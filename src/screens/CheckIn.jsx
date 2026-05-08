@@ -2,12 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
-// The Apps Script returns each row as an object with TWO sets of keys:
-// 1. Exact column header strings (full, trimmed) — for any future direct access
-// 2. Short underscore-prefixed aliases (_bookerName, _checkInDate etc) — stable,
-//    survive column reordering and new columns being added to the form.
-// Always use the _ aliases here. Only update these if you rename the alias
-// in the Apps Script getPendingCheckIns function.
 const F = {
   timestamp:        '_timestamp',
   email:            '_email',
@@ -16,7 +10,9 @@ const F = {
   citizenship:      '_citizenship',
   additionalGuests: '_additionalGuests',
   aadhaar:          '_aadhaar',
+  aadhaarUpload:    '_aadhaarUpload',
   passportNumber:   '_passportNum',
+  passportUpload:   '_passportUpload',
   visaInfo:         '_visaInfo',
   eta:              '_eta',
   purpose:          '_purpose',
@@ -30,7 +26,6 @@ const F = {
   bookerName:       '_bookerName',
 }
 
-// Safe field accessor
 function g(row, key) {
   if (!row) return ''
   const val = row[F[key]]
@@ -61,15 +56,15 @@ function calcNights(checkIn, checkOut) {
 
 export default function CheckIn() {
   const navigate   = useNavigate()
-  const [pending, setPending]     = useState([])   // list of form submissions
-  const [selected, setSelected]   = useState(null) // chosen submission
-  const [expanded, setExpanded]   = useState(false)
-  const [carNumber, setCarNumber] = useState('')
-  const [carPhoto, setCarPhoto]   = useState(null)
+  const [pending, setPending]       = useState([])
+  const [selected, setSelected]     = useState(null)
+  const [expanded, setExpanded]     = useState(false)
+  const [carNumber, setCarNumber]   = useState('')
+  const [carPhoto, setCarPhoto]     = useState(null)
   const [platePhoto, setPlatePhoto] = useState(null)
-  const [saving, setSaving]       = useState(false)
-  const [toast, setToast]         = useState(null)
-  const [loading, setLoading]     = useState(true)
+  const [saving, setSaving]         = useState(false)
+  const [toast, setToast]           = useState(null)
+  const [loading, setLoading]       = useState(true)
   const carPhotoRef   = useRef()
   const platePhotoRef = useRef()
 
@@ -91,10 +86,10 @@ export default function CheckIn() {
       })
   }, [])
 
-  const guests     = selected ? parseGuestNames(g(selected, 'guestNames')) : []
-  const nights     = selected ? calcNights(g(selected, 'checkInDate'), g(selected, 'checkOutDate')) : 0
+  const guests      = selected ? parseGuestNames(g(selected, 'guestNames')) : []
+  const nights      = selected ? calcNights(g(selected, 'checkInDate'), g(selected, 'checkOutDate')) : 0
   const citizenship = selected ? String(g(selected, 'citizenship') || '').toLowerCase() : ''
-  const isForeign  = citizenship.includes('foreign')
+  const isForeign   = citizenship.includes('foreign')
   const totalGuests = selected
     ? (parseInt(g(selected, 'adultsCount'))||0) +
       (parseInt(g(selected, 'childrenCount'))||0) +
@@ -160,8 +155,6 @@ export default function CheckIn() {
       </div>
 
       <div className="screen-body">
-
-        {/* PENDING SUBMISSIONS */}
         {loading ? (
           <div className="loading"><div className="spinner"/>Loading guest forms...</div>
         ) : pending.length === 0 ? (
@@ -174,7 +167,6 @@ export default function CheckIn() {
           </div>
         ) : (
           <>
-            {/* Guest selector — show if multiple pending */}
             {pending.length > 1 && (
               <>
                 <div className="card-section-label">SELECT GUEST</div>
@@ -188,8 +180,8 @@ export default function CheckIn() {
                       onClick={() => setSelected(row)}>
                       <div className="menu-icon" style={{background:'rgba(200,144,58,0.08)'}}>🏠</div>
                       <div className="menu-label">
-                        <div className="menu-title">{row[COL.bookerName] || 'Guest'}</div>
-                        <div className="menu-sub">{formatDate(row[COL.checkInDate])} · {row[COL.adultsCount]} adults</div>
+                        <div className="menu-title">{g(row, 'bookerName') || 'Guest'}</div>
+                        <div className="menu-sub">{formatDate(g(row, 'checkInDate'))} · {g(row, 'adultsCount')} adults</div>
                       </div>
                       {selected === row && <span style={{color:'var(--gold)',fontSize:'1.1rem'}}>✓</span>}
                     </div>
@@ -200,7 +192,6 @@ export default function CheckIn() {
 
             {selected && (
               <>
-                {/* AUTO-FILLED BANNER */}
                 <div className="banner-green" style={{marginBottom:'14px'}}>
                   <div className="banner-dot"/>
                   <div>
@@ -211,7 +202,6 @@ export default function CheckIn() {
                   </div>
                 </div>
 
-                {/* BOOKING SUMMARY */}
                 <div className="card-section-label">BOOKING SUMMARY</div>
                 <div className="card">
                   <div className="grid-2">
@@ -250,7 +240,6 @@ export default function CheckIn() {
                   </div>
                 </div>
 
-                {/* GUEST COUNT */}
                 <div className="card-section-label">GUEST COUNT — {totalGuests} TOTAL</div>
                 <div className="card">
                   <div className="grid-3">
@@ -268,13 +257,12 @@ export default function CheckIn() {
                     </div>
                   </div>
                   <div className="divider"/>
-                  {/* Guest names list */}
                   <div className="field-label" style={{marginBottom:'8px'}}>GUEST NAMES</div>
                   <div style={styles.guestList}>
-                    {(expanded ? guests : guests.slice(0,4)).map((g,i) => (
+                    {(expanded ? guests : guests.slice(0,4)).map((gst,i) => (
                       <div key={i} style={styles.guestRow}>
-                        <span style={styles.guestName}>{g.name}</span>
-                        <span style={styles.guestAge}>{g.age} yrs</span>
+                        <span style={styles.guestName}>{gst.name}</span>
+                        <span style={styles.guestAge}>{gst.age} yrs</span>
                       </div>
                     ))}
                     {guests.length > 4 && (
@@ -283,7 +271,6 @@ export default function CheckIn() {
                       </div>
                     )}
                   </div>
-
                   {g(selected, 'additionalGuests') && !String(g(selected, 'additionalGuests')).toLowerCase().includes('no') && (
                     <div className="tag-row" style={{marginTop:'10px'}}>
                       <span className="tag tag-gold">Additional guests requested</span>
@@ -291,7 +278,6 @@ export default function CheckIn() {
                   )}
                 </div>
 
-                {/* ADD-ONS */}
                 <div className="card-section-label">ADD-ONS REQUESTED</div>
                 <div className="card">
                   <div className="tag-row">
@@ -307,7 +293,6 @@ export default function CheckIn() {
                   </div>
                 </div>
 
-                {/* IDENTITY */}
                 <div className="card-section-label">
                   IDENTITY — {isForeign ? '🌍 FOREIGN CITIZEN' : '🇮🇳 INDIAN CITIZEN'}
                 </div>
@@ -320,7 +305,7 @@ export default function CheckIn() {
                       </div>
                       <div className="field">
                         <div className="field-label">ID Upload</div>
-                        <div className="field-input auto-filled">
+                        <div className="field-input auto-filled" style={{color: g(selected, 'aadhaarUpload') ? 'var(--green)' : 'var(--text-dim)'}}>
                           {g(selected, 'aadhaarUpload') ? 'Received ✓' : 'Not uploaded'}
                         </div>
                       </div>
@@ -333,8 +318,8 @@ export default function CheckIn() {
                           <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{g(selected, 'passportNumber') || '—'}</div>
                         </div>
                         <div className="field">
-                          <div className="field-label">Passport upload</div>
-                          <div className="field-input" style={{color:'#85B7EB'}}>
+                          <div className="field-label">Passport / Visa upload</div>
+                          <div className="field-input" style={{color: g(selected, 'passportUpload') ? '#85B7EB' : 'var(--text-dim)'}}>
                             {g(selected, 'passportUpload') ? 'Received ✓' : 'Not uploaded'}
                           </div>
                         </div>
@@ -349,39 +334,22 @@ export default function CheckIn() {
                   )}
                 </div>
 
-                {/* RAMAN'S ONLY TASK */}
                 <div className="card-section-label">YOUR ONLY TASK — TAKE CAR PHOTOS</div>
                 <div className="card">
                   <div className="photo-row">
-                    <div
-                      className={`photo-box ${carPhoto ? 'captured' : ''}`}
-                      onClick={() => carPhotoRef.current?.click()}
-                    >
-                      {carPhoto ? (
-                        <img src={carPhoto.preview} alt="car" style={styles.photoPreview}/>
-                      ) : (
-                        <>
-                          <div className="photo-icon">📷</div>
-                          <div className="photo-label">Car photo</div>
-                          <div className="photo-sub">Tap to take</div>
-                        </>
-                      )}
+                    <div className={`photo-box ${carPhoto ? 'captured' : ''}`} onClick={() => carPhotoRef.current?.click()}>
+                      {carPhoto
+                        ? <img src={carPhoto.preview} alt="car" style={styles.photoPreview}/>
+                        : <><div className="photo-icon">📷</div><div className="photo-label">Car photo</div><div className="photo-sub">Tap to take</div></>
+                      }
                       <input ref={carPhotoRef} type="file" accept="image/*" capture="environment"
                         onChange={e => handlePhotoCapture('car', e)} style={{display:'none'}}/>
                     </div>
-                    <div
-                      className={`photo-box ${platePhoto ? 'captured' : ''}`}
-                      onClick={() => platePhotoRef.current?.click()}
-                    >
-                      {platePhoto ? (
-                        <img src={platePhoto.preview} alt="plate" style={styles.photoPreview}/>
-                      ) : (
-                        <>
-                          <div className="photo-icon">🔢</div>
-                          <div className="photo-label">Number plate</div>
-                          <div className="photo-sub">Tap to take</div>
-                        </>
-                      )}
+                    <div className={`photo-box ${platePhoto ? 'captured' : ''}`} onClick={() => platePhotoRef.current?.click()}>
+                      {platePhoto
+                        ? <img src={platePhoto.preview} alt="plate" style={styles.photoPreview}/>
+                        : <><div className="photo-icon">🔢</div><div className="photo-label">Number plate</div><div className="photo-sub">Tap to take</div></>
+                      }
                       <input ref={platePhotoRef} type="file" accept="image/*" capture="environment"
                         onChange={e => handlePhotoCapture('plate', e)} style={{display:'none'}}/>
                     </div>
@@ -395,7 +363,6 @@ export default function CheckIn() {
                   </div>
                 </div>
 
-                {/* STAY ID PREVIEW */}
                 <div style={styles.stayIdStrip}>
                   <div>
                     <div style={styles.stayIdLabel}>STAY ID · WILL BE AUTO-GENERATED</div>
@@ -421,40 +388,14 @@ export default function CheckIn() {
 }
 
 const styles = {
-  guestList: {
-    background: 'var(--dark-input)',
-    borderRadius: '8px',
-    padding: '8px 10px',
-    border: '1px solid rgba(52,168,83,0.2)',
-  },
-  guestRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '4px 0',
-    borderBottom: '1px solid rgba(255,255,255,0.04)',
-  },
-  guestName: { color: '#C0DD97', fontSize: '0.85rem', fontWeight: '600' },
-  guestAge:  { color: 'var(--text-dim)', fontSize: '0.78rem' },
-  guestMore: {
-    color: 'var(--text-dim)', fontSize: '0.78rem',
-    textAlign: 'right', paddingTop: '6px', cursor: 'pointer',
-  },
-  photoPreview: {
-    width: '100%', height: '80px',
-    objectFit: 'cover', borderRadius: '6px',
-  },
-  stayIdStrip: {
-    background: 'rgba(200,144,58,0.06)',
-    border: '1px solid rgba(200,144,58,0.2)',
-    borderRadius: '10px',
-    padding: '12px 14px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: '14px',
-  },
-  stayIdLabel: { fontSize: '0.65rem', color: 'var(--text-dim)', letterSpacing: '1px' },
-  stayIdVal:   { color: 'var(--gold)', fontSize: '1.1rem', fontWeight: '800', fontFamily: 'monospace', letterSpacing: '2px', margin: '3px 0' },
-  stayIdNote:  { fontSize: '0.68rem', color: 'var(--text-dim)' },
+  guestList:    { background: 'var(--dark-input)', borderRadius: '8px', padding: '8px 10px', border: '1px solid rgba(52,168,83,0.2)' },
+  guestRow:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' },
+  guestName:    { color: '#C0DD97', fontSize: '0.85rem', fontWeight: '600' },
+  guestAge:     { color: 'var(--text-dim)', fontSize: '0.78rem' },
+  guestMore:    { color: 'var(--text-dim)', fontSize: '0.78rem', textAlign: 'right', paddingTop: '6px', cursor: 'pointer' },
+  photoPreview: { width: '100%', height: '80px', objectFit: 'cover', borderRadius: '6px' },
+  stayIdStrip:  { background: 'rgba(200,144,58,0.06)', border: '1px solid rgba(200,144,58,0.2)', borderRadius: '10px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' },
+  stayIdLabel:  { fontSize: '0.65rem', color: 'var(--text-dim)', letterSpacing: '1px' },
+  stayIdVal:    { color: 'var(--gold)', fontSize: '1.1rem', fontWeight: '800', fontFamily: 'monospace', letterSpacing: '2px', margin: '3px 0' },
+  stayIdNote:   { fontSize: '0.68rem', color: 'var(--text-dim)' },
 }

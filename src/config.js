@@ -12,9 +12,12 @@ export const CONFIG = {
   tagline:    'Property Management Portal',
 
   // Google integration
-  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbz_bVbPyrXBBAMWbpiab5uTPmyoixyTVAt__XoDJXG8R-2Xzi1LjTxHPYShPs8FxTrL/exec',
+  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbzzYqO2oTqt0pWnM05q8cay1uJgW6VZKcUaK7Fk68_iLrbhdrXxi5v5QXrUOrRCCN6M/exec',
   driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
   ownerEmail:    'bijisukumar@gmail.com',
+  spreadsheetId:    '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ',  // add this
+  guestFormSheetId: '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
+
 
   // Villa properties — add more objects here for second villa
   villas: [

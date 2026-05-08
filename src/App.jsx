@@ -16,6 +16,7 @@ import CoconutTracker from './screens/CoconutTracker'
 import PavutumuriHub  from './screens/PavutumuriHub'
 import RubberTracker  from './screens/RubberTracker'
 import EstateLedger   from './screens/EstateLedger'
+import CheckIn        from './screens/CheckIn'
 import CoconutDashboard from './screens/CoconutDashboard'
 
 function ProtectedRoutes() {
@@ -52,7 +53,10 @@ function ProtectedRoutes() {
 
       {/* Raman — simplified view */}
       {role === 'manager' && <>
-        <Route path="/" element={<RamanHome />} />
+        <Route path="/"              element={<RamanHome />} />
+        <Route path="/raman/checkin" element={<CheckIn />} />
+        <Route path="/pavutumuri/rubber"  element={<RubberTracker />} />
+        <Route path="/pavutumuri/ledger"  element={<EstateLedger estate="pavutumuri" />} />
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

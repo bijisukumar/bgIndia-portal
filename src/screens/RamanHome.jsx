@@ -12,14 +12,18 @@ export default function RamanHome() {
 
   useEffect(()=>{
     api.getActiveStay('dwarka')
-      .then(d=>{setActiveStay(d);setLoading(false)})
+      .then(d=>{
+        // Only set if we got a real stay object with a stayId
+        if (d && d.stayId) setActiveStay(d)
+        setLoading(false)
+      })
       .catch(()=>setLoading(false))
   },[])
 
   const villaRows=[
     {icon:'🏠',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Check-in',sub:activeStay?`Active: ${activeStay.guestName}`:'New guest arrival',path:'/raman/checkin',disabled:false},
     {icon:'🛒',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Kitchen incidentals',sub:activeStay?`Linked to ${activeStay.guestName}`:'No active stay',path:'/raman/kitchen',disabled:!activeStay},
-    {icon:'🍳',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Breakfast',sub:activeStay?`${activeStay.guestCount} guests · ₹${CONFIG.breakfastRate}/person`:'No active stay',path:'/raman/breakfast',disabled:!activeStay},
+    {icon:'🍳',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Breakfast',sub:activeStay?`${activeStay.guestCount || activeStay.adultsCount || ''} guests · ₹${CONFIG.breakfastRate}/person`:'No active stay',path:'/raman/breakfast',disabled:!activeStay},
     {icon:'🚗',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Car rental',sub:'Trip log',path:'/raman/carrental',disabled:!activeStay},
   ]
   const estateRows=[
@@ -47,7 +51,7 @@ export default function RamanHome() {
             <div className="banner-dot"/>
             <div style={{flex:1}}>
               <div className="active-stay-name">Active: {activeStay.guestName}</div>
-              <div className="active-stay-sub">Check-in {activeStay.checkIn} · {activeStay.guestCount} guests</div>
+              <div className="active-stay-sub">Check-in {activeStay.checkIn || activeStay.checkInDate || ''} · {activeStay.guestCount || activeStay.adultsCount || ''} guests</div>
             </div>
             <div style={{color:'var(--green)',fontSize:'0.85rem',fontWeight:'600'}}>View ›</div>
           </div>

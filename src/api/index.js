@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js'
 // ============================================================
 //  API LAYER — All Apps Script calls go through here.
 //  Action strings must match your Apps Script doPost handler.
@@ -8,20 +9,38 @@ import { CONFIG } from '../config.js'
 const URL = CONFIG.appsScriptUrl
 
 async function post(action, payload) {
-  const res = await fetch(URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ action, ...payload }),
-  })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
-  return res.json()
+  logger.info('API:POST', action, payload)
+  try {
+    const res = await fetch(URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action, ...payload }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
+    const data = await res.json()
+    if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
+    logger.info('API:POST', `${action} OK`)
+    return data
+  } catch(err) {
+    logger.error('API:POST', err, { action })
+    throw err
+  }
 }
 
 async function get(action, params = {}) {
-  const qs = new URLSearchParams({ action, ...params }).toString()
-  const res = await fetch(`${URL}?${qs}`)
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
-  return res.json()
+  logger.info('API:GET', action, params)
+  try {
+    const qs  = new URLSearchParams({ action, ...params }).toString()
+    const res = await fetch(`${URL}?${qs}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
+    const data = await res.json()
+    if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
+    logger.info('API:GET', `${action} OK`)
+    return data?.data ?? data
+  } catch(err) {
+    logger.error('API:GET', err, { action, params })
+    throw err
+  }
 }
 
 // ── STAY / CHECK-IN ─────────────────────────────────────────

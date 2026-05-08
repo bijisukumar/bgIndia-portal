@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { CONFIG } from '../config'
+import { logger } from '../utils/logger'
 
 const SECTIONS = [
   {
@@ -104,7 +105,10 @@ export default function OwnerHome() {
           </div>
         ))}
 
-        <button className="logout-btn" onClick={logout}>Log out</button>
+        <div style={{display:'flex',gap:'8px',marginTop:'16px'}}>
+          <button className="logout-btn" style={{flex:1}} onClick={logout}>Log out</button>
+          <button onClick={() => navigate('/debug')} style={{padding:'12px 16px',borderRadius:'12px',border:'1px solid rgba(255,255,255,0.06)',background:'transparent',color:'var(--text-dim)',fontSize:'0.8rem',cursor:'pointer'}}>🔧</button>
+        </div>
       </div>
     </div>
   )

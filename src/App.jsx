@@ -17,6 +17,7 @@ import PavutumuriHub  from './screens/PavutumuriHub'
 import RubberTracker  from './screens/RubberTracker'
 import EstateLedger   from './screens/EstateLedger'
 import CheckIn        from './screens/CheckIn'
+import DebugPanel     from './screens/DebugPanel'
 import CoconutDashboard from './screens/CoconutDashboard'
 
 function ProtectedRoutes() {
@@ -32,6 +33,7 @@ function ProtectedRoutes() {
         <Route path="/"                    element={<OwnerHome />} />
         <Route path="/owner/villa"         element={<VillaHub />} />
         <Route path="/owner/villa/income"  element={<VillaRentalIncome />} />
+        <Route path="/debug"               element={<DebugPanel />} />
         <Route path="/owner/villa/dashboard" element={<VillaDashboard />} />
         <Route path="/owner/rental"        element={<RentalProperties />} />
         <Route path="/owner/pollachi"      element={<PollachiHub />} />

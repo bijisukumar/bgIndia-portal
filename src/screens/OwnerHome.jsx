@@ -67,7 +67,7 @@ export default function OwnerHome() {
     <div className="screen">
       {/* Header */}
       <div style={styles.header}>
-        <img src="/icons/logo.png" alt="GE" style={styles.logo}
+        <img src="/icons/logo-black.png" alt="GE" style={styles.logo}
           onError={e => e.target.style.display = 'none'} />
         <div style={styles.headerText}>
           <div style={styles.brandName}>{CONFIG.brandName}</div>
@@ -113,13 +113,20 @@ export default function OwnerHome() {
 const styles = {
   header: {
     background: '#111111',
-    padding: '20px 16px 16px',
+    padding: '16px 16px 14px',
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
+    gap: '14px',
     borderBottom: '1px solid rgba(200,144,58,0.18)',
   },
-  logo: { height: '44px', width: 'auto' },
+  logo: {
+    height: '52px',
+    width: '52px',
+    borderRadius: '10px',
+    objectFit: 'cover',
+    border: '1px solid rgba(200,144,58,0.3)',
+    boxShadow: '0 4px 12px rgba(200,144,58,0.15)',
+  },
   headerText: { flex: 1 },
   brandName: {
     fontFamily: "'Cormorant Garamond', serif",

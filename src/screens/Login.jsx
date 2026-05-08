@@ -28,7 +28,7 @@ export default function Login() {
         {/* Logo */}
         <div style={styles.logoWrap}>
           <img
-            src="/icons/logo.png"
+            src="/icons/logo-black.png"
             alt="Guruvayur Estates"
             style={styles.logo}
             onError={e => { e.target.style.display = 'none' }}
@@ -117,11 +117,16 @@ const styles = {
   },
   logoWrap: {
     marginBottom: '20px',
+    borderRadius: '16px',
+    overflow: 'hidden',
+    border: '1px solid rgba(200,144,58,0.3)',
+    boxShadow: '0 8px 32px rgba(200,144,58,0.2)',
   },
   logo: {
-    height: '120px',
-    width: 'auto',
-    objectFit: 'contain',
+    height: '160px',
+    width: '160px',
+    objectFit: 'cover',
+    display: 'block',
   },
   goldLine: {
     width: '48px',

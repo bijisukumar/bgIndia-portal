@@ -2,31 +2,40 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
-// Column mapping from the Google Form response sheet
-// Based on actual Vikram submission headers
-const COL = {
-  timestamp:        0,
-  email:            1,
-  phone:            2,
-  address:          3,
-  guestNames:       4,   // "Name/Age, Name/Age" format
-  citizenship:      5,
-  additionalGuests: 6,
-  aadhaar:          7,
-  aadhaarUpload:    8,
-  passportNumber:   9,
-  passportUpload:   10,
-  visaInfo:         11,
-  eta:              12,
-  purpose:          13,
-  transport:        14,
-  breakfast:        15,
-  checkInDate:      16,
-  checkOutDate:     17,
-  adultsCount:      18,
-  childrenCount:    19,
-  infantsCount:     20,
-  bookerName:       21,
+// The Apps Script returns each row as an object with TWO sets of keys:
+// 1. Exact column header strings (full, trimmed) — for any future direct access
+// 2. Short underscore-prefixed aliases (_bookerName, _checkInDate etc) — stable,
+//    survive column reordering and new columns being added to the form.
+// Always use the _ aliases here. Only update these if you rename the alias
+// in the Apps Script getPendingCheckIns function.
+const F = {
+  timestamp:        '_timestamp',
+  email:            '_email',
+  phone:            '_phone',
+  guestNames:       '_guestNames',
+  citizenship:      '_citizenship',
+  additionalGuests: '_additionalGuests',
+  aadhaar:          '_aadhaar',
+  passportNumber:   '_passportNum',
+  visaInfo:         '_visaInfo',
+  eta:              '_eta',
+  purpose:          '_purpose',
+  transport:        '_transport',
+  breakfast:        '_breakfast',
+  checkInDate:      '_checkInDate',
+  checkOutDate:     '_checkOutDate',
+  adultsCount:      '_adultsCount',
+  childrenCount:    '_childrenCount',
+  infantsCount:     '_infantsCount',
+  bookerName:       '_bookerName',
+}
+
+// Safe field accessor
+function g(row, key) {
+  if (!row) return ''
+  const val = row[F[key]]
+  if (val !== undefined && val !== null) return val
+  return ''
 }
 
 function parseGuestNames(raw) {
@@ -82,14 +91,14 @@ export default function CheckIn() {
       })
   }, [])
 
-  const guests     = selected ? parseGuestNames(selected[COL.guestNames]) : []
-  const nights     = selected ? calcNights(selected[COL.checkInDate], selected[COL.checkOutDate]) : 0
-  const citizenship = selected ? String(selected[COL.citizenship] || '').toLowerCase() : ''
+  const guests     = selected ? parseGuestNames(g(selected, 'guestNames')) : []
+  const nights     = selected ? calcNights(g(selected, 'checkInDate'), g(selected, 'checkOutDate')) : 0
+  const citizenship = selected ? String(g(selected, 'citizenship') || '').toLowerCase() : ''
   const isForeign  = citizenship.includes('foreign')
   const totalGuests = selected
-    ? (parseInt(selected[COL.adultsCount])||0) +
-      (parseInt(selected[COL.childrenCount])||0) +
-      (parseInt(selected[COL.infantsCount])||0)
+    ? (parseInt(g(selected, 'adultsCount'))||0) +
+      (parseInt(g(selected, 'childrenCount'))||0) +
+      (parseInt(g(selected, 'infantsCount'))||0)
     : 0
 
   const handlePhotoCapture = (type, e) => {
@@ -109,26 +118,26 @@ export default function CheckIn() {
     try {
       const result = await api.confirmCheckIn({
         villaId:          'dwarka',
-        guestName:        guests[0]?.name || selected[COL.bookerName] || 'Guest',
-        bookerName:       selected[COL.bookerName] || '',
-        checkInDate:      selected[COL.checkInDate],
-        checkOutDate:     selected[COL.checkOutDate],
-        adultsCount:      selected[COL.adultsCount] || 0,
-        childrenCount:    selected[COL.childrenCount] || 0,
-        infantsCount:     selected[COL.infantsCount] || 0,
-        citizenship:      selected[COL.citizenship] || 'Indian',
-        govtId:           isForeign ? selected[COL.passportNumber] : selected[COL.aadhaar],
-        phone:            selected[COL.phone] || '',
-        email:            selected[COL.email] || '',
-        eta:              selected[COL.eta] || '',
-        purpose:          selected[COL.purpose] || '',
-        transport:        selected[COL.transport] || 'No',
-        breakfastPrepaid: selected[COL.breakfast] || 'No',
-        additionalGuests: selected[COL.additionalGuests] || 'No',
+        guestName:        guests[0]?.name || g(selected, 'bookerName') || 'Guest',
+        bookerName:       g(selected, 'bookerName') || '',
+        checkInDate:      g(selected, 'checkInDate'),
+        checkOutDate:     g(selected, 'checkOutDate'),
+        adultsCount:      g(selected, 'adultsCount') || 0,
+        childrenCount:    g(selected, 'childrenCount') || 0,
+        infantsCount:     g(selected, 'infantsCount') || 0,
+        citizenship:      g(selected, 'citizenship') || 'Indian',
+        govtId:           isForeign ? g(selected, 'passportNumber') : g(selected, 'aadhaar'),
+        phone:            g(selected, 'phone') || '',
+        email:            g(selected, 'email') || '',
+        eta:              g(selected, 'eta') || '',
+        purpose:          g(selected, 'purpose') || '',
+        transport:        g(selected, 'transport') || 'No',
+        breakfastPrepaid: g(selected, 'breakfast') || 'No',
+        additionalGuests: g(selected, 'additionalGuests') || 'No',
         carNumber:        carNumber,
         channel:          'Direct',
-        guestNamesRaw:    selected[COL.guestNames] || '',
-        visaInfo:         isForeign ? selected[COL.visaInfo] || '' : '',
+        guestNamesRaw:    g(selected, 'guestNames') || '',
+        visaInfo:         isForeign ? g(selected, 'visaInfo') || '' : '',
       })
       showToast('Check-in confirmed! Stay ID: ' + result?.data?.stayId)
       setTimeout(() => navigate('/'), 2500)
@@ -197,7 +206,7 @@ export default function CheckIn() {
                   <div>
                     <div className="banner-title">Auto-filled from online registration</div>
                     <div className="banner-sub">
-                      Submitted {formatDate(selected[COL.timestamp])} · Raman only needs to take car photos below
+                      Submitted {formatDate(g(selected, 'timestamp'))} · Raman only needs to take car photos below
                     </div>
                   </div>
                 </div>
@@ -208,19 +217,19 @@ export default function CheckIn() {
                   <div className="grid-2">
                     <div className="field">
                       <div className="field-label">Booker</div>
-                      <div className="field-input auto-filled">{selected[COL.bookerName] || '—'}</div>
+                      <div className="field-input auto-filled">{g(selected, 'bookerName') || '—'}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Purpose</div>
-                      <div className="field-input auto-filled">{selected[COL.purpose] || '—'}</div>
+                      <div className="field-input auto-filled">{g(selected, 'purpose') || '—'}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Check-in</div>
-                      <div className="field-input gold">{formatDate(selected[COL.checkInDate])}</div>
+                      <div className="field-input gold">{formatDate(g(selected, 'checkInDate'))}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Check-out</div>
-                      <div className="field-input gold">{formatDate(selected[COL.checkOutDate])}</div>
+                      <div className="field-input gold">{formatDate(g(selected, 'checkOutDate'))}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Nights</div>
@@ -228,15 +237,15 @@ export default function CheckIn() {
                     </div>
                     <div className="field">
                       <div className="field-label">ETA</div>
-                      <div className="field-input auto-filled">{selected[COL.eta] || '—'}</div>
+                      <div className="field-input auto-filled">{g(selected, 'eta') || '—'}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">WhatsApp</div>
-                      <div className="field-input auto-filled" style={{fontSize:'0.85rem'}}>{selected[COL.phone] || '—'}</div>
+                      <div className="field-input auto-filled" style={{fontSize:'0.85rem'}}>{g(selected, 'phone') || '—'}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Email</div>
-                      <div className="field-input auto-filled" style={{fontSize:'0.8rem'}}>{selected[COL.email] || '—'}</div>
+                      <div className="field-input auto-filled" style={{fontSize:'0.8rem'}}>{g(selected, 'email') || '—'}</div>
                     </div>
                   </div>
                 </div>
@@ -247,15 +256,15 @@ export default function CheckIn() {
                   <div className="grid-3">
                     <div className="field">
                       <div className="field-label">Adults</div>
-                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{selected[COL.adultsCount]||0}</div>
+                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{g(selected, 'adultsCount')||0}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Children</div>
-                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{selected[COL.childrenCount]||0}</div>
+                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{g(selected, 'childrenCount')||0}</div>
                     </div>
                     <div className="field">
                       <div className="field-label">Infants</div>
-                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{selected[COL.infantsCount]||0}</div>
+                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{g(selected, 'infantsCount')||0}</div>
                     </div>
                   </div>
                   <div className="divider"/>
@@ -275,7 +284,7 @@ export default function CheckIn() {
                     )}
                   </div>
 
-                  {selected[COL.additionalGuests] && !String(selected[COL.additionalGuests]).toLowerCase().includes('no') && (
+                  {g(selected, 'additionalGuests') && !String(g(selected, 'additionalGuests')).toLowerCase().includes('no') && (
                     <div className="tag-row" style={{marginTop:'10px'}}>
                       <span className="tag tag-gold">Additional guests requested</span>
                     </div>
@@ -286,14 +295,14 @@ export default function CheckIn() {
                 <div className="card-section-label">ADD-ONS REQUESTED</div>
                 <div className="card">
                   <div className="tag-row">
-                    <span className={`tag ${String(selected[COL.breakfast]||'').toLowerCase().includes('yes') ? 'tag-green' : 'tag-gray'}`}>
-                      {String(selected[COL.breakfast]||'').toLowerCase().includes('yes') ? '✓ Breakfast prepaid' : 'No breakfast'}
+                    <span className={`tag ${String(g(selected, 'breakfast')||'').toLowerCase().includes('yes') ? 'tag-green' : 'tag-gray'}`}>
+                      {String(g(selected, 'breakfast')||'').toLowerCase().includes('yes') ? '✓ Breakfast prepaid' : 'No breakfast'}
                     </span>
-                    <span className={`tag ${String(selected[COL.transport]||'').toLowerCase().includes('yes') ? 'tag-green' : 'tag-gray'}`}>
-                      {String(selected[COL.transport]||'').toLowerCase().includes('yes') ? '✓ Transport needed' : 'No transport'}
+                    <span className={`tag ${String(g(selected, 'transport')||'').toLowerCase().includes('yes') ? 'tag-green' : 'tag-gray'}`}>
+                      {String(g(selected, 'transport')||'').toLowerCase().includes('yes') ? '✓ Transport needed' : 'No transport'}
                     </span>
-                    {selected[COL.purpose] && (
-                      <span className="tag tag-gold">{selected[COL.purpose]}</span>
+                    {g(selected, 'purpose') && (
+                      <span className="tag tag-gold">{g(selected, 'purpose')}</span>
                     )}
                   </div>
                 </div>
@@ -307,12 +316,12 @@ export default function CheckIn() {
                     <div className="grid-2">
                       <div className="field">
                         <div className="field-label">Aadhaar / Passport</div>
-                        <div className="field-input auto-filled">{selected[COL.aadhaar] || '—'}</div>
+                        <div className="field-input auto-filled">{g(selected, 'aadhaar') || '—'}</div>
                       </div>
                       <div className="field">
                         <div className="field-label">ID Upload</div>
                         <div className="field-input auto-filled">
-                          {selected[COL.aadhaarUpload] ? 'Received ✓' : 'Not uploaded'}
+                          {g(selected, 'aadhaarUpload') ? 'Received ✓' : 'Not uploaded'}
                         </div>
                       </div>
                     </div>
@@ -321,19 +330,19 @@ export default function CheckIn() {
                       <div className="grid-2">
                         <div className="field">
                           <div className="field-label">Passport number</div>
-                          <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{selected[COL.passportNumber] || '—'}</div>
+                          <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{g(selected, 'passportNumber') || '—'}</div>
                         </div>
                         <div className="field">
                           <div className="field-label">Passport upload</div>
                           <div className="field-input" style={{color:'#85B7EB'}}>
-                            {selected[COL.passportUpload] ? 'Received ✓' : 'Not uploaded'}
+                            {g(selected, 'passportUpload') ? 'Received ✓' : 'Not uploaded'}
                           </div>
                         </div>
                       </div>
-                      {selected[COL.visaInfo] && (
+                      {g(selected, 'visaInfo') && (
                         <div className="field" style={{marginTop:'8px'}}>
                           <div className="field-label">Visa / GOI info</div>
-                          <div className="field-input" style={{color:'#85B7EB',fontSize:'0.85rem'}}>{selected[COL.visaInfo]}</div>
+                          <div className="field-input" style={{color:'#85B7EB',fontSize:'0.85rem'}}>{g(selected, 'visaInfo')}</div>
                         </div>
                       )}
                     </>

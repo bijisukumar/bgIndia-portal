@@ -1,0 +1,149 @@
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
+import { CONFIG } from '../config'
+
+const SECTIONS = [
+  {
+    label: 'VILLAS',
+    color: '#C8903A',
+    rows: [
+      {
+        id:    'villa',
+        icon:  '🏡',
+        bg:    'rgba(200,144,58,0.08)',
+        title: 'GVR Villa(s)',
+        sub:   'Rental income · Dashboard',
+        arrow: '#C8903A',
+        path:  '/owner/villa',
+      },
+    ],
+  },
+  {
+    label: 'RENTAL INCOME',
+    color: '#185FA5',
+    rows: [
+      {
+        id:    'rental',
+        icon:  '🏢',
+        bg:    'rgba(24,95,165,0.08)',
+        title: 'Rental properties',
+        sub:   '3 properties · Monthly tracker · Dashboard',
+        arrow: '#185FA5',
+        path:  '/owner/rental',
+      },
+    ],
+  },
+  {
+    label: 'ESTATES',
+    color: '#3B6D11',
+    rows: [
+      {
+        id:    'pollachi',
+        icon:  '🌴',
+        bg:    'rgba(59,109,17,0.08)',
+        title: 'Pollachi estate',
+        sub:   'Coconut tracker · Irrigation · Income/Expense',
+        arrow: '#3B6D11',
+        path:  '/owner/pollachi',
+      },
+      {
+        id:    'pavutumuri',
+        icon:  '🌳',
+        bg:    'rgba(15,110,86,0.08)',
+        title: 'Pavutumuri estate',
+        sub:   'Rubber tracker · Income/Expense',
+        arrow: '#0F6E56',
+        path:  '/owner/pavutumuri',
+      },
+    ],
+  },
+]
+
+export default function OwnerHome() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  return (
+    <div className="screen">
+      {/* Header */}
+      <div style={styles.header}>
+        <img src="/icons/logo.png" alt="GE" style={styles.logo}
+          onError={e => e.target.style.display = 'none'} />
+        <div style={styles.headerText}>
+          <div style={styles.brandName}>{CONFIG.brandName}</div>
+          <div style={styles.tagline}>{CONFIG.tagline.toUpperCase()}</div>
+        </div>
+        <div style={styles.welcomeBadge}>
+          <span style={styles.welcomeLabel}>OWNER</span>
+        </div>
+      </div>
+
+      <div className="screen-body">
+        {SECTIONS.map(section => (
+          <div key={section.label}>
+            <div className="card-section-label">{section.label}</div>
+            <div className="menu-tile">
+              {section.rows.map((row, i) => (
+                <div
+                  key={row.id}
+                  className="menu-row"
+                  onClick={() => navigate(row.path)}
+                  style={i < section.rows.length - 1 ? {} : { borderBottom: 'none' }}
+                >
+                  <div className="menu-icon" style={{ background: row.bg }}>
+                    {row.icon}
+                  </div>
+                  <div className="menu-label">
+                    <div className="menu-title">{row.title}</div>
+                    <div className="menu-sub">{row.sub}</div>
+                  </div>
+                  <div className="menu-arrow" style={{ background: row.arrow }}>›</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <button className="logout-btn" onClick={logout}>Log out</button>
+      </div>
+    </div>
+  )
+}
+
+const styles = {
+  header: {
+    background: '#111111',
+    padding: '20px 16px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    borderBottom: '1px solid rgba(200,144,58,0.18)',
+  },
+  logo: { height: '44px', width: 'auto' },
+  headerText: { flex: 1 },
+  brandName: {
+    fontFamily: "'Cormorant Garamond', serif",
+    fontSize: '1.15rem',
+    fontWeight: '600',
+    color: '#E8B86D',
+    letterSpacing: '0.5px',
+  },
+  tagline: {
+    fontSize: '0.6rem',
+    color: '#5C7080',
+    letterSpacing: '2px',
+    marginTop: '2px',
+  },
+  welcomeBadge: {
+    background: 'rgba(200,144,58,0.12)',
+    border: '1px solid rgba(200,144,58,0.2)',
+    borderRadius: '20px',
+    padding: '4px 12px',
+  },
+  welcomeLabel: {
+    color: '#C8903A',
+    fontSize: '0.65rem',
+    fontWeight: '700',
+    letterSpacing: '2px',
+  },
+}

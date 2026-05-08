@@ -154,7 +154,7 @@ export default function CheckIn() {
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Guest check-in</div>
-          <div className="topbar-sub">GVR DVARAKA VILLA</div>
+          <div className="topbar-sub">GVR DWARKA VILLA</div>
         </div>
         <div style={{width:34}}/>
       </div>

@@ -19,9 +19,31 @@ export default function DebugPanel() {
     setLogs(logger.getAll())
   }, [])
 
+  const [copied, setCopied] = useState(false)
+
   const handleClear = () => {
     logger.clear()
     setLogs([])
+  }
+
+  const handleCopy = () => {
+    const text = logs.map(log =>
+      `[${log.level.toUpperCase()}] ${new Date(log.time).toLocaleTimeString('en-IN')} | ${log.context} | ${log.message}${log.stack ? ' | ' + log.stack : ''}`
+    ).join('\n')
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
   }
 
   const handleRefresh = () => {
@@ -110,7 +132,17 @@ export default function DebugPanel() {
             ERROR LOG ({logs.length})
           </div>
           {logs.length > 0 && (
-            <button onClick={handleClear} style={styles.clearBtn}>Clear all</button>
+            <div style={{display:'flex',gap:'6px'}}>
+              <button onClick={handleCopy} style={{
+                ...styles.clearBtn,
+                background: copied ? 'rgba(52,168,83,0.15)' : 'rgba(24,95,165,0.1)',
+                border: copied ? '1px solid rgba(52,168,83,0.3)' : '1px solid rgba(24,95,165,0.25)',
+                color: copied ? '#81C995' : '#85B7EB',
+              }}>
+                {copied ? '✓ Copied' : '📋 Copy all'}
+              </button>
+              <button onClick={handleClear} style={styles.clearBtn}>Clear</button>
+            </div>
           )}
         </div>
 

@@ -20,8 +20,8 @@ export const CONFIG = {
   villas: [
     {
       id:       'dwarka',
-      name:     'Dvaraka',
-      full:     'Dvaraka — GVR Villa',
+      name:     'Dwarka',
+      full:     'Dwarka — GVR Villa',
       location: 'Guruvayur',
       active:   true,
     }

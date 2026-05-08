@@ -46,7 +46,7 @@ export default function VillaRentalIncome() {
     <div className="screen">
       <div className="topbar">
         <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
-        <div><div className="topbar-title">Villa rental income</div><div className="topbar-sub">DVARAKA · NEW BOOKING</div></div>
+        <div><div className="topbar-title">Villa rental income</div><div className="topbar-sub">DWARKA · NEW BOOKING</div></div>
       </div>
       <div className="screen-body">
         <div className="card-section-label">BOOKING DETAILS</div>

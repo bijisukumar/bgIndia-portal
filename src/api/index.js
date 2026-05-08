@@ -1,37 +1,25 @@
 import { logger } from '../utils/logger.js'
-// ============================================================
-//  API LAYER — All Apps Script calls go through here.
-//  Action strings must match your Apps Script doPost handler.
-// ============================================================
-
 import { CONFIG } from '../config.js'
 
 const URL = CONFIG.appsScriptUrl
 
-async function post(action, payload) {
-  logger.info('API:POST', action, payload)
-  try {
-    const res = await fetch(URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action, ...payload }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
-    const data = await res.json()
-    if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
-    logger.info('API:POST', `${action} OK`)
-    return data
-  } catch(err) {
-    logger.error('API:POST', err, { action })
-    throw err
-  }
-}
+// ── CORS NOTE ─────────────────────────────────────────────────
+// Google Apps Script deployed as "Anyone can access" supports CORS
+// BUT only when:
+//   1. No custom request headers are sent (no Content-Type: application/json)
+//   2. GET requests use query params
+//   3. POST requests send data as URL-encoded form data, not JSON body
+// This is a known Apps Script limitation. We work around it below.
+// ─────────────────────────────────────────────────────────────
 
 async function get(action, params = {}) {
   logger.info('API:GET', action, params)
   try {
     const qs  = new URLSearchParams({ action, ...params }).toString()
-    const res = await fetch(`${URL}?${qs}`)
+    const res = await fetch(`${URL}?${qs}`, {
+      method: 'GET',
+      // No custom headers — required for Apps Script CORS
+    })
     if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
     const data = await res.json()
     if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
@@ -43,18 +31,39 @@ async function get(action, params = {}) {
   }
 }
 
+async function post(action, payload) {
+  logger.info('API:POST', action, payload)
+  try {
+    // Send as URL-encoded form data to avoid CORS preflight
+    // Apps Script reads this via e.parameter
+    const body = new URLSearchParams({
+      payload: JSON.stringify({ action, ...payload })
+    })
+    const res = await fetch(URL, {
+      method: 'POST',
+      // No Content-Type header — let browser set it automatically for form data
+      body,
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
+    const data = await res.json()
+    if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
+    logger.info('API:POST', `${action} OK`)
+    return data?.data ?? data
+  } catch(err) {
+    logger.error('API:POST', err, { action })
+    throw err
+  }
+}
+
 // ── STAY / CHECK-IN ─────────────────────────────────────────
 export const api = {
 
-  // Fetch pending guest form submissions (not yet confirmed)
   getPendingCheckIns: () =>
     get('getPendingCheckIns'),
 
-  // Confirm a check-in (Raman taps confirm + uploads car photos)
   confirmCheckIn: (data) =>
     post('confirmCheckIn', data),
 
-  // Get current active stay for a villa
   getActiveStay: (villaId) =>
     get('getActiveStay', { villaId }),
 
@@ -112,7 +121,4 @@ export const api = {
 
   getRentalDashboard: (year) =>
     get('getRentalDashboard', { year }),
-
-  // ── IRRIGATION (existing) ─────────────────────────────────
-  // Kept as webview links — no change needed
 }

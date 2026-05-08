@@ -64,7 +64,7 @@ export default function RamanHome() {
             </div>
           </div>
         )}
-        <div className="card-section-label">GVR DVARAKA VILLA</div>
+        <div className="card-section-label">GVR DWARKA VILLA</div>
         <div className="menu-tile">
           {villaRows.map((r,i)=>(
             <div key={i} className="menu-row" onClick={()=>!r.disabled&&navigate(r.path)}

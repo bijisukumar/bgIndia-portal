@@ -60,7 +60,7 @@ export default function VillaDashboard() {
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Villa dashboard</div>
-          <div className="topbar-sub">DVARAKA · GVR · {year}</div>
+          <div className="topbar-sub">DWARKA · GVR · {year}</div>
         </div>
       </div>
 

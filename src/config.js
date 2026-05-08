@@ -1,28 +1,29 @@
 // ============================================================
 //  BG INDIA PORTAL — CENTRAL CONFIGURATION
 //  All property-specific values live here.
+//  PINs are loaded from environment variables (never in code).
 //  To white-label for another tenant: change this file only.
 // ============================================================
 
 export const CONFIG = {
   // Branding
-  brandName:     'Guruvayur Estates',
-  brandShort:    'GE Portal',
-  tagline:       'Property Management Portal',
+  brandName:  'Guruvayur Estates',
+  brandShort: 'GE Portal',
+  tagline:    'Property Management Portal',
 
   // Google integration
-  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbzIIuiPmTZM6jmPVIERI8Pxef3-bg7q4djuojvQpJ_JwMq-sW1R6vMl84d7rkkJMyiN/exec',
+  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbyfAYqgMMvkBkxyFFE6NOGUNBWgcK1KmKRqJpRbN3i3jHpKODxGNTAXFozeM59isIN6/exec',
   driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
   ownerEmail:    'bijisukumar@gmail.com',
 
   // Villa properties — add more objects here for second villa
   villas: [
     {
-      id:     'dwarka',
-      name:   'Dvaraka',
-      full:   'Dvaraka — GVR Villa',
+      id:       'dwarka',
+      name:     'Dvaraka',
+      full:     'Dvaraka — GVR Villa',
       location: 'Guruvayur',
-      active: true,
+      active:   true,
     }
   ],
 
@@ -35,65 +36,42 @@ export const CONFIG = {
 
   // Estate properties
   estates: [
-    {
-      id:       'pollachi',
-      name:     'Pollachi Estate',
-      type:     'coconut',
-      manager:  'Pradosh',
-      active:   true,
-    },
-    {
-      id:       'pavutumuri',
-      name:     'Pavutumuri Estate',
-      type:     'rubber',
-      manager:  'RamananKutty',
-      active:   true,
-    }
+    { id: 'pollachi',   name: 'Pollachi Estate',   type: 'coconut', manager: 'Pradosh',      active: true },
+    { id: 'pavutumuri', name: 'Pavutumuri Estate',  type: 'rubber',  manager: 'RamananKutty', active: true },
   ],
 
   // Pricing defaults
   breakfastRate:       275,   // ₹ per person per day
-  additionalGuestRate: 750,   // ₹ per night (drivers, nannies etc.)
+  additionalGuestRate: 750,   // ₹ per night
+  dehuskDefaultRate:   1.50,  // ₹ per coconut
 
-  // Dehusk default rate — editable per harvest entry
-  dehuskDefaultRate: 1.50,    // ₹ per coconut
-
-  // ============================================================
-  //  USER ACCESS CONTROL
-  //  Each user has a PIN and a list of screen IDs they can access.
-  //  screenIds must match keys in SCREENS below.
-  // ============================================================
+  // ── USER ACCESS CONTROL ──────────────────────────────────
+  //  PINs are loaded from Vite environment variables.
+  //  Set these in Cloudflare Pages → Settings → Environment variables:
+  //    VITE_PIN_OWNER   = your owner PIN
+  //    VITE_PIN_RAMAN   = Raman's PIN
+  //    VITE_PIN_PRADOSH = Pradosh's PIN
+  //  For local dev, set them in .env.local (never commit that file)
+  // ─────────────────────────────────────────────────────────
   users: {
-    '303': {
-      name:    'Owner',
-      role:    'owner',
-      screens: ['owner_home'],   // owner_home shows everything
-    },
-    '1111': {
-      name:    'RamananKutty',
-      role:    'manager',
-      screens: ['raman_home'],
-    },
-    '2222': {
-      name:    'Pradosh',
-      role:    'estate_manager',
-      screens: ['pradosh_home'],
-    },
+    [import.meta.env.VITE_PIN_OWNER]:   { name: 'Owner',        role: 'owner'          },
+    [import.meta.env.VITE_PIN_RAMAN]:   { name: 'RamananKutty', role: 'manager'         },
+    [import.meta.env.VITE_PIN_PRADOSH]: { name: 'Pradosh',      role: 'estate_manager'  },
   },
 
-  // Theme colours — matches the gold/dark GVR aesthetic
+  // Theme colours
   theme: {
-    gold:     '#C8903A',
-    goldLight:'#F0D080',
-    dark:     '#1A1A1A',
-    darkCard: '#242B3D',
-    darkNav:  '#1E2535',
-    text:     '#EDF2F7',
-    textMuted:'#8A9BAE',
-    textDim:  '#5C7080',
-    green:    '#34A853',
-    red:      '#c62828',
-    blue:     '#185FA5',
-    teal:     '#0F6E56',
+    gold:      '#C8903A',
+    goldLight: '#F0D080',
+    dark:      '#1A1A1A',
+    darkCard:  '#242B3D',
+    darkNav:   '#1E2535',
+    text:      '#EDF2F7',
+    textMuted: '#8A9BAE',
+    textDim:   '#5C7080',
+    green:     '#34A853',
+    red:       '#c62828',
+    blue:      '#185FA5',
+    teal:      '#0F6E56',
   }
 }

@@ -119,6 +119,9 @@ export const api = {
   getVillaDashboard: (villaId, year) =>
     get('getVillaDashboard', { villaId, year }),
 
+  getStays: (villaId, year) =>
+    get('getStays', { villaId, year }),
+
   getEstateDashboard: (year) =>
     get('getEstateDashboard', { year }),
 

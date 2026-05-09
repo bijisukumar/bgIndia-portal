@@ -12,7 +12,7 @@ export const CONFIG = {
   tagline:    'Property Management Portal',
 
   // Google integration
-  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbzWpHgCGur3d86qqeDUnkAmG6Vt-QeoDqpg0sfo8LdQCQ_MJ-KIFE3fGjNRbmBvSBNl/exec',
+  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxOmeJUo_cVtJq7E-ZCjojrNrnlh3iBtKE4PgsJuAbzyi7Z1PerG8NaNKLcnMIx5N2b/exec',
   driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
   ownerEmail:    'bijisukumar@gmail.com',
   spreadsheetId:    '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ',  // add this

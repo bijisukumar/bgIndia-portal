@@ -111,9 +111,13 @@ export default function CheckIn() {
     if (!selected) { showToast('No guest selected', 'error'); return }
     setSaving(true)
     try {
+      // Convert car photos to base64 for Drive upload
+      const carPhotoB64   = carPhoto   ? carPhoto.preview.split(',')[1]   : null
+      const platePhotoB64 = platePhoto ? platePhoto.preview.split(',')[1] : null
+
       const result = await api.confirmCheckIn({
         villaId:          'dwarka',
-        guestName:        guests[0]?.name || g(selected, 'bookerName') || 'Guest',
+        guestName:        g(selected, 'bookerName') || guests[0]?.name || 'Guest',
         bookerName:       g(selected, 'bookerName') || '',
         checkInDate:      g(selected, 'checkInDate'),
         checkOutDate:     g(selected, 'checkOutDate'),
@@ -130,6 +134,8 @@ export default function CheckIn() {
         breakfastPrepaid: g(selected, 'breakfast') || 'No',
         additionalGuests: g(selected, 'additionalGuests') || 'No',
         carNumber:        carNumber,
+        carPhotoB64:      carPhotoB64,
+        platePhotoB64:    platePhotoB64,
         channel:          'Direct',
         guestNamesRaw:    g(selected, 'guestNames') || '',
         visaInfo:         isForeign ? g(selected, 'visaInfo') || '' : '',

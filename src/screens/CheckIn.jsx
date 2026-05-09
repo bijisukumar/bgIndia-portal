@@ -140,7 +140,7 @@ export default function CheckIn() {
         guestNamesRaw:    g(selected, 'guestNames') || '',
         visaInfo:         isForeign ? g(selected, 'visaInfo') || '' : '',
       })
-      showToast('Check-in confirmed! Stay ID: ' + result?.data?.stayId)
+      showToast('Check-in confirmed! Stay ID: ' + result?.stayId)
       setTimeout(() => navigate('/'), 2500)
     } catch (e) {
       showToast('Failed to confirm check-in. Try again.', 'error')

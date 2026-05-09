@@ -122,6 +122,18 @@ export const api = {
   getStays: (villaId, year) =>
     get('getStays', { villaId, year }),
 
+  getGuests: () =>
+    get('getGuests'),
+
+  getRamanUnpaid: () =>
+    get('getRamanUnpaid'),
+
+  getRamanHistory: () =>
+    get('getRamanHistory'),
+
+  markRamanPaid: (data) =>
+    post('markRamanPaid', data),
+
   getEstateDashboard: (year) =>
     get('getEstateDashboard', { year }),
 

@@ -5,7 +5,30 @@ import { logger } from '../utils/logger'
 
 const SECTIONS = [
   {
-    label: 'VILLAS',
+    label: 'PEOPLE',
+    color: '#8B5CF6',
+    rows: [
+      {
+        id:    'guests',
+        icon:  '👥',
+        bg:    'rgba(139,92,246,0.08)',
+        title: 'Guest Repository',
+        sub:   'Contact list · Repeat guests · Marketing segments',
+        arrow: '#8B5CF6',
+        path:  '/owner/guests',
+      },
+      {
+        id:    'rdashboard',
+        icon:  '📊',
+        bg:    'rgba(200,144,58,0.08)',
+        title: 'R-Dashboard',
+        sub:   'RamananKutty commission · Unpaid · History',
+        arrow: '#C8903A',
+        path:  '/owner/r-dashboard',
+      },
+    ],
+  },
+  {
     color: '#C8903A',
     rows: [
       {

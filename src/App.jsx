@@ -19,6 +19,7 @@ import EstateLedger   from './screens/EstateLedger'
 import CheckIn        from './screens/CheckIn'
 import DebugPanel     from './screens/DebugPanel'
 import CoconutDashboard from './screens/CoconutDashboard'
+import NewBooking      from './screens/NewBooking'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -33,6 +34,7 @@ function ProtectedRoutes() {
         <Route path="/"                    element={<OwnerHome />} />
         <Route path="/owner/villa"         element={<VillaHub />} />
         <Route path="/owner/villa/income"  element={<VillaRentalIncome />} />
+        <Route path="/owner/villa/booking" element={<NewBooking />} />
         <Route path="/debug"               element={<DebugPanel />} />
         <Route path="/owner/villa/dashboard" element={<VillaDashboard />} />
         <Route path="/owner/rental"        element={<RentalProperties />} />

@@ -23,6 +23,14 @@ export default function VillaHub() {
             <span className="tag tag-green">Active</span>
           </div>
           <div style={{padding:'4px 0'}}>
+            <div className="menu-row" style={{padding:'14px 0',borderBottom:'1px solid var(--border-dim)'}} onClick={() => navigate('/owner/villa/booking')}>
+              <div className="menu-icon" style={{background:'rgba(52,168,83,0.08)'}}>📋</div>
+              <div className="menu-label">
+                <div className="menu-title">New booking</div>
+                <div className="menu-sub">Record booking · assign Stay ID · create Drive folder</div>
+              </div>
+              <div className="menu-arrow" style={{background:'#34A853'}}>›</div>
+            </div>
             <div className="menu-row" style={{padding:'14px 0',borderBottom:'1px solid var(--border-dim)'}} onClick={() => navigate('/owner/villa/income')}>
               <div className="menu-icon" style={{background:'rgba(200,144,58,0.08)'}}>🏨</div>
               <div className="menu-label">

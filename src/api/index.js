@@ -61,6 +61,9 @@ export const api = {
   getPendingCheckIns: () =>
     get('getPendingCheckIns'),
 
+  createBooking: (data) =>
+    post('createBooking', data),
+
   confirmCheckIn: (data) =>
     post('confirmCheckIn', data),
 

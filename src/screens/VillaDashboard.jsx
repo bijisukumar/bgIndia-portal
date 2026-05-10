@@ -259,7 +259,35 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
 // ── TAB: FINANCIALS ──────────────────────────────────────────────────────────
 
 function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange }) {
-  const monthData = data?.months?.[month] || {}
+  // When month==='fy', aggregate all months
+  const monthData = month === 'fy'
+    ? Object.values(data?.months || {}).reduce((acc, m) => ({
+        revenue:   (acc.revenue||0)   + (m.revenue||0),
+        fees:      (acc.fees||0)      + (m.fees||0),
+        bookings:  (acc.bookings||0)  + (m.bookings||0),
+        direct:    (acc.direct||0)    + (m.direct||0),
+        profit:    (acc.profit||0)    + (m.profit||0),
+        breakdown: {
+          tariff:    (acc.breakdown?.tariff||0)    + (m.breakdown?.tariff||0),
+          carRental: (acc.breakdown?.carRental||0) + (m.breakdown?.carRental||0),
+          kitchen:   (acc.breakdown?.kitchen||0)   + (m.breakdown?.kitchen||0),
+          breakfast: (acc.breakdown?.breakfast||0) + (m.breakdown?.breakfast||0),
+          events:    (acc.breakdown?.events||0)    + (m.breakdown?.events||0),
+        }
+      }), { revenue:0, fees:0, bookings:0, profit:0, breakdown:{} })
+    : (data?.months?.[month] || {})
+
+  const totalBookings = month === 'fy'
+    ? Object.values(data?.months || {}).reduce((s,m) => s+(m.bookings||0), 0)
+    : (monthData.bookings || 0)
+
+  const totalDirect = month === 'fy'
+    ? Object.values(data?.months || {}).reduce((s,m) => s+(m.direct||0), 0)
+    : (monthData.direct || 0)
+
+  const directRatio = totalBookings > 0 ? `${totalDirect} / ${totalBookings}` : '—'
+  const margin = monthData.revenue > 0 ? Math.round((monthData.profit / monthData.revenue) * 100) : 0
+
   const breakdown = monthData.breakdown || {}
   const maxBreakdown = Math.max(...Object.values(breakdown).map(v => v||0), 1)
 
@@ -292,12 +320,12 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
           <div className="stat-card">
             <div className="stat-label">Revenue</div>
             <div className="stat-val gold">{fmt(monthData.revenue)}</div>
-            <div className="stat-sub">{monthData.bookings||0} bookings</div>
+            <div className="stat-sub">{totalBookings} bookings</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Net profit</div>
             <div className="stat-val green">{fmt(monthData.profit)}</div>
-            <div className="stat-sub">{monthData.margin||0}% margin</div>
+            <div className="stat-sub">{margin}% margin</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Commissions</div>
@@ -306,7 +334,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
           </div>
           <div className="stat-card">
             <div className="stat-label">Direct ratio</div>
-            <div className="stat-val green">{monthData.directRatio||'—'}</div>
+            <div className="stat-val green">{directRatio}</div>
             <div className="stat-sub">Direct / total</div>
           </div>
         </div>
@@ -494,8 +522,8 @@ function MarketingTab({ data, stays, loading, year }) {
 export default function VillaDashboard() {
   const navigate = useNavigate()
   const [tab,    setTab]    = useState('guests')
-  const [month,  setMonth]  = useState(CUR_MONTH)
-  const [year,   setYear]   = useState(2025)
+  const [month,  setMonth]  = useState('fy')
+  const [year,   setYear]   = useState(2023)
   const [data,   setData]   = useState(null)
   const [stays,  setStays]  = useState([])
   const [loading, setLoading] = useState(true)

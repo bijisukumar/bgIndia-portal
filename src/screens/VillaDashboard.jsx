@@ -82,7 +82,7 @@ function StatusBadge({ status }) {
 
 function GuestsTab({ stays, loading, year, onYearChange }) {
   const [filter, setFilter] = useState('all')
-  const [selMonth, setSelMonth] = useState(CUR_MONTH)
+  const [selMonth, setSelMonth] = useState('all')
 
   const today = new Date()
   today.setHours(0,0,0,0)
@@ -96,7 +96,10 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
   const upcoming   = parsed.filter(s => s.checkInDate > today && s.status !== 'cancelled').sort((a,b) => a.checkInDate - b.checkInDate)
   const active     = parsed.filter(s => s.status === 'active')
   const unclosed   = parsed.filter(s => !['checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate))
-  const byMonth    = parsed.filter(s => s.checkInDate.getMonth() === selMonth && s.checkInDate.getFullYear() === year)
+  const byMonth    = parsed.filter(s => {
+    if (selMonth === 'all') return s.checkInDate.getFullYear() === year
+    return s.checkInDate.getMonth() === selMonth && s.checkInDate.getFullYear() === year
+  })
 
   return (
     <div>
@@ -191,19 +194,21 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
       {/* By month */}
       <div className="card-section-label">📋 BOOKINGS BY MONTH</div>
       <div className="month-strip" style={{ marginBottom:'12px' }}>
-        {MONTHS.map((m, i) => (
-          <button key={m} className={`month-pill${selMonth===i?' active':''}`} onClick={() => setSelMonth(i)}>{m}</button>
-        ))}
-      </div>
-      {loading ? <Skeleton h={120} /> : byMonth.length === 0 ? (
-        <div className="card" style={{ textAlign:'center', color:'var(--text-dim)', padding:'20px' }}>
-          No bookings in {MONTHS_FULL[selMonth]} {year}
+          <button className={`month-pill${selMonth==='all'?' active':''}`} onClick={() => setSelMonth('all')}>All</button>
+          {MONTHS.map((m, i) => (
+            <button key={m} className={`month-pill${selMonth===i?' active':''}`} onClick={() => setSelMonth(i)}>{m}</button>
+          ))}
         </div>
+      {loading ? <Skeleton h={120} /> : byMonth.length === 0 ? (
+          <div className="card" style={{textAlign:'center',color:'var(--text-dim)',padding:'20px'}}>
+            No bookings in {selMonth==='all' ? String(year) : `${MONTHS_FULL[selMonth]} ${year}`}
+          </div>
       ) : (
         <>
           <div style={{ display:'flex', gap:'8px', marginBottom:'8px', flexWrap:'wrap' }}>
             <span style={{ fontSize:'0.75rem', color:'var(--text-dim)' }}>
               {byMonth.length} booking{byMonth.length>1?'s':''} · {byMonth.reduce((s,b)=>s+calcNights(b.checkIn||b.checkInDate,b.checkOut||b.checkOutDate),0)} total nights
+              {selMonth === 'all' ? ` · Full year ${year}` : ` · ${MONTHS_FULL[selMonth]} ${year}`}
             </span>
           </div>
           <div style={{ background:'var(--dark-card)', borderRadius:'12px', border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'12px' }}>

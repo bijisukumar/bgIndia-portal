@@ -93,6 +93,9 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
     checkOutDate: new Date(s.checkOut || s.checkOutDate || ''),
   }))
 
+  // Year-filtered for summary stats
+  const parsedYear = parsed.filter(s => !isNaN(s.checkInDate) && s.checkInDate.getFullYear() === year)
+
   const upcoming   = parsed.filter(s => s.checkInDate > today && s.status !== 'cancelled').sort((a,b) => a.checkInDate - b.checkInDate)
   const active     = parsed.filter(s => s.status === 'active')
   const unclosed   = parsed.filter(s => !['checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate))
@@ -237,16 +240,16 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
         {loading ? <Skeleton h={80}/> : (
           <>
             {[
-              { label:'Total bookings',    val: parsed.length },
-              { label:'Checked out',       val: parsed.filter(s=>s.status==='checked_out').length },
-              { label:'Active now',        val: active.length },
-              { label:'Upcoming',          val: upcoming.length },
-              { label:'Cancelled',         val: parsed.filter(s=>s.status==='cancelled').length },
-              { label:'Unclosed (action)', val: unclosed.length, alert: unclosed.length > 0 },
+              { label:'Total bookings',    val: parsedYear.length },
+              { label:'Checked out',       val: parsedYear.filter(s=>s.status==='checked_out').length },
+              { label:'Active now',        val: parsedYear.filter(s=>s.status==='active').length },
+              { label:'Upcoming',          val: parsedYear.filter(s=>s.checkInDate > today && s.status !== 'cancelled').length },
+              { label:'Cancelled',         val: parsedYear.filter(s=>s.status==='cancelled').length },
+              { label:'Unclosed (action)', val: parsedYear.filter(s=>!['checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate)).length, alert: true },
             ].map((row, i) => (
               <div key={i} className="net-row">
                 <span className="net-label">{row.label}</span>
-                <span style={{ color: row.alert ? 'var(--red)' : 'var(--text)', fontWeight:'600' }}>{row.val}</span>
+                <span style={{ color: row.alert && row.val > 0 ? 'var(--red)' : 'var(--text)', fontWeight:'600' }}>{row.val}</span>
               </div>
             ))}
           </>
@@ -256,9 +259,148 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
   )
 }
 
+// ── MONTHLY TREND CHART (10 years) ───────────────────────────────────────────
+
+function MonthlyTrendChart({ stays, currentYear }) {
+  const allYears = Array.from({ length: 10 }, (_, i) => currentYear - i).reverse()
+
+  // Build month × year revenue matrix from all stays
+  const matrix = {}
+  MONTHS.forEach(m => { matrix[m] = {} })
+
+  ;(stays || []).forEach(s => {
+    const ci = new Date(s.checkIn || s.checkInDate || '')
+    if (isNaN(ci)) return
+    const m   = MONTHS[ci.getMonth()]
+    const y   = ci.getFullYear()
+    const rev = parseFloat(s.gross || 0)
+    if (!matrix[m][y]) matrix[m][y] = { revenue: 0, bookings: 0 }
+    matrix[m][y].revenue  += rev
+    matrix[m][y].bookings += 1
+  })
+
+  // Find best and worst months across all years
+  const monthTotals = MONTHS.map(m => ({
+    month: m,
+    total: Object.values(matrix[m]).reduce((s, v) => s + (v.revenue||0), 0),
+    avg:   Object.keys(matrix[m]).length > 0
+      ? Object.values(matrix[m]).reduce((s,v) => s+(v.revenue||0), 0) / Object.keys(matrix[m]).length
+      : 0,
+  }))
+
+  const maxAvg   = Math.max(...monthTotals.map(m => m.avg), 1)
+  const bestMonth  = [...monthTotals].sort((a,b) => b.avg - a.avg)[0]
+  const worstMonth = [...monthTotals].filter(m => m.avg > 0).sort((a,b) => a.avg - b.avg)[0]
+
+  // Max revenue across entire matrix for colour scaling
+  const allRevValues = MONTHS.flatMap(m => Object.values(matrix[m]).map(v => v.revenue||0))
+  const maxRev = Math.max(...allRevValues, 1)
+
+  const getColor = (rev) => {
+    if (!rev) return 'rgba(255,255,255,0.04)'
+    const pct = rev / maxRev
+    if (pct > 0.75) return 'rgba(200,144,58,0.85)'
+    if (pct > 0.50) return 'rgba(200,144,58,0.55)'
+    if (pct > 0.25) return 'rgba(200,144,58,0.30)'
+    return 'rgba(200,144,58,0.12)'
+  }
+
+  return (
+    <>
+      <div className="card-section-label">📊 MONTHLY TREND — LAST 10 YEARS</div>
+      <div style={{ background:'rgba(52,168,83,0.06)', border:'1px solid rgba(52,168,83,0.2)', borderRadius:'10px', padding:'10px 12px', marginBottom:'12px', display:'flex', gap:'16px', flexWrap:'wrap' }}>
+        <div>
+          <div style={{ color:'var(--text-dim)', fontSize:'0.68rem', letterSpacing:'1px' }}>BEST MONTH</div>
+          <div style={{ color:'var(--gold)', fontWeight:'700', fontSize:'0.9rem' }}>{bestMonth?.month} <span style={{ color:'var(--text-dim)', fontWeight:'400', fontSize:'0.75rem' }}>avg {fmt(Math.round(bestMonth?.avg||0))}/yr</span></div>
+        </div>
+        {worstMonth && (
+          <div>
+            <div style={{ color:'var(--text-dim)', fontSize:'0.68rem', letterSpacing:'1px' }}>LOWEST MONTH</div>
+            <div style={{ color:'#5C7080', fontWeight:'700', fontSize:'0.9rem' }}>{worstMonth?.month} <span style={{ color:'var(--text-dim)', fontWeight:'400', fontSize:'0.75rem' }}>avg {fmt(Math.round(worstMonth?.avg||0))}/yr</span></div>
+          </div>
+        )}
+      </div>
+
+      {/* Heatmap grid */}
+      <div className="card" style={{ padding:'10px', overflowX:'auto' }}>
+        <div style={{ minWidth:'340px' }}>
+          {/* Year headers */}
+          <div style={{ display:'grid', gridTemplateColumns:`50px repeat(${allYears.length}, 1fr)`, gap:'3px', marginBottom:'3px' }}>
+            <div/>
+            {allYears.map(y => (
+              <div key={y} style={{ fontSize:'0.6rem', color: y===currentYear?'var(--gold)':'var(--text-dim)', textAlign:'center', fontWeight: y===currentYear?'700':'400' }}>
+                {String(y).slice(2)}
+              </div>
+            ))}
+          </div>
+          {/* Month rows */}
+          {MONTHS.map((m, mi) => {
+            const isB = m === bestMonth?.month
+            const isW = m === worstMonth?.month
+            return (
+              <div key={m} style={{ display:'grid', gridTemplateColumns:`50px repeat(${allYears.length}, 1fr)`, gap:'3px', marginBottom:'3px' }}>
+                <div style={{ fontSize:'0.72rem', color: isB?'var(--gold)':isW?'#5C7080':'var(--text-dim)',
+                  fontWeight: isB||isW?'700':'400', display:'flex', alignItems:'center' }}>
+                  {m}{isB?' 🏆':isW?' 📉':''}
+                </div>
+                {allYears.map(y => {
+                  const cell = matrix[m][y]
+                  const rev  = cell?.revenue || 0
+                  return (
+                    <div key={y} title={rev > 0 ? `${m} ${y}: ${fmt(Math.round(rev))} · ${cell?.bookings} booking(s)` : `${m} ${y}: No data`}
+                      style={{ height:'22px', borderRadius:'4px', background: getColor(rev),
+                        border: y===currentYear ? '1px solid rgba(200,144,58,0.3)' : 'none',
+                        cursor: rev > 0 ? 'pointer' : 'default' }}/>
+                  )
+                })}
+              </div>
+            )
+          })}
+          {/* Legend */}
+          <div style={{ display:'flex', gap:'8px', marginTop:'10px', alignItems:'center', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'0.68rem', color:'var(--text-dim)' }}>Revenue:</span>
+            {[
+              { label:'No data', color:'rgba(255,255,255,0.04)' },
+              { label:'Low',     color:'rgba(200,144,58,0.12)' },
+              { label:'Mid',     color:'rgba(200,144,58,0.30)' },
+              { label:'High',    color:'rgba(200,144,58,0.55)' },
+              { label:'Peak',    color:'rgba(200,144,58,0.85)' },
+            ].map(l => (
+              <div key={l.label} style={{ display:'flex', alignItems:'center', gap:'4px' }}>
+                <div style={{ width:'14px', height:'14px', borderRadius:'3px', background:l.color }}/>
+                <span style={{ fontSize:'0.65rem', color:'var(--text-dim)' }}>{l.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Month avg bar chart */}
+      <div className="card-section-label">AVG MONTHLY REVENUE (ALL YEARS)</div>
+      <div className="card">
+        {monthTotals.map((m, i) => (
+          <div key={i} style={S.barRow}>
+            <div style={{ ...S.barLabel, color: m.month===bestMonth?.month?'var(--gold)':m.month===worstMonth?.month?'#5C7080':'var(--text-dim)',
+              fontWeight: m.month===bestMonth?.month||m.month===worstMonth?.month?'700':'400' }}>
+              {m.month}
+            </div>
+            <div style={S.barTrack}>
+              <div style={{ ...S.barFill, width:`${(m.avg/maxAvg)*100}%`,
+                background: m.month===bestMonth?.month?'#C8903A':m.month===worstMonth?.month?'#5C7080':'#185FA5' }}/>
+            </div>
+            <div style={{ ...S.barVal, color: m.month===bestMonth?.month?'var(--gold)':'var(--text)' }}>
+              {m.avg > 0 ? fmt(Math.round(m.avg)) : '—'}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
 // ── TAB: FINANCIALS ──────────────────────────────────────────────────────────
 
-function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange }) {
+function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange, stays }) {
   // When month==='fy', aggregate all months
   const monthData = month === 'fy'
     ? Object.values(data?.months || {}).reduce((acc, m) => ({
@@ -376,6 +518,8 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
           </>
         )}
       </div>
+
+      <MonthlyTrendChart stays={stays} currentYear={year} />
     </div>
   )
 }
@@ -524,9 +668,10 @@ export default function VillaDashboard() {
   const [tab,    setTab]    = useState('guests')
   const [month,  setMonth]  = useState('fy')
   const [year,   setYear]   = useState(2023)
-  const [data,   setData]   = useState(null)
-  const [stays,  setStays]  = useState([])
-  const [loading, setLoading] = useState(true)
+  const [data,     setData]     = useState(null)
+  const [stays,    setStays]    = useState([])
+  const [allStays, setAllStays] = useState([])
+  const [loading,  setLoading]  = useState(true)
 
   useEffect(() => {
     setLoading(true)
@@ -539,6 +684,13 @@ export default function VillaDashboard() {
       setLoading(false)
     })
   }, [year])
+
+  // Load all stays once for the 10-year trend chart
+  useEffect(() => {
+    api.getStays('dwarka', 'all').catch(() => []).then(all => {
+      setAllStays(Array.isArray(all) ? all : [])
+    })
+  }, [])
 
   const TABS = [
     { key:'guests',     label:'Guests',     icon:'👥' },
@@ -574,7 +726,7 @@ export default function VillaDashboard() {
 
       <div className="screen-body">
         {tab === 'guests'     && <GuestsTab     stays={stays} loading={loading} year={year} onYearChange={setYear}/>}
-        {tab === 'financials' && <FinancialsTab  data={data}  loading={loading} month={month} onMonthChange={setMonth} year={year} onYearChange={setYear}/>}
+        {tab === 'financials' && <FinancialsTab  data={data}  loading={loading} month={month} onMonthChange={setMonth} year={year} onYearChange={setYear} stays={allStays}/>}
         {tab === 'marketing'  && <MarketingTab   data={data}  stays={stays} loading={loading} year={year}/>}
       </div>
     </div>

@@ -302,11 +302,13 @@ textarea.field-input { resize: vertical; min-height: 80px; }
 /* ── MONTH STRIP ────────────────────────── */
 .month-strip {
   display: flex;
+  flex-wrap: nowrap;
   gap: 6px;
   overflow-x: auto;
   padding-bottom: 4px;
   margin-bottom: 16px;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 .month-strip::-webkit-scrollbar { display: none; }
 .month-pill {

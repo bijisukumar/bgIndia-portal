@@ -193,7 +193,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
 
       {/* By month */}
       <div className="card-section-label">📋 BOOKINGS BY MONTH</div>
-      <div className="month-strip" style={{ marginBottom:'12px' }}>
+      <div className="month-strip" style={{ marginBottom:'12px', overflowX:'auto', flexWrap:'nowrap', WebkitOverflowScrolling:'touch' }}>
           <button className={`month-pill${selMonth==='all'?' active':''}`} onClick={() => setSelMonth('all')}>All</button>
           {MONTHS.map((m, i) => (
             <button key={m} className={`month-pill${selMonth===i?' active':''}`} onClick={() => setSelMonth(i)}>{m}</button>
@@ -277,7 +277,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
         ))}
       </div>
 
-      <div className="month-strip">
+      <div className="month-strip" style={{ overflowX:'auto', flexWrap:'nowrap', WebkitOverflowScrolling:'touch' }}>
         <button className={`month-pill${month==='fy'?' active':''}`} onClick={() => onMonthChange('fy')}>All</button>
         {MONTHS.map((m, i) => (
           <button key={m} className={`month-pill${month===i?' active':''}`} onClick={() => onMonthChange(i)}>{m}</button>

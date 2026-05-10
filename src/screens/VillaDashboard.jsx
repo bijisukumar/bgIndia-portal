@@ -263,6 +263,96 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
   )
 }
 
+// ── EARNINGS COMPARISON CHART ────────────────────────────────────────────────
+
+function EarningsComparisonChart({ allStays, selectedYears }) {
+  const [compareYears, setCompareYears] = useState(selectedYears.slice(0, 2))
+
+  const COLORS = ['#C8903A', '#8B5CF6', '#34A853', '#185FA5', '#E53935']
+
+  // Build month × year revenue from all stays
+  const byYearMonth = {}
+  ;(allStays || []).forEach(s => {
+    const ci = new Date(s.checkIn || s.checkInDate || '')
+    if (isNaN(ci)) return
+    const y = ci.getFullYear()
+    const m = ci.getMonth()
+    const rev = parseFloat(s.gross || 0)
+    if (!byYearMonth[y]) byYearMonth[y] = Array(12).fill(0)
+    byYearMonth[y][m] += rev
+  })
+
+  const availableYears = Object.keys(byYearMonth).map(Number).sort((a,b) => b-a)
+  const maxVal = Math.max(...compareYears.flatMap(y => byYearMonth[y] || []), 1)
+
+  const toggleYear = (y) => {
+    setCompareYears(prev =>
+      prev.includes(y) ? prev.filter(p => p !== y) : prev.length < 3 ? [...prev, y] : prev
+    )
+  }
+
+  return (
+    <>
+      <div className="card-section-label">📈 EARNINGS COMPARISON</div>
+      {/* Year selector */}
+      <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'12px' }}>
+        {availableYears.map((y, yi) => (
+          <button key={y} onClick={() => toggleYear(y)}
+            style={{ padding:'5px 12px', borderRadius:'20px', cursor:'pointer',
+              border: `1px solid ${compareYears.includes(y) ? COLORS[compareYears.indexOf(y)] : 'rgba(255,255,255,0.08)'}`,
+              background: compareYears.includes(y) ? `${COLORS[compareYears.indexOf(y)]}22` : 'transparent',
+              color: compareYears.includes(y) ? COLORS[compareYears.indexOf(y)] : 'var(--text-dim)',
+              fontSize:'0.78rem', fontWeight: compareYears.includes(y)?'700':'400' }}>
+            {y}
+          </button>
+        ))}
+        <span style={{ fontSize:'0.7rem', color:'var(--text-dim)', alignSelf:'center' }}>Pick up to 3</span>
+      </div>
+
+      {/* Chart */}
+      <div className="card" style={{ padding:'12px' }}>
+        {/* Y-axis labels + bars */}
+        <div style={{ display:'flex', gap:'4px', alignItems:'flex-end', height:'160px', marginBottom:'6px' }}>
+          {MONTHS.map((m, mi) => (
+            <div key={m} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:'2px', height:'100%', justifyContent:'flex-end' }}>
+              {compareYears.map((y, yi) => {
+                const rev = (byYearMonth[y] || [])[mi] || 0
+                const pct = maxVal > 0 ? (rev / maxVal) * 100 : 0
+                return (
+                  <div key={y} title={`${m} ${y}: ${rev > 0 ? '₹'+Math.round(rev).toLocaleString('en-IN') : 'No data'}`}
+                    style={{ width:'100%', height:`${Math.max(pct, rev > 0 ? 2 : 0)}%`,
+                      background: COLORS[yi], borderRadius:'3px 3px 0 0', minHeight: rev > 0 ? '3px' : '0',
+                      transition:'height 0.4s ease', cursor:'pointer' }}/>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+        {/* X-axis */}
+        <div style={{ display:'flex', gap:'4px' }}>
+          {MONTHS.map(m => (
+            <div key={m} style={{ flex:1, textAlign:'center', fontSize:'0.58rem', color:'var(--text-dim)' }}>{m}</div>
+          ))}
+        </div>
+        {/* Legend */}
+        <div style={{ display:'flex', gap:'12px', marginTop:'10px', flexWrap:'wrap' }}>
+          {compareYears.map((y, yi) => {
+            const total = ((byYearMonth[y] || [])).reduce((s,v)=>s+v,0)
+            return (
+              <div key={y} style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                <div style={{ width:'12px', height:'12px', borderRadius:'3px', background:COLORS[yi] }}/>
+                <span style={{ fontSize:'0.75rem', color:COLORS[yi], fontWeight:'600' }}>
+                  {y} — {total > 0 ? `₹${(total/1000).toFixed(0)}K` : 'No data'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ── MONTHLY TREND CHART (10 years) ───────────────────────────────────────────
 
 function MonthlyTrendChart({ stays, currentYear }) {
@@ -532,6 +622,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
       </div>
 
       <MonthlyTrendChart stays={stays} currentYear={year} />
+      <EarningsComparisonChart allStays={stays} selectedYears={YEARS.slice(0,2)} />
     </div>
   )
 }

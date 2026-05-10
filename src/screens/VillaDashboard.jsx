@@ -278,10 +278,10 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
       </div>
 
       <div className="month-strip">
+        <button className={`month-pill${month==='fy'?' active':''}`} onClick={() => onMonthChange('fy')}>All</button>
         {MONTHS.map((m, i) => (
           <button key={m} className={`month-pill${month===i?' active':''}`} onClick={() => onMonthChange(i)}>{m}</button>
         ))}
-        <button className={`month-pill${month==='fy'?' active':''}`} onClick={() => onMonthChange('fy')}>FY</button>
       </div>
 
       <div className="card-section-label">{typeof month==='number'?MONTHS_FULL[month]:'Full Year'} {year}</div>

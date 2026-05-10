@@ -32,7 +32,7 @@ const STATUS_COLORS = {
   cancelled:   '#E53935',
 }
 
-const YEARS = [CUR_YEAR, CUR_YEAR-1, CUR_YEAR-2, CUR_YEAR-3]
+const YEARS = [CUR_YEAR, CUR_YEAR-1, CUR_YEAR-2, CUR_YEAR-3, CUR_YEAR-4, CUR_YEAR-5]
 
 function fmt(n) {
   if (!n && n !== 0) return '—'
@@ -495,7 +495,7 @@ export default function VillaDashboard() {
   const navigate = useNavigate()
   const [tab,    setTab]    = useState('guests')
   const [month,  setMonth]  = useState(CUR_MONTH)
-  const [year,   setYear]   = useState(CUR_YEAR)
+  const [year,   setYear]   = useState(2025)
   const [data,   setData]   = useState(null)
   const [stays,  setStays]  = useState([])
   const [loading, setLoading] = useState(true)

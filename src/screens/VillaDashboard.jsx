@@ -161,37 +161,41 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
         </>
       )}
 
-      {/* Upcoming */}
-      <div className="card-section-label">📅 UPCOMING BOOKINGS</div>
-      {loading ? <Skeleton h={100} /> : upcoming.length === 0 ? (
-        <div className="card" style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px' }}>
-          No upcoming bookings for {year}
-        </div>
-      ) : (
-        <div style={{ background:'var(--dark-card)', borderRadius:'12px', border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'12px' }}>
-          {upcoming.slice(0,10).map((s, i) => {
-            const daysAway = Math.round((s.checkInDate - today) / (1000*60*60*24))
-            return (
-              <div key={i} style={{ padding:'12px 16px', borderBottom: i<Math.min(upcoming.length,10)-1?'1px solid var(--border-dim)':'none' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
-                  <span style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.9rem' }}>{s.guestName || s.bookerName}</span>
-                  <StatusBadge status={s.status} />
-                </div>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ color:'var(--text-dim)', fontSize:'0.78rem' }}>
-                    {fmtDate(s.checkIn || s.checkInDate)} · {calcNights(s.checkIn||s.checkInDate, s.checkOut||s.checkOutDate)} nights · {s.channel||'Direct'}
-                  </span>
-                  <span style={{ fontSize:'0.72rem', color: daysAway<=7?'#E53935':daysAway<=14?'#C8903A':'#5C7080', fontWeight:'600' }}>
-                    {daysAway===0?'TODAY':daysAway===1?'Tomorrow':`${daysAway}d away`}
-                  </span>
-                </div>
-                <div style={{ color:'var(--text-dim)', fontSize:'0.72rem', marginTop:'2px' }}>
-                  {s.stayId} · {s.adults||0} adults · {s.phone||''}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+      {/* Upcoming — only show for current year */}
+      {year >= CUR_YEAR && (
+        <>
+          <div className="card-section-label">📅 UPCOMING BOOKINGS</div>
+          {loading ? <Skeleton h={100} /> : upcoming.length === 0 ? (
+            <div className="card" style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px' }}>
+              No upcoming bookings for {year}
+            </div>
+          ) : (
+            <div style={{ background:'var(--dark-card)', borderRadius:'12px', border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'12px' }}>
+              {upcoming.slice(0,10).map((s, i) => {
+                const daysAway = Math.round((s.checkInDate - today) / (1000*60*60*24))
+                return (
+                  <div key={i} style={{ padding:'12px 16px', borderBottom: i<Math.min(upcoming.length,10)-1?'1px solid var(--border-dim)':'none' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
+                      <span style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.9rem' }}>{s.guestName || s.bookerName}</span>
+                      <StatusBadge status={s.status} />
+                    </div>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <span style={{ color:'var(--text-dim)', fontSize:'0.78rem' }}>
+                        {fmtDate(s.checkIn || s.checkInDate)} · {calcNights(s.checkIn||s.checkInDate, s.checkOut||s.checkOutDate)} nights · {s.channel||'Direct'}
+                      </span>
+                      <span style={{ fontSize:'0.72rem', color: daysAway<=7?'#E53935':daysAway<=14?'#C8903A':'#5C7080', fontWeight:'600' }}>
+                        {daysAway===0?'TODAY':daysAway===1?'Tomorrow':`${daysAway}d away`}
+                      </span>
+                    </div>
+                    <div style={{ color:'var(--text-dim)', fontSize:'0.72rem', marginTop:'2px' }}>
+                      {s.stayId} · {s.adults||0} adults · {s.phone||''}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {/* By month */}
@@ -455,6 +459,14 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
       </div>
 
       <div className="card-section-label">{typeof month==='number'?MONTHS_FULL[month]:'Full Year'} {year}</div>
+      {/* Notice for years with no revenue recorded */}
+      {!loading && monthData.revenue === 0 && totalBookings === 0 && year === 2025 && (
+        <div style={{ background:'rgba(92,112,128,0.08)', border:'1px solid rgba(92,112,128,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'12px' }}>
+          <div style={{ color:'var(--text-dim)', fontSize:'0.82rem' }}>
+            ℹ️ <strong style={{color:'var(--text)'}}>2025 revenue not recorded</strong> — bookings exist but tariff amounts were not entered in the source sheet. Upload the 2025 financial data to see revenue figures.
+          </div>
+        </div>
+      )}
       {loading ? (
         <div className="stats-grid"><Skeleton/><Skeleton/><Skeleton/><Skeleton/></div>
       ) : (

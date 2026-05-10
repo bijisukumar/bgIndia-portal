@@ -29,6 +29,7 @@ const SECTIONS = [
     ],
   },
   {
+    label: 'VILLAS',
     color: '#C8903A',
     rows: [
       {

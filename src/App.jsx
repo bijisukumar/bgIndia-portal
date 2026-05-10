@@ -22,6 +22,9 @@ import CoconutDashboard from './screens/CoconutDashboard'
 import NewBooking      from './screens/NewBooking'
 import RDashboard      from './screens/RDashboard'
 import GuestRepository from './screens/GuestRepository'
+import KitchenIncidentals from './screens/KitchenIncidentals'
+import BreakfastEntry  from './screens/BreakfastEntry'
+import CarRentalEntry  from './screens/CarRentalEntry'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -61,8 +64,11 @@ function ProtectedRoutes() {
 
       {/* Raman — simplified view */}
       {role === 'manager' && <>
-        <Route path="/"              element={<RamanHome />} />
-        <Route path="/raman/checkin" element={<CheckIn />} />
+        <Route path="/"                   element={<RamanHome />} />
+        <Route path="/raman/checkin"      element={<CheckIn />} />
+        <Route path="/raman/kitchen"      element={<KitchenIncidentals />} />
+        <Route path="/raman/breakfast"    element={<BreakfastEntry />} />
+        <Route path="/raman/carrental"    element={<CarRentalEntry />} />
         <Route path="/pavutumuri/rubber"  element={<RubberTracker />} />
         <Route path="/pavutumuri/ledger"  element={<EstateLedger estate="pavutumuri" />} />
       </>}

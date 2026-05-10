@@ -11,10 +11,9 @@ const TESTS = [
   {
     id: 1, name: 'API Connection', group: 'Infrastructure',
     fn: async () => {
-      const r = await fetch(window.__SCRIPT_URL__ + '?action=ping')
-      const d = await r.json()
-      if (!d.success && !d.data) throw new Error('No response')
-      return 'API reachable ✓'
+      const stays = await api.getStays('dwarka', new Date().getFullYear())
+      if (!Array.isArray(stays)) throw new Error('Invalid response from API')
+      return 'API connected and responding ✓'
     }
   },
   {

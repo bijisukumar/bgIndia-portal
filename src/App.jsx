@@ -25,6 +25,7 @@ import GuestRepository from './screens/GuestRepository'
 import KitchenIncidentals from './screens/KitchenIncidentals'
 import BreakfastEntry  from './screens/BreakfastEntry'
 import CarRentalEntry  from './screens/CarRentalEntry'
+import TestRunner      from './screens/TestRunner'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -43,6 +44,7 @@ function ProtectedRoutes() {
         <Route path="/owner/r-dashboard"   element={<RDashboard />} />
         <Route path="/owner/guests"        element={<GuestRepository />} />
         <Route path="/debug"               element={<DebugPanel />} />
+        <Route path="/test"                element={<TestRunner />} />
         <Route path="/owner/villa/dashboard" element={<VillaDashboard />} />
         <Route path="/owner/rental"        element={<RentalProperties />} />
         <Route path="/owner/pollachi"      element={<PollachiHub />} />

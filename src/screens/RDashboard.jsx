@@ -83,7 +83,7 @@ export default function RDashboard() {
 
   const gpayLink = (amount) => {
     // GPay UPI deep link — replace with Raman's UPI ID
-    const upi = 'ramankutty@upi' // ← UPDATE with Raman's actual UPI ID
+    const upi = '85471419raman@okicici'
     return `upi://pay?pa=${upi}&pn=RamananKutty&am=${amount}&cu=INR&tn=Villa+Commission`
   }
 

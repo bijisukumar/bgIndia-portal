@@ -112,10 +112,11 @@ const TESTS = [
   {
     id: 10, name: 'Get Villa Dashboard', group: 'Owner Dashboard',
     fn: async () => {
-      const d = await api.getVillaDashboard('dwarka', new Date().getFullYear())
-      if (!d?.months) throw new Error('No months data')
+      const d = await api.getVillaDashboard('dwarka', 2023)
+      if (!d?.months) throw new Error('No months data returned')
       const total = Object.values(d.months).reduce((s,m) => s+(m.revenue||0), 0)
-      return `Dashboard loaded · YTD revenue: ₹${Math.round(total).toLocaleString('en-IN')} ✓`
+      const bookings = Object.values(d.months).reduce((s,m) => s+(m.bookings||0), 0)
+      return `2023: ${bookings} bookings · ₹${Math.round(total).toLocaleString('en-IN')} revenue ✓`
     }
   },
   {

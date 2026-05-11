@@ -263,6 +263,178 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
   )
 }
 
+// ── BOOKING LEAD TIME CHART ──────────────────────────────────────────────────
+
+function BookingLeadTimeChart({ allStays }) {
+  const [view, setView] = useState('heatmap') // 'heatmap' | 'bars'
+
+  // Calculate lead times from all stays that have bookedDate
+  const monthlyLead = Array.from({length:12}, () => [])
+
+  ;(allStays || []).forEach(s => {
+    const bd = s.bookedDate || s.bookeddate || ''
+    const ci = s.checkIn || s.checkInDate || ''
+    if (!bd || !ci) return
+    try {
+      const d1 = new Date(bd), d2 = new Date(ci)
+      const lead = Math.round((d2 - d1) / (1000*60*60*24))
+      if (lead >= 0 && lead <= 365) {
+        monthlyLead[d2.getMonth()].push(lead)
+      }
+    } catch {}
+  })
+
+  const stats = monthlyLead.map(leads => {
+    if (!leads.length) return null
+    const sorted = [...leads].sort((a,b)=>a-b)
+    const avg  = Math.round(leads.reduce((s,v)=>s+v,0)/leads.length)
+    const med  = sorted[Math.floor(sorted.length/2)]
+    const u7   = leads.filter(l=>l<7).length
+    const u30  = leads.filter(l=>l>=7&&l<30).length
+    const u90  = leads.filter(l=>l>=30&&l<90).length
+    const o90  = leads.filter(l=>l>=90).length
+    const n    = leads.length
+    return { avg, med, n,
+      u7pct: Math.round(u7/n*100), u30pct: Math.round(u30/n*100),
+      u90pct: Math.round(u90/n*100), o90pct: Math.round(o90/n*100) }
+  })
+
+  const maxAvg = Math.max(...stats.filter(Boolean).map(s=>s.avg), 1)
+  const mostImpulsive = stats.reduce((best, s, i) => s && s.u7pct > (stats[best]?.u7pct||0) ? i : best, 0)
+  const mostPlanned   = stats.reduce((best, s, i) => s && s.avg > (stats[best]?.avg||0) ? i : best, 0)
+
+  const SEGMENTS = [
+    { key:'u7pct',   label:'< 7 days',   color:'#E53935', desc:'Impulsive' },
+    { key:'u30pct',  label:'7–30 days',  color:'#C8903A', desc:'Short notice' },
+    { key:'u90pct',  label:'30–90 days', color:'#185FA5', desc:'Planned' },
+    { key:'o90pct',  label:'90+ days',   color:'#34A853', desc:'Far ahead' },
+  ]
+
+  return (
+    <>
+      <div className="card-section-label">⏱ BOOKING LEAD TIME BY MONTH</div>
+
+      {/* Summary badges */}
+      <div style={{display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'}}>
+        <div style={{background:'rgba(229,57,53,0.1)',border:'1px solid rgba(229,57,53,0.3)',
+          borderRadius:'10px',padding:'8px 12px',flex:1,minWidth:'120px'}}>
+          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',letterSpacing:'1px'}}>MOST IMPULSIVE</div>
+          <div style={{color:'#E53935',fontWeight:'700',fontSize:'0.95rem'}}>{MONTHS[mostImpulsive]}</div>
+          <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>{stats[mostImpulsive]?.u7pct}% booked &lt;7 days out</div>
+        </div>
+        <div style={{background:'rgba(52,168,83,0.08)',border:'1px solid rgba(52,168,83,0.25)',
+          borderRadius:'10px',padding:'8px 12px',flex:1,minWidth:'120px'}}>
+          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',letterSpacing:'1px'}}>MOST PLANNED</div>
+          <div style={{color:'var(--green)',fontWeight:'700',fontSize:'0.95rem'}}>{MONTHS[mostPlanned]}</div>
+          <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>avg {stats[mostPlanned]?.avg} days ahead</div>
+        </div>
+      </div>
+
+      {/* View toggle */}
+      <div style={{display:'flex',gap:'6px',marginBottom:'10px'}}>
+        {[{k:'heatmap',l:'Stacked %'},{k:'bars',l:'Avg days'}].map(v=>(
+          <button key={v.k} onClick={()=>setView(v.k)}
+            style={{padding:'5px 12px',borderRadius:'20px',border:`1px solid ${view===v.k?'var(--gold)':'rgba(255,255,255,0.08)'}`,
+              background:view===v.k?'rgba(200,144,58,0.15)':'transparent',
+              color:view===v.k?'var(--gold)':'var(--text-dim)',fontSize:'0.75rem',cursor:'pointer'}}>
+            {v.l}
+          </button>
+        ))}
+      </div>
+
+      <div className="card" style={{padding:'12px'}}>
+        {view === 'heatmap' ? (
+          <>
+            {/* Stacked bar chart — % of each bucket per month */}
+            {MONTHS.map((m, mi) => {
+              const s = stats[mi]
+              if (!s) return (
+                <div key={m} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+                  <div style={{width:'28px',fontSize:'0.72rem',color:'var(--text-dim)',flexShrink:0}}>{m}</div>
+                  <div style={{flex:1,height:'18px',background:'rgba(255,255,255,0.03)',borderRadius:'4px'}}/>
+                  <div style={{width:'40px',fontSize:'0.68rem',color:'var(--text-dim)',textAlign:'right'}}>—</div>
+                </div>
+              )
+              const isImp = mi === mostImpulsive
+              const isPln = mi === mostPlanned
+              return (
+                <div key={m} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+                  <div style={{width:'28px',fontSize:'0.72rem',
+                    color:isImp?'#E53935':isPln?'var(--green)':'var(--text-dim)',
+                    fontWeight:isImp||isPln?'700':'400',flexShrink:0}}>
+                    {m}
+                  </div>
+                  {/* Stacked bar */}
+                  <div style={{flex:1,height:'18px',borderRadius:'4px',overflow:'hidden',display:'flex'}}>
+                    {SEGMENTS.map(seg => (
+                      <div key={seg.key} title={`${seg.label}: ${s[seg.key]}%`}
+                        style={{width:`${s[seg.key]}%`,background:seg.color,
+                          transition:'width 0.4s ease',height:'100%'}}/>
+                    ))}
+                  </div>
+                  <div style={{width:'40px',fontSize:'0.68rem',color:'var(--text-dim)',textAlign:'right'}}>
+                    {s.n} bkgs
+                  </div>
+                </div>
+              )
+            })}
+            {/* Legend */}
+            <div style={{display:'flex',gap:'10px',marginTop:'10px',flexWrap:'wrap'}}>
+              {SEGMENTS.map(seg=>(
+                <div key={seg.key} style={{display:'flex',alignItems:'center',gap:'4px'}}>
+                  <div style={{width:'10px',height:'10px',borderRadius:'2px',background:seg.color}}/>
+                  <span style={{fontSize:'0.68rem',color:'var(--text-dim)'}}>{seg.label}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Average lead time bar chart */}
+            {MONTHS.map((m, mi) => {
+              const s = stats[mi]
+              const pct = s ? (s.avg / maxAvg) * 100 : 0
+              const isImp = mi === mostImpulsive
+              const isPln = mi === mostPlanned
+              return (
+                <div key={m} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+                  <div style={{width:'28px',fontSize:'0.72rem',
+                    color:isImp?'#E53935':isPln?'var(--green)':'var(--text-dim)',
+                    fontWeight:isImp||isPln?'700':'400',flexShrink:0}}>{m}</div>
+                  <div style={{flex:1,height:'18px',background:'rgba(255,255,255,0.04)',borderRadius:'4px',overflow:'hidden'}}>
+                    <div style={{width:`${pct}%`,height:'100%',borderRadius:'4px',
+                      background:isImp?'#E53935':isPln?'var(--green)':'#185FA5',
+                      transition:'width 0.4s ease'}}/>
+                  </div>
+                  <div style={{width:'60px',fontSize:'0.72rem',color:'var(--text)',textAlign:'right'}}>
+                    {s ? `${s.avg}d avg` : '—'}
+                  </div>
+                </div>
+              )
+            })}
+            <div style={{marginTop:'10px',fontSize:'0.72rem',color:'var(--text-dim)',lineHeight:'1.6'}}>
+              <span style={{color:'#E53935',fontWeight:'600'}}>Red</span> = most impulsive · {' '}
+              <span style={{color:'var(--green)',fontWeight:'600'}}>Green</span> = most planned ahead
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Marketing insight box */}
+      <div style={{background:'rgba(200,144,58,0.06)',border:'1px solid rgba(200,144,58,0.2)',
+        borderRadius:'10px',padding:'12px 14px',marginBottom:'12px'}}>
+        <div style={{color:'var(--gold)',fontSize:'0.75rem',fontWeight:'700',marginBottom:'6px'}}>
+          🎯 MARKETING IMPLICATION
+        </div>
+        <div style={{color:'var(--text-dim)',fontSize:'0.78rem',lineHeight:'1.7'}}>
+          <strong style={{color:'var(--text)'}}>January, April, June</strong> attract last-minute bookers — run flash offers and "book now" WhatsApp campaigns in these months.{' '}
+          <strong style={{color:'var(--text)'}}>Aug, Sep, Oct</strong> guests plan ahead — send Guruvayur festival calendars and early-bird packages 60–90 days before.
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ── EARNINGS COMPARISON CHART ────────────────────────────────────────────────
 
 function EarningsComparisonChart({ allStays, selectedYears }) {
@@ -623,6 +795,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
 
       <MonthlyTrendChart stays={stays} currentYear={year} />
       <EarningsComparisonChart allStays={stays} selectedYears={YEARS.slice(0,2)} />
+      <BookingLeadTimeChart allStays={stays} />
     </div>
   )
 }

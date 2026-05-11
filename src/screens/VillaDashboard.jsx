@@ -188,7 +188,8 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
                       </span>
                     </div>
                     <div style={{ color:'var(--text-dim)', fontSize:'0.72rem', marginTop:'2px' }}>
-                      {s.stayId} · {s.adults||0} adults · {s.phone||''}
+                      {s.stayId} · {s.adults||0} adults{s.children>0?` · ${s.children} children`:''} · {s.channel||'Direct'}
+                      {(s.bookedDate||s.bookeddate) ? ` · Booked: ${fmtDate(s.bookedDate||s.bookeddate)}` : ''}
                     </div>
                   </div>
                 )
@@ -219,7 +220,12 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
             </span>
           </div>
           <div style={{ background:'var(--dark-card)', borderRadius:'12px', border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'12px' }}>
-            {byMonth.map((s, i) => (
+            {byMonth.map((s, i) => {
+              const bd = s.bookedDate || s.bookeddate || ''
+              const leadDays = bd && (s.checkIn||s.checkInDate)
+                ? Math.round((new Date(s.checkIn||s.checkInDate) - new Date(bd)) / (1000*60*60*24))
+                : null
+              return (
               <div key={i} style={{ padding:'12px 16px', borderBottom: i<byMonth.length-1?'1px solid var(--border-dim)':'none' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'3px' }}>
                   <span style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.88rem' }}>{s.guestName || s.bookerName}</span>
@@ -228,12 +234,25 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
                 <div style={{ color:'var(--text-dim)', fontSize:'0.75rem' }}>
                   {fmtDate(s.checkIn||s.checkInDate)} → {fmtDate(s.checkOut||s.checkOutDate)} · {s.channel||'Direct'} · {s.adults||0} adults
                 </div>
-                <div style={{ display:'flex', justifyContent:'space-between', marginTop:'3px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginTop:'3px', flexWrap:'wrap', gap:'4px' }}>
                   <span style={{ color:'var(--text-dim)', fontSize:'0.72rem' }}>{s.stayId}</span>
-                  {s.net ? <span style={{ color:'var(--green)', fontSize:'0.78rem', fontWeight:'600' }}>{fmt(s.net)}</span> : null}
+                  <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                    {bd && (
+                      <span style={{ fontSize:'0.72rem', color:'var(--text-dim)' }}>
+                        📅 Booked {fmtDate(bd)}
+                        {leadDays !== null && leadDays >= 0 && (
+                          <span style={{ marginLeft:'4px', color: leadDays < 7 ? '#E53935' : leadDays < 30 ? '#C8903A' : 'var(--green)', fontWeight:'600' }}>
+                            ({leadDays}d ahead)
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {s.net ? <span style={{ color:'var(--green)', fontSize:'0.78rem', fontWeight:'600' }}>{fmt(s.net)}</span> : null}
+                  </div>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         </>
       )}

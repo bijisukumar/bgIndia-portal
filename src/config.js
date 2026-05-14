@@ -19,7 +19,8 @@ export const CONFIG = {
   guestFormSheetId: '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
 
 
-  // Villa properties — add more objects here for second villa
+  // Villa properties — add more objects here for additional villas
+  // logoUrl: per-villa logo for white-labeling (null = use default)
   villas: [
     {
       id:       'dwarka',
@@ -27,14 +28,16 @@ export const CONFIG = {
       full:     'Dwarka — GVR Villa',
       location: 'Guruvayur',
       active:   true,
+      logoUrl:  null,   // set to '/icons/dwarka-logo.png' or CDN URL to brand this villa
     }
   ],
 
   // Rental properties — monthly income tracker
+  // Add leaseEnd (YYYY-MM-DD) to enable renewal alerts (60-day warning)
   rentalProperties: [
-    { id: 'rental_1', name: 'Property A', location: '' },
-    { id: 'rental_2', name: 'Property B', location: '' },
-    { id: 'rental_3', name: 'Property C', location: '' },
+    { id: 'rental_1', name: 'Property A', location: '', tenantName: '', leaseEnd: '' },
+    { id: 'rental_2', name: 'Property B', location: '', tenantName: '', leaseEnd: '' },
+    { id: 'rental_3', name: 'Property C', location: '', tenantName: '', leaseEnd: '' },
   ],
 
   // Estate properties

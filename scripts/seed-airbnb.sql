@@ -1,7 +1,6 @@
 -- Airbnb Historical Data Seed
 -- Run: wrangler d1 execute bgindia-db --file=scripts/seed-airbnb.sql --remote
 
-BEGIN TRANSACTION;
 
 INSERT INTO stays (stay_id, villa_id, source, airbnb_conf, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_at)
 VALUES ('DWK-2026-0001', 'dwarka', 'airbnb', 'HM5TN2WW9K', 'Vikram Ramasubramanian', '2026-05-08', '2026-05-09', 1, 11170.00, 3.0, 335.10, 10834.90, 'closed', '2026-05-08T12:00:00');
@@ -462,4 +461,3 @@ VALUES ('DWK-2018-0152', 'dwarka', 'airbnb', 'HMATNXTYJC', 'Kasthuri Rengan Para
 INSERT INTO stays (stay_id, villa_id, source, airbnb_conf, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_at)
 VALUES ('DWK-2018-0153', 'dwarka', 'airbnb', 'HMX44JYJYW', 'Sastha.S Subbaian S.C', '2018-05-19', '2018-05-20', 1, 800.00, 3.0, 24.00, 776.00, 'closed', '2018-05-19T12:00:00');
 
-COMMIT;

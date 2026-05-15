@@ -1,7 +1,6 @@
 -- Master Booking Sheet Seed (Direct + Booking.com)
 -- Run AFTER seed-airbnb.sql
 
-BEGIN TRANSACTION;
 
 INSERT OR IGNORE INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_at)
 VALUES ('DWK-2026-M0200', 'dwarka', 'direct', 'AjayRao', '2026-01-22', '2026-01-24', 2, 14500.00, 0, 0.00, 14500.00, 'closed', '2026-01-22T12:00:00');
@@ -264,4 +263,3 @@ VALUES ('DWK-2025-M0285', 'dwarka', 'booking_com', 'Vaisak Sasi', '2025-04-06', 
 INSERT OR IGNORE INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_at)
 VALUES ('DWK-2025-M0286', 'dwarka', 'booking_com', 'Krishnamurti Anantanarayanam', '2025-05-02', '2025-05-04', 2, 0.00, 15, 0.00, 0.00, 'closed', '2025-05-02T12:00:00');
 
-COMMIT;

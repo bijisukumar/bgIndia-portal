@@ -253,6 +253,7 @@ export async function onRequest(ctx) {
       // BOOKING
       if (action === 'createBooking') {
         const stayId = genStayId(body.villaId)
+        const nights = parseInt(body.nights) || 1
         await DB.prepare(`
           INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, children,
@@ -261,12 +262,17 @@ export async function onRequest(ctx) {
         `).bind(
           stayId, body.villaId || 'dwarka', body.source || 'direct',
           body.guestName, body.guestPhone || null, body.guestEmail || null,
-          body.checkInDate, body.checkOutDate, body.nights || 1,
+          body.checkInDate, body.checkOutDate, nights,
           body.adults || 1, body.children || 0,
           body.tariffPerNight || 0, body.extraCharges || 0,
           body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0
         ).run()
-        return json({ success: true, data: { stayId } })
+        // Auto-create Raman commission: Rs1000 for 1 night, Rs2000 for 2+ nights
+        const ramanComm = nights > 1 ? 2000 : 1000
+        await DB.prepare(
+          'INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid) VALUES (?, ?, ?, ?, ?, ?, 0)'
+        ).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nights, ramanComm).run()
+        return json({ success: true, data: { stayId, ramanComm } })
       }
 
       if (action === 'confirmCheckIn') {

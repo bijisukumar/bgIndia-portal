@@ -302,7 +302,9 @@ export default function RentalProperties() {
 
 const MOCK_DASH = {
   totalIncome:312000, totalExpense:48600, netIncome:263400,
-  rows: CONFIG?.rentalProperties?.flatMap((p,i) =>
-    Array.from({length:5},(_,mi)=>({prop_id:`rental_${i+1}`,month:mi+1,income:9000,expense:1500,net:7500}))
-  ) || []
+  rows: [
+    ...Array.from({length:5},(_,mi)=>({prop_id:'rental_1',month:mi+1,income:9000,expense:1500,net:7500})),
+    ...Array.from({length:5},(_,mi)=>({prop_id:'rental_2',month:mi+1,income:8000,expense:1400,net:6600})),
+    ...Array.from({length:5},(_,mi)=>({prop_id:'rental_3',month:mi+1,income:9000,expense:1500,net:7500})),
+  ]
 }

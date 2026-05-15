@@ -175,3 +175,18 @@ CREATE INDEX IF NOT EXISTS idx_stays_guest    ON stays(guest_name);
 CREATE INDEX IF NOT EXISTS idx_stays_source   ON stays(source);
 CREATE INDEX IF NOT EXISTS idx_harvests_date  ON coconut_harvests(harvest_date);
 CREATE INDEX IF NOT EXISTS idx_rental_income  ON rental_income(prop_id, year, month);
+
+
+-- RAMAN COMMISSIONS (added for R-Dashboard)
+CREATE TABLE IF NOT EXISTS raman_commissions (
+  comm_id       TEXT PRIMARY KEY,
+  stay_id       TEXT,                    -- links to stays if available
+  guest_name    TEXT NOT NULL,
+  checkin_date  TEXT NOT NULL,
+  nights        INTEGER DEFAULT 1,
+  commission    REAL NOT NULL,
+  is_paid       INTEGER DEFAULT 0,       -- 0=unpaid, 1=paid
+  paid_date     TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_raman_paid ON raman_commissions(is_paid, checkin_date);

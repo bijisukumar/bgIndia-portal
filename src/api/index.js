@@ -1,31 +1,27 @@
+// ============================================================
+//  bgIndia Portal — API Layer
+//  NOW CONNECTED TO: Cloudflare D1 via Pages Function (/api/*)
+//  All methods have identical signatures to before — screens
+//  don't need any changes.
+// ============================================================
 import { logger } from '../utils/logger.js'
-import { CONFIG } from '../config.js'
 
-const URL = CONFIG.appsScriptUrl
-
-// ── CORS NOTE ─────────────────────────────────────────────────
-// Google Apps Script deployed as "Anyone can access" supports CORS
-// BUT only when:
-//   1. No custom request headers are sent (no Content-Type: application/json)
-//   2. GET requests use query params
-//   3. POST requests send data as URL-encoded form data, not JSON body
-// This is a known Apps Script limitation. We work around it below.
-// ─────────────────────────────────────────────────────────────
+// In production (Cloudflare Pages), /api/* is handled by the Worker.
+// In local dev (npm run dev), requests proxy to the Worker via vite proxy.
+const BASE = '/api'
 
 async function get(action, params = {}) {
   logger.info('API:GET', action, params)
   try {
-    const qs  = new URLSearchParams({ action, ...params }).toString()
-    const res = await fetch(`${URL}?${qs}`, {
-      method: 'GET',
-      // No custom headers — required for Apps Script CORS
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
+    const qs  = new URLSearchParams(params).toString()
+    const url = qs ? `${BASE}/${action}?${qs}` : `${BASE}/${action}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
     const data = await res.json()
-    if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
+    if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
     logger.info('API:GET', `${action} OK`)
     return data?.data ?? data
-  } catch(err) {
+  } catch (err) {
     logger.error('API:GET', err, { action, params })
     throw err
   }
@@ -34,122 +30,78 @@ async function get(action, params = {}) {
 async function post(action, payload) {
   logger.info('API:POST', action, payload)
   try {
-    // Send as URL-encoded form data to avoid CORS preflight
-    // Apps Script reads this via e.parameter
-    const body = new URLSearchParams({
-      payload: JSON.stringify({ action, ...payload })
+    const res = await fetch(`${BASE}/${action}`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
     })
-    const res = await fetch(URL, {
-      method: 'POST',
-      // No Content-Type header — let browser set it automatically for form data
-      body,
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status} on action: ${action}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
     const data = await res.json()
-    if (data && data.success === false) throw new Error(data.error || `Action failed: ${action}`)
+    if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
     logger.info('API:POST', `${action} OK`)
     return data?.data ?? data
-  } catch(err) {
+  } catch (err) {
     logger.error('API:POST', err, { action })
     throw err
   }
 }
 
-// ── STAY / CHECK-IN ─────────────────────────────────────────
 export const api = {
+  // ── STAY / CHECK-IN ──────────────────────────────────────
+  getPendingCheckIns:   ()       => get('getPendingCheckIns'),
+  createBooking:        (data)   => post('createBooking', data),
+  confirmCheckIn:       (data)   => post('confirmCheckIn', data),
+  getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
 
-  getPendingCheckIns: () =>
-    get('getPendingCheckIns'),
+  // ── VILLA INCOME ─────────────────────────────────────────
+  saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),
+  saveKitchenEntry:     (data)   => post('saveKitchenEntry', data),
+  saveBreakfastEntry:   (data)   => post('saveBreakfastEntry', data),
+  saveCarRental:        (data)   => post('saveCarRental', data),
+  saveVillaExpense:     (data)   => post('saveVillaExpense', data),
 
-  createBooking: (data) =>
-    post('createBooking', data),
+  // ── RENTAL PROPERTIES ────────────────────────────────────
+  saveRentalIncome:     (data)   => post('saveRentalIncome', data),
+  getRentalIncome:      (m, y)   => get('getRentalIncome', { month: m, year: y }),
+  getRentalDashboard:   (year)   => get('getRentalDashboard', { year }),
 
-  confirmCheckIn: (data) =>
-    post('confirmCheckIn', data),
+  // ── COCONUT ──────────────────────────────────────────────
+  saveCoconutHarvest:   (data)   => post('saveCoconutHarvest', data),
+  getCoconutHarvests:   (year)   => get('getCoconutHarvests', { year }),
 
-  getActiveStay: (villaId) =>
-    get('getActiveStay', { villaId }),
+  // ── RUBBER ───────────────────────────────────────────────
+  saveRubberHarvest:    (data)   => post('saveRubberHarvest', data),
+  getRubberHarvests:    (year)   => get('getRubberHarvests', { year }),
 
-  // ── VILLA INCOME ───────────────────────────────────────────
-  saveVillaRentalIncome: (data) =>
-    post('saveVillaRentalIncome', data),
+  // ── ESTATES ──────────────────────────────────────────────
+  saveEstateTransaction:(data)   => post('saveEstateTransaction', data),
+  getEstateTransactions:(id, y)  => get('getEstateTransactions', { estateId: id, year: y }),
+  getEstateDashboard:   (year)   => get('getEstateDashboard', { year }),
 
-  saveKitchenEntry: (data) =>
-    post('saveKitchenEntry', data),
+  // ── DASHBOARDS ───────────────────────────────────────────
+  getVillaDashboard:    (vId, y) => get('getVillaDashboard', { villaId: vId, year: y }),
+  getStays:             (vId, y) => get('getStays', { villaId: vId, year: y }),
+  getGuests:            ()       => get('getGuests'),
 
-  saveBreakfastEntry: (data) =>
-    post('saveBreakfastEntry', data),
+  // ── RAMAN ────────────────────────────────────────────────
+  getRamanUnpaid:       ()       => get('getRamanUnpaid'),
+  getRamanHistory:      ()       => get('getRamanHistory'),
+  markRamanPaid:        (data)   => post('markRamanPaid', data),
 
-  saveCarRental: (data) =>
-    post('saveCarRental', data),
+  // ── INVENTORY ────────────────────────────────────────────
+  saveInventoryPrices:  (data)   => post('saveInventoryPrices', data),
+  getInventoryPrices:   (vId)    => get('getInventoryPrices', { villaId: vId }),
+  saveInventoryRestock: (data)   => post('saveInventoryRestock', data),
+  getInventory:         (vId)    => get('getInventory', { villaId: vId }),
 
-  // ── VILLA EXPENSES ─────────────────────────────────────────
-  saveVillaExpense: (data) =>
-    post('saveVillaExpense', data),
-
-  // ── RENTAL PROPERTIES ─────────────────────────────────────
-  saveRentalIncome: (data) =>
-    post('saveRentalIncome', data),
-
-  getRentalIncome: (month, year) =>
-    get('getRentalIncome', { month, year }),
-
-  // ── COCONUT TRACKER ───────────────────────────────────────
-  saveCoconutHarvest: (data) =>
-    post('saveCoconutHarvest', data),
-
-  getCoconutHarvests: (year) =>
-    get('getCoconutHarvests', { year }),
-
-  // ── RUBBER TRACKER ────────────────────────────────────────
-  saveRubberHarvest: (data) =>
-    post('saveRubberHarvest', data),
-
-  getRubberHarvests: (year) =>
-    get('getRubberHarvests', { year }),
-
-  // ── ESTATE INCOME / EXPENSE ───────────────────────────────
-  saveEstateTransaction: (data) =>
-    post('saveEstateTransaction', data),
-
-  getEstateTransactions: (estateId, year) =>
-    get('getEstateTransactions', { estateId, year }),
-
-  // ── DASHBOARDS ────────────────────────────────────────────
-  getVillaDashboard: (villaId, year) =>
-    get('getVillaDashboard', { villaId, year }),
-
-  getStays: (villaId, year) =>
-    get('getStays', { villaId, year }),
-
-  getGuests: () =>
-    get('getGuests'),
-
-  getRamanUnpaid: () =>
-    get('getRamanUnpaid'),
-
-  getRamanHistory: () =>
-    get('getRamanHistory'),
-
-  markRamanPaid: (data) =>
-    post('markRamanPaid', data),
-
-  getEstateDashboard: (year) =>
-    get('getEstateDashboard', { year }),
-
-  getRentalDashboard: (year) =>
-    get('getRentalDashboard', { year }),
-
-  // ── INVENTORY ─────────────────────────────────────────────
-  saveInventoryPrices: (data) =>
-    post('saveInventoryPrices', data),
-
-  getInventoryPrices: (villaId) =>
-    get('getInventoryPrices', { villaId }),
-
-  saveInventoryRestock: (data) =>
-    post('saveInventoryRestock', data),
-
-  getInventory: (villaId) =>
-    get('getInventory', { villaId }),
+  // ── AD-HOC QUERIES (D1Explorer) ──────────────────────────
+  // Returns full response object (not just .data) so D1Explorer gets both rows + sql
+  runQuery: async (key) => {
+    const qs  = new URLSearchParams({ key }).toString()
+    const res = await fetch(`${BASE}/runQuery?${qs}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const body = await res.json()
+    if (body?.success === false) throw new Error(body.error || 'Query failed')
+    return body.data   // array of rows
+  },
 }

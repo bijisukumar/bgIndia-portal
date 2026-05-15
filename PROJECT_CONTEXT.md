@@ -10,6 +10,7 @@ A Progressive Web App (PWA) for managing Guruvayur Estates properties — villa 
 
 **Live URL:** Cloudflare Pages (auto-deploys on every push to `main`)  
 **GitHub repo:** https://github.com/bijisukumar/bgIndia-portal  
+**Local clone (Windows):** `C:\Projects\bgIndia-portal` — already cloned, run `git pull` to get latest  
 **Owner email:** bijisukumar@gmail.com
 
 ---

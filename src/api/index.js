@@ -97,6 +97,16 @@ export const api = {
   getInventory:         (vId)    => get('getInventory', { villaId: vId }),
 
   // ── AD-HOC QUERIES (D1Explorer) ──────────────────────────
+  // Free-form SQL — any SELECT query
+  runSQL: async (sql) => {
+    const qs  = new URLSearchParams({ sql }).toString()
+    const res = await fetch(`${BASE}/runSQL?${qs}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const body = await res.json()
+    if (body?.success === false) throw new Error(body.error || 'Query failed')
+    return body.data
+  },
+
   // Returns full response object (not just .data) so D1Explorer gets both rows + sql
   runQuery: async (key) => {
     const qs  = new URLSearchParams({ key }).toString()

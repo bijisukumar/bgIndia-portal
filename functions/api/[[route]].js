@@ -219,6 +219,22 @@ export async function onRequest(ctx) {
         return json({ success: true, data: prices })
       }
 
+      // FREE-FORM SQL (owner only — any SELECT query)
+      if (action === 'runSQL') {
+        const sql = url.searchParams.get('sql') || ''
+        const trimmed = sql.trim().toUpperCase()
+        // Safety: only allow SELECT statements
+        if (!trimmed.startsWith('SELECT') && !trimmed.startsWith('PRAGMA')) {
+          return err('Only SELECT and PRAGMA queries allowed')
+        }
+        try {
+          const { results } = await DB.prepare(sql).all()
+          return json({ success: true, data: results, rowCount: results.length })
+        } catch (e) {
+          return json({ success: false, error: e.message }, 400)
+        }
+      }
+
       // AD-HOC QUERY (owner only — runs preset queries by key)
       if (action === 'runQuery') {
         const key = url.searchParams.get('key')

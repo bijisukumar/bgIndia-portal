@@ -267,17 +267,60 @@ export async function onRequest(ctx) {
           body.tariffPerNight || 0, body.extraCharges || 0,
           body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0
         ).run()
-        // Auto-create Raman commission: Rs1000 for 1 night, Rs2000 for 2+ nights
-        const ramanComm = nights > 1 ? 2000 : 1000
-        await DB.prepare(
-          'INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid) VALUES (?, ?, ?, ?, ?, ?, 0)'
-        ).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nights, ramanComm).run()
-        return json({ success: true, data: { stayId, ramanComm } })
+        // Raman commission is created at check-OUT (not here) to avoid
+        // creating commission records for cancelled bookings
+        return json({ success: true, data: { stayId } })
       }
 
       if (action === 'confirmCheckIn') {
-        await DB.prepare(`UPDATE stays SET status = 'checked_in', updated_at = datetime('now') WHERE stay_id = ?`)
-          .bind(body.stayId).run()
+        await DB.prepare(
+          `UPDATE stays SET status = 'checked_in', updated_at = datetime('now') WHERE stay_id = ?`
+        ).bind(body.stayId).run()
+        return json({ success: true })
+      }
+
+      // CHECK-OUT: complete the stay lifecycle + create Raman commission
+      if (action === 'checkOut') {
+        const { stayId } = body
+
+        // Mark stay as checked_out
+        await DB.prepare(
+          `UPDATE stays SET status = 'checked_out', updated_at = datetime('now') WHERE stay_id = ?`
+        ).bind(stayId).run()
+
+        // Fetch stay details to calculate commission
+        const stay = await DB.prepare(
+          `SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+
+        if (stay) {
+          // Only create commission if one doesn't already exist for this stay
+          const existing = await DB.prepare(
+            `SELECT comm_id FROM raman_commissions WHERE stay_id = ?`
+          ).bind(stayId).first()
+
+          if (!existing) {
+            const nights    = parseInt(stay.nights) || 1
+            const ramanComm = nights > 1 ? 2000 : 1000
+            await DB.prepare(
+              `INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid)
+               VALUES (?, ?, ?, ?, ?, ?, 0)`
+            ).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm).run()
+            return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
+          }
+        }
+        return json({ success: true, data: { stayId, commissionCreated: false } })
+      }
+
+      // CANCEL STAY: mark cancelled, never creates a commission
+      if (action === 'cancelStay') {
+        await DB.prepare(
+          `UPDATE stays SET status = 'cancelled', updated_at = datetime('now') WHERE stay_id = ?`
+        ).bind(body.stayId).run()
+        // Also remove any erroneously created commission for this stay
+        await DB.prepare(
+          `DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`
+        ).bind(body.stayId).run()
         return json({ success: true })
       }
 

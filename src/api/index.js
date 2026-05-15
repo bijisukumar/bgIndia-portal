@@ -51,6 +51,8 @@ export const api = {
   getPendingCheckIns:   ()       => get('getPendingCheckIns'),
   createBooking:        (data)   => post('createBooking', data),
   confirmCheckIn:       (data)   => post('confirmCheckIn', data),
+  checkOut:             (data)   => post('checkOut', data),
+  cancelStay:           (data)   => post('cancelStay', data),
   getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
 
   // ── VILLA INCOME ─────────────────────────────────────────

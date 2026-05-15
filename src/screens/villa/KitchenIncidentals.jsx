@@ -52,8 +52,14 @@ export default function KitchenIncidentals() {
     if (!items.length) { showToast('Add at least one item', 'error'); return }
     setSaving(true)
     try {
+      // Save incidentals
       await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes })
-      showToast('Checkout entry saved ✓')
+      // Complete the stay lifecycle — this triggers Raman commission creation
+      const result = await api.checkOut({ stayId: stay?.stayId })
+      const commMsg = result?.commissionCreated
+        ? ` · Raman ₹${result.ramanComm} commission logged`
+        : ''
+      showToast(`Check-out saved ✓${commMsg}`)
       setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
     } catch { showToast('Failed to save', 'error') }
     finally { setSaving(false) }

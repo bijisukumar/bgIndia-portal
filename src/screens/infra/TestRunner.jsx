@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
+import { api } from '../../api'
 
 const TEST_PREFIX = 'TEST-' + new Date().toISOString().split('T')[0]
 const TEST_GUEST  = 'Test Guest (DELETE ME)'

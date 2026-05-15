@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { logger } from '../utils/logger'
-import { CONFIG } from '../config'
+import { logger } from '../../utils/logger'
+import { CONFIG } from '../../config'
 
 const LEVEL_COLORS = {
   error: '#EF9A9A',

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
-import { CONFIG } from '../config'
+import { api } from '../../api'
+import { CONFIG } from '../../config'
 
 export default function BreakfastEntry() {
   const navigate   = useNavigate()

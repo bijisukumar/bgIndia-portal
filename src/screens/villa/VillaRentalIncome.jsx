@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
+import { api } from '../../api'
 
 const TODAY = new Date().toISOString().split('T')[0]
 const CHANNELS = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Other']

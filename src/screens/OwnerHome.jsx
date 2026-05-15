@@ -109,6 +109,7 @@ export default function OwnerHome() {
 
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
           <button className="logout-btn" style={{ flex: 1 }} onClick={logout}>Log out</button>
+          <button onClick={() => navigate('/infra/d1')} style={{padding:'12px 16px',borderRadius:'12px',border:'1px solid rgba(24,95,165,0.3)',background:'rgba(24,95,165,0.08)',color:'#85B7EB',fontSize:'0.8rem',cursor:'pointer'}}>🗄</button>
           <button onClick={() => navigate('/debug')}
             style={{ padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', background: 'transparent', color: 'var(--text-dim)', fontSize: '0.8rem', cursor: 'pointer' }}>🔧</button>
           <button onClick={() => navigate('/test')}

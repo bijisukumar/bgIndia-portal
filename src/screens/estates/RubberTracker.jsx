@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
+import { api } from '../../api'
 
 const TODAY=new Date().toISOString().split('T')[0]
 function fmt(n){return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}`}

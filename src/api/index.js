@@ -139,4 +139,17 @@ export const api = {
 
   getRentalDashboard: (year) =>
     get('getRentalDashboard', { year }),
+
+  // ── INVENTORY ─────────────────────────────────────────────
+  saveInventoryPrices: (data) =>
+    post('saveInventoryPrices', data),
+
+  getInventoryPrices: (villaId) =>
+    get('getInventoryPrices', { villaId }),
+
+  saveInventoryRestock: (data) =>
+    post('saveInventoryRestock', data),
+
+  getInventory: (villaId) =>
+    get('getInventory', { villaId }),
 }

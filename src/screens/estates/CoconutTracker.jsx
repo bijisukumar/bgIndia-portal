@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
-import { CONFIG } from '../config'
+import { api } from '../../api'
+import { CONFIG } from '../../config'
 
 const TODAY = new Date().toISOString().split('T')[0]
 

@@ -1,0 +1,177 @@
+-- ============================================================
+-- bgIndia Portal — Cloudflare D1 Schema (SQLite)
+-- Deploy: wrangler d1 execute bgindia-db --file=schema.sql --remote
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS stays (
+  stay_id       TEXT PRIMARY KEY,
+  villa_id      TEXT NOT NULL DEFAULT 'dwarka',
+  source        TEXT NOT NULL DEFAULT 'direct',
+  airbnb_conf   TEXT,
+  guest_name    TEXT NOT NULL,
+  guest_phone   TEXT,
+  guest_email   TEXT,
+  checkin_date  TEXT,
+  checkout_date TEXT,
+  nights        INTEGER DEFAULT 1,
+  adults        INTEGER DEFAULT 1,
+  children      INTEGER DEFAULT 0,
+  tariff_per_night REAL DEFAULT 0,
+  extra_charges REAL DEFAULT 0,
+  gross         REAL DEFAULT 0,
+  commission_pct REAL DEFAULT 0,
+  commission_amt REAL DEFAULT 0,
+  net           REAL DEFAULT 0,
+  status        TEXT DEFAULT 'confirmed',
+  drive_folder_id TEXT,
+  converted_to_direct INTEGER DEFAULT 0,
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS guest_requests (
+  req_id      TEXT PRIMARY KEY,
+  stay_id     TEXT REFERENCES stays(stay_id),
+  type        TEXT,
+  detail      TEXT,
+  status      TEXT DEFAULT 'pending',
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stay_cars (
+  car_id      TEXT PRIMARY KEY,
+  stay_id     TEXT REFERENCES stays(stay_id),
+  plate_no    TEXT,
+  photo_url   TEXT,
+  captured_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS inventory (
+  item_id         TEXT PRIMARY KEY,
+  villa_id        TEXT NOT NULL DEFAULT 'dwarka',
+  name            TEXT NOT NULL,
+  unit            TEXT,
+  category        TEXT,
+  qty_in_stock    INTEGER DEFAULT 0,
+  cost_price      REAL DEFAULT 0,
+  sell_price      REAL DEFAULT 0,
+  last_restocked  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS stay_incidentals (
+  item_id       TEXT PRIMARY KEY,
+  stay_id       TEXT REFERENCES stays(stay_id),
+  inv_item_id   TEXT REFERENCES inventory(item_id),
+  name          TEXT,
+  qty           INTEGER DEFAULT 1,
+  price_per_unit REAL DEFAULT 0,
+  total         REAL DEFAULT 0,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rental_props (
+  prop_id      TEXT PRIMARY KEY,
+  name         TEXT,
+  location     TEXT,
+  tenant_name  TEXT,
+  tenant_phone TEXT,
+  lease_start  TEXT,
+  lease_end    TEXT,
+  monthly_rent REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS rental_income (
+  record_id    TEXT PRIMARY KEY,
+  prop_id      TEXT REFERENCES rental_props(prop_id),
+  month        INTEGER,
+  year         INTEGER,
+  rent         REAL DEFAULT 0,
+  car_parking  REAL DEFAULT 0,
+  maintenance  REAL DEFAULT 0,
+  electricity  REAL DEFAULT 0,
+  water        REAL DEFAULT 0,
+  property_tax REAL DEFAULT 0,
+  land_tax     REAL DEFAULT 0,
+  extra_maintenance REAL DEFAULT 0,
+  net          REAL DEFAULT 0,
+  notes        TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS coconut_harvests (
+  harvest_id        TEXT PRIMARY KEY,
+  estate_id         TEXT DEFAULT 'pollachi',
+  harvester_name    TEXT,
+  harvest_date      TEXT,
+  final_payment_date TEXT,
+  total_nuts        INTEGER DEFAULT 0,
+  net_good_nuts     INTEGER DEFAULT 0,
+  nuts_rejected     INTEGER DEFAULT 0,
+  additional_unaccounted INTEGER DEFAULT 0,
+  total_weight_kg   REAL DEFAULT 0,
+  price_per_kg      REAL DEFAULT 0,
+  avg_weight_per_nut REAL DEFAULT 0,
+  earnings_main     REAL DEFAULT 0,
+  nuts_rejected_b2  INTEGER DEFAULT 0,
+  rejection_revenue REAL DEFAULT 0,
+  husk_count_sold   INTEGER DEFAULT 0,
+  husk_cost_per_nut REAL DEFAULT 0,
+  husk_earnings     REAL DEFAULT 0,
+  other_earnings    REAL DEFAULT 0,
+  total_earnings    REAL DEFAULT 0,
+  harvest_nuts      INTEGER DEFAULT 0,
+  harvest_cost_nut  REAL DEFAULT 0,
+  harvest_expense   REAL DEFAULT 0,
+  dehusk_nuts       INTEGER DEFAULT 0,
+  dehusk_cost_nut   REAL DEFAULT 0,
+  dehusk_expense    REAL DEFAULT 0,
+  tractor_expense   REAL DEFAULT 0,
+  other_expense     REAL DEFAULT 0,
+  total_expense     REAL DEFAULT 0,
+  net_income        REAL DEFAULT 0,
+  advance_payment   REAL DEFAULT 0,
+  advance_date      TEXT,
+  second_payment    REAL DEFAULT 0,
+  final_settlement  REAL DEFAULT 0,
+  balance_due       REAL DEFAULT 0,
+  next_harvest_date TEXT,
+  notes             TEXT,
+  created_at        TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rubber_harvests (
+  harvest_id    TEXT PRIMARY KEY,
+  estate_id     TEXT DEFAULT 'pavutumuri',
+  harvest_date  TEXT,
+  weight_kg     REAL DEFAULT 0,
+  price_per_kg  REAL DEFAULT 0,
+  gross         REAL DEFAULT 0,
+  expense       REAL DEFAULT 0,
+  net           REAL DEFAULT 0,
+  notes         TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+
+-- Inventory seed (default items, qty=10 each)
+INSERT OR IGNORE INTO inventory (item_id, villa_id, name, unit, category, qty_in_stock, cost_price, sell_price) VALUES
+  ('water_bottle',   'dwarka', 'Water bottles',     'bottle', 'kitchen',  10, 18, 30),
+  ('soft_drink',     'dwarka', 'Soft drinks',        'can',    'kitchen',  10, 40, 60),
+  ('chocolate',      'dwarka', 'Chocolates',         'bar',    'kitchen',  10, 45, 70),
+  ('chips',          'dwarka', 'Chips',              'packet', 'kitchen',  10, 30, 50),
+  ('milk_packet',    'dwarka', 'Milk packets',       'packet', 'kitchen',  10, 30, 45),
+  ('tea_coffee',     'dwarka', 'Tea / Coffee',       'cup',    'kitchen',  10, 15, 25),
+  ('eggs',           'dwarka', 'Eggs',               'egg',    'kitchen',  10,  8, 12),
+  ('bread',          'dwarka', 'Bread',              'loaf',   'kitchen',  10, 35, 45),
+  ('shampoo',        'dwarka', 'Shampoo',            'bottle', 'bathroom', 10, 80,  0),
+  ('body_wash',      'dwarka', 'Body wash',          'bottle', 'bathroom', 10, 90,  0),
+  ('bathroom_cleaner','dwarka','Bathroom cleaner',   'bottle', 'bathroom', 10, 60,  0),
+  ('tissue',         'dwarka', 'Tissue/toilet paper','roll',   'bathroom', 10, 25,  0),
+  ('bed_essential',  'dwarka', 'Bedroom essentials', 'set',    'bedroom',  10,  0,  0);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_stays_checkin  ON stays(checkin_date);
+CREATE INDEX IF NOT EXISTS idx_stays_status   ON stays(status);
+CREATE INDEX IF NOT EXISTS idx_stays_guest    ON stays(guest_name);
+CREATE INDEX IF NOT EXISTS idx_stays_source   ON stays(source);
+CREATE INDEX IF NOT EXISTS idx_harvests_date  ON coconut_harvests(harvest_date);
+CREATE INDEX IF NOT EXISTS idx_rental_income  ON rental_income(prop_id, year, month);

@@ -2,77 +2,92 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import './index.css'
 
-// Screens
+// Root screens
 import Login          from './screens/Login'
 import OwnerHome      from './screens/OwnerHome'
 import PradoshHome    from './screens/PradoshHome'
 import RamanHome      from './screens/RamanHome'
-import VillaHub       from './screens/VillaHub'
-import VillaRentalIncome from './screens/VillaRentalIncome'
-import VillaDashboard from './screens/VillaDashboard'
-import RentalProperties from './screens/RentalProperties'
-import PollachiHub    from './screens/PollachiHub'
-import CoconutTracker from './screens/CoconutTracker'
-import PavutumuriHub  from './screens/PavutumuriHub'
-import RubberTracker  from './screens/RubberTracker'
-import EstateLedger   from './screens/EstateLedger'
-import CheckIn        from './screens/CheckIn'
-import DebugPanel     from './screens/DebugPanel'
-import CoconutDashboard from './screens/CoconutDashboard'
-import NewBooking      from './screens/NewBooking'
-import RDashboard      from './screens/RDashboard'
-import GuestRepository from './screens/GuestRepository'
-import KitchenIncidentals from './screens/KitchenIncidentals'
-import BreakfastEntry  from './screens/BreakfastEntry'
-import CarRentalEntry  from './screens/CarRentalEntry'
-import TestRunner      from './screens/TestRunner'
+import RDashboard     from './screens/RDashboard'
+
+// Villa screens
+import VillaHub          from './screens/villa/VillaHub'
+import VillaRentalIncome from './screens/villa/VillaRentalIncome'
+import VillaDashboard    from './screens/villa/VillaDashboard'
+import NewBooking        from './screens/villa/NewBooking'
+import CheckIn           from './screens/villa/CheckIn'
+import KitchenIncidentals from './screens/villa/KitchenIncidentals'
+import BreakfastEntry    from './screens/villa/BreakfastEntry'
+import CarRentalEntry    from './screens/villa/CarRentalEntry'
+import GuestRepository   from './screens/villa/GuestRepository'
+import Inventory         from './screens/villa/Inventory'
+
+// Rental screens
+import RentalProperties from './screens/rental/RentalProperties'
+
+// Estate screens
+import PollachiHub    from './screens/estates/PollachiHub'
+import CoconutTracker from './screens/estates/CoconutTracker'
+import CoconutDashboard from './screens/estates/CoconutDashboard'
+import PavutumuriHub  from './screens/estates/PavutumuriHub'
+import RubberTracker  from './screens/estates/RubberTracker'
+import EstateLedger   from './screens/estates/EstateLedger'
+
+// Infra / ops screens
+import DebugPanel  from './screens/infra/DebugPanel'
+import TestRunner  from './screens/infra/TestRunner'
+import D1Explorer  from './screens/infra/D1Explorer'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
-
   const role = user.role
 
   return (
     <Routes>
-      {/* Owner */}
+      {/* ── OWNER ──────────────────────────────────── */}
       {role === 'owner' && <>
-        <Route path="/"                    element={<OwnerHome />} />
-        <Route path="/owner/villa"         element={<VillaHub />} />
-        <Route path="/owner/villa/income"  element={<VillaRentalIncome />} />
-        <Route path="/owner/villa/booking" element={<NewBooking />} />
-        <Route path="/owner/r-dashboard"   element={<RDashboard />} />
-        <Route path="/owner/guests"        element={<GuestRepository />} />
-        <Route path="/debug"               element={<DebugPanel />} />
-        <Route path="/test"                element={<TestRunner />} />
-        <Route path="/owner/villa/dashboard" element={<VillaDashboard />} />
-        <Route path="/owner/rental"        element={<RentalProperties />} />
-        <Route path="/owner/pollachi"      element={<PollachiHub />} />
-        <Route path="/owner/pavutumuri"    element={<PavutumuriHub />} />
-        <Route path="/pollachi/coconut"    element={<CoconutTracker />} />
-        <Route path="/pollachi/ledger"     element={<EstateLedger estate="pollachi" />} />
-        <Route path="/pollachi/dashboard"  element={<CoconutDashboard />} />
-        <Route path="/pavutumuri/rubber"   element={<RubberTracker />} />
-        <Route path="/pavutumuri/ledger"   element={<EstateLedger estate="pavutumuri" />} />
+        <Route path="/"                       element={<OwnerHome />} />
+        {/* Villa */}
+        <Route path="/owner/villa"            element={<VillaHub />} />
+        <Route path="/owner/villa/booking"    element={<NewBooking />} />
+        <Route path="/owner/villa/income"     element={<VillaRentalIncome />} />
+        <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
+        <Route path="/owner/villa/inventory"  element={<Inventory />} />
+        <Route path="/owner/guests"           element={<GuestRepository />} />
+        <Route path="/owner/r-dashboard"      element={<RDashboard />} />
+        {/* Rental */}
+        <Route path="/owner/rental"           element={<RentalProperties />} />
+        {/* Estates */}
+        <Route path="/owner/pollachi"         element={<PollachiHub />} />
+        <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
+        <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
+        <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
+        <Route path="/owner/pavutumuri"       element={<PavutumuriHub />} />
+        <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
+        <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
+        {/* Infra */}
+        <Route path="/debug"                  element={<DebugPanel />} />
+        <Route path="/test"                   element={<TestRunner />} />
+        <Route path="/infra/d1"               element={<D1Explorer />} />
       </>}
 
-      {/* Pradosh */}
+      {/* ── PRADOSH (estate manager) ───────────────── */}
       {role === 'estate_manager' && <>
-        <Route path="/"                   element={<PradoshHome />} />
-        <Route path="/pollachi/coconut"   element={<CoconutTracker />} />
-        <Route path="/pollachi/ledger"    element={<EstateLedger estate="pollachi" />} />
-        <Route path="/pollachi/dashboard" element={<CoconutDashboard />} />
+        <Route path="/"                       element={<PradoshHome />} />
+        <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
+        <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
+        <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
       </>}
 
-      {/* Raman — simplified view */}
+      {/* ── RAMAN (villa manager) ──────────────────── */}
       {role === 'manager' && <>
-        <Route path="/"                   element={<RamanHome />} />
-        <Route path="/raman/checkin"      element={<CheckIn />} />
-        <Route path="/raman/kitchen"      element={<KitchenIncidentals />} />
-        <Route path="/raman/breakfast"    element={<BreakfastEntry />} />
-        <Route path="/raman/carrental"    element={<CarRentalEntry />} />
-        <Route path="/pavutumuri/rubber"  element={<RubberTracker />} />
-        <Route path="/pavutumuri/ledger"  element={<EstateLedger estate="pavutumuri" />} />
+        <Route path="/"                       element={<RamanHome />} />
+        <Route path="/raman/checkin"          element={<CheckIn />} />
+        <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
+        <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
+        <Route path="/raman/carrental"        element={<CarRentalEntry />} />
+        <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
+        <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

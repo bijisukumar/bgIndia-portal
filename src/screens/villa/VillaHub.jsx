@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { CONFIG } from '../config'
+import { CONFIG } from '../../config'
 
 export default function VillaHub() {
   const navigate = useNavigate()
@@ -43,6 +43,7 @@ export default function VillaHub() {
                 { icon: '📋', bg: 'rgba(52,168,83,0.08)',    arrow: '#34A853', title: 'New booking',       sub: 'Record booking · assign Stay ID · create Drive folder', path: `/owner/villa/booking` },
                 { icon: '🏨', bg: 'rgba(200,144,58,0.08)',   arrow: '#C8903A', title: 'Villa rental income', sub: 'Bookings · tariffs · commissions',                    path: `/owner/villa/income` },
                 { icon: '📊', bg: 'rgba(24,95,165,0.08)',    arrow: '#185FA5', title: 'Villa dashboard',    sub: 'Revenue · profit · breakdown',                          path: `/owner/villa/dashboard` },
+            { icon: '📦', bg: 'rgba(15,110,86,0.08)',    arrow: '#0F6E56', title: 'Inventory',          sub: 'Stock levels · sell prices · restock log',               path: `/owner/villa/inventory` },
               ].map((row, i, arr) => (
                 <div key={row.title}
                   className="menu-row"

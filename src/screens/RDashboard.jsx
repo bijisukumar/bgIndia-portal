@@ -28,6 +28,7 @@ export default function RDashboard() {
   const [loading, setLoading] = useState(true)
   const [paying, setPaying]   = useState(null) // quarter being paid
   const [toast, setToast]     = useState(null)
+  const [apiError, setApiError] = useState(null)
   const [expandQ, setExpandQ] = useState({})
 
   const showToast = (msg, type='success') => {
@@ -44,7 +45,11 @@ export default function RDashboard() {
       setUnpaid(u)
       setHistory(Array.isArray(h) ? h : [])
       setLoading(false)
-    }).catch(() => setLoading(false))
+    }).catch((e) => {
+      console.error('RDashboard load error:', e)
+      setApiError(e.message || 'Failed to connect to database')
+      setLoading(false)
+    })
   }, [])
 
   const handleMarkPaid = async (quarter) => {
@@ -120,6 +125,15 @@ export default function RDashboard() {
       </div>
 
       <div className="screen-body">
+
+        {/* API ERROR BANNER */}
+        {apiError && (
+          <div style={{background:'rgba(198,40,40,0.12)',border:'1px solid rgba(198,40,40,0.4)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'}}>
+            <div style={{color:'#EF9A9A',fontWeight:'700',fontSize:'0.82rem',marginBottom:'4px'}}>⚠️ Database connection error</div>
+            <div style={{color:'#EF9A9A',fontSize:'0.75rem',fontFamily:'monospace'}}>{apiError}</div>
+            <div style={{color:'#5C7080',fontSize:'0.72rem',marginTop:'6px'}}>Check: Cloudflare Pages → Settings → Bindings → D1 binding named <strong>bgindia_db</strong> must exist</div>
+          </div>
+        )}
 
         {/* ── UNPAID TAB ─────────────────────────────────────── */}
         {tab === 'unpaid' && (

@@ -67,7 +67,9 @@ export const api = {
   confirmCheckIn:       (data)   => post('confirmCheckIn', data),
   checkOut:             (data)   => post('checkOut', data),
   cancelStay:           (data)   => post('cancelStay', data),
+  updateStayStatus:     (data)   => post('updateStayStatus', data),
   getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
+  getUpcomingStays:     (villaId)=> get('getUpcomingStays', { villaId }),
 
   // ── VILLA INCOME ─────────────────────────────────────────
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),

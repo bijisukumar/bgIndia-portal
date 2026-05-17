@@ -88,8 +88,9 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getPendingCheckIns') {
+        // Returns stays in 'ready_for_checkin' status for Raman's check-in screen
         const { results } = await DB.prepare(
-          `SELECT * FROM stays WHERE status = 'confirmed' ORDER BY checkin_date ASC`
+          `SELECT * FROM stays WHERE status = 'ready_for_checkin' ORDER BY checkin_date ASC`
         ).all()
         return json({ success: true, data: results })
       }
@@ -285,6 +286,24 @@ export async function onRequest(ctx) {
         if (!sql) return err(`Unknown query key: ${key}`)
         const { results } = await DB.prepare(sql).all()
         return json({ success: true, data: results, sql })
+      }
+
+      // UPCOMING STAYS — for Complete Booking screen
+      // Returns stays checking in within next 30 days OR checked in within last 2 days
+      // Excludes closed and cancelled
+      if (action === 'getUpcomingStays') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(
+          `SELECT * FROM stays
+           WHERE villa_id = ?
+             AND status NOT IN ('closed','cancelled','checked_out')
+             AND (
+               checkin_date >= date('now', '-2 days')
+               OR status = 'checked_in'
+             )
+           ORDER BY checkin_date ASC`
+        ).bind(villaId).all()
+        return json({ success: true, data: results })
       }
 
       // RENTAL AGREEMENTS — get tenant details for all rental properties
@@ -527,6 +546,45 @@ export async function onRequest(ctx) {
                 parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
                 actor, actor, now(), now()).run()
         return json({ success: true, data: { harvestId: id } })
+      }
+
+      // UPDATE STAY STATUS — used by Complete Booking and CheckIn screens
+      // Allowed transitions enforced here for safety
+      if (action === 'updateStayStatus') {
+        const { stayId, status } = body
+        const allowed = ['booked','confirmed','docs_uploaded','ready_for_checkin',
+                         'checked_in','ready_for_checkout','checked_out','closed','cancelled']
+        if (!stayId) return err('stayId required')
+        if (!allowed.includes(status)) return err(`Invalid status: ${status}`)
+
+        await DB.prepare(
+          `UPDATE stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(status, actor, now(), stayId).run()
+
+        // Auto-create Raman commission when moving to checked_out
+        if (status === 'checked_out') {
+          const stay = await DB.prepare(
+            `SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`
+          ).bind(stayId).first()
+          if (stay) {
+            const existing = await DB.prepare(
+              `SELECT comm_id FROM raman_commissions WHERE stay_id = ?`
+            ).bind(stayId).first()
+            if (!existing) {
+              const nights = parseInt(stay.nights) || 1
+              const ramanComm = nights > 1 ? 2000 : 1000
+              await DB.prepare(
+                `INSERT INTO raman_commissions
+                   (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid,
+                    created_by, updated_by, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,0,'system','system',?,?)`
+              ).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date,
+                     nights, ramanComm, now(), now()).run()
+            }
+          }
+        }
+
+        return json({ success: true, data: { stayId, status } })
       }
 
       // BREAKFAST ENTRY

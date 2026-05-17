@@ -1,158 +1,155 @@
+/**
+ * CheckIn.jsx — Raman's screen
+ *
+ * Shows stays in 'ready_for_checkin' status.
+ * Raman selects a guest, takes car photos, and confirms check-in.
+ *
+ * Also handles:
+ *   - "Ready for Check-out" button (guest about to leave)
+ *   - "Complete Check-out" button (guest has left)
+ *
+ * Lifecycle managed here:
+ *   ready_for_checkin → [Raman confirms + car photos] → checked_in
+ *   checked_in → ready_for_checkout → checked_out
+ */
+
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
-const F = {
-  timestamp:        '_timestamp',
-  email:            '_email',
-  phone:            '_phone',
-  guestNames:       '_guestNames',
-  citizenship:      '_citizenship',
-  additionalGuests: '_additionalGuests',
-  aadhaar:          '_aadhaar',
-  aadhaarUpload:    '_aadhaarUpload',
-  passportNumber:   '_passportNum',
-  passportUpload:   '_passportUpload',
-  visaInfo:         '_visaInfo',
-  eta:              '_eta',
-  purpose:          '_purpose',
-  transport:        '_transport',
-  breakfast:        '_breakfast',
-  checkInDate:      '_checkInDate',
-  checkOutDate:     '_checkOutDate',
-  adultsCount:      '_adultsCount',
-  childrenCount:    '_childrenCount',
-  infantsCount:     '_infantsCount',
-  bookerName:       '_bookerName',
-}
-
-function g(row, key) {
-  if (!row) return ''
-  const val = row[F[key]]
-  if (val !== undefined && val !== null) return val
-  return ''
-}
-
-function parseGuestNames(raw) {
-  if (!raw) return []
-  return raw.split(',').map(g => {
-    const parts = g.trim().split('/')
-    return { name: parts[0]?.trim() || '', age: parts[1]?.trim() || '' }
-  }).filter(g => g.name)
-}
-
 function formatDate(d) {
-  if (!d) return ''
-  const date = new Date(d)
-  if (isNaN(date)) return String(d)
-  return date.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })
+  if (!d) return '—'
+  try { return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
+  catch { return String(d) }
+}
+function calcNights(ci, co) {
+  if (!ci||!co) return 0
+  return Math.max(0, Math.round((new Date(co)-new Date(ci))/(1000*60*60*24)))
+}
+function daysFromNow(d) {
+  if (!d) return null
+  return Math.round((new Date(d)-new Date())/(1000*60*60*24))
 }
 
-function calcNights(checkIn, checkOut) {
-  if (!checkIn || !checkOut) return 0
-  const diff = new Date(checkOut) - new Date(checkIn)
-  return Math.max(0, Math.round(diff / (1000 * 60 * 60 * 24)))
+const STATUS_META = {
+  ready_for_checkin:  { label:'Ready for Check-in',  color:'#34A853', icon:'🔑' },
+  checked_in:         { label:'Checked In',          color:'#C8903A', icon:'🏠' },
+  ready_for_checkout: { label:'Ready for Check-out', color:'#F59E0B', icon:'🧳' },
 }
 
 export default function CheckIn() {
-  const navigate   = useNavigate()
-  const [pending, setPending]       = useState([])
-  const [selected, setSelected]     = useState(null)
-  const [expanded, setExpanded]     = useState(false)
-  const [carNumber, setCarNumber]   = useState('')
-  const [carPhoto, setCarPhoto]     = useState(null)
-  const [platePhoto, setPlatePhoto] = useState(null)
-  const [saving, setSaving]         = useState(false)
-  const [toast, setToast]           = useState(null)
-  const [loading, setLoading]       = useState(true)
-  const carPhotoRef   = useRef()
-  const platePhotoRef = useRef()
+  const navigate = useNavigate()
+  const [stays,    setStays]    = useState([])
+  const [selected, setSelected] = useState(null)
+  const [tab,      setTab]      = useState('checkin')  // 'checkin' | 'inhouse'
+  const [carNumber, setCarNumber] = useState('')
+  const [carPhoto,  setCarPhoto]  = useState(null)
+  const [platePhoto,setPlatePhoto]= useState(null)
+  const [saving,  setSaving]    = useState(false)
+  const [loading, setLoading]   = useState(true)
+  const [toast,   setToast]     = useState(null)
+  const carRef   = useRef()
+  const plateRef = useRef()
 
   const showToast = (msg, type='success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 4000)
+    setToast({msg,type}); setTimeout(()=>setToast(null),4000)
   }
 
-  useEffect(() => {
-    api.getPendingCheckIns()
-      .then(rows => {
-        setPending(rows)
-        if (rows.length > 0) setSelected(rows[0])
-        setLoading(false)
-      })
-      .catch(() => {
-        setLoading(false)
-        showToast('Could not load form submissions. Check connection.', 'error')
-      })
-  }, [])
+  useEffect(() => { loadStays() }, [])
 
-  const guests      = selected ? parseGuestNames(g(selected, 'guestNames')) : []
-  const nights      = selected ? calcNights(g(selected, 'checkInDate'), g(selected, 'checkOutDate')) : 0
-  const citizenship = selected ? String(g(selected, 'citizenship') || '').toLowerCase() : ''
-  const isForeign   = citizenship.includes('foreign')
-  const totalGuests = selected
-    ? (parseInt(g(selected, 'adultsCount'))||0) +
-      (parseInt(g(selected, 'childrenCount'))||0) +
-      (parseInt(g(selected, 'infantsCount'))||0)
-    : 0
+  async function loadStays() {
+    setLoading(true)
+    try {
+      // Load ready_for_checkin stays
+      const pending = await api.getPendingCheckIns()
+      // Load checked_in and ready_for_checkout stays (in-house guests)
+      const active = await api.getUpcomingStays('dwarka')
+      const inhouse = Array.isArray(active)
+        ? active.filter(s => ['checked_in','ready_for_checkout'].includes(s.status))
+        : []
+      setStays({ pending: Array.isArray(pending) ? pending : [], inhouse })
+      const allReady = Array.isArray(pending) ? pending : []
+      if (allReady.length > 0) setSelected(allReady[0])
+      else if (inhouse.length > 0) { setSelected(inhouse[0]); setTab('inhouse') }
+    } catch(e) {
+      showToast('Could not load stays: ' + e.message, 'error')
+    } finally { setLoading(false) }
+  }
 
-  const handlePhotoCapture = (type, e) => {
+  const pendingList = stays.pending || []
+  const inhouseList = stays.inhouse || []
+
+  function handlePhotoCapture(type, e) {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
     reader.onload = ev => {
-      if (type === 'car')   setCarPhoto({ file, preview: ev.target.result })
-      if (type === 'plate') setPlatePhoto({ file, preview: ev.target.result })
+      if (type==='car')   setCarPhoto({file, preview:ev.target.result})
+      if (type==='plate') setPlatePhoto({file, preview:ev.target.result})
     }
     reader.readAsDataURL(file)
   }
 
-  const handleConfirm = async () => {
-    if (!selected) { showToast('No guest selected', 'error'); return }
+  // Confirm check-in (ready_for_checkin → checked_in)
+  async function handleConfirmCheckIn() {
+    if (!selected) { showToast('No guest selected','error'); return }
     setSaving(true)
     try {
-      // Convert car photos to base64 for Drive upload
       const carPhotoB64   = carPhoto   ? carPhoto.preview.split(',')[1]   : null
       const platePhotoB64 = platePhoto ? platePhoto.preview.split(',')[1] : null
 
-      const result = await api.confirmCheckIn({
-        villaId:          'dwarka',
-        guestName:        g(selected, 'bookerName') || guests[0]?.name || 'Guest',
-        bookerName:       g(selected, 'bookerName') || '',
-        checkInDate:      g(selected, 'checkInDate'),
-        checkOutDate:     g(selected, 'checkOutDate'),
-        adultsCount:      g(selected, 'adultsCount') || 0,
-        childrenCount:    g(selected, 'childrenCount') || 0,
-        infantsCount:     g(selected, 'infantsCount') || 0,
-        citizenship:      g(selected, 'citizenship') || 'Indian',
-        govtId:           isForeign ? g(selected, 'passportNumber') : g(selected, 'aadhaar'),
-        phone:            g(selected, 'phone') || '',
-        email:            g(selected, 'email') || '',
-        eta:              g(selected, 'eta') || '',
-        purpose:          g(selected, 'purpose') || '',
-        transport:        g(selected, 'transport') || 'No',
-        breakfastPrepaid: g(selected, 'breakfast') || 'No',
-        additionalGuests: g(selected, 'additionalGuests') || 'No',
-        carNumber:        carNumber,
-        carPhotoB64:      carPhotoB64,
-        platePhotoB64:    platePhotoB64,
-        channel:          'Direct',
-        guestNamesRaw:    g(selected, 'guestNames') || '',
-        visaInfo:         isForeign ? g(selected, 'visaInfo') || '' : '',
+      await api.confirmCheckIn({
+        stayId:       selected.stay_id,
+        villaId:      'dwarka',
+        guestName:    selected.guest_name,
+        checkInDate:  selected.checkin_date,
+        checkOutDate: selected.checkout_date,
+        adultsCount:  selected.adults || 1,
+        childrenCount: selected.children || 0,
+        carNumber,
+        carPhotoB64,
+        platePhotoB64,
       })
-      showToast('Check-in confirmed! Stay ID: ' + result?.stayId)
-      setTimeout(() => navigate('/'), 2500)
-    } catch (e) {
-      showToast('Failed to confirm check-in. Try again.', 'error')
-    } finally {
-      setSaving(false)
-    }
+      showToast('✅ Check-in confirmed! ' + selected.stay_id)
+      setCarPhoto(null); setPlatePhoto(null); setCarNumber('')
+      await loadStays()
+    } catch(e) {
+      showToast('Failed: ' + e.message, 'error')
+    } finally { setSaving(false) }
   }
+
+  // Move to ready_for_checkout
+  async function handleReadyForCheckout() {
+    if (!selected) return
+    setSaving(true)
+    try {
+      await api.updateStayStatus({ stayId: selected.stay_id, status: 'ready_for_checkout' })
+      showToast('Marked ready for check-out ✓')
+      await loadStays()
+    } catch(e) { showToast('Failed: '+e.message,'error') }
+    finally { setSaving(false) }
+  }
+
+  // Complete checkout (ready_for_checkout → checked_out)
+  async function handleCompleteCheckout() {
+    if (!selected) return
+    setSaving(true)
+    try {
+      await api.checkOut({ stayId: selected.stay_id })
+      showToast('✅ Check-out complete! Raman commission recorded.')
+      setSelected(null)
+      await loadStays()
+    } catch(e) { showToast('Failed: '+e.message,'error') }
+    finally { setSaving(false) }
+  }
+
+  const nights = selected ? calcNights(selected.checkin_date, selected.checkout_date) : 0
+  const days   = selected ? daysFromNow(selected.checkin_date) : null
 
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Guest check-in</div>
           <div className="topbar-sub">GVR DWARKA VILLA</div>
@@ -160,248 +157,252 @@ export default function CheckIn() {
         <div style={{width:34}}/>
       </div>
 
+      {/* Tabs */}
+      <div style={{display:'flex',background:'var(--dark-card)',borderBottom:'1px solid var(--border-dim)',flexShrink:0}}>
+        {[
+          {key:'checkin', label:`Check-in (${pendingList.length})`, icon:'🔑'},
+          {key:'inhouse', label:`In-house (${inhouseList.length})`,  icon:'🏠'},
+        ].map(t => (
+          <button key={t.key} onClick={()=>{setTab(t.key); setSelected(t.key==='checkin'?pendingList[0]:inhouseList[0])}}
+            style={{flex:1,padding:'12px 4px',border:'none',background:'transparent',cursor:'pointer',
+              color:tab===t.key?'var(--gold)':'var(--text-dim)',
+              borderBottom:tab===t.key?'2px solid var(--gold)':'2px solid transparent',
+              fontSize:'0.78rem',fontWeight:tab===t.key?'700':'400'}}>
+            <div style={{fontSize:'1rem',marginBottom:'2px'}}>{t.icon}</div>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       <div className="screen-body">
-        {loading ? (
-          <div className="loading"><div className="spinner"/>Loading guest forms...</div>
-        ) : pending.length === 0 ? (
-          <div className="card" style={{textAlign:'center',padding:'32px 16px'}}>
-            <div style={{fontSize:'2rem',marginBottom:'12px'}}>📋</div>
-            <div style={{color:'var(--gold)',fontWeight:'600',marginBottom:'6px'}}>No pending check-ins</div>
-            <div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>
-              Guests must fill the online registration form before check-in appears here.
-            </div>
-          </div>
-        ) : (
+        {loading && <div className="loading"><div className="spinner"/>Loading…</div>}
+
+        {/* ── CHECK-IN TAB ── */}
+        {!loading && tab==='checkin' && (
           <>
-            {pending.length > 1 && (
+            {pendingList.length === 0 ? (
+              <div className="card" style={{textAlign:'center',padding:'32px 16px'}}>
+                <div style={{fontSize:'2rem',marginBottom:'12px'}}>🔑</div>
+                <div style={{color:'var(--gold)',fontWeight:'600',marginBottom:'6px'}}>No guests ready for check-in</div>
+                <div style={{color:'var(--text-dim)',fontSize:'0.85rem'}}>
+                  Owner must mark a booking as "Ready for Check-in" before it appears here.
+                </div>
+              </div>
+            ) : (
               <>
-                <div className="card-section-label">SELECT GUEST</div>
-                <div className="menu-tile" style={{marginBottom:'14px'}}>
-                  {pending.map((row, i) => (
-                    <div key={i} className="menu-row"
-                      style={{
-                        borderBottom: i < pending.length-1 ? '1px solid var(--border-dim)' : 'none',
-                        background: selected === row ? 'rgba(200,144,58,0.06)' : undefined,
-                      }}
-                      onClick={() => setSelected(row)}>
-                      <div className="menu-icon" style={{background:'rgba(200,144,58,0.08)'}}>🏠</div>
-                      <div className="menu-label">
-                        <div className="menu-title">{g(row, 'bookerName') || 'Guest'}</div>
-                        <div className="menu-sub">{formatDate(g(row, 'checkInDate'))} · {g(row, 'adultsCount')} adults</div>
-                      </div>
-                      {selected === row && <span style={{color:'var(--gold)',fontSize:'1.1rem'}}>✓</span>}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {selected && (
-              <>
-                <div className="banner-green" style={{marginBottom:'14px'}}>
-                  <div className="banner-dot"/>
-                  <div>
-                    <div className="banner-title">Auto-filled from online registration</div>
-                    <div className="banner-sub">
-                      Submitted {formatDate(g(selected, 'timestamp'))} · Raman only needs to take car photos below
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card-section-label">BOOKING SUMMARY</div>
-                <div className="card">
-                  <div className="grid-2">
-                    <div className="field">
-                      <div className="field-label">Booker</div>
-                      <div className="field-input auto-filled">{g(selected, 'bookerName') || '—'}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Purpose</div>
-                      <div className="field-input auto-filled">{g(selected, 'purpose') || '—'}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Check-in</div>
-                      <div className="field-input gold">{formatDate(g(selected, 'checkInDate'))}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Check-out</div>
-                      <div className="field-input gold">{formatDate(g(selected, 'checkOutDate'))}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Nights</div>
-                      <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{nights}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">ETA</div>
-                      <div className="field-input auto-filled">{g(selected, 'eta') || '—'}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">WhatsApp</div>
-                      <div className="field-input auto-filled" style={{fontSize:'0.85rem'}}>{g(selected, 'phone') || '—'}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Email</div>
-                      <div className="field-input auto-filled" style={{fontSize:'0.8rem'}}>{g(selected, 'email') || '—'}</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="card-section-label">GUEST COUNT — {totalGuests} TOTAL</div>
-                <div className="card">
-                  <div className="grid-3">
-                    <div className="field">
-                      <div className="field-label">Adults</div>
-                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{g(selected, 'adultsCount')||0}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Children</div>
-                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{g(selected, 'childrenCount')||0}</div>
-                    </div>
-                    <div className="field">
-                      <div className="field-label">Infants</div>
-                      <div className="field-input auto-filled" style={{textAlign:'center',fontSize:'1.1rem',fontWeight:'700'}}>{g(selected, 'infantsCount')||0}</div>
-                    </div>
-                  </div>
-                  <div className="divider"/>
-                  <div className="field-label" style={{marginBottom:'8px'}}>GUEST NAMES</div>
-                  <div style={styles.guestList}>
-                    {(expanded ? guests : guests.slice(0,4)).map((gst,i) => (
-                      <div key={i} style={styles.guestRow}>
-                        <span style={styles.guestName}>{gst.name}</span>
-                        <span style={styles.guestAge}>{gst.age} yrs</span>
-                      </div>
-                    ))}
-                    {guests.length > 4 && (
-                      <div style={styles.guestMore} onClick={() => setExpanded(!expanded)}>
-                        {expanded ? 'Show less ↑' : `+${guests.length - 4} more · tap to expand`}
-                      </div>
-                    )}
-                  </div>
-                  {g(selected, 'additionalGuests') && !String(g(selected, 'additionalGuests')).toLowerCase().includes('no') && (
-                    <div className="tag-row" style={{marginTop:'10px'}}>
-                      <span className="tag tag-gold">Additional guests requested</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="card-section-label">ADD-ONS REQUESTED</div>
-                <div className="card">
-                  <div className="tag-row">
-                    <span className={`tag ${String(g(selected, 'breakfast')||'').toLowerCase().includes('yes') ? 'tag-green' : 'tag-gray'}`}>
-                      {String(g(selected, 'breakfast')||'').toLowerCase().includes('yes') ? '✓ Breakfast prepaid' : 'No breakfast'}
-                    </span>
-                    <span className={`tag ${String(g(selected, 'transport')||'').toLowerCase().includes('yes') ? 'tag-green' : 'tag-gray'}`}>
-                      {String(g(selected, 'transport')||'').toLowerCase().includes('yes') ? '✓ Transport needed' : 'No transport'}
-                    </span>
-                    {g(selected, 'purpose') && (
-                      <span className="tag tag-gold">{g(selected, 'purpose')}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="card-section-label">
-                  IDENTITY — {isForeign ? '🌍 FOREIGN CITIZEN' : '🇮🇳 INDIAN CITIZEN'}
-                </div>
-                <div className="card" style={{borderColor: isForeign ? 'rgba(24,95,165,0.25)' : 'rgba(52,168,83,0.2)'}}>
-                  {!isForeign ? (
-                    <div className="grid-2">
-                      <div className="field">
-                        <div className="field-label">Aadhaar / Passport</div>
-                        <div className="field-input auto-filled">{g(selected, 'aadhaar') || '—'}</div>
-                      </div>
-                      <div className="field">
-                        <div className="field-label">ID Upload</div>
-                        <div className="field-input auto-filled" style={{color: g(selected, 'aadhaarUpload') ? 'var(--green)' : 'var(--text-dim)'}}>
-                          {g(selected, 'aadhaarUpload') ? 'Received ✓' : 'Not uploaded'}
+                {/* Guest selector */}
+                {pendingList.length > 1 && (
+                  <>
+                    <div className="card-section-label">SELECT GUEST</div>
+                    <div style={{background:'var(--dark-card)',borderRadius:'12px',
+                      border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'14px'}}>
+                      {pendingList.map((stay,i) => (
+                        <div key={stay.stay_id} onClick={()=>setSelected(stay)}
+                          style={{padding:'12px 16px',cursor:'pointer',
+                            borderBottom:i<pendingList.length-1?'1px solid var(--border-dim)':'none',
+                            background:selected?.stay_id===stay.stay_id?'rgba(200,144,58,0.07)':'transparent',
+                            display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                          <div>
+                            <div style={{fontWeight:'600',fontSize:'0.88rem'}}>
+                              {selected?.stay_id===stay.stay_id && <span style={{color:'var(--gold)',marginRight:'6px'}}>✓</span>}
+                              {stay.guest_name}
+                            </div>
+                            <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
+                              {formatDate(stay.checkin_date)} · {calcNights(stay.checkin_date,stay.checkout_date)}N
+                            </div>
+                          </div>
+                          <span style={{fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',
+                            borderRadius:'10px',background:'rgba(52,168,83,0.15)',color:'#34A853'}}>
+                            Ready
+                          </span>
                         </div>
-                      </div>
+                      ))}
                     </div>
-                  ) : (
-                    <>
+                  </>
+                )}
+
+                {selected && (
+                  <>
+                    {/* Booking summary */}
+                    <div className="card-section-label">BOOKING SUMMARY</div>
+                    <div className="card">
                       <div className="grid-2">
                         <div className="field">
-                          <div className="field-label">Passport number</div>
-                          <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{g(selected, 'passportNumber') || '—'}</div>
+                          <div className="field-label">Guest</div>
+                          <div className="field-input auto-filled">{selected.guest_name}</div>
                         </div>
                         <div className="field">
-                          <div className="field-label">Passport / Visa upload</div>
-                          <div className="field-input" style={{color: g(selected, 'passportUpload') ? '#85B7EB' : 'var(--text-dim)'}}>
-                            {g(selected, 'passportUpload') ? 'Received ✓' : 'Not uploaded'}
-                          </div>
+                          <div className="field-label">Stay ID</div>
+                          <div className="field-input" style={{color:'var(--gold)',fontWeight:'700',
+                            fontFamily:'monospace',fontSize:'0.85rem'}}>{selected.stay_id}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Check-in</div>
+                          <div className="field-input gold">{formatDate(selected.checkin_date)}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Check-out</div>
+                          <div className="field-input gold">{formatDate(selected.checkout_date)}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Nights</div>
+                          <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{nights}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Guests</div>
+                          <div className="field-input auto-filled">{selected.adults||1} adults{selected.children>0?`, ${selected.children} children`:''}</div>
                         </div>
                       </div>
-                      {g(selected, 'visaInfo') && (
-                        <div className="field" style={{marginTop:'8px'}}>
-                          <div className="field-label">Visa / GOI info</div>
-                          <div className="field-input" style={{color:'#85B7EB',fontSize:'0.85rem'}}>{g(selected, 'visaInfo')}</div>
+                      {selected.guest_phone && (
+                        <div className="field" style={{marginBottom:0,marginTop:'4px'}}>
+                          <div className="field-label">WhatsApp</div>
+                          <div className="field-input auto-filled">{selected.guest_phone}</div>
                         </div>
                       )}
-                    </>
-                  )}
-                </div>
-
-                <div className="card-section-label">YOUR ONLY TASK — TAKE CAR PHOTOS</div>
-                <div className="card">
-                  <div className="photo-row">
-                    <div className={`photo-box ${carPhoto ? 'captured' : ''}`} onClick={() => carPhotoRef.current?.click()}>
-                      {carPhoto
-                        ? <img src={carPhoto.preview} alt="car" style={styles.photoPreview}/>
-                        : <><div className="photo-icon">📷</div><div className="photo-label">Car photo</div><div className="photo-sub">Tap to take</div></>
-                      }
-                      <input ref={carPhotoRef} type="file" accept="image/*" capture="environment"
-                        onChange={e => handlePhotoCapture('car', e)} style={{display:'none'}}/>
                     </div>
-                    <div className={`photo-box ${platePhoto ? 'captured' : ''}`} onClick={() => platePhotoRef.current?.click()}>
-                      {platePhoto
-                        ? <img src={platePhoto.preview} alt="plate" style={styles.photoPreview}/>
-                        : <><div className="photo-icon">🔢</div><div className="photo-label">Number plate</div><div className="photo-sub">Tap to take</div></>
-                      }
-                      <input ref={platePhotoRef} type="file" accept="image/*" capture="environment"
-                        onChange={e => handlePhotoCapture('plate', e)} style={{display:'none'}}/>
+
+                    {/* Car photos — Raman's main task */}
+                    <div className="card-section-label">YOUR TASK — TAKE CAR PHOTOS</div>
+                    <div className="card">
+                      <div className="photo-row">
+                        <div className={`photo-box ${carPhoto?'captured':''}`} onClick={()=>carRef.current?.click()}>
+                          {carPhoto
+                            ? <img src={carPhoto.preview} alt="car" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'6px'}}/>
+                            : <><div className="photo-icon">📷</div><div className="photo-label">Car photo</div><div className="photo-sub">Tap to take</div></>
+                          }
+                          <input ref={carRef} type="file" accept="image/*" capture="environment"
+                            onChange={e=>handlePhotoCapture('car',e)} style={{display:'none'}}/>
+                        </div>
+                        <div className={`photo-box ${platePhoto?'captured':''}`} onClick={()=>plateRef.current?.click()}>
+                          {platePhoto
+                            ? <img src={platePhoto.preview} alt="plate" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'6px'}}/>
+                            : <><div className="photo-icon">🔢</div><div className="photo-label">Number plate</div><div className="photo-sub">Tap to take</div></>
+                          }
+                          <input ref={plateRef} type="file" accept="image/*" capture="environment"
+                            onChange={e=>handlePhotoCapture('plate',e)} style={{display:'none'}}/>
+                        </div>
+                      </div>
+                      <div className="divider"/>
+                      <div className="field" style={{marginBottom:0}}>
+                        <div className="field-label">Car number</div>
+                        <input className="field-input" placeholder="e.g. KL 07 AB 1234"
+                          value={carNumber} onChange={e=>setCarNumber(e.target.value.toUpperCase())}
+                          style={{textTransform:'uppercase'}}/>
+                      </div>
                     </div>
-                  </div>
-                  <div className="divider"/>
-                  <div className="field" style={{marginBottom:0}}>
-                    <div className="field-label">Car number (type if visible)</div>
-                    <input className="field-input" placeholder="e.g. KL 07 AB 1234"
-                      value={carNumber} onChange={e => setCarNumber(e.target.value)}
-                      style={{textTransform:'uppercase'}}/>
-                  </div>
-                </div>
 
-                <div style={styles.stayIdStrip}>
-                  <div>
-                    <div style={styles.stayIdLabel}>STAY ID · WILL BE AUTO-GENERATED</div>
-                    <div style={styles.stayIdVal}>DWK-?????</div>
-                    <div style={styles.stayIdNote}>Generated on confirm · links all transactions · saved to Drive</div>
-                  </div>
-                  <span style={{fontSize:'1.4rem'}}>🔒</span>
-                </div>
+                    <button className="btn btn-gold" onClick={handleConfirmCheckIn} disabled={saving}>
+                      {saving?'Confirming…':'✅ Confirm check-in'}
+                    </button>
+                    <p className="btn-email-note">📧 Owner notified on check-in</p>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
 
-                <button className="btn btn-gold" onClick={handleConfirm} disabled={saving}>
-                  {saving ? 'Confirming check-in...' : 'Confirm check-in → Save to Drive'}
-                </button>
-                <p className="btn-email-note">📧 Confirmation email sent to owner + guest on confirm</p>
+        {/* ── IN-HOUSE TAB ── */}
+        {!loading && tab==='inhouse' && (
+          <>
+            {inhouseList.length === 0 ? (
+              <div className="card" style={{textAlign:'center',padding:'32px 16px'}}>
+                <div style={{fontSize:'2rem',marginBottom:'12px'}}>🏠</div>
+                <div style={{color:'var(--gold)',fontWeight:'600',marginBottom:'6px'}}>No guests currently in-house</div>
+              </div>
+            ) : (
+              <>
+                {inhouseList.length > 1 && (
+                  <>
+                    <div className="card-section-label">SELECT GUEST</div>
+                    <div style={{background:'var(--dark-card)',borderRadius:'12px',
+                      border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'14px'}}>
+                      {inhouseList.map((stay,i) => {
+                        const m = STATUS_META[stay.status] || STATUS_META.checked_in
+                        return (
+                          <div key={stay.stay_id} onClick={()=>setSelected(stay)}
+                            style={{padding:'12px 16px',cursor:'pointer',
+                              borderBottom:i<inhouseList.length-1?'1px solid var(--border-dim)':'none',
+                              background:selected?.stay_id===stay.stay_id?'rgba(200,144,58,0.07)':'transparent',
+                              display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                            <div>
+                              <div style={{fontWeight:'600',fontSize:'0.88rem'}}>
+                                {selected?.stay_id===stay.stay_id && <span style={{color:'var(--gold)',marginRight:'6px'}}>✓</span>}
+                                {stay.guest_name}
+                              </div>
+                              <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
+                                Out: {formatDate(stay.checkout_date)}
+                              </div>
+                            </div>
+                            <span style={{fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',
+                              borderRadius:'10px',background:m.color+'22',color:m.color}}>
+                              {m.label}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {selected && ['checked_in','ready_for_checkout'].includes(selected.status) && (
+                  <>
+                    <div className="card-section-label">GUEST</div>
+                    <div className="card">
+                      <div className="grid-2">
+                        <div className="field">
+                          <div className="field-label">Name</div>
+                          <div className="field-input auto-filled">{selected.guest_name}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Stay ID</div>
+                          <div className="field-input" style={{color:'var(--gold)',fontWeight:'700',
+                            fontFamily:'monospace',fontSize:'0.85rem'}}>{selected.stay_id}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Check-out</div>
+                          <div className="field-input gold">{formatDate(selected.checkout_date)}</div>
+                        </div>
+                        <div className="field">
+                          <div className="field-label">Nights</div>
+                          <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{nights}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Status actions */}
+                    <div className="card-section-label">CHECKOUT ACTIONS</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'14px'}}>
+                      {selected.status === 'checked_in' && (
+                        <button onClick={handleReadyForCheckout} disabled={saving}
+                          style={{width:'100%',padding:'12px',borderRadius:'10px',
+                            border:'1px solid rgba(245,158,11,0.4)',
+                            background:'rgba(245,158,11,0.12)',color:'#F59E0B',
+                            fontWeight:'700',fontSize:'0.88rem',cursor:'pointer',textAlign:'left'}}>
+                          {saving?'…':'🧳 Guest is ready to check out'}
+                        </button>
+                      )}
+                      {selected.status === 'ready_for_checkout' && (
+                        <button onClick={handleCompleteCheckout} disabled={saving}
+                          style={{width:'100%',padding:'12px',borderRadius:'10px',
+                            border:'1px solid rgba(52,168,83,0.4)',
+                            background:'rgba(52,168,83,0.12)',color:'#34A853',
+                            fontWeight:'700',fontSize:'0.88rem',cursor:'pointer',textAlign:'left'}}>
+                          {saving?'…':'✅ Complete check-out — guest has left'}
+                        </button>
+                      )}
+                    </div>
+                    <p style={{color:'var(--text-dim)',fontSize:'0.75rem',textAlign:'center',marginTop:'4px'}}>
+                      📧 Owner notified · Raman commission auto-created on check-out
+                    </p>
+                  </>
+                )}
               </>
             )}
           </>
         )}
       </div>
-
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   )
-}
-
-const styles = {
-  guestList:    { background: 'var(--dark-input)', borderRadius: '8px', padding: '8px 10px', border: '1px solid rgba(52,168,83,0.2)' },
-  guestRow:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' },
-  guestName:    { color: '#C0DD97', fontSize: '0.85rem', fontWeight: '600' },
-  guestAge:     { color: 'var(--text-dim)', fontSize: '0.78rem' },
-  guestMore:    { color: 'var(--text-dim)', fontSize: '0.78rem', textAlign: 'right', paddingTop: '6px', cursor: 'pointer' },
-  photoPreview: { width: '100%', height: '80px', objectFit: 'cover', borderRadius: '6px' },
-  stayIdStrip:  { background: 'rgba(200,144,58,0.06)', border: '1px solid rgba(200,144,58,0.2)', borderRadius: '10px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' },
-  stayIdLabel:  { fontSize: '0.65rem', color: 'var(--text-dim)', letterSpacing: '1px' },
-  stayIdVal:    { color: 'var(--gold)', fontSize: '1.1rem', fontWeight: '800', fontFamily: 'monospace', letterSpacing: '2px', margin: '3px 0' },
-  stayIdNote:   { fontSize: '0.68rem', color: 'var(--text-dim)' },
 }

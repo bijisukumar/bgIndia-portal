@@ -12,6 +12,7 @@ import RDashboard     from './screens/RDashboard'
 // Villa screens
 import VillaHub          from './screens/villa/VillaHub'
 import VillaRentalIncome from './screens/villa/VillaRentalIncome'
+import CompleteBooking    from './screens/villa/CompleteBooking'
 import VillaDashboard    from './screens/villa/VillaDashboard'
 import NewBooking        from './screens/villa/NewBooking'
 import CheckIn           from './screens/villa/CheckIn'
@@ -51,7 +52,7 @@ function ProtectedRoutes() {
         {/* Villa */}
         <Route path="/owner/villa"            element={<VillaHub />} />
         <Route path="/owner/villa/booking"    element={<NewBooking />} />
-        <Route path="/owner/villa/income"     element={<VillaRentalIncome />} />
+        <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/owner/guests"           element={<GuestRepository />} />

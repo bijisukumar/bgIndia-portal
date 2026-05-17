@@ -73,10 +73,10 @@ function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
 // It finds the matching open stay, renames and moves the uploaded
 // files (ID card, registration form) into the correct guest folder.
 //
-// Set up: Triggers → Add Trigger → onFormSubmit → From spreadsheet
+// Set up: Triggers → Add Trigger → onGuestFormSubmit → From spreadsheet
 //         → On form submit (on the GUEST FORM spreadsheet)
 
-function onFormSubmit(e) {
+function onGuestFormSubmit(e) {
   try {
     var ss    = SpreadsheetApp.openById(CONFIG.guestFormSheetId);
     var sheet = ss.getSheets()[0];
@@ -100,7 +100,7 @@ function onFormSubmit(e) {
     var phone       = getField('phone number');
 
     if (!bookerName) {
-      Logger.log('onFormSubmit: no booker name found');
+      Logger.log('onGuestFormSubmit: no booker name found');
       return;
     }
 
@@ -128,7 +128,7 @@ function onFormSubmit(e) {
       }
     } else {
       // No matching stay found — create folder anyway and notify owner
-      Logger.log('onFormSubmit: no matching stay for ' + bookerName + ' on ' + checkInDate);
+      Logger.log('onGuestFormSubmit: no matching stay for ' + bookerName + ' on ' + checkInDate);
       sendEmail('⚠️ Check-in form: no matching stay',
         'Guest: ' + bookerName + '\nCheck-in: ' + checkInDate +
         '\nNo open stay found in D1. Please create a booking first, ' +
@@ -192,7 +192,7 @@ function onFormSubmit(e) {
       '\n\nReview and click "Mark ready for check-in" in Complete Booking screen.');
 
   } catch(e) {
-    sendErrorEmail('onFormSubmit', e, '');
+    sendErrorEmail('onGuestFormSubmit', e, '');
   }
 }
 
@@ -643,5 +643,5 @@ function setupTriggers() {
     .create();
 
   Logger.log('✅ Triggers set up: pollGmail (5min) + pollDriveCheckIns (10min)');
-  Logger.log('Also set up onFormSubmit manually: Triggers → Add Trigger → onFormSubmit → From spreadsheet → On form submit');
+  Logger.log('Also set up onFormSubmit manually: Triggers → Add Trigger → onGuestFormSubmit → From spreadsheet → On form submit');
 }

@@ -77,7 +77,14 @@ export async function onRequest(ctx) {
         const stay = await DB.prepare(
           `SELECT * FROM stays WHERE villa_id = ? AND status = 'checked_in' ORDER BY checkin_date DESC LIMIT 1`
         ).bind(villaId).first()
-        return json({ success: true, data: stay || null })
+        if (!stay) return json({ success: true, data: null })
+        // Expose both snake_case and camelCase for compatibility
+        return json({ success: true, data: {
+          ...stay,
+          stayId:    stay.stay_id,
+          guestName: stay.guest_name,
+          villaId:   stay.villa_id,
+        }})
       }
 
       if (action === 'getPendingCheckIns') {
@@ -116,7 +123,17 @@ export async function onRequest(ctx) {
           byChannel[s.source].bookings++
           byChannel[s.source].net += (s.net || 0)
         })
-        return json({ success: true, data: { totalBookings, totalNights, grossRevenue, totalNet, totalComm, byChannel, stays } })
+        // Build months map (1-12) for TestRunner compatibility
+        const months = {}
+        for (let m = 1; m <= 12; m++) {
+          const mStays = stays.filter(s => new Date(s.checkin_date).getMonth() + 1 === m)
+          months[m] = {
+            bookings: mStays.length,
+            revenue:  mStays.reduce((s, r) => s + (r.net || 0), 0),
+            gross:    mStays.reduce((s, r) => s + (r.gross || 0), 0),
+          }
+        }
+        return json({ success: true, data: { totalBookings, totalNights, grossRevenue, totalNet, totalComm, byChannel, stays, months } })
       }
 
       // RAMAN COMMISSION
@@ -296,8 +313,8 @@ export async function onRequest(ctx) {
             created_by, updated_by, created_at, updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?)
         `).bind(
-          stayId, body.villaId || 'dwarka', body.source || 'direct',
-          body.guestName, body.guestPhone || null, body.guestEmail || null,
+          stayId, body.villaId || 'dwarka', body.source || (body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : 'direct'),
+          body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null,
           body.checkInDate, body.checkOutDate, nights,
           body.adults || 1, body.children || 0,
           body.tariffPerNight || 0, body.extraCharges || 0,
@@ -310,10 +327,38 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'confirmCheckIn') {
-        await DB.prepare(
-          `UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`
-        ).bind(actor, now(), body.stayId).run()
-        return json({ success: true })
+        // If stayId provided, update that stay directly
+        // Otherwise find the most recent confirmed stay for this guest (used by CheckIn screen)
+        let stayId = body.stayId
+        if (!stayId) {
+          const found = await DB.prepare(
+            `SELECT stay_id FROM stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`
+          ).bind(body.guestName || body.bookerName).first()
+          stayId = found?.stay_id
+        }
+        // If still no stay, create one on the fly (CheckIn screen flow)
+        if (!stayId) {
+          stayId = genStayId(body.villaId || 'dwarka')
+          await DB.prepare(`
+            INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+              checkin_date, checkout_date, nights, adults, children, gross, net, status,
+              created_by, updated_by, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)
+          `).bind(
+            stayId, body.villaId || 'dwarka', 'direct',
+            body.guestName || body.bookerName,
+            body.phone || null, body.email || null,
+            body.checkInDate, body.checkOutDate,
+            Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)),
+            body.adultsCount || 1, body.childrenCount || 0,
+            actor, actor, now(), now()
+          ).run()
+        } else {
+          await DB.prepare(
+            `UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          ).bind(actor, now(), stayId).run()
+        }
+        return json({ success: true, data: { stayId } })
       }
 
       // CHECK-OUT: complete the stay lifecycle + create Raman commission
@@ -372,7 +417,10 @@ export async function onRequest(ctx) {
               (item_id, stay_id, inv_item_id, name, qty, price_per_unit, total,
                created_by, updated_by, created_at, updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)
-          `).bind(genId('INC'), body.stayId, item.itemId || null, item.name, item.qty, item.pricePerUnit, item.subtotal,
+          `).bind(genId('INC'), body.stayId, item.itemId || item.inv_item_id || null,
+                  item.name, item.qty || 1,
+                  item.pricePerUnit || item.price || 0,
+                  item.subtotal || item.total || 0,
                   actor, actor, now(), now()).run()
         }
         return json({ success: true })
@@ -479,6 +527,74 @@ export async function onRequest(ctx) {
                 parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
                 actor, actor, now(), now()).run()
         return json({ success: true, data: { harvestId: id } })
+      }
+
+      // BREAKFAST ENTRY
+      if (action === 'saveBreakfastEntry') {
+        const id = genId('BF')
+        await DB.prepare(`
+          INSERT INTO guest_requests
+            (req_id, stay_id, type, detail, status,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?)
+        `).bind(
+          id, body.stayId, 'breakfast',
+          JSON.stringify({
+            date:        body.date,
+            guestCount:  body.guestCount  || 1,
+            ratePerPerson: body.ratePerPerson || 0,
+            total:       body.total       || 0,
+            notes:       body.notes       || '',
+          }),
+          'done', actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { id } })
+      }
+
+      // CAR RENTAL ENTRY
+      if (action === 'saveCarRental') {
+        const id = genId('CR')
+        await DB.prepare(`
+          INSERT INTO guest_requests
+            (req_id, stay_id, type, detail, status,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?)
+        `).bind(
+          id, body.stayId, 'car_rental',
+          JSON.stringify({
+            date:        body.date,
+            destination: body.destination || '',
+            amount:      body.amount      || 0,
+            commission:  body.commission  || 0,
+            net:         body.net         || 0,
+            notes:       body.notes       || '',
+          }),
+          'done', actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { id } })
+      }
+
+      // VILLA EXPENSE
+      if (action === 'saveVillaExpense') {
+        const id = genId('VE')
+        await DB.prepare(`
+          INSERT INTO guest_requests
+            (req_id, stay_id, type, detail, status,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?)
+        `).bind(
+          id, body.stayId || null, 'villa_expense',
+          JSON.stringify({
+            villaId:     body.villaId    || 'dwarka',
+            date:        body.date,
+            category:    body.category   || '',
+            amount:      body.amount     || 0,
+            paidTo:      body.paidTo     || '',
+            description: body.description|| '',
+          }),
+          'done', actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { id } })
       }
 
       // RAMAN — MARK PAID

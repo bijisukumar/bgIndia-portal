@@ -52,10 +52,11 @@ export default function NewBooking() {
   }
 
   const handleSave = async () => {
-    if (!form.bookerName || !form.checkInDate || !form.checkOutDate || !form.tariffPerNight) {
-      showToast('Fill in booker name, dates and tariff', 'error')
-      return
-    }
+    // Explicit validation — tariff of ₹0 is valid (e.g. complimentary stays)
+    if (!form.bookerName.trim())   { showToast('Enter the booker name', 'error'); return }
+    if (!form.checkInDate)         { showToast('Enter a check-in date', 'error'); return }
+    if (!form.checkOutDate)        { showToast('Enter a check-out date', 'error'); return }
+    if (form.tariffPerNight === '') { showToast('Enter the tariff (0 is valid for complimentary stays)', 'error'); return }
     setSaving(true)
     try {
       // Map form fields to what the Worker / D1 schema expects

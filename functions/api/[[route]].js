@@ -375,6 +375,52 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results, sql })
       }
 
+      // GET OPEN STAYS — for Drive file watcher in Apps Script
+      // Returns stays in booked/confirmed/docs_uploaded status with their folder IDs
+      if (action === 'getOpenStays') {
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status
+           FROM stays
+           WHERE status IN ('booked','confirmed','docs_uploaded')
+           ORDER BY checkin_date ASC`
+        ).all()
+        return json({ success: true, data: results.map(r => ({
+          stayId:        r.stay_id,
+          guestName:     r.guest_name,
+          checkinDate:   r.checkin_date,
+          driveFolderId: r.drive_folder_id,
+          driveFolderUrl:r.drive_folder_url,
+          status:        r.status,
+        }))})
+      }
+
+      // FIND OPEN STAY — match by guest name + check-in date for form submit trigger
+      if (action === 'findOpenStay') {
+        const guestName   = url.searchParams.get('guestName')   || ''
+        const checkInDate = url.searchParams.get('checkInDate')  || ''
+        const firstName   = guestName.split(' ')[0]
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status
+           FROM stays
+           WHERE guest_name LIKE ?
+             AND status NOT IN ('cancelled','closed','checked_out')
+           ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC
+           LIMIT 1`
+        ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
+        if (results.length > 0) {
+          const r = results[0]
+          return json({ success: true, data: {
+            stayId:        r.stay_id,
+            guestName:     r.guest_name,
+            checkinDate:   r.checkin_date,
+            driveFolderId: r.drive_folder_id,
+            driveFolderUrl:r.drive_folder_url,
+            status:        r.status,
+          }})
+        }
+        return json({ success: true, data: null })
+      }
+
       // FIND STAY FOR REVIEW MATCHING — called by Apps Script Gmail poller
       // Matches guest name + checkout within 14 days before reviewDate
       if (action === 'findStayForReview') {
@@ -704,6 +750,17 @@ export async function onRequest(ctx) {
                 parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
                 actor, actor, now(), now()).run()
         return json({ success: true, data: { harvestId: id } })
+      }
+
+      // UPDATE DRIVE FOLDER — called by Apps Script after folder creation
+      if (action === 'updateDriveFolder') {
+        const { stayId, driveFolderId, driveFolderUrl } = body
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `UPDATE stays SET drive_folder_id = ?, drive_folder_url = ?,
+           updated_by = 'auto', updated_at = ? WHERE stay_id = ?`
+        ).bind(driveFolderId || null, driveFolderUrl || null, now(), stayId).run()
+        return json({ success: true, data: { stayId, driveFolderId } })
       }
 
       // SAVE REVIEW — called by Apps Script when review email arrives

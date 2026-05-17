@@ -1,23 +1,28 @@
 // ============================================================
 // BG INDIA PORTAL — APPS SCRIPT ADDITIONS
-// Add these functions to your existing Apps Script (V20)
-// Then set up time-based triggers as noted below.
+// APPEND this entire file to the bottom of your existing
+// Apps Script (V20). Do NOT delete the existing code.
+//
+// After pasting:
+//   1. Run setupTriggers() once manually
+//   2. Redeploy: Deployments → Manage → New version → Deploy
 // ============================================================
-
-// ── UPDATED CONFIG (merge with existing) ─────────────────────────────────
-// Add these to your existing CONFIG object:
-// workerUrl: 'https://manage.luxuryvillasofguruvayur.com/api'
-// The Worker URL is used to notify D1 when reviews/bookings arrive via email.
 
 var WORKER_URL = 'https://manage.luxuryvillasofguruvayur.com/api';
 
 // ============================================================
-// PART 1: DRIVE FOLDER — CORRECT YEAR/MONTH/GUEST STRUCTURE
+// PART 1: UPDATED DRIVE FOLDER STRUCTURE
 // ============================================================
-// New structure: BG-India/Portal/Guests/YYYY/MM-MonthName/GuestName-DD-StayID
-// Example: Guests/2026/05-May/Vikram Ramasubramanian-17-DWK-AB123
+// New structure: Guests/YYYY/MM-MonthName/GuestName-DD-StayID
+// Example:       Guests/2026/05-May/Vikram Ramasubramanian-17-DWK-AB123
 //
-// REPLACE your existing getOrCreateGuestFolder() with this version:
+// This REPLACES your existing getOrCreateGuestFolder() function.
+// After pasting, your old getOrCreateGuestFolder() will be
+// overridden by this one (JavaScript uses the last definition).
+//
+// ALSO update the two calls in confirmCheckIn() and createBooking():
+//   FIND:    var folder = getOrCreateGuestFolder(guestName, stayId);
+//   REPLACE: var folder = getOrCreateGuestFolder(guestName, stayId, data.checkInDate || data.checkIn);
 
 function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
   var root = DriveApp.getFolderById(CONFIG.driveRootId);
@@ -26,13 +31,14 @@ function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
   var gf = root.getFoldersByName('Guests');
   var guestsFolder = gf.hasNext() ? gf.next() : root.createFolder('Guests');
 
-  // Parse check-in date for year/month
+  // Parse check-in date for year/month/day
   var d = checkInDate ? new Date(checkInDate) : new Date();
+  if (isNaN(d)) d = new Date();
   var year  = String(d.getFullYear());
-  var month = d.getMonth(); // 0-indexed
+  var month = d.getMonth();
   var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var monthLabel = String(month + 1).padStart(2, '0') + '-' + monthNames[month];
-  var day   = String(d.getDate()).padStart(2, '0');
+  var day = String(d.getDate()).padStart(2, '0');
 
   // Year folder
   var yf = guestsFolder.getFoldersByName(year);
@@ -43,36 +49,170 @@ function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
   var monthFolder = mf.hasNext() ? mf.next() : yearFolder.createFolder(monthLabel);
 
   // Guest folder: GuestName-DD-StayID
-  var folderName = guestName + '-' + day + '-' + stayId;
+  var folderName = (guestName || 'Guest') + '-' + day + '-' + stayId;
   var ef = monthFolder.getFoldersByName(folderName);
   if (ef.hasNext()) return ef.next();
-  return monthFolder.createFolder(folderName);
+  var newFolder = monthFolder.createFolder(folderName);
+
+  // Store folder URL back to D1 via Worker
+  try {
+    callWorker('POST', 'updateDriveFolder', {
+      stayId:         stayId,
+      driveFolderId:  newFolder.getId(),
+      driveFolderUrl: newFolder.getUrl(),
+    });
+  } catch(e) { Logger.log('updateDriveFolder Worker call failed: ' + e.message); }
+
+  return newFolder;
 }
 
-// UPDATE createBooking to pass checkInDate to folder creation:
-// FIND this line in confirmCheckIn and createBooking:
-//   var folder = getOrCreateGuestFolder(guestName, stayId);
-// REPLACE with:
-//   var folder = getOrCreateGuestFolder(guestName, stayId, data.checkInDate||data.checkIn);
+// ============================================================
+// PART 2: GOOGLE FORM SUBMIT TRIGGER
+// ============================================================
+// This fires whenever a guest submits the online check-in form.
+// It finds the matching open stay, renames and moves the uploaded
+// files (ID card, registration form) into the correct guest folder.
+//
+// Set up: Triggers → Add Trigger → onFormSubmit → From spreadsheet
+//         → On form submit (on the GUEST FORM spreadsheet)
+
+function onFormSubmit(e) {
+  try {
+    var ss    = SpreadsheetApp.openById(CONFIG.guestFormSheetId);
+    var sheet = ss.getSheets()[0];
+    var data  = sheet.getDataRange().getValues();
+    if (data.length < 2) return;
+
+    var headers   = data[0];
+    var lastRow   = data[data.length - 1];
+    var lcHeaders = headers.map(function(h) { return String(h).toLowerCase().trim(); });
+
+    // Extract key fields from the submission
+    function getField(keyword) {
+      var idx = lcHeaders.findIndex(function(h) { return h.includes(keyword); });
+      return idx >= 0 ? String(lastRow[idx] || '').trim() : '';
+    }
+
+    var bookerName  = getField('bookers full name') || getField('booker');
+    var checkInDate = getField('check in date');
+    var checkOutDate= getField('check out date');
+    var email       = getField('email address');
+    var phone       = getField('phone number');
+
+    if (!bookerName) {
+      Logger.log('onFormSubmit: no booker name found');
+      return;
+    }
+
+    // Find matching open stay in D1
+    var matchResp = callWorker('GET', 'findOpenStay', {
+      guestName:   bookerName,
+      checkInDate: checkInDate,
+    });
+
+    var stayId      = null;
+    var guestFolder = null;
+
+    if (matchResp && matchResp.success && matchResp.data && matchResp.data.stayId) {
+      stayId = matchResp.data.stayId;
+      var folderId = matchResp.data.driveFolderId;
+
+      if (folderId) {
+        try { guestFolder = DriveApp.getFolderById(folderId); }
+        catch(e) { Logger.log('Could not open folder ' + folderId + ': ' + e.message); }
+      }
+
+      // If no folder yet, create it
+      if (!guestFolder) {
+        guestFolder = getOrCreateGuestFolder(bookerName, stayId, checkInDate);
+      }
+    } else {
+      // No matching stay found — create folder anyway and notify owner
+      Logger.log('onFormSubmit: no matching stay for ' + bookerName + ' on ' + checkInDate);
+      sendEmail('⚠️ Check-in form: no matching stay',
+        'Guest: ' + bookerName + '\nCheck-in: ' + checkInDate +
+        '\nNo open stay found in D1. Please create a booking first, ' +
+        'then the documents will need to be moved manually.');
+      return;
+    }
+
+    // Move uploaded files from form responses to guest folder
+    // Google Forms puts file uploads into a folder in Drive automatically
+    // We find them by looking at URLs in the form response row
+    var movedCount = 0;
+    lastRow.forEach(function(cell, i) {
+      var val = String(cell || '');
+      // Form file upload columns contain Drive URLs
+      if (!val.startsWith('https://drive.google.com')) return;
+
+      var fileIdMatch = val.match(/id=([a-zA-Z0-9_-]+)/) ||
+                        val.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (!fileIdMatch) return;
+
+      var fileId = fileIdMatch[1];
+      try {
+        var file = DriveApp.getFileById(fileId);
+        var colLabel = String(headers[i] || '').toLowerCase();
+
+        // Rename based on column type
+        var newName;
+        if (colLabel.includes('id') || colLabel.includes('aadhaar') ||
+            colLabel.includes('passport') || colLabel.includes('identity')) {
+          newName = 'ID-' + stayId + '-' + bookerName.split(' ')[0] + getFileExtension(file.getName());
+        } else {
+          newName = 'OnlineCheckIn-' + stayId + '-' + bookerName.split(' ')[0] + getFileExtension(file.getName());
+        }
+
+        file.setName(newName);
+
+        // Move to guest folder
+        var parents = file.getParents();
+        while (parents.hasNext()) { file.removeFromFolder(parents.next()); }
+        file.addToFolder(guestFolder);
+        movedCount++;
+        Logger.log('Moved: ' + newName + ' → ' + guestFolder.getName());
+      } catch(e) {
+        Logger.log('File move error: ' + e.message);
+      }
+    });
+
+    // Update stay status to docs_uploaded in D1
+    callWorker('POST', 'updateStayStatus', {
+      stayId:    stayId,
+      status:    'docs_uploaded',
+      createdBy: 'auto',
+    });
+
+    sendEmail('📋 Check-in form received: ' + bookerName,
+      'Stay ID: ' + stayId +
+      '\nCheck-in: ' + checkInDate + ' → ' + checkOutDate +
+      '\nEmail: ' + email + ' · Phone: ' + phone +
+      '\nFiles moved to guest folder: ' + movedCount +
+      '\nStatus set to: docs_uploaded' +
+      '\n\nReview and click "Mark ready for check-in" in Complete Booking screen.');
+
+  } catch(e) {
+    sendErrorEmail('onFormSubmit', e, '');
+  }
+}
+
+function getFileExtension(filename) {
+  var parts = String(filename || '').split('.');
+  return parts.length > 1 ? '.' + parts[parts.length - 1] : '';
+}
 
 // ============================================================
-// PART 2: GMAIL POLLER — AIRBNB BOOKINGS + REVIEWS
+// PART 3: GMAIL POLLER — AIRBNB BOOKINGS + REVIEWS
 // ============================================================
-// Set up a time-based trigger: every 5 minutes
-// In Apps Script: Triggers → Add Trigger → pollGmail → Time-driven → Minutes → Every 5 minutes
+// Runs every 5 minutes via time-based trigger.
 
 function pollGmail() {
-  try { pollAirbnbBookings(); } catch(e) { Logger.log('pollAirbnbBookings error: ' + e.message); }
-  try { pollAirbnbReviews();  } catch(e) { Logger.log('pollAirbnbReviews error: '  + e.message); }
-  try { pollGoogleReviews();  } catch(e) { Logger.log('pollGoogleReviews error: '  + e.message); }
-  try { pollDriveCheckIns();  } catch(e) { Logger.log('pollDriveCheckIns error: '  + e.message); }
+  try { pollAirbnbBookings(); } catch(e) { Logger.log('pollAirbnbBookings: ' + e.message); }
+  try { pollAirbnbReviews();  } catch(e) { Logger.log('pollAirbnbReviews: '  + e.message); }
+  try { pollGoogleReviews();  } catch(e) { Logger.log('pollGoogleReviews: '  + e.message); }
 }
 
 // ── AIRBNB BOOKING CONFIRMATION ───────────────────────────────────────────
-// Reads Airbnb confirmation emails and creates bookings in D1 via Worker.
-// Email pattern: from:automated@airbnb.com subject:"Reservation confirmed"
-// Also catches: subject:"New reservation" from Airbnb
-
 function pollAirbnbBookings() {
   var threads = GmailApp.search(
     'from:automated@airbnb.com (subject:"Reservation confirmed" OR subject:"New reservation") is:unread',
@@ -81,24 +221,25 @@ function pollAirbnbBookings() {
 
   threads.forEach(function(thread) {
     var msg  = thread.getMessages()[0];
-    var body = msg.getPlainBody();
     var subj = msg.getSubject();
+    var body = msg.getPlainBody();
 
     try {
       var booking = parseAirbnbConfirmation(body, subj);
-      if (!booking) { Logger.log('Could not parse Airbnb email: ' + subj); return; }
+      if (!booking) {
+        Logger.log('Could not parse Airbnb email: ' + subj);
+        return;
+      }
 
-      // Check if already imported (by Airbnb confirmation code)
-      var existing = checkAirbnbConfExists(booking.confirmationCode);
-      if (existing) {
+      // Skip if already imported (check by Airbnb confirmation code in source field)
+      if (checkAirbnbConfExists(booking.confirmationCode)) {
         Logger.log('Already imported: ' + booking.confirmationCode);
         msg.markRead();
         return;
       }
 
-      // Create booking via Worker → D1
-      var payload = {
-        action:          'createBooking',
+      // Create booking in D1 via Worker
+      var resp = callWorker('POST', 'createBooking', {
         villaId:         'dwarka',
         source:          'airbnb',
         guestName:       booking.guestName,
@@ -106,7 +247,7 @@ function pollAirbnbBookings() {
         checkOutDate:    booking.checkOut,
         nights:          booking.nights,
         adults:          booking.adults || 1,
-        gross:           booking.nightFee + (booking.cleaningFee || 0),
+        gross:           (booking.nightFee || 0) + (booking.cleaningFee || 0),
         commissionPct:   3,
         commissionAmt:   booking.hostServiceFee || 0,
         net:             booking.youEarn || 0,
@@ -119,71 +260,71 @@ function pollAirbnbBookings() {
         youEarn:         booking.youEarn,
         status:          'confirmed',
         createdBy:       'auto',
-      };
+      });
 
-      var resp = callWorker('POST', 'createBooking', payload);
       if (resp && resp.success) {
-        Logger.log('Airbnb booking imported: ' + booking.confirmationCode + ' → ' + resp.data.stayId);
+        var stayId    = resp.data.stayId;
+        var folderUrl = resp.data.folderUrl || '';
+        Logger.log('Airbnb booking created: ' + booking.confirmationCode + ' → ' + stayId);
         msg.markRead();
 
-        // Also save to Sheets (legacy backup)
+        // Backup to Sheets
         appendRow(SHEETS.STAYS, STAYS_HEADERS, buildStayRow({
-          stayId:    resp.data.stayId,
+          stayId:    stayId,
           villaId:   'dwarka',
           guestName: booking.guestName,
           checkIn:   booking.checkIn,
           checkOut:  booking.checkOut,
           nights:    booking.nights,
           channel:   'Airbnb',
-          gross:     booking.nightFee + (booking.cleaningFee || 0),
+          gross:     (booking.nightFee || 0) + (booking.cleaningFee || 0),
           commPct:   3,
           commAmt:   booking.hostServiceFee || 0,
           net:       booking.youEarn || 0,
           status:    'confirmed',
           source:    booking.confirmationCode,
-        }, resp.data.folderUrl || ''));
+        }, folderUrl));
 
         sendEmail(
           '✈️ Airbnb booking auto-imported: ' + booking.guestName,
-          'Confirmation: ' + booking.confirmationCode +
-          '\nGuest: '      + booking.guestName +
-          '\nCheck-in: '   + booking.checkIn +
-          '\nCheck-out: '  + booking.checkOut +
-          '\nNights: '     + booking.nights +
-          '\nYou earn: ₹'  + (booking.youEarn || 0) +
-          '\nStay ID: '    + resp.data.stayId +
-          '\n\nPlease review and update tariff in Complete Booking screen.'
+          'Confirmation: '  + booking.confirmationCode +
+          '\nStay ID: '     + stayId +
+          '\nGuest: '       + booking.guestName +
+          '\nCheck-in: '    + booking.checkIn +
+          '\nCheck-out: '   + booking.checkOut +
+          '\nNights: '      + booking.nights +
+          '\nNight fee: ₹'  + (booking.nightFee || 0) +
+          '\nCleaning fee: ₹' + (booking.cleaningFee || 0) +
+          '\nHost service fee: -₹' + (booking.hostServiceFee || 0) +
+          '\nYou earn: ₹'   + (booking.youEarn || 0) +
+          '\nGuest paid: ₹' + (booking.guestPaid || 0) +
+          '\n\nGo to Complete Booking screen to review and confirm details.'
         );
       } else {
         Logger.log('Worker createBooking failed: ' + JSON.stringify(resp));
       }
     } catch(e) {
-      Logger.log('Error processing Airbnb email: ' + e.message);
+      Logger.log('Airbnb booking error: ' + e.message);
       sendErrorEmail('pollAirbnbBookings', e, subj);
     }
   });
 }
 
 function parseAirbnbConfirmation(body, subject) {
-  // Extract confirmation code: HMXXXXXXXX format
+  // Confirmation code — Airbnb uses HMXXXXXXXX format
   var confMatch = body.match(/\b(HM[A-Z0-9]{6,12})\b/) ||
-                  body.match(/Confirmation code[:\s]+([A-Z0-9]{8,12})/i) ||
-                  body.match(/([A-Z0-9]{10})\b/);
-  var confCode  = confMatch ? confMatch[1] : null;
+                  body.match(/Confirmation code[:\s]+([A-Z0-9]{8,12})/i);
+  var confCode  = confMatch ? confMatch[1] : ('AB-' + Date.now());
 
-  // Extract guest name from subject or body
-  var nameMatch = subject.match(/^([A-Za-z\s]+) has reserved/) ||
+  // Guest name from subject: "FirstName LastName has reserved" or "New reservation from Name"
+  var nameMatch = subject.match(/^([A-Za-z\s\-]+?)\s+(?:has reserved|left a)/i) ||
                   body.match(/Guest name[:\s]+(.+)/i) ||
-                  body.match(/([A-Z][a-z]+ [A-Z][a-z]+) is reserved/);
+                  subject.match(/from\s+([A-Za-z\s]+)/i);
   var guestName = nameMatch ? nameMatch[1].trim() : 'Airbnb Guest';
 
-  // Extract dates
-  var checkInMatch  = body.match(/Check-in[:\s]+([A-Za-z]+,?\s+[A-Za-z]+\s+\d{1,2},?\s+\d{4})/i) ||
-                      body.match(/(\d{4}-\d{2}-\d{2})/);
-  var checkOutMatch = body.match(/Check-out[:\s]+([A-Za-z]+,?\s+[A-Za-z]+\s+\d{1,2},?\s+\d{4})/i);
-
-  var checkIn  = checkInMatch  ? parseFlexDate(checkInMatch[1])  : null;
-  var checkOut = checkOutMatch ? parseFlexDate(checkOutMatch[1]) : null;
+  // Dates — try multiple formats
+  var checkIn  = extractAirbnbDate(body, 'Check-in');
+  var checkOut = extractAirbnbDate(body, 'Check-out') || extractAirbnbDate(body, 'Checkout');
 
   // Nights
   var nightsMatch = body.match(/(\d+)\s+night/i);
@@ -192,60 +333,64 @@ function parseAirbnbConfirmation(body, subject) {
     nights = Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000);
   }
 
-  // Fees — "You earn" section
-  var nightFeeMatch      = body.match(/(\d[\d,]+)\s*(?:×\s*\d+\s*night|night fee)/i);
-  var cleaningFeeMatch   = body.match(/Cleaning fee[:\s]+₹?\s*([\d,]+)/i);
-  var hostSvcMatch       = body.match(/Host service fee[:\s\(]+[\d.]+%\)?[:\s]+[-−]?₹?\s*([\d,]+)/i);
-  var youEarnMatch       = body.match(/Total\s*\(INR\)[:\s]+₹?\s*([\d,]+)/i) ||
-                           body.match(/You earn[:\s]+₹?\s*([\d,]+)/i);
-  var guestSvcMatch      = body.match(/Guest service fee[:\s]+₹?\s*([\d,]+)/i);
-  var guestPaidMatch     = body.match(/Guest paid[:\s]+₹?\s*([\d,]+)/i) ||
-                           body.match(/Total\s*\(INR\)[:\s]+₹?\s*([\d,]+)/i);
-
-  function parseAmount(match) {
-    if (!match) return 0;
-    return parseFloat(String(match[1]).replace(/,/g,'')) || 0;
+  // Fee amounts — handle ₹, commas, various formats
+  function extractAmount(pattern) {
+    var m = body.match(pattern);
+    if (!m) return 0;
+    return parseFloat(String(m[1]).replace(/[,₹\s]/g, '')) || 0;
   }
 
-  // Adults count
-  var adultsMatch = body.match(/(\d+)\s+guest/i);
+  var nightFee      = extractAmount(/(\d[\d,]+)\s*(?:×\s*\d+\s*night|x\s*\d+\s*night)/i) ||
+                      extractAmount(/Night fee[:\s]+₹?\s*([\d,]+)/i);
+  var cleaningFee   = extractAmount(/Cleaning fee[:\s]+₹?\s*([\d,]+)/i);
+  var hostSvcFee    = extractAmount(/Host service fee[^:]*:[:\s]+[-−]?₹?\s*([\d,]+)/i);
+  var youEarn       = extractAmount(/Total\s*\(INR\)[:\s]+₹?\s*([\d,]+)/i) ||
+                      extractAmount(/You earn[:\s]+₹?\s*([\d,]+)/i);
+  var guestSvcFee   = extractAmount(/Guest service fee[:\s]+₹?\s*([\d,]+)/i);
+  var guestPaid     = extractAmount(/Guest paid[:\s]+₹?\s*([\d,]+)/i);
+  var adultsMatch   = body.match(/(\d+)\s+guest/i);
 
-  if (!checkIn) return null;
+  if (!checkIn) return null; // Cannot create booking without a date
 
   return {
-    confirmationCode: confCode || ('AB-' + Date.now()),
+    confirmationCode: confCode,
     guestName:        guestName,
     checkIn:          checkIn,
     checkOut:         checkOut || '',
     nights:           nights,
     adults:           adultsMatch ? parseInt(adultsMatch[1]) : 1,
-    nightFee:         parseAmount(nightFeeMatch),
-    cleaningFee:      parseAmount(cleaningFeeMatch),
-    hostServiceFee:   parseAmount(hostSvcMatch),
-    youEarn:          parseAmount(youEarnMatch),
-    guestServiceFee:  parseAmount(guestSvcMatch),
-    guestPaid:        parseAmount(guestPaidMatch),
+    nightFee:         nightFee,
+    cleaningFee:      cleaningFee,
+    hostServiceFee:   hostSvcFee,
+    youEarn:          youEarn,
+    guestServiceFee:  guestSvcFee,
+    guestPaid:        guestPaid,
   };
 }
 
-function parseFlexDate(str) {
-  if (!str) return null;
+function extractAirbnbDate(body, label) {
+  // Try: "Check-in: Thursday, May 22, 2026" or "Check-in: 2026-05-22"
+  var pattern1 = new RegExp(label + '[:\\s]+([A-Za-z]+,?\\s+[A-Za-z]+\\s+\\d{1,2},?\\s+\\d{4})', 'i');
+  var pattern2 = new RegExp(label + '[:\\s]+(\\d{4}-\\d{2}-\\d{2})', 'i');
+  var m = body.match(pattern1) || body.match(pattern2);
+  if (!m) return null;
   try {
-    var d = new Date(str);
-    if (!isNaN(d)) return d.toISOString().slice(0, 10);
-  } catch(e) {}
-  return null;
+    var d = new Date(m[1]);
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  } catch(e) { return null; }
 }
 
 function checkAirbnbConfExists(confCode) {
-  if (!confCode) return false;
+  if (!confCode || confCode.startsWith('AB-')) return false;
   var rows = sheetToObjects(SHEETS.STAYS);
-  return rows.some(function(r) { return String(r.source || '') === confCode; });
+  return rows.some(function(r) {
+    return String(r.source || '').trim() === String(confCode).trim();
+  });
 }
 
-// ── AIRBNB REVIEW PARSER ─────────────────────────────────────────────────
-// Email: from:automated@airbnb.com subject:"<GuestName> left a 5-star review!"
-// Stars appear in subject or body. Match to a stay within 14 days of checkout.
+// ── AIRBNB REVIEWS ────────────────────────────────────────────────────────
+// Subject: "<GuestName> left a 5-star review!"
+// From:     automated@airbnb.com
 
 function pollAirbnbReviews() {
   var threads = GmailApp.search(
@@ -259,55 +404,51 @@ function pollAirbnbReviews() {
     var body = msg.getPlainBody();
 
     try {
-      // Extract guest name and star rating from subject
-      // e.g. "Vikram Ramasubramanian left a 5-star review!"
-      var nameMatch  = subj.match(/^(.+?)\s+left a/i);
-      var starMatch  = subj.match(/(\d)-star/i) || body.match(/(\d)-star/i) ||
-                       body.match(/(\d)\s+out of\s+5/i);
-
+      var nameMatch = subj.match(/^(.+?)\s+left a/i);
+      var starMatch = subj.match(/(\d)-star/i) || body.match(/(\d)-star/i);
       if (!nameMatch || !starMatch) { msg.markRead(); return; }
 
-      var guestName = nameMatch[1].trim();
-      var stars     = parseInt(starMatch[1]);
+      var guestName  = nameMatch[1].trim();
+      var stars      = parseInt(starMatch[1]);
       var reviewDate = msg.getDate().toISOString().slice(0, 10);
 
-      // Find matching stay: same guest, checkout within last 14 days
-      var matchedStayId = findStayForReview(guestName, reviewDate, 'airbnb');
-      if (!matchedStayId) {
-        Logger.log('Review: no matching stay for ' + guestName + ' within 14 days');
-        // Still log it — might match later when stay is created
-        sendEmail('⭐ Review received (unmatched): ' + guestName,
-          stars + ' stars · ' + reviewDate + '\nCould not match to a stay. Check manually.');
-        msg.markRead();
-        return;
-      }
-
-      // Update D1 via Worker
-      callWorker('POST', 'saveReview', {
-        stayId:       matchedStayId,
-        rating:       stars,
-        source:       'airbnb',
-        reviewDate:   reviewDate,
-        guestName:    guestName,
-        createdBy:    'auto',
+      // Find matching stay via Worker (guest checkout within 14 days)
+      var matchResp = callWorker('GET', 'findStayForReview', {
+        guestName:  guestName,
+        reviewDate: reviewDate,
       });
 
-      // Update Sheets
-      updateStayField(matchedStayId, 'review', stars + '★');
+      var matchedStayId = (matchResp && matchResp.success && matchResp.data)
+        ? matchResp.data.stayId : null;
 
-      Logger.log('Airbnb review matched: ' + guestName + ' → ' + matchedStayId + ' (' + stars + '★)');
-      sendEmail('⭐ ' + stars + '-star review: ' + guestName,
-        'Stay ID: ' + matchedStayId + '\nDate: ' + reviewDate + '\nSource: Airbnb');
+      // Fallback: check Sheets
+      if (!matchedStayId) matchedStayId = findStayForReviewInSheets(guestName, reviewDate);
+
+      if (matchedStayId) {
+        callWorker('POST', 'saveReview', {
+          stayId:     matchedStayId,
+          rating:     stars,
+          source:     'airbnb',
+          reviewDate: reviewDate,
+          guestName:  guestName,
+          createdBy:  'auto',
+        });
+        updateStayField(matchedStayId, 'review', stars + '★ Airbnb');
+        Logger.log('Review saved: ' + guestName + ' → ' + matchedStayId + ' (' + stars + '★)');
+      }
+
+      sendEmail(
+        '⭐ ' + stars + '-star Airbnb review: ' + guestName,
+        (matchedStayId ? 'Stay: ' + matchedStayId : '⚠️ No matching stay found — check manually') +
+        '\nDate: ' + reviewDate
+      );
       msg.markRead();
-    } catch(e) {
-      Logger.log('Error processing review: ' + e.message);
-    }
+    } catch(e) { Logger.log('pollAirbnbReviews error: ' + e.message); }
   });
 }
 
-// ── GOOGLE REVIEW PARSER ─────────────────────────────────────────────────
+// ── GOOGLE REVIEWS ────────────────────────────────────────────────────────
 // Subject: "<GuestName> left a review for Dvaraka- Luxury Villas of Guruvayur"
-// Google reviews don't include star rating in email — just notify and log as 'received'
 
 function pollGoogleReviews() {
   var threads = GmailApp.search(
@@ -326,74 +467,144 @@ function pollGoogleReviews() {
 
       var guestName  = nameMatch[1].trim();
       var reviewDate = msg.getDate().toISOString().slice(0, 10);
+      // Google emails rarely include star count — try to extract from body
+      var starMatch  = body.match(/(\d)\s*(?:out of 5|stars?)/i);
+      var stars      = starMatch ? parseInt(starMatch[1]) : 0;
 
-      // Google review emails don't contain star count — extract from body if possible
-      var starMatch = body.match(/(\d)\s*(?:out of 5|stars?|★)/i);
-      var stars     = starMatch ? parseInt(starMatch[1]) : 0; // 0 = unknown
-
-      var matchedStayId = findStayForReview(guestName, reviewDate, 'google');
+      var matchResp     = callWorker('GET', 'findStayForReview', { guestName: guestName, reviewDate: reviewDate });
+      var matchedStayId = (matchResp && matchResp.success && matchResp.data) ? matchResp.data.stayId : null;
+      if (!matchedStayId) matchedStayId = findStayForReviewInSheets(guestName, reviewDate);
 
       if (matchedStayId) {
         callWorker('POST', 'saveReview', {
-          stayId:     matchedStayId,
-          rating:     stars,
-          source:     'google',
-          reviewDate: reviewDate,
-          guestName:  guestName,
-          createdBy:  'auto',
+          stayId: matchedStayId, rating: stars, source: 'google',
+          reviewDate: reviewDate, guestName: guestName, createdBy: 'auto',
         });
-        updateStayField(matchedStayId, 'review', stars ? stars + '★ G' : 'G★');
+        updateStayField(matchedStayId, 'review', (stars ? stars + '★ ' : '') + 'Google');
       }
 
-      sendEmail('🌟 Google review: ' + guestName,
-        (stars ? stars + ' stars · ' : 'Stars unknown · ') + reviewDate +
-        (matchedStayId ? '\nStay: ' + matchedStayId : '\nNo matching stay found — check manually.') +
-        '\n\nCheck Google Business Profile for full review text.');
+      sendEmail(
+        '🌟 Google review: ' + guestName,
+        (stars ? stars + ' stars · ' : 'Rating unknown · ') + reviewDate +
+        (matchedStayId ? '\nStay: ' + matchedStayId : '\n⚠️ No matching stay — check manually') +
+        '\n\nCheck Google Business Profile for full review text.'
+      );
       msg.markRead();
-    } catch(e) {
-      Logger.log('Google review error: ' + e.message);
-    }
+    } catch(e) { Logger.log('pollGoogleReviews error: ' + e.message); }
   });
 }
 
-// Find a stay matching guestName with checkout within 14 days before reviewDate
-function findStayForReview(guestName, reviewDate, source) {
+// Fallback review matching in Sheets (when Worker not available)
+function findStayForReviewInSheets(guestName, reviewDate) {
   var reviewDt    = new Date(reviewDate);
-  var windowStart = new Date(reviewDt); windowStart.setDate(windowStart.getDate() - 14);
-  var guestLower  = guestName.toLowerCase().trim();
+  var windowStart = new Date(reviewDt);
+  windowStart.setDate(windowStart.getDate() - 14);
+  var first = guestName.split(' ')[0].toLowerCase();
 
-  // Check D1 via Worker first
-  try {
-    var resp = callWorker('GET', 'findStayForReview', {
-      guestName:  guestName,
-      reviewDate: reviewDate,
-    });
-    if (resp && resp.success && resp.data && resp.data.stayId) {
-      return resp.data.stayId;
-    }
-  } catch(e) { Logger.log('Worker findStayForReview error: ' + e.message); }
-
-  // Fallback: check Sheets
   var rows = sheetToObjects(SHEETS.STAYS);
   var match = null;
   rows.forEach(function(r) {
     if (match) return;
-    var rName = String(r.guestName || r.bookerName || '').toLowerCase().trim();
-    if (rName.indexOf(guestLower.split(' ')[0].toLowerCase()) < 0) return;
-    var checkout = new Date(r.checkOut || r.checkout_date || '');
+    var rName = String(r.guestName || r.bookerName || '').toLowerCase();
+    if (rName.indexOf(first) < 0) return;
+    var checkout = new Date(r.checkOut || '');
     if (isNaN(checkout)) return;
     if (checkout >= windowStart && checkout <= reviewDt) match = r.stayId;
   });
   return match;
 }
 
-// Helper: update a single field in the Stays sheet for a given stayId
+// ============================================================
+// PART 4: DRIVE FILE WATCHER
+// ============================================================
+// Runs every 10 minutes. Only checks folders for stays that
+// are currently open (booked/confirmed/docs_uploaded).
+// When both OnlineCheckIn-* and ID-* files are present,
+// auto-sets status = ready_for_checkin.
+
+function pollDriveCheckIns() {
+  // Get open stays from Worker (not yet at ready_for_checkin or beyond)
+  var resp = callWorker('GET', 'getOpenStays', {});
+  if (!resp || !resp.success || !resp.data || !resp.data.length) {
+    Logger.log('pollDriveCheckIns: no open stays or Worker unavailable');
+    return;
+  }
+
+  var openStays = resp.data; // [{stayId, guestName, checkinDate, driveFolderId, status}]
+
+  openStays.forEach(function(stay) {
+    if (!stay.driveFolderId) return; // no folder yet — skip
+
+    try {
+      var folder = DriveApp.getFolderById(stay.driveFolderId);
+      var hasCheckIn = false;
+      var hasId      = false;
+
+      var files = folder.getFiles();
+      while (files.hasNext()) {
+        var fname = files.next().getName();
+        if (fname.match(/^OnlineCheckIn[-_]/i)) hasCheckIn = true;
+        if (fname.match(/^ID[-_]/i))            hasId      = true;
+      }
+
+      if (hasCheckIn && hasId) {
+        // Both docs present — transition to ready_for_checkin
+        var setResp = callWorker('POST', 'setReadyForCheckIn', {
+          stayId:    stay.stayId,
+          createdBy: 'auto',
+        });
+        if (setResp && setResp.success && setResp.data && setResp.data.changed) {
+          Logger.log('Auto ready_for_checkin: ' + stay.stayId + ' (' + stay.guestName + ')');
+          sendEmail(
+            '🔑 Guest ready for check-in: ' + stay.guestName,
+            'Stay ID: '   + stay.stayId +
+            '\nCheck-in: ' + stay.checkinDate +
+            '\nBoth OnlineCheckIn and ID documents found in Drive.' +
+            '\nStatus automatically set to: ready_for_checkin' +
+            '\nRaman can now see this guest on his Check-in screen.'
+          );
+        }
+      }
+    } catch(e) {
+      Logger.log('pollDriveCheckIns error for ' + stay.stayId + ': ' + e.message);
+    }
+  });
+}
+
+// ============================================================
+// PART 5: WORKER HELPER
+// ============================================================
+function callWorker(method, action, payload) {
+  try {
+    var url  = WORKER_URL + '/' + action;
+    var opts = {
+      method:             method.toLowerCase(),
+      headers:            { 'Content-Type': 'application/json', 'X-Actor': 'auto' },
+      muteHttpExceptions: true,
+    };
+    if (method === 'GET' && payload && Object.keys(payload).length > 0) {
+      var qs = Object.keys(payload).map(function(k) {
+        return encodeURIComponent(k) + '=' + encodeURIComponent(payload[k]);
+      }).join('&');
+      url += '?' + qs;
+    }
+    if (method === 'POST') {
+      opts.payload = JSON.stringify(payload || {});
+    }
+    var resp = UrlFetchApp.fetch(url, opts);
+    return JSON.parse(resp.getContentText());
+  } catch(e) {
+    Logger.log('callWorker (' + action + ') error: ' + e.message);
+    return null;
+  }
+}
+
+// Helper — update a single field in Stays sheet
 function updateStayField(stayId, field, value) {
   try {
-    var ss    = SpreadsheetApp.openById(CONFIG.spreadsheetId);
-    var sheet = ss.getSheetByName(SHEETS.STAYS);
+    var sheet = SpreadsheetApp.openById(CONFIG.spreadsheetId).getSheetByName(SHEETS.STAYS);
     var data  = sheet.getDataRange().getValues();
-    var h     = data[0];
+    var h = data[0];
     var idIdx = h.indexOf('stayId');
     var fIdx  = h.indexOf(field);
     if (idIdx < 0 || fIdx < 0) return;
@@ -407,110 +618,15 @@ function updateStayField(stayId, field, value) {
 }
 
 // ============================================================
-// PART 3: DRIVE FILE WATCHER — AUTO SET READY FOR CHECK-IN
-// ============================================================
-// Triggered every 10 minutes.
-// Checks guest folders in the current month for:
-//   - OnlineCheckIn-* file
-//   - ID-* file
-// When both exist, calls Worker to set status = ready_for_checkin
-
-function pollDriveCheckIns() {
-  var root         = DriveApp.getFolderById(CONFIG.driveRootId);
-  var gf           = root.getFoldersByName('Guests');
-  if (!gf.hasNext()) return;
-  var guestsFolder = gf.next();
-
-  var now    = new Date();
-  var year   = String(now.getFullYear());
-  var month  = now.getMonth();
-  var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var monthLabel = String(month + 1).padStart(2, '0') + '-' + monthNames[month];
-
-  // Navigate to current month folder
-  var yf = guestsFolder.getFoldersByName(year);
-  if (!yf.hasNext()) return;
-  var yearFolder = yf.next();
-  var mf = yearFolder.getFoldersByName(monthLabel);
-  if (!mf.hasNext()) return;
-  var monthFolder = mf.next();
-
-  // Check each guest folder
-  var folders = monthFolder.getFolders();
-  while (folders.hasNext()) {
-    var folder = folders.next();
-    var name   = folder.getName(); // GuestName-DD-StayID
-
-    // Extract StayID (last segment after last dash-group)
-    var parts  = name.split('-');
-    if (parts.length < 3) continue;
-    var stayId = parts.slice(-2).join('-'); // e.g. DWK-AB123
-
-    try {
-      var hasCheckIn = false;
-      var hasId      = false;
-      var files = folder.getFiles();
-      while (files.hasNext()) {
-        var fname = files.next().getName();
-        if (fname.match(/^OnlineCheckIn[-_]/i)) hasCheckIn = true;
-        if (fname.match(/^ID[-_]/i))            hasId      = true;
-      }
-
-      if (hasCheckIn && hasId) {
-        // Both docs present — mark ready for check-in if not already
-        var resp = callWorker('POST', 'setReadyForCheckIn', {
-          stayId:    stayId,
-          createdBy: 'auto',
-        });
-        if (resp && resp.success && resp.data && resp.data.changed) {
-          Logger.log('Auto ready_for_checkin: ' + stayId);
-          sendEmail('🔑 Guest ready for check-in: ' + name,
-            'Stay ID: ' + stayId +
-            '\nBoth OnlineCheckIn and ID documents found in Drive.' +
-            '\nRaman has been notified on his Check-in screen.');
-        }
-      }
-    } catch(e) {
-      Logger.log('pollDriveCheckIns folder error (' + name + '): ' + e.message);
-    }
-  }
-}
-
-// ============================================================
-// PART 4: WORKER HELPER
-// ============================================================
-function callWorker(method, action, payload) {
-  try {
-    var url  = WORKER_URL + '/' + action;
-    var opts = {
-      method:            method.toLowerCase(),
-      headers:           { 'Content-Type': 'application/json', 'X-Actor': 'auto' },
-      muteHttpExceptions: true,
-    };
-    if (method === 'GET' && payload) {
-      var qs = Object.keys(payload).map(function(k) {
-        return encodeURIComponent(k) + '=' + encodeURIComponent(payload[k]);
-      }).join('&');
-      url += '?' + qs;
-    } else if (method === 'POST') {
-      opts.payload = JSON.stringify(payload);
-    }
-    var resp = UrlFetchApp.fetch(url, opts);
-    return JSON.parse(resp.getContentText());
-  } catch(e) {
-    Logger.log('callWorker error (' + action + '): ' + e.message);
-    return null;
-  }
-}
-
-// ============================================================
-// PART 5: TRIGGER SETUP (run once manually)
+// PART 6: TRIGGER SETUP — run this function once manually
 // ============================================================
 function setupTriggers() {
-  // Remove existing triggers to avoid duplicates
+  // Remove existing poller triggers to avoid duplicates
   ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (['pollGmail','pollDriveCheckIns'].indexOf(t.getHandlerFunction()) >= 0) {
+    var fn = t.getHandlerFunction();
+    if (['pollGmail', 'pollDriveCheckIns'].indexOf(fn) >= 0) {
       ScriptApp.deleteTrigger(t);
+      Logger.log('Removed existing trigger: ' + fn);
     }
   });
 
@@ -526,14 +642,6 @@ function setupTriggers() {
     .everyMinutes(10)
     .create();
 
-  Logger.log('Triggers set up successfully.');
+  Logger.log('✅ Triggers set up: pollGmail (5min) + pollDriveCheckIns (10min)');
+  Logger.log('Also set up onFormSubmit manually: Triggers → Add Trigger → onFormSubmit → From spreadsheet → On form submit');
 }
-
-// ============================================================
-// EXISTING FUNCTION UPDATES
-// ============================================================
-// In your existing confirmCheckIn() and createBooking() functions,
-// change the folder creation line from:
-//   var folder = getOrCreateGuestFolder(guestName, stayId);
-// to:
-//   var folder = getOrCreateGuestFolder(guestName, stayId, data.checkInDate || data.checkIn);

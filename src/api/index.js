@@ -66,6 +66,8 @@ export const api = {
   saveRentalIncome:     (data)   => post('saveRentalIncome', data),
   getRentalIncome:      (m, y)   => get('getRentalIncome', { month: m, year: y }),
   getRentalDashboard:   (year)   => get('getRentalDashboard', { year }),
+  getRentalAgreements:  ()       => get('getRentalAgreements'),
+  saveRentalAgreement:  (data)   => post('saveRentalAgreement', data),
 
   // ── COCONUT ──────────────────────────────────────────────
   saveCoconutHarvest:   (data)   => post('saveCoconutHarvest', data),

@@ -2,9 +2,21 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
-const CUR_YEAR  = new Date().getFullYear()
-const YEARS     = [CUR_YEAR, CUR_YEAR-1, CUR_YEAR-2, CUR_YEAR-3, CUR_YEAR-4]
-const QUARTERS  = ['Q1','Q2','Q3','Q4']
+// ── COMMISSION LOGIC ──────────────────────────────────────────────────────────
+// To change Raman's commission rates, edit ONLY this function.
+// Do NOT display these figures in the UI — Raman doesn't need to see the formula.
+//
+// Current rates (owner confirmed May 2026, based on master Excel formula since 2018):
+//   1-night stay  → ₹1,000
+//   2+ night stay → ₹2,000
+//
+function calcCommission(nights) {
+  if (nights <= 1) return 1000
+  return 2000
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CUR_YEAR = new Date().getFullYear()
 
 function fmt(n) {
   if (!n && n !== 0) return '—'
@@ -12,32 +24,34 @@ function fmt(n) {
 }
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
+  try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
   catch { return String(d) }
 }
-
-function Skeleton({ h=60 }) {
-  return <div style={{ height:h, background:'rgba(255,255,255,0.04)', borderRadius:'10px', marginBottom:'10px' }}/>
+function Skeleton({ h = 60 }) {
+  return <div style={{ height: h, background: 'rgba(255,255,255,0.04)', borderRadius: '10px', marginBottom: '10px' }} />
 }
 
 export default function RDashboard() {
-  const navigate   = useNavigate()
-  const [tab, setTab]         = useState('unpaid')
-  const [unpaid, setUnpaid]   = useState(null)
-  const [history, setHistory] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [paying, setPaying]   = useState(null) // quarter being paid
-  const [toast, setToast]     = useState(null)
+  const navigate = useNavigate()
+  const [tab, setTab]           = useState('unpaid')
+  const [unpaid, setUnpaid]     = useState(null)
+  const [history, setHistory]   = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [paying, setPaying]     = useState(false)
+  const [toast, setToast]       = useState(null)
   const [apiError, setApiError] = useState(null)
-  const [expandQ, setExpandQ] = useState({})
+  const [expandQ, setExpandQ]   = useState({})
+  // Set of stay_ids (comm_ids) selected via checkboxes
+  const [selected, setSelected] = useState(new Set())
 
-  const showToast = (msg, type='success') => {
+  const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 4000)
+    setTimeout(() => setToast(null), 4500)
   }
 
-  useEffect(() => {
+  const loadData = () => {
     setLoading(true)
+    setApiError(null)
     Promise.all([
       api.getRamanUnpaid(),
       api.getRamanHistory(),
@@ -50,53 +64,116 @@ export default function RDashboard() {
       setApiError(e.message || 'Failed to connect to database')
       setLoading(false)
     })
-  }, [])
+  }
 
-  const handleMarkPaid = async (quarter) => {
-    setPaying(quarter)
+  useEffect(() => { loadData() }, [])
+
+  // ── SELECTION HELPERS ────────────────────────────────────────────────────
+  const toggleOne = (commId) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(commId) ? next.delete(commId) : next.add(commId)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    const allIds = getAllStays().map(s => s.commId)
+    setSelected(prev =>
+      prev.size === allIds.length ? new Set() : new Set(allIds)
+    )
+  }
+
+  const toggleQuarter = (qLabel) => {
+    const qStays = getQuarterStays(qLabel)
+    const ids = qStays.map(s => s.commId)
+    setSelected(prev => {
+      const next = new Set(prev)
+      const allSelected = ids.every(id => next.has(id))
+      ids.forEach(id => allSelected ? next.delete(id) : next.add(id))
+      return next
+    })
+  }
+
+  const getAllStays = () =>
+    (unpaid?.quarters || []).flatMap(q => q.stays || [])
+
+  const getQuarterStays = (qLabel) =>
+    (unpaid?.quarters || []).find(q => q.label === qLabel)?.stays || []
+
+  // ── PAY SELECTED ─────────────────────────────────────────────────────────
+  const handleMarkSelected = async () => {
+    if (selected.size === 0) { showToast('Select at least one stay first', 'error'); return }
+    setPaying(true)
     const today = new Date().toISOString().substring(0, 10)
     try {
-      const res = await api.markRamanPaid({ quarter, paidDate: today })
-      showToast(`✅ ${fmt(res?.totalPaid)} marked paid for ${quarter}`)
-      // Refresh data
-      const [u, h] = await Promise.all([api.getRamanUnpaid(), api.getRamanHistory()])
-      setUnpaid(u)
-      setHistory(Array.isArray(h) ? h : [])
+      // Send selected comm_ids to backend
+      await api.markRamanPaid({ commIds: [...selected], paidDate: today })
+      const total = getAllStays()
+        .filter(s => selected.has(s.commId))
+        .reduce((sum, s) => sum + calcCommission(s.nights), 0)
+      showToast(`✅ ${fmt(total)} marked paid for ${selected.size} stay${selected.size > 1 ? 's' : ''}`)
+      setSelected(new Set())
+      loadData()
     } catch (e) {
       showToast('Failed to mark as paid. Try again.', 'error')
     } finally {
-      setPaying(null)
+      setPaying(false)
     }
   }
 
-  const handleMarkAllPaid = async () => {
-    if (!window.confirm) { /* skip confirm in PWA */ }
-    setPaying('ALL')
+  // ── PAY WHOLE QUARTER ────────────────────────────────────────────────────
+  const handleMarkQuarterPaid = async (qLabel) => {
+    setPaying(true)
     const today = new Date().toISOString().substring(0, 10)
     try {
-      const res = await api.markRamanPaid({ paidDate: today })
-      showToast(`✅ ${fmt(res?.totalPaid)} — all unpaid stays marked paid`)
-      const [u, h] = await Promise.all([api.getRamanUnpaid(), api.getRamanHistory()])
-      setUnpaid(u)
-      setHistory(Array.isArray(h) ? h : [])
+      await api.markRamanPaid({ quarter: qLabel, paidDate: today })
+      const q = unpaid?.quarters?.find(q => q.label === qLabel)
+      showToast(`✅ ${fmt(q?.total)} marked paid for ${qLabel}`)
+      setSelected(new Set())
+      loadData()
     } catch {
       showToast('Failed. Try again.', 'error')
     } finally {
-      setPaying(null)
+      setPaying(false)
+    }
+  }
+
+  // ── PAY ALL ──────────────────────────────────────────────────────────────
+  const handleMarkAllPaid = async () => {
+    setPaying(true)
+    const today = new Date().toISOString().substring(0, 10)
+    try {
+      await api.markRamanPaid({ paidDate: today })
+      showToast(`✅ ${fmt(unpaid?.totalUnpaid)} — all unpaid stays marked paid`)
+      setSelected(new Set())
+      loadData()
+    } catch {
+      showToast('Failed. Try again.', 'error')
+    } finally {
+      setPaying(false)
     }
   }
 
   const gpayLink = (amount) => {
-    // GPay UPI deep link — replace with Raman's UPI ID
     const upi = '85471419raman@okicici'
     return `upi://pay?pa=${upi}&pn=RamananKutty&am=${amount}&cu=INR&tn=Villa+Commission`
   }
 
   const totalHistoryPaid = history.reduce((s, h) => s + (h.total || 0), 0)
+  const allStays = getAllStays()
+  const allIds = allStays.map(s => s.commId)
+  const allChecked = allIds.length > 0 && allIds.every(id => selected.has(id))
+  const someChecked = selected.size > 0 && !allChecked
+
+  // Total of selected stays using our commission calc
+  const selectedTotal = allStays
+    .filter(s => selected.has(s.commId))
+    .reduce((sum, s) => sum + calcCommission(s.nights), 0)
 
   const TABS = [
-    { key:'unpaid',  label:'Unpaid',  icon:'⏳' },
-    { key:'history', label:'History', icon:'📋' },
+    { key: 'unpaid',  label: 'Unpaid',  icon: '⏳' },
+    { key: 'history', label: 'History', icon: '📋' },
   ]
 
   return (
@@ -107,18 +184,18 @@ export default function RDashboard() {
           <div className="topbar-title">R-Dashboard</div>
           <div className="topbar-sub">RAMANKUTTY · COMMISSION TRACKER</div>
         </div>
-        <div style={{width:34}}/>
+        <div style={{ width: 34 }} />
       </div>
 
       {/* Tab bar */}
-      <div style={{ display:'flex', background:'var(--dark-card)', borderBottom:'1px solid var(--border-dim)', flexShrink:0 }}>
+      <div style={{ display: 'flex', background: 'var(--dark-card)', borderBottom: '1px solid var(--border-dim)', flexShrink: 0 }}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            style={{ flex:1, padding:'12px 4px', border:'none', background:'transparent', cursor:'pointer',
-              color: tab===t.key ? 'var(--gold)' : 'var(--text-dim)',
-              borderBottom: tab===t.key ? '2px solid var(--gold)' : '2px solid transparent',
-              fontSize:'0.78rem', fontWeight: tab===t.key ? '700':'400', letterSpacing:'0.5px' }}>
-            <div style={{ fontSize:'1rem', marginBottom:'2px' }}>{t.icon}</div>
+            style={{ flex: 1, padding: '12px 4px', border: 'none', background: 'transparent', cursor: 'pointer',
+              color: tab === t.key ? 'var(--gold)' : 'var(--text-dim)',
+              borderBottom: tab === t.key ? '2px solid var(--gold)' : '2px solid transparent',
+              fontSize: '0.78rem', fontWeight: tab === t.key ? '700' : '400', letterSpacing: '0.5px' }}>
+            <div style={{ fontSize: '1rem', marginBottom: '2px' }}>{t.icon}</div>
             {t.label}
           </button>
         ))}
@@ -126,138 +203,183 @@ export default function RDashboard() {
 
       <div className="screen-body">
 
-        {/* API ERROR BANNER */}
+        {/* API error */}
         {apiError && (
-          <div style={{background:'rgba(198,40,40,0.12)',border:'1px solid rgba(198,40,40,0.4)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'}}>
-            <div style={{color:'#EF9A9A',fontWeight:'700',fontSize:'0.82rem',marginBottom:'4px'}}>⚠️ Database connection error</div>
-            <div style={{color:'#EF9A9A',fontSize:'0.75rem',fontFamily:'monospace'}}>{apiError}</div>
-            <div style={{color:'#5C7080',fontSize:'0.72rem',marginTop:'6px'}}>Check: Cloudflare Pages → Settings → Bindings → D1 binding named <strong>bgindia_db</strong> must exist</div>
+          <div style={{ background: 'rgba(198,40,40,0.12)', border: '1px solid rgba(198,40,40,0.4)', borderRadius: '12px', padding: '12px 14px', marginBottom: '12px' }}>
+            <div style={{ color: '#EF9A9A', fontWeight: '700', fontSize: '0.82rem', marginBottom: '4px' }}>⚠️ Database connection error</div>
+            <div style={{ color: '#EF9A9A', fontSize: '0.75rem', fontFamily: 'monospace' }}>{apiError}</div>
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '6px' }}>Check: Cloudflare Pages → Settings → Bindings → D1 binding named <strong>bgindia_db</strong> must exist</div>
           </div>
         )}
 
-        {/* ── UNPAID TAB ─────────────────────────────────────── */}
+        {/* ── UNPAID TAB ──────────────────────────────────────────────────── */}
         {tab === 'unpaid' && (
           <>
             {/* Summary card */}
             <div className="card-section-label">TOTAL OUTSTANDING</div>
-            {loading ? <Skeleton h={80}/> : (
-              <div style={{ background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.25)',
-                borderRadius:'14px', padding:'16px', marginBottom:'14px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            {loading ? <Skeleton h={80} /> : (
+              <div style={{ background: 'rgba(200,144,58,0.06)', border: '1px solid rgba(200,144,58,0.25)', borderRadius: '14px', padding: '16px', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <div style={{ color:'var(--text-dim)', fontSize:'0.72rem', letterSpacing:'1px', marginBottom:'4px' }}>
+                    <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', letterSpacing: '1px', marginBottom: '4px' }}>
                       TOTAL UNPAID · {unpaid?.unpaidCount || 0} STAYS
                     </div>
-                    <div style={{ color:'var(--gold)', fontSize:'2rem', fontWeight:'800', fontFamily:'monospace' }}>
+                    <div style={{ color: 'var(--gold)', fontSize: '2rem', fontWeight: '800', fontFamily: 'monospace' }}>
                       {fmt(unpaid?.totalUnpaid)}
                     </div>
                   </div>
-                  <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:'0.72rem', color:'var(--text-dim)', marginBottom:'6px' }}>
-                      Commission logic:
-                    </div>
-                    <div style={{ fontSize:'0.78rem', color:'var(--text-muted)' }}>1 night → ₹1,000</div>
-                    <div style={{ fontSize:'0.78rem', color:'var(--text-muted)' }}>2+ nights → ₹2,000</div>
-                  </div>
                 </div>
-                {unpaid?.totalUnpaid > 0 && (
-                  <div style={{ marginTop:'14px', display:'flex', gap:'8px' }}>
-                    <button onClick={handleMarkAllPaid} disabled={!!paying}
-                      style={{ flex:1, padding:'10px', borderRadius:'10px', border:'none',
-                        background:'var(--gold)', color:'#000', fontWeight:'700', fontSize:'0.85rem', cursor:'pointer' }}>
-                      {paying==='ALL' ? 'Marking...' : `Mark all paid → ${fmt(unpaid?.totalUnpaid)}`}
-                    </button>
-                    <a href={gpayLink(unpaid?.totalUnpaid || 0)}
-                      style={{ padding:'10px 14px', borderRadius:'10px', border:'1px solid rgba(200,144,58,0.3)',
-                        background:'transparent', color:'var(--gold)', fontSize:'0.85rem', fontWeight:'600',
-                        textDecoration:'none', display:'flex', alignItems:'center', gap:'6px' }}>
-                      💳 GPay
-                    </a>
+
+                {/* Bulk action buttons */}
+                {(unpaid?.totalUnpaid > 0) && (
+                  <div style={{ marginTop: '14px', display: 'flex', gap: '8px' }}>
+                    {selected.size > 0 ? (
+                      <>
+                        <button onClick={handleMarkSelected} disabled={paying}
+                          style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: 'var(--gold)', color: '#000', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>
+                          {paying ? 'Marking...' : `Pay ${selected.size} selected → ${fmt(selectedTotal)}`}
+                        </button>
+                        <button onClick={() => setSelected(new Set())}
+                          style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(200,144,58,0.3)', background: 'transparent', color: 'var(--gold)', fontSize: '0.85rem', fontWeight: '600', cursor: 'pointer' }}>
+                          Clear
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={handleMarkAllPaid} disabled={paying}
+                          style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: 'var(--gold)', color: '#000', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>
+                          {paying ? 'Marking...' : `Mark all paid → ${fmt(unpaid?.totalUnpaid)}`}
+                        </button>
+                        <a href={gpayLink(unpaid?.totalUnpaid || 0)}
+                          style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(200,144,58,0.3)', background: 'transparent', color: 'var(--gold)', fontSize: '0.85rem', fontWeight: '600', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          💳 GPay
+                        </a>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
             )}
 
-            {/* By quarter */}
+            {/* Select-all checkbox */}
+            {!loading && allStays.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 2px', marginBottom: '4px' }}>
+                <input
+                  type="checkbox"
+                  checked={allChecked}
+                  ref={el => { if (el) el.indeterminate = someChecked }}
+                  onChange={toggleAll}
+                  style={{ width: 16, height: 16, accentColor: 'var(--gold)', cursor: 'pointer' }}
+                />
+                <span style={{ color: 'var(--text-dim)', fontSize: '0.78rem' }}>
+                  {allChecked ? 'Deselect all' : `Select all (${allStays.length} stays)`}
+                </span>
+              </div>
+            )}
+
+            {/* Quarters */}
             <div className="card-section-label">BY QUARTER</div>
             {loading ? (
-              <><Skeleton/><Skeleton/><Skeleton/></>
+              <><Skeleton /><Skeleton /><Skeleton /></>
             ) : !unpaid?.quarters?.length ? (
-              <div className="card" style={{ textAlign:'center', color:'var(--green)', padding:'24px' }}>
+              <div className="card" style={{ textAlign: 'center', color: 'var(--green)', padding: '24px' }}>
                 ✅ All stays paid — nothing outstanding
               </div>
             ) : (
-              unpaid.quarters.map((q, qi) => (
-                <div key={qi} style={{ background:'var(--dark-card)', border:'1px solid var(--border-dim)',
-                  borderRadius:'12px', marginBottom:'8px', overflow:'hidden' }}>
-                  {/* Quarter header */}
-                  <div style={{ padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center',
-                    cursor:'pointer', borderBottom: expandQ[q.label] ? '1px solid var(--border-dim)' : 'none' }}
-                    onClick={() => setExpandQ(prev => ({ ...prev, [q.label]: !prev[q.label] }))}>
-                    <div>
-                      <div style={{ color:'var(--text)', fontWeight:'700', fontSize:'0.95rem' }}>{q.label}</div>
-                      <div style={{ color:'var(--text-dim)', fontSize:'0.75rem', marginTop:'2px' }}>
-                        {q.stays?.length || 0} stays · {expandQ[q.label] ? 'tap to collapse' : 'tap to expand'}
-                      </div>
-                    </div>
-                    <div style={{ textAlign:'right' }}>
-                      <div style={{ color:'var(--gold)', fontWeight:'800', fontSize:'1.1rem' }}>{fmt(q.total)}</div>
-                    </div>
-                  </div>
+              unpaid.quarters.map((q, qi) => {
+                const qStays = q.stays || []
+                const qIds = qStays.map(s => s.commId)
+                const qAllChecked = qIds.length > 0 && qIds.every(id => selected.has(id))
+                const qSomeChecked = qIds.some(id => selected.has(id)) && !qAllChecked
 
-                  {/* Expanded stay list */}
-                  {expandQ[q.label] && (
-                    <>
-                      {(q.stays || []).map((s, si) => (
-                        <div key={si} style={{ padding:'10px 16px', borderBottom:'1px solid rgba(255,255,255,0.03)',
-                          display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                          <div>
-                            <div style={{ color:'var(--text)', fontSize:'0.85rem', fontWeight:'500' }}>
-                              {s.guestName || s.bookerName}
-                            </div>
-                            <div style={{ color:'var(--text-dim)', fontSize:'0.73rem', marginTop:'1px' }}>
-                              {fmtDate(s.checkIn)} · {s.nights} night{s.nights>1?'s':''}
-                            </div>
-                          </div>
-                          <div style={{ color:'var(--gold)', fontWeight:'700', fontSize:'0.9rem' }}>
-                            {fmt(s.ramanComm)}
+                return (
+                  <div key={qi} style={{ background: 'var(--dark-card)', border: '1px solid var(--border-dim)', borderRadius: '12px', marginBottom: '8px', overflow: 'hidden' }}>
+
+                    {/* Quarter header with checkbox */}
+                    <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: expandQ[q.label] ? '1px solid var(--border-dim)' : 'none' }}
+                      onClick={() => setExpandQ(prev => ({ ...prev, [q.label]: !prev[q.label] }))}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <input
+                          type="checkbox"
+                          checked={qAllChecked}
+                          ref={el => { if (el) el.indeterminate = qSomeChecked }}
+                          onChange={(e) => { e.stopPropagation(); toggleQuarter(q.label) }}
+                          onClick={e => e.stopPropagation()}
+                          style={{ width: 16, height: 16, accentColor: 'var(--gold)', cursor: 'pointer', flexShrink: 0 }}
+                        />
+                        <div>
+                          <div style={{ color: 'var(--text)', fontWeight: '700', fontSize: '0.95rem' }}>{q.label}</div>
+                          <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', marginTop: '2px' }}>
+                            {qStays.length} stay{qStays.length !== 1 ? 's' : ''} · {expandQ[q.label] ? 'tap to collapse' : 'tap to expand'}
                           </div>
                         </div>
-                      ))}
-                      {/* Pay this quarter */}
-                      <div style={{ padding:'12px 16px', display:'flex', gap:'8px' }}>
-                        <button onClick={() => handleMarkPaid(q.label)} disabled={!!paying}
-                          style={{ flex:1, padding:'9px', borderRadius:'9px', border:'none',
-                            background:'rgba(200,144,58,0.15)', color:'var(--gold)', fontWeight:'700',
-                            fontSize:'0.82rem', cursor:'pointer', border:'1px solid rgba(200,144,58,0.3)' }}>
-                          {paying===q.label ? 'Marking...' : `Mark ${q.label} paid → ${fmt(q.total)}`}
-                        </button>
-                        <a href={gpayLink(q.total || 0)}
-                          style={{ padding:'9px 12px', borderRadius:'9px', border:'1px solid rgba(200,144,58,0.2)',
-                            color:'var(--gold)', fontSize:'0.82rem', textDecoration:'none',
-                            display:'flex', alignItems:'center' }}>
-                          💳
-                        </a>
                       </div>
-                    </>
-                  )}
-                </div>
-              ))
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ color: 'var(--gold)', fontWeight: '800', fontSize: '1.1rem' }}>{fmt(q.total)}</div>
+                      </div>
+                    </div>
+
+                    {/* Expanded: stay list with per-stay checkboxes */}
+                    {expandQ[q.label] && (
+                      <>
+                        {qStays.map((s, si) => {
+                          const isChecked = selected.has(s.commId)
+                          return (
+                            <div key={si}
+                              onClick={() => toggleOne(s.commId)}
+                              style={{ padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', background: isChecked ? 'rgba(200,144,58,0.07)' : 'transparent', transition: 'background 0.12s', userSelect: 'none' }}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => toggleOne(s.commId)}
+                                onClick={e => e.stopPropagation()}
+                                style={{ width: 16, height: 16, accentColor: 'var(--gold)', cursor: 'pointer', flexShrink: 0 }}
+                              />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ color: 'var(--text)', fontSize: '0.85rem', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {s.guestName || s.bookerName}
+                                </div>
+                                <div style={{ color: 'var(--text-dim)', fontSize: '0.73rem', marginTop: '1px' }}>
+                                  {fmtDate(s.checkIn)} · {s.nights} night{s.nights > 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem', flexShrink: 0 }}>
+                                {fmt(calcCommission(s.nights))}
+                              </div>
+                            </div>
+                          )
+                        })}
+
+                        {/* Pay this quarter button */}
+                        <div style={{ padding: '12px 16px', display: 'flex', gap: '8px' }}>
+                          <button onClick={() => handleMarkQuarterPaid(q.label)} disabled={paying}
+                            style={{ flex: 1, padding: '9px', borderRadius: '9px', border: '1px solid rgba(200,144,58,0.3)', background: 'rgba(200,144,58,0.15)', color: 'var(--gold)', fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer' }}>
+                            {paying ? 'Marking...' : `Mark ${q.label} paid → ${fmt(q.total)}`}
+                          </button>
+                          <a href={gpayLink(q.total || 0)}
+                            style={{ padding: '9px 12px', borderRadius: '9px', border: '1px solid rgba(200,144,58,0.2)', color: 'var(--gold)', fontSize: '0.82rem', textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+                            💳
+                          </a>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )
+              })
             )}
           </>
         )}
 
-        {/* ── HISTORY TAB ────────────────────────────────────── */}
+        {/* ── HISTORY TAB ─────────────────────────────────────────────────── */}
         {tab === 'history' && (
           <>
             <div className="card-section-label">ALL-TIME PAID</div>
-            {loading ? <Skeleton h={80}/> : (
-              <div style={{ background:'rgba(52,168,83,0.06)', border:'1px solid rgba(52,168,83,0.2)',
-                borderRadius:'14px', padding:'16px', marginBottom:'14px' }}>
-                <div style={{ color:'var(--text-dim)', fontSize:'0.72rem', letterSpacing:'1px', marginBottom:'4px' }}>
+            {loading ? <Skeleton h={80} /> : (
+              <div style={{ background: 'rgba(52,168,83,0.06)', border: '1px solid rgba(52,168,83,0.2)', borderRadius: '14px', padding: '16px', marginBottom: '14px' }}>
+                <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', letterSpacing: '1px', marginBottom: '4px' }}>
                   TOTAL PAID TO DATE · {history.length} PAYMENTS
                 </div>
-                <div style={{ color:'var(--green)', fontSize:'2rem', fontWeight:'800', fontFamily:'monospace' }}>
+                <div style={{ color: 'var(--green)', fontSize: '2rem', fontWeight: '800', fontFamily: 'monospace' }}>
                   {fmt(totalHistoryPaid)}
                 </div>
               </div>
@@ -265,27 +387,24 @@ export default function RDashboard() {
 
             <div className="card-section-label">PAYMENT HISTORY</div>
             {loading ? (
-              <><Skeleton/><Skeleton/><Skeleton/></>
+              <><Skeleton /><Skeleton /><Skeleton /></>
             ) : !history.length ? (
-              <div className="card" style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px' }}>
+              <div className="card" style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '24px' }}>
                 No payment history yet
               </div>
             ) : (
-              <div style={{ background:'var(--dark-card)', borderRadius:'12px',
-                border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'12px' }}>
+              <div style={{ background: 'var(--dark-card)', borderRadius: '12px', border: '1px solid var(--border-dim)', overflow: 'hidden', marginBottom: '12px' }}>
                 {history.map((h, i) => (
-                  <div key={i} style={{ padding:'14px 16px',
-                    borderBottom: i < history.length-1 ? '1px solid var(--border-dim)' : 'none',
-                    display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div key={i} style={{ padding: '14px 16px', borderBottom: i < history.length - 1 ? '1px solid var(--border-dim)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <div style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.9rem' }}>
+                      <div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.9rem' }}>
                         Paid {fmtDate(h.date)}
                       </div>
-                      <div style={{ color:'var(--text-dim)', fontSize:'0.75rem', marginTop:'2px' }}>
-                        {h.stays} stay{h.stays>1?'s':''} covered
+                      <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', marginTop: '2px' }}>
+                        {h.stays} stay{h.stays > 1 ? 's' : ''} covered
                       </div>
                     </div>
-                    <div style={{ color:'var(--green)', fontWeight:'700', fontSize:'1rem' }}>
+                    <div style={{ color: 'var(--green)', fontWeight: '700', fontSize: '1rem' }}>
                       {fmt(h.total)}
                     </div>
                   </div>
@@ -293,22 +412,21 @@ export default function RDashboard() {
               </div>
             )}
 
-            {/* All-time stats */}
             <div className="card-section-label">STATS</div>
             <div className="card">
-              {loading ? <Skeleton/> : (
+              {loading ? <Skeleton /> : (
                 <>
                   <div className="net-row">
                     <span className="net-label">Total paid to date</span>
-                    <span style={{ color:'var(--green)', fontWeight:'700' }}>{fmt(totalHistoryPaid)}</span>
+                    <span style={{ color: 'var(--green)', fontWeight: '700' }}>{fmt(totalHistoryPaid)}</span>
                   </div>
                   <div className="net-row">
                     <span className="net-label">Total outstanding</span>
-                    <span style={{ color:'var(--gold)', fontWeight:'700' }}>{fmt(unpaid?.totalUnpaid)}</span>
+                    <span style={{ color: 'var(--gold)', fontWeight: '700' }}>{fmt(unpaid?.totalUnpaid)}</span>
                   </div>
                   <div className="net-row">
                     <span className="net-label">All-time commission</span>
-                    <span style={{ fontWeight:'700' }}>{fmt((totalHistoryPaid||0) + (unpaid?.totalUnpaid||0))}</span>
+                    <span style={{ fontWeight: '700' }}>{fmt((totalHistoryPaid || 0) + (unpaid?.totalUnpaid || 0))}</span>
                   </div>
                   <div className="net-row">
                     <span className="net-label">Number of payments made</span>

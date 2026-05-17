@@ -70,15 +70,28 @@ CREATE TABLE IF NOT EXISTS stay_incidentals (
 );
 
 CREATE TABLE IF NOT EXISTS rental_props (
-  prop_id      TEXT PRIMARY KEY,
-  name         TEXT,
-  location     TEXT,
-  tenant_name  TEXT,
-  tenant_phone TEXT,
-  lease_start  TEXT,
-  lease_end    TEXT,
-  monthly_rent REAL DEFAULT 0
+  prop_id         TEXT PRIMARY KEY,
+  name            TEXT,
+  location        TEXT,
+  tenant_name     TEXT,
+  tenant_phone    TEXT,
+  deposit         REAL DEFAULT 0,      -- security deposit amount
+  agreed_rent     REAL DEFAULT 0,      -- monthly agreed rent
+  maintenance_fee REAL DEFAULT 0,      -- monthly maintenance fee
+  lease_start     TEXT,                -- YYYY-MM-DD
+  lease_end       TEXT,                -- YYYY-MM-DD (used for 60-day renewal alerts)
+  notes           TEXT,                -- special terms, contact info etc.
+  monthly_rent    REAL DEFAULT 0,      -- kept for backward compat; use agreed_rent going forward
+  updated_at      TEXT DEFAULT (datetime('now'))
 );
+
+-- Migration: if rental_props already exists, add the new columns safely (SQLite ALTER TABLE)
+-- Run these manually once against your live D1 if the table was already created:
+--   ALTER TABLE rental_props ADD COLUMN deposit         REAL DEFAULT 0;
+--   ALTER TABLE rental_props ADD COLUMN agreed_rent     REAL DEFAULT 0;
+--   ALTER TABLE rental_props ADD COLUMN maintenance_fee REAL DEFAULT 0;
+--   ALTER TABLE rental_props ADD COLUMN notes           TEXT;
+--   ALTER TABLE rental_props ADD COLUMN updated_at      TEXT DEFAULT (datetime('now'));
 
 CREATE TABLE IF NOT EXISTS rental_income (
   record_id    TEXT PRIMARY KEY,

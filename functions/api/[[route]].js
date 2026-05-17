@@ -259,6 +259,14 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results, sql })
       }
 
+      // RENTAL AGREEMENTS — get tenant details for all rental properties
+      if (action === 'getRentalAgreements') {
+        const { results } = await DB.prepare(
+          `SELECT * FROM rental_props ORDER BY prop_id`
+        ).all()
+        return json({ success: true, data: results })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -447,26 +455,46 @@ export async function onRequest(ctx) {
       }
 
       // RAMAN — MARK PAID
+      // Supports three modes:
+      //   commIds: [...] — pay specific selected stays by their comm_id
+      //   quarter: 'Q1 2026' — pay all stays in that quarter
+      //   (neither)  — pay ALL unpaid stays
       if (action === 'markRamanPaid') {
         const today = new Date().toISOString().slice(0, 10)
         const paidDate = body.paidDate || today
-        let query = `UPDATE raman_commissions SET is_paid = 1, paid_date = ? WHERE is_paid = 0`
-        const binds = [paidDate]
-        if (body.quarter) {
-          // Mark only that quarter's entries
+        let result
+
+        if (body.commIds && Array.isArray(body.commIds) && body.commIds.length > 0) {
+          // Pay specific selected stays — run one UPDATE per id (D1 doesn't support IN with bind arrays)
+          for (const commId of body.commIds) {
+            await DB.prepare(
+              `UPDATE raman_commissions SET is_paid = 1, paid_date = ? WHERE comm_id = ? AND is_paid = 0`
+            ).bind(paidDate, commId).run()
+          }
+        } else if (body.quarter) {
+          // Pay all stays in a specific quarter
           const [q, y] = body.quarter.split(' ')
           const qNum   = parseInt(q.replace('Q',''))
           const mStart = String((qNum - 1) * 3 + 1).padStart(2, '0')
           const mEnd   = String(qNum * 3).padStart(2, '0')
-          query += ` AND strftime('%Y', checkin_date) = ? AND strftime('%m', checkin_date) BETWEEN ? AND ?`
-          binds.push(y, mStart, mEnd)
+          await DB.prepare(
+            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?
+             WHERE is_paid = 0
+               AND strftime('%Y', checkin_date) = ?
+               AND strftime('%m', checkin_date) BETWEEN ? AND ?`
+          ).bind(paidDate, y, mStart, mEnd).run()
+        } else {
+          // Pay ALL outstanding
+          await DB.prepare(
+            `UPDATE raman_commissions SET is_paid = 1, paid_date = ? WHERE is_paid = 0`
+          ).bind(paidDate).run()
         }
-        const result = await DB.prepare(query).bind(...binds).run()
-        // Get total paid
-        const { results } = await DB.prepare(
+
+        // Return total paid in this batch
+        const { results: totals } = await DB.prepare(
           `SELECT SUM(commission) as total FROM raman_commissions WHERE paid_date = ? AND is_paid = 1`
         ).bind(paidDate).all()
-        return json({ success: true, data: { totalPaid: results[0]?.total || 0, rowsUpdated: result.meta?.changes || 0 } })
+        return json({ success: true, data: { totalPaid: totals[0]?.total || 0 } })
       }
 
       // INVENTORY PRICES
@@ -486,6 +514,33 @@ export async function onRequest(ctx) {
             .bind(parseFloat(e.qty)||0, e.id, villaId).run()
         }
         return json({ success: true })
+      }
+
+      // RENTAL AGREEMENTS — save tenant agreement for a rental property
+      if (action === 'saveRentalAgreement') {
+        const { propId, tenantName, deposit, agreedRent, maintenance, leaseStart, leaseEnd, notes } = body
+        if (!propId) return err('propId is required')
+        // Upsert: update if exists, insert if not
+        const existing = await DB.prepare(
+          `SELECT prop_id FROM rental_props WHERE prop_id = ?`
+        ).bind(propId).first()
+        if (existing) {
+          await DB.prepare(
+            `UPDATE rental_props
+             SET tenant_name = ?, deposit = ?, agreed_rent = ?, maintenance_fee = ?,
+                 lease_start = ?, lease_end = ?, notes = ?, updated_at = datetime('now')
+             WHERE prop_id = ?`
+          ).bind(tenantName||'', deposit||0, agreedRent||0, maintenance||0,
+                 leaseStart||null, leaseEnd||null, notes||null, propId).run()
+        } else {
+          await DB.prepare(
+            `INSERT INTO rental_props
+               (prop_id, tenant_name, deposit, agreed_rent, maintenance_fee, lease_start, lease_end, notes)
+             VALUES (?,?,?,?,?,?,?,?)`
+          ).bind(propId, tenantName||'', deposit||0, agreedRent||0, maintenance||0,
+                 leaseStart||null, leaseEnd||null, notes||null).run()
+        }
+        return json({ success: true, data: { propId } })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

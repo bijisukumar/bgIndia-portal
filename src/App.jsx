@@ -23,6 +23,7 @@ import Inventory         from './screens/villa/Inventory'
 
 // Rental screens
 import RentalProperties from './screens/rental/RentalProperties'
+import RentalAgreement  from './screens/rental/RentalAgreement'
 
 // Estate screens
 import PollachiHub    from './screens/estates/PollachiHub'
@@ -57,6 +58,7 @@ function ProtectedRoutes() {
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         {/* Rental */}
         <Route path="/owner/rental"           element={<RentalProperties />} />
+        <Route path="/owner/rental/agreement" element={<RentalAgreement />} />
         {/* Estates */}
         <Route path="/owner/pollachi"         element={<PollachiHub />} />
         <Route path="/pollachi/coconut"       element={<CoconutTracker />} />

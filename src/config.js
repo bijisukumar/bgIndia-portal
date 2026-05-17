@@ -33,11 +33,13 @@ export const CONFIG = {
   ],
 
   // Rental properties — monthly income tracker
-  // Add leaseEnd (YYYY-MM-DD) to enable renewal alerts (60-day warning)
+  // tenantName and leaseEnd are now managed via the Tenant Agreements screen (/owner/rental/agreement)
+  // and stored in the rental_props table. The fields below are fallbacks for display only.
+  // Add leaseEnd (YYYY-MM-DD) here to enable renewal alerts (60-day warning) as a quick override.
   rentalProperties: [
-    { id: 'rental_1', name: 'Property A', location: '', tenantName: '', leaseEnd: '' },
-    { id: 'rental_2', name: 'Property B', location: '', tenantName: '', leaseEnd: '' },
-    { id: 'rental_3', name: 'Property C', location: '', tenantName: '', leaseEnd: '' },
+    { id: 'rental_1', name: 'Tritvam',  location: 'Kochi, KL',  tenantName: '', leaseEnd: '' },
+    { id: 'rental_2', name: 'Pacifica', location: 'OMR, TN',    tenantName: '', leaseEnd: '' },
+    { id: 'rental_3', name: 'Pinnacle', location: 'TCR, KL',    tenantName: '', leaseEnd: '' },
   ],
 
   // Estate properties

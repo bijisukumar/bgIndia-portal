@@ -58,19 +58,34 @@ export default function NewBooking() {
     }
     setSaving(true)
     try {
+      // Map form fields to what the Worker / D1 schema expects
       const res = await api.createBooking({
-        ...form,
+        villaId:        'dwarka',
+        source:         form.channel,
+        guestName:      form.bookerName,       // Worker expects guestName (not bookerName)
+        guestPhone:     form.guestPhone || null,
+        guestEmail:     form.guestEmail || null,
+        checkInDate:    form.checkInDate,
+        checkOutDate:   form.checkOutDate,
         nights,
+        adults:         parseInt(form.guestCount) || 1,
+        children:       0,
+        tariffPerNight: parseFloat(form.tariffPerNight) || 0,
+        extraCharges:   parseFloat(form.extraCharges) || 0,
         gross,
-        commPct,
-        commAmt,
+        commissionPct:  commPct,               // Worker expects commissionPct (not commPct)
+        commissionAmt:  commAmt,               // Worker expects commissionAmt (not commAmt)
         net,
-        villaId: 'dwarka',
+        notes:          form.notes,
+        status:         form.status,
       })
       setResult(res)
       showToast('Booking created! Stay ID: ' + res?.stayId)
     } catch (e) {
-      showToast('Failed to create booking. Try again.', 'error')
+      // Show actual Worker error — helps diagnose 500s
+      const msg = e?.message || 'Unknown error'
+      showToast(`Save failed: ${msg}`, 'error')
+      console.error('[NewBooking] createBooking failed:', e)
     } finally {
       setSaving(false)
     }

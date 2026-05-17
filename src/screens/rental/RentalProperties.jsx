@@ -6,6 +6,7 @@ import { CONFIG } from '../../config'
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const CUR_MONTH = new Date().getMonth()
 const CUR_YEAR  = new Date().getFullYear()
+const YEAR_OPTIONS = [CUR_YEAR, CUR_YEAR - 1]  // Current year + last year. Add more as needed.
 
 const INCOME_FIELDS  = [
   { key: 'rent',       label: 'Rent received', color: 'green' },
@@ -41,6 +42,7 @@ export default function RentalProperties() {
   const [tab, setTab]         = useState('tracker')
   const [monthFrom, setMonthFrom] = useState(CUR_MONTH)
   const [monthTo,   setMonthTo]   = useState(CUR_MONTH)
+  const [selectedYear, setSelectedYear] = useState(CUR_YEAR)
   const [saving, setSaving]   = useState(false)
   const [toast, setToast]     = useState(null)
   const [data, setData]       = useState(CONFIG.rentalProperties.map(() => emptyProp()))
@@ -55,11 +57,11 @@ export default function RentalProperties() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await api.saveRentalIncome({ monthFrom, monthTo, year: CUR_YEAR, properties: data })
+      await api.saveRentalIncome({ monthFrom, monthTo, year: selectedYear, properties: data })
       const label = monthFrom === monthTo
         ? MONTHS[monthFrom]
         : `${MONTHS[monthFrom]}–${MONTHS[monthTo]}`
-      showToast(`✓ Saved for ${label} ${CUR_YEAR}${monthCount > 1 ? ` (${monthCount} months)` : ''}`)
+      showToast(`✓ Saved for ${label} ${selectedYear}${monthCount > 1 ? ` (${monthCount} months)` : ''}`)
     } catch { showToast('Failed to save','error') }
     finally { setSaving(false) }
   }
@@ -91,13 +93,14 @@ export default function RentalProperties() {
         <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Rental properties</div>
-          <div className="topbar-sub">MONTHLY INCOME TRACKER · {CUR_YEAR}</div>
+          <div className="topbar-sub">MONTHLY INCOME TRACKER · {selectedYear}</div>
         </div>
       </div>
 
       <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.06)', background:'#111'}}>
-        <button style={tabStyle('tracker')}  onClick={()=>setTab('tracker')}>📋 Monthly entry</button>
-        <button style={tabStyle('dashboard')} onClick={()=>setTab('dashboard')}>📊 Dashboard</button>
+        <button style={tabStyle('tracker')}    onClick={()=>setTab('tracker')}>📋 Monthly entry</button>
+        <button style={tabStyle('dashboard')}  onClick={()=>setTab('dashboard')}>📊 Dashboard</button>
+        <button style={tabStyle('agreements')} onClick={()=>navigate('/owner/rental/agreement')}>📄 Agreements</button>
       </div>
 
       <div className="screen-body">
@@ -124,6 +127,25 @@ export default function RentalProperties() {
         {/* ── TRACKER TAB ──────────────────────────────── */}
         {tab === 'tracker' && (
           <>
+            {/* Year selector */}
+            <div className="card-section-label">SELECT YEAR</div>
+            <div style={{display:'flex',gap:'8px',marginBottom:'4px'}}>
+              {YEAR_OPTIONS.map(yr => (
+                <button key={yr}
+                  onClick={() => setSelectedYear(yr)}
+                  style={{
+                    flex:1, padding:'8px', borderRadius:'20px', cursor:'pointer',
+                    border: selectedYear===yr ? '2px solid var(--gold)' : '1px solid rgba(255,255,255,0.1)',
+                    background: selectedYear===yr ? 'rgba(200,144,58,0.15)' : 'transparent',
+                    color: selectedYear===yr ? 'var(--gold)' : '#5C7080',
+                    fontWeight: selectedYear===yr ? '700' : '400',
+                    fontSize:'0.88rem',
+                  }}>
+                  {yr}
+                </button>
+              ))}
+            </div>
+
             {/* Month range selector */}
             <div className="card-section-label">SELECT MONTH RANGE TO SAVE</div>
             <div className="card" style={{marginBottom:'12px'}}>
@@ -229,13 +251,13 @@ export default function RentalProperties() {
             <div className="net-box" style={{marginTop:'8px'}}>
               <div className="net-row">
                 <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>
-                  Total net · {monthCount > 1 ? `${MONTHS[monthFrom]}–${MONTHS[monthTo]}` : MONTHS[monthFrom]} {CUR_YEAR}
+                  Total net · {monthCount > 1 ? `${MONTHS[monthFrom]}–${MONTHS[monthTo]}` : MONTHS[monthFrom]} {selectedYear}
                 </span>
                 <span className={`net-val big ${totalNet<0?'neg':''}`}>{fmt(totalNet)}</span>
               </div>
               {monthCount > 1 && (
                 <div className="net-row">
-                  <span className="net-label">{monthCount} months × {fmt(totalNet)}</span>
+                  <span className="net-label">{monthCount} months × {fmt(totalNet)} each</span>
                   <span style={{color:'#85B7EB',fontWeight:'700'}}>{fmt(totalNet * monthCount)}</span>
                 </div>
               )}
@@ -244,7 +266,7 @@ export default function RentalProperties() {
             <button className="btn btn-gold" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving...' : monthCount > 1
                 ? `Save for ${MONTHS[monthFrom]}–${MONTHS[monthTo]} (${monthCount} months) →`
-                : `Save ${MONTHS[monthFrom]} ${CUR_YEAR} →`}
+                : `Save ${MONTHS[monthFrom]} ${selectedYear} →`}
             </button>
             <p className="btn-email-note">📧 Owner notified on save</p>
           </>

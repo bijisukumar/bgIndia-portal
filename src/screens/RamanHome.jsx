@@ -68,6 +68,13 @@ export default function RamanHome() {
       disabled: !activeStay,
       lockReason: 'Guest must be checked in to record car rental',
     },
+    {
+      icon: '💰', bg: 'rgba(52,168,83,0.08)', arrow: '#34A853',
+      title: 'My earnings',
+      sub: 'Commission snapshot · paid & outstanding',
+      path: '/raman/dashboard',
+      disabled: false,
+    },
   ]
 
   return (

@@ -105,6 +105,7 @@ export const api = {
 
   // ── RAMAN ────────────────────────────────────────────────
   getRamanUnpaid:       ()       => get('getRamanUnpaid'),
+  getRamanDashboard:    ()       => get('getRamanDashboard'),
   getRamanHistory:      ()       => get('getRamanHistory'),
   markRamanPaid:        (data)   => post('markRamanPaid', data),
 

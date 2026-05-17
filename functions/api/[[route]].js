@@ -191,6 +191,63 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // RAMAN DASHBOARD SUMMARY — year-by-year + current quarter unpaid detail
+      if (action === 'getRamanDashboard') {
+        // Paid totals by year
+        const { results: byYear } = await DB.prepare(
+          `SELECT strftime('%Y', paid_date) as year,
+                  SUM(commission) as total_paid,
+                  COUNT(*) as stays_paid
+           FROM raman_commissions
+           WHERE is_paid = 1
+           GROUP BY year ORDER BY year DESC`
+        ).all()
+
+        // Unpaid — all, with quarter breakdown
+        const { results: unpaidRows } = await DB.prepare(
+          `SELECT comm_id, guest_name, checkin_date, nights, commission
+           FROM raman_commissions
+           WHERE is_paid = 0
+           ORDER BY checkin_date ASC`
+        ).all()
+
+        const totalUnpaid = unpaidRows.reduce((s,r) => s + (r.commission||0), 0)
+
+        // Group unpaid by year+quarter
+        const unpaidByQ = {}
+        unpaidRows.forEach(r => {
+          const d = new Date(r.checkin_date)
+          const yr = d.getFullYear()
+          const q  = Math.floor(d.getMonth() / 3) + 1
+          const key = `${yr}-Q${q}`
+          if (!unpaidByQ[key]) unpaidByQ[key] = { key, year: yr, quarter: q,
+            label: `Q${q} ${yr}`, total: 0, stays: [] }
+          unpaidByQ[key].total += r.commission || 0
+          unpaidByQ[key].stays.push({
+            commId:    r.comm_id,
+            guestName: r.guest_name,
+            checkIn:   r.checkin_date,
+            nights:    r.nights,
+            commission: r.commission,
+          })
+        })
+
+        // All-time total paid
+        const allTimePaid = byYear.reduce((s,r) => s + (r.total_paid||0), 0)
+
+        return json({ success: true, data: {
+          byYear: byYear.map(r => ({
+            year:       r.year,
+            totalPaid:  r.total_paid,
+            staysPaid:  r.stays_paid,
+          })),
+          unpaidByQ:    Object.values(unpaidByQ).sort((a,b) => b.key.localeCompare(a.key)),
+          totalUnpaid,
+          allTimePaid,
+          grandTotal:   allTimePaid + totalUnpaid,
+        }})
+      }
+
       // RENTAL INCOME
       if (action === 'getRentalIncome') {
         const propId = url.searchParams.get('propId')

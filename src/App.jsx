@@ -7,7 +7,8 @@ import Login          from './screens/Login'
 import OwnerHome      from './screens/OwnerHome'
 import PradoshHome    from './screens/PradoshHome'
 import RamanHome      from './screens/RamanHome'
-import RDashboard     from './screens/RDashboard'
+import RDashboard         from './screens/RDashboard'
+import RDashboardSnapshot from './screens/RDashboardSnapshot'
 
 // Villa screens
 import VillaHub          from './screens/villa/VillaHub'
@@ -57,6 +58,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
+        <Route path="/raman/dashboard"         element={<RDashboardSnapshot />} />
         {/* Rental */}
         <Route path="/owner/rental"           element={<RentalProperties />} />
         <Route path="/owner/rental/agreement" element={<RentalAgreement />} />

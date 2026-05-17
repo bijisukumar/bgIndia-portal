@@ -10,12 +10,23 @@ import { logger } from '../utils/logger.js'
 // In local dev (npm run dev), requests proxy to the Worker via vite proxy.
 const BASE = '/api'
 
+// ── AUDIT: resolve the current actor from session storage ──────────────────
+// Set by Login.jsx on successful PIN entry: sessionStorage.setItem('ge_actor', role)
+// Allowed values: owner | raman | pradosh | auto | system
+// The Worker reads the X-Actor header to stamp created_by / updated_by on every row.
+function getActor() {
+  try { return sessionStorage.getItem('ge_actor') || 'owner' }
+  catch { return 'owner' }
+}
+
 async function get(action, params = {}) {
   logger.info('API:GET', action, params)
   try {
     const qs  = new URLSearchParams(params).toString()
     const url = qs ? `${BASE}/${action}?${qs}` : `${BASE}/${action}`
-    const res = await fetch(url)
+    const res = await fetch(url, {
+      headers: { 'X-Actor': getActor() },
+    })
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
     const data = await res.json()
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
@@ -32,8 +43,11 @@ async function post(action, payload) {
   try {
     const res = await fetch(`${BASE}/${action}`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Actor':      getActor(),   // stamps created_by / updated_by in D1
+      },
+      body: JSON.stringify(payload),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
     const data = await res.json()

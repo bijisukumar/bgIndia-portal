@@ -37,6 +37,17 @@ export async function onRequest(ctx) {
   const { request, env } = ctx
   const DB = env.bgindia_db
 
+  // ── AUDIT: resolve who is making this request ──────────
+  // The client sends X-Actor header with the role of the logged-in user.
+  // Allowed values: owner | raman | pradosh | auto | system
+  // Falls back to 'owner' if header is absent (e.g. direct API calls).
+  const actor = (() => {
+    const h = request.headers.get('X-Actor') || ''
+    const allowed = ['owner', 'raman', 'pradosh', 'auto', 'system']
+    return allowed.includes(h) ? h : 'owner'
+  })()
+  const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
+
   // OPTIONS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: CORS })
@@ -281,15 +292,17 @@ export async function onRequest(ctx) {
         await DB.prepare(`
           INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, children,
-            tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed')
+            tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status,
+            created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?)
         `).bind(
           stayId, body.villaId || 'dwarka', body.source || 'direct',
           body.guestName, body.guestPhone || null, body.guestEmail || null,
           body.checkInDate, body.checkOutDate, nights,
           body.adults || 1, body.children || 0,
           body.tariffPerNight || 0, body.extraCharges || 0,
-          body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0
+          body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0,
+          actor, actor, now(), now()
         ).run()
         // Raman commission is created at check-OUT (not here) to avoid
         // creating commission records for cancelled bookings
@@ -298,8 +311,8 @@ export async function onRequest(ctx) {
 
       if (action === 'confirmCheckIn') {
         await DB.prepare(
-          `UPDATE stays SET status = 'checked_in', updated_at = datetime('now') WHERE stay_id = ?`
-        ).bind(body.stayId).run()
+          `UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(actor, now(), body.stayId).run()
         return json({ success: true })
       }
 
@@ -309,8 +322,8 @@ export async function onRequest(ctx) {
 
         // Mark stay as checked_out
         await DB.prepare(
-          `UPDATE stays SET status = 'checked_out', updated_at = datetime('now') WHERE stay_id = ?`
-        ).bind(stayId).run()
+          `UPDATE stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(actor, now(), stayId).run()
 
         // Fetch stay details to calculate commission
         const stay = await DB.prepare(
@@ -327,9 +340,11 @@ export async function onRequest(ctx) {
             const nights    = parseInt(stay.nights) || 1
             const ramanComm = nights > 1 ? 2000 : 1000
             await DB.prepare(
-              `INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid)
-               VALUES (?, ?, ?, ?, ?, ?, 0)`
-            ).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm).run()
+              `INSERT INTO raman_commissions
+                 (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid,
+                  created_by, updated_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`
+            ).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
             return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
           }
         }
@@ -339,8 +354,8 @@ export async function onRequest(ctx) {
       // CANCEL STAY: mark cancelled, never creates a commission
       if (action === 'cancelStay') {
         await DB.prepare(
-          `UPDATE stays SET status = 'cancelled', updated_at = datetime('now') WHERE stay_id = ?`
-        ).bind(body.stayId).run()
+          `UPDATE stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(actor, now(), body.stayId).run()
         // Also remove any erroneously created commission for this stay
         await DB.prepare(
           `DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`
@@ -353,9 +368,12 @@ export async function onRequest(ctx) {
         const items = body.items || []
         for (const item of items) {
           await DB.prepare(`
-            INSERT INTO stay_incidentals (item_id, stay_id, inv_item_id, name, qty, price_per_unit, total)
-            VALUES (?,?,?,?,?,?,?)
-          `).bind(genId('INC'), body.stayId, item.itemId || null, item.name, item.qty, item.pricePerUnit, item.subtotal).run()
+            INSERT INTO stay_incidentals
+              (item_id, stay_id, inv_item_id, name, qty, price_per_unit, total,
+               created_by, updated_by, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(genId('INC'), body.stayId, item.itemId || null, item.name, item.qty, item.pricePerUnit, item.subtotal,
+                  actor, actor, now(), now()).run()
         }
         return json({ success: true })
       }
@@ -365,12 +383,14 @@ export async function onRequest(ctx) {
         const stayId = genStayId(body.villaId || 'dwarka')
         await DB.prepare(`
           INSERT INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date,
-            nights, gross, commission_pct, commission_amt, net, status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed')
+            nights, gross, commission_pct, commission_amt, net, status,
+            created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)
         `).bind(
           stayId, body.villaId || 'dwarka', (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'),
           body.guestName, body.checkInDate, body.checkOutDate,
-          body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0
+          body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0,
+          actor, actor, now(), now()
         ).run()
         return json({ success: true, data: { stayId } })
       }
@@ -394,14 +414,16 @@ export async function onRequest(ctx) {
             await DB.prepare(`
               INSERT OR REPLACE INTO rental_income
                 (record_id, prop_id, month, year, rent, car_parking, maintenance, electricity,
-                 water, property_tax, land_tax, extra_maintenance, net)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 water, property_tax, land_tax, extra_maintenance, net,
+                 created_by, updated_by, created_at, updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             `).bind(
               recId, propId, m + 1, year,
               parseFloat(prop.rent)||0, parseFloat(prop.carParking)||0,
               parseFloat(prop.maintenance)||0, parseFloat(prop.electricity)||0,
               parseFloat(prop.water)||0, parseFloat(prop.propertyTax)||0,
-              parseFloat(prop.landTax)||0, parseFloat(prop.extraMaintenance)||0, net
+              parseFloat(prop.landTax)||0, parseFloat(prop.extraMaintenance)||0, net,
+              actor, actor, now(), now()
             ).run()
           }
         }
@@ -422,8 +444,9 @@ export async function onRequest(ctx) {
              dehusk_nuts, dehusk_cost_nut, dehusk_expense,
              tractor_expense, other_expense, total_expense, net_income,
              advance_payment, advance_date, second_payment, final_settlement, balance_due,
-             next_harvest_date, notes)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             next_harvest_date, notes,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           id, body.estate || 'pollachi', body.harvesterName, body.harvestDate, body.finalPaymentDate || null,
           parseInt(body.totalNuts)||0, parseInt(body.netGoodNuts)||0, parseInt(body.nutsRejected)||0, parseInt(body.additionalUnaccounted)||0,
@@ -436,7 +459,8 @@ export async function onRequest(ctx) {
           parseFloat(body.tractorExpense)||0, parseFloat(body.otherExpense)||0, parseFloat(body.totalExpense)||0, parseFloat(body.netIncome)||0,
           parseFloat(body.advancePayment)||0, body.advancePaymentDate||null,
           parseFloat(body.secondPayment)||0, parseFloat(body.finalSettlement)||0, parseFloat(body.balanceDue)||0,
-          body.nextHarvestDate||null, body.notes||null
+          body.nextHarvestDate||null, body.notes||null,
+          actor, actor, now(), now()
         ).run()
         return json({ success: true, data: { harvestId: id } })
       }
@@ -447,10 +471,13 @@ export async function onRequest(ctx) {
         const gross = (parseFloat(body.weightKg)||0) * (parseFloat(body.pricePerKg)||0)
         const net   = gross - (parseFloat(body.expense)||0)
         await DB.prepare(`
-          INSERT INTO rubber_harvests (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes)
-          VALUES (?,?,?,?,?,?,?,?,?)
+          INSERT INTO rubber_harvests
+            (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(id, 'pavutumuri', body.harvestDate, parseFloat(body.weightKg)||0,
-                parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null).run()
+                parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
+                actor, actor, now(), now()).run()
         return json({ success: true, data: { harvestId: id } })
       }
 
@@ -468,8 +495,8 @@ export async function onRequest(ctx) {
           // Pay specific selected stays — run one UPDATE per id (D1 doesn't support IN with bind arrays)
           for (const commId of body.commIds) {
             await DB.prepare(
-              `UPDATE raman_commissions SET is_paid = 1, paid_date = ? WHERE comm_id = ? AND is_paid = 0`
-            ).bind(paidDate, commId).run()
+              `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE comm_id = ? AND is_paid = 0`
+            ).bind(paidDate, actor, now(), commId).run()
           }
         } else if (body.quarter) {
           // Pay all stays in a specific quarter
@@ -478,16 +505,16 @@ export async function onRequest(ctx) {
           const mStart = String((qNum - 1) * 3 + 1).padStart(2, '0')
           const mEnd   = String(qNum * 3).padStart(2, '0')
           await DB.prepare(
-            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?
+            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
              WHERE is_paid = 0
                AND strftime('%Y', checkin_date) = ?
                AND strftime('%m', checkin_date) BETWEEN ? AND ?`
-          ).bind(paidDate, y, mStart, mEnd).run()
+          ).bind(paidDate, actor, now(), y, mStart, mEnd).run()
         } else {
           // Pay ALL outstanding
           await DB.prepare(
-            `UPDATE raman_commissions SET is_paid = 1, paid_date = ? WHERE is_paid = 0`
-          ).bind(paidDate).run()
+            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0`
+          ).bind(paidDate, actor, now()).run()
         }
 
         // Return total paid in this batch
@@ -501,8 +528,8 @@ export async function onRequest(ctx) {
       if (action === 'saveInventoryPrices') {
         const { villaId = 'dwarka', prices } = body
         for (const [itemId, p] of Object.entries(prices || {})) {
-          await DB.prepare(`UPDATE inventory SET cost_price = ?, sell_price = ? WHERE item_id = ? AND villa_id = ?`)
-            .bind(p.costPrice || 0, p.sellPrice || 0, itemId, villaId).run()
+          await DB.prepare(`UPDATE inventory SET cost_price = ?, sell_price = ?, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
+            .bind(p.costPrice || 0, p.sellPrice || 0, actor, now(), itemId, villaId).run()
         }
         return json({ success: true })
       }
@@ -510,8 +537,8 @@ export async function onRequest(ctx) {
       if (action === 'saveInventoryRestock') {
         const { villaId = 'dwarka', entries } = body
         for (const e of (entries || [])) {
-          await DB.prepare(`UPDATE inventory SET qty_in_stock = qty_in_stock + ?, last_restocked = datetime('now') WHERE item_id = ? AND villa_id = ?`)
-            .bind(parseFloat(e.qty)||0, e.id, villaId).run()
+          await DB.prepare(`UPDATE inventory SET qty_in_stock = qty_in_stock + ?, last_restocked = ?, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
+            .bind(parseFloat(e.qty)||0, now(), actor, now(), e.id, villaId).run()
         }
         return json({ success: true })
       }
@@ -528,17 +555,21 @@ export async function onRequest(ctx) {
           await DB.prepare(
             `UPDATE rental_props
              SET tenant_name = ?, deposit = ?, agreed_rent = ?, maintenance_fee = ?,
-                 lease_start = ?, lease_end = ?, notes = ?, updated_at = datetime('now')
+                 lease_start = ?, lease_end = ?, notes = ?,
+                 updated_by = ?, updated_at = ?
              WHERE prop_id = ?`
           ).bind(tenantName||'', deposit||0, agreedRent||0, maintenance||0,
-                 leaseStart||null, leaseEnd||null, notes||null, propId).run()
+                 leaseStart||null, leaseEnd||null, notes||null,
+                 actor, now(), propId).run()
         } else {
           await DB.prepare(
             `INSERT INTO rental_props
-               (prop_id, tenant_name, deposit, agreed_rent, maintenance_fee, lease_start, lease_end, notes)
-             VALUES (?,?,?,?,?,?,?,?)`
+               (prop_id, tenant_name, deposit, agreed_rent, maintenance_fee, lease_start, lease_end, notes,
+                created_by, updated_by, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
           ).bind(propId, tenantName||'', deposit||0, agreedRent||0, maintenance||0,
-                 leaseStart||null, leaseEnd||null, notes||null).run()
+                 leaseStart||null, leaseEnd||null, notes||null,
+                 actor, actor, now(), now()).run()
         }
         return json({ success: true, data: { propId } })
       }

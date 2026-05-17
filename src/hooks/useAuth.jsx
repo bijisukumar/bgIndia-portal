@@ -18,12 +18,17 @@ export function AuthProvider({ children }) {
     const userData = { ...found, pin }
     setUser(userData)
     sessionStorage.setItem('ge_user', JSON.stringify(userData))
+    // Store actor for X-Actor header — maps role to DB actor value
+    // owner → 'owner', manager (Raman) → 'raman', estate_manager (Pradosh) → 'pradosh'
+    const actorMap = { owner: 'owner', manager: 'raman', estate_manager: 'pradosh' }
+    sessionStorage.setItem('ge_actor', actorMap[found.role] || 'owner')
     return true
   }
 
   const logout = () => {
     setUser(null)
     sessionStorage.removeItem('ge_user')
+    sessionStorage.removeItem('ge_actor')
   }
 
   return (

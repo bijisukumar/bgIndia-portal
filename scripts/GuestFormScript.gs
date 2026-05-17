@@ -49,6 +49,43 @@ function onGuestFormSubmit(e) {
     var eta          = get('estimated time') || get('eta');
     var purpose      = get('purpose of stay') || get('purpose');
     var guestList    = get('list all guest') || get('guest names');
+    var homeAddress  = get('full home address') || get('address');
+
+    // Parse city, state, country from full home address
+    // Expected format: "House, Area, City, State - PIN" or "City, State, Country"
+    var city = '', state = '', country = 'India', fromCity = '';
+    if (homeAddress) {
+      var parts = homeAddress.split(',').map(function(p) { return p.trim(); });
+      if (parts.length >= 3) {
+        // Last meaningful part is often State - PIN or Country
+        var last = parts[parts.length - 1].replace(/\d+/g, '').trim();
+        var secondLast = parts[parts.length - 2].trim();
+        var thirdLast  = parts[parts.length - 3].trim();
+
+        // Detect if last part is a country (non-Indian)
+        var knownCountries = ['USA','UK','United States','United Kingdom',
+          'Australia','Canada','UAE','Singapore','Germany','France','Malaysia'];
+        var isCountry = knownCountries.some(function(c) {
+          return last.toLowerCase().indexOf(c.toLowerCase()) >= 0;
+        });
+
+        if (isCountry) {
+          country  = last;
+          state    = secondLast;
+          fromCity = thirdLast;
+        } else {
+          // Assume India — state is last, city is second-last
+          country  = 'India';
+          state    = last.replace(/-.*/, '').trim();  // remove PIN code
+          fromCity = secondLast;
+        }
+        city = fromCity;
+      } else if (parts.length === 2) {
+        fromCity = parts[0]; city = parts[0]; state = parts[1];
+      } else if (parts.length === 1) {
+        fromCity = parts[0]; city = parts[0];
+      }
+    }
 
     Logger.log('Form submit: booker=' + bookerName + '  checkIn=' + checkInDate);
 
@@ -139,6 +176,18 @@ function onGuestFormSubmit(e) {
     });
 
     // ── Set status to docs_uploaded in D1 ────────────────────────────────
+    // Also update location fields on the stay
+    callWorker('POST', 'updateStayLocation', {
+      stayId:      stayId,
+      homeAddress: homeAddress,
+      city:        city,
+      state:       state,
+      country:     country,
+      fromCity:    fromCity,
+      phone:       phone,
+      email:       email,
+    });
+
     callWorker('POST', 'updateStayStatus', {
       stayId:    stayId,
       status:    'docs_uploaded',

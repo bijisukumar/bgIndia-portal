@@ -111,7 +111,11 @@ export async function onRequest(ctx) {
             MAX(children)       as last_children,
             MAX(review_rating)  as last_review_rating,
             MAX(review_source)  as last_review_source,
-            MAX(review_date)    as last_review_date
+            MAX(review_date)    as last_review_date,
+            MAX(from_city)      as from_city,
+            MAX(state)          as state,
+            MAX(country)        as country,
+            GROUP_CONCAT(DISTINCT source) as all_sources
            FROM stays WHERE status != 'cancelled'
            GROUP BY guest_name ORDER BY last_stay DESC`
         ).all()
@@ -128,9 +132,13 @@ export async function onRequest(ctx) {
           totalSpent:       r.total_spent,
           adults:           r.last_adults,
           children:         r.last_children,
+          fromCity:         r.from_city    || '',
+          state:            r.state        || '',
+          country:          r.country      || '',
           lastReviewRating: r.last_review_rating || 0,
           lastReviewSource: r.last_review_source || '',
           lastReviewDate:   r.last_review_date   || '',
+          allSources:       r.all_sources       || '',
         }))
         return json({ success: true, data: guests })
       }
@@ -375,6 +383,82 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results, sql })
       }
 
+      // MARKETING STATS — city breakdown, purpose, channel vs revenue
+      if (action === 'getMarketingStats') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+
+        // City breakdown
+        const { results: cityRows } = await DB.prepare(
+          `SELECT
+            COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name,
+            COALESCE(NULLIF(state,''), '') as state_name,
+            COALESCE(NULLIF(country,''), 'India') as country_name,
+            COUNT(DISTINCT guest_name) as guest_count,
+            COUNT(*) as booking_count,
+            ROUND(SUM(COALESCE(net,0)),0) as revenue
+           FROM stays
+           WHERE villa_id = ? AND status NOT IN ('cancelled')
+           GROUP BY city_name, state_name, country_name
+           ORDER BY guest_count DESC`
+        ).bind(villaId).all()
+
+        // Purpose/category breakdown
+        const { results: purposeRows } = await DB.prepare(
+          `SELECT
+            CASE
+              WHEN LOWER(notes) LIKE '%wedding%'       THEN 'Wedding'
+              WHEN LOWER(notes) LIKE '%temple%'
+                OR LOWER(notes) LIKE '%guruvayur%'     THEN 'Temple / Pilgrimage'
+              WHEN LOWER(notes) LIKE '%tourism%'
+                OR LOWER(notes) LIKE '%holiday%'
+                OR LOWER(notes) LIKE '%vacation%'      THEN 'Tourism'
+              WHEN LOWER(notes) LIKE '%family%'        THEN 'Family Visit'
+              WHEN LOWER(notes) LIKE '%arangettam%'    THEN 'Arangettam'
+              WHEN LOWER(notes) LIKE '%kerala%'        THEN 'Kerala Tour'
+              ELSE 'Other'
+            END as purpose,
+            COUNT(*) as bookings,
+            COUNT(DISTINCT guest_name) as guests,
+            ROUND(SUM(COALESCE(net,0)),0) as revenue
+           FROM stays
+           WHERE villa_id = ? AND status NOT IN ('cancelled')
+           GROUP BY purpose ORDER BY bookings DESC`
+        ).bind(villaId).all()
+
+        // Channel breakdown — bookings + revenue
+        const { results: channelRows } = await DB.prepare(
+          `SELECT
+            source as channel,
+            COUNT(*) as bookings,
+            COUNT(DISTINCT guest_name) as unique_guests,
+            ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue,
+            ROUND(SUM(COALESCE(net,0)),0) as net_revenue,
+            ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission
+           FROM stays
+           WHERE villa_id = ? AND status NOT IN ('cancelled')
+           GROUP BY source ORDER BY net_revenue DESC`
+        ).bind(villaId).all()
+
+        // Stale data report
+        const { results: staleRows } = await DB.prepare(
+          `SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city,
+            SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state,
+            SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country,
+            SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone,
+            SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email
+           FROM stays WHERE status NOT IN ('cancelled')`
+        ).all()
+
+        return json({ success: true, data: {
+          cities:   cityRows,
+          purposes: purposeRows,
+          channels: channelRows,
+          stale:    staleRows[0] || {},
+        }})
+      }
+
       // GET OPEN STAYS — for Drive file watcher in Apps Script
       // Returns stays in booked/confirmed/docs_uploaded status with their folder IDs
       if (action === 'getOpenStays') {
@@ -533,8 +617,9 @@ export async function onRequest(ctx) {
           INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, children,
             tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status,
+            home_address, city, state, country, from_city,
             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?)
         `).bind(
           stayId, body.villaId || 'dwarka', body.source || (body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : 'direct'),
           body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null,
@@ -542,6 +627,8 @@ export async function onRequest(ctx) {
           body.adults || 1, body.children || 0,
           body.tariffPerNight || 0, body.extraCharges || 0,
           body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0,
+          body.homeAddress || null, body.city || null, body.state || null,
+          body.country || 'India', body.fromCity || body.city || null,
           actor, actor, now(), now()
         ).run()
         // Raman commission is created at check-OUT (not here) to avoid
@@ -750,6 +837,24 @@ export async function onRequest(ctx) {
                 parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
                 actor, actor, now(), now()).run()
         return json({ success: true, data: { harvestId: id } })
+      }
+
+      // UPDATE STAY LOCATION — called by GuestFormScript after form submission
+      if (action === 'updateStayLocation') {
+        const { stayId, homeAddress, city, state, country, fromCity, phone, email } = body
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `UPDATE stays
+           SET home_address = ?, city = ?, state = ?, country = ?, from_city = ?,
+               guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
+               guest_email = COALESCE(NULLIF(guest_email,''), ?),
+               updated_by = 'auto', updated_at = ?
+           WHERE stay_id = ?`
+        ).bind(
+          homeAddress||null, city||null, state||null, country||'India', fromCity||null,
+          phone||null, email||null, now(), stayId
+        ).run()
+        return json({ success: true, data: { stayId, city, state, country } })
       }
 
       // UPDATE DRIVE FOLDER — called by Apps Script after folder creation

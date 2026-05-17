@@ -73,3 +73,10 @@ UPDATE rental_income     SET created_by='owner',   updated_by='owner',   updated
 UPDATE coconut_harvests  SET created_by='pradosh', updated_by='pradosh', updated_at=created_at  WHERE updated_by IS NULL;
 UPDATE rubber_harvests   SET created_by='raman',   updated_by='raman',   updated_at=created_at  WHERE updated_by IS NULL;
 UPDATE raman_commissions SET created_by='system',  updated_by='owner',   updated_at=created_at  WHERE updated_by IS NULL;
+
+-- ── Location columns on stays (added separately) ──────────────────────────
+ALTER TABLE stays ADD COLUMN home_address TEXT;
+ALTER TABLE stays ADD COLUMN city         TEXT;
+ALTER TABLE stays ADD COLUMN state        TEXT;
+ALTER TABLE stays ADD COLUMN country      TEXT DEFAULT 'India';
+ALTER TABLE stays ADD COLUMN from_city    TEXT;  -- parsed short city name

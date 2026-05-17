@@ -2,64 +2,63 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
-// Marketing segment definitions
+// ── SEGMENT DEFINITIONS ───────────────────────────────────────────────────
 const SEGMENTS = {
-  frequent:   { label:'Frequent Visitor',     icon:'⭐', color:'#C8903A', bg:'rgba(200,144,58,0.12)',  minStays: 3 },
-  temple:     { label:'Temple Regular',       icon:'🛕', color:'#8B5CF6', bg:'rgba(139,92,246,0.12)', minStays: 2 },
-  wedding:    { label:'Wedding Guest',        icon:'💒', color:'#EC4899', bg:'rgba(236,72,153,0.12)', keywords:['wedding','wed'] },
-  family:     { label:'Family Traveller',     icon:'👨‍👩‍👧‍👦', color:'#34A853', bg:'rgba(52,168,83,0.12)',  minKids: 1 },
-  overseas:   { label:'Overseas Guest',       icon:'✈️', color:'#185FA5', bg:'rgba(24,95,165,0.12)',  countries:['USA','UK','Australia','Canada','UAE','Singapore','Germany','France'] },
-  vip:        { label:'VIP (5+ stays)',       icon:'👑', color:'#F59E0B', bg:'rgba(245,158,11,0.12)', minStays: 5 },
+  frequent: { label:'Frequent Visitor', icon:'⭐', color:'#C8903A', bg:'rgba(200,144,58,0.12)', minStays:3 },
+  temple:   { label:'Temple Regular',   icon:'🛕', color:'#8B5CF6', bg:'rgba(139,92,246,0.12)' },
+  wedding:  { label:'Wedding Guest',    icon:'💒', color:'#EC4899', bg:'rgba(236,72,153,0.12)' },
+  family:   { label:'Family Traveller', icon:'👨‍👩‍👧‍👦', color:'#34A853', bg:'rgba(52,168,83,0.12)' },
+  overseas: { label:'Overseas Guest',   icon:'✈️', color:'#185FA5', bg:'rgba(24,95,165,0.12)' },
+  vip:      { label:'VIP (5+ stays)',   icon:'👑', color:'#F59E0B', bg:'rgba(245,158,11,0.12)', minStays:5 },
 }
 
-function getSegments(guest, stays) {
-  const guestStays = stays.filter(s =>
-    s.guestName?.toLowerCase() === guest.name?.toLowerCase() ||
-    s.bookerName?.toLowerCase() === guest.name?.toLowerCase()
-  )
+// Channel display config
+const CHANNEL_META = {
+  airbnb:      { label:'Airbnb',      color:'#FF5A5F', bg:'rgba(255,90,95,0.12)'  },
+  direct:      { label:'Direct',      color:'#34A853', bg:'rgba(52,168,83,0.12)'  },
+  'booking.com':{ label:'Booking.com',color:'#003580', bg:'rgba(0,53,128,0.15)'  },
+  makemytrip:  { label:'MakeMyTrip',  color:'#e74c3c', bg:'rgba(231,76,60,0.12)' },
+  other:       { label:'Other',       color:'#5C7080', bg:'rgba(92,112,128,0.12)' },
+}
+function channelMeta(src) {
+  const key = String(src||'').toLowerCase().replace(/[^a-z]/g,'')
+  return CHANNEL_META[src] || CHANNEL_META[key] || CHANNEL_META.other
+}
+
+function getSegments(guest) {
   const tags = []
-  const totalStays  = guest.totalStays || guestStays.length
-  const totalNights = guest.totalNights || guestStays.reduce((s,r) => s + (parseInt(r.nights)||0), 0)
-  const purposes    = guestStays.map(s => String(s.purpose||'').toLowerCase()).join(' ')
-  const country     = String(guest.country || '').trim()
+  const total    = guest.totalStays || 0
+  const country  = String(guest.country || '').toLowerCase()
+  const sources  = String(guest.allSources || guest.source || '').toLowerCase()
 
-  if (totalStays >= 5)  tags.push('vip')
-  else if (totalStays >= 3) tags.push('frequent')
-  if (totalStays >= 2 && purposes.includes('temple')) tags.push('temple')
-  if (SEGMENTS.wedding.keywords.some(k => purposes.includes(k))) tags.push('wedding')
-  if (SEGMENTS.overseas.countries.some(c => country.toLowerCase().includes(c.toLowerCase()))) tags.push('overseas')
-  // Family: check if any stay had children
-  if (guestStays.some(s => parseInt(s.children||0) > 0 || parseInt(s.infants||0) > 0)) tags.push('family')
-
+  if (total >= 5) tags.push('vip')
+  else if (total >= 3) tags.push('frequent')
+  if (sources.includes('temple') || sources.includes('guruvayur')) tags.push('temple')
+  if (country && !['india',''].includes(country)) tags.push('overseas')
+  if (parseInt(guest.children||0) > 0) tags.push('family')
   return tags
 }
 
 function getMarketingActions(tags) {
   const actions = []
   if (tags.includes('vip') || tags.includes('frequent')) {
-    actions.push({ icon:'🏆', text:'Invite to "Guruvayoorappan Special Stay" loyalty programme', priority:'high' })
-    actions.push({ icon:'📅', text:'Send advance booking offer for Ekadasi & peak festivals', priority:'high' })
+    actions.push({ icon:'🏆', text:'Invite to loyalty programme — advance booking offer for Ekadasi & festivals', priority:'high' })
   }
   if (tags.includes('temple')) {
-    actions.push({ icon:'🛕', text:'Monthly/quarterly temple visit package — offer repeat discount', priority:'high' })
+    actions.push({ icon:'🛕', text:'Monthly temple visit package — repeat discount offer', priority:'high' })
     actions.push({ icon:'📿', text:'Send Guruvayur Ekadasi dates for next 6 months', priority:'medium' })
   }
   if (tags.includes('wedding')) {
-    actions.push({ icon:'👶', text:'Invite for Choorunu (rice ceremony) stay — family milestone visits', priority:'high' })
-    actions.push({ icon:'🎂', text:'Anniversary stay package — 1st, 5th, 10th year returns', priority:'medium' })
-    actions.push({ icon:'🛕', text:'Yearly pilgrimage package for wedding anniversary blessing', priority:'medium' })
+    actions.push({ icon:'👶', text:'Invite for Choorunu / family milestone visits', priority:'high' })
+    actions.push({ icon:'🎂', text:'Anniversary stay package', priority:'medium' })
   }
   if (tags.includes('family')) {
     actions.push({ icon:'🏖️', text:'Summer holiday package — school break stays', priority:'medium' })
-    actions.push({ icon:'🎄', text:'Christmas/Onam family reunion stay offer', priority:'medium' })
   }
   if (tags.includes('overseas')) {
     actions.push({ icon:'✈️', text:'India visit pre-booking — contact 3 months before peak season', priority:'high' })
-    actions.push({ icon:'📧', text:'Email newsletter with Guruvayur festival calendar', priority:'medium' })
   }
-  if (!actions.length) {
-    actions.push({ icon:'💌', text:'Add to general mailing list for seasonal offers', priority:'low' })
-  }
+  if (!actions.length) actions.push({ icon:'💌', text:'Add to general mailing list for seasonal offers', priority:'low' })
   return actions
 }
 
@@ -68,60 +67,73 @@ function fmtDate(d) {
   try { return new Date(d).toLocaleDateString('en-IN', { month:'short', year:'numeric' }) }
   catch { return String(d) }
 }
+function fmt(n) { return `₹${Number(n||0).toLocaleString('en-IN')}` }
 
-function GuestCard({ guest, stays, onClick }) {
-  const tags    = getSegments(guest, stays)
+// ── GUEST CARD ─────────────────────────────────────────────────────────────
+function GuestCard({ guest, onClick }) {
+  const tags     = getSegments(guest)
   const isRepeat = (guest.totalStays || 0) > 1
+  const sources  = [...new Set(String(guest.allSources||guest.source||'direct').split(',').map(s=>s.trim()).filter(Boolean))]
 
   return (
-    <div onClick={onClick} style={{ background:'var(--dark-card)', border:'1px solid var(--border-dim)',
+    <div onClick={onClick} style={{
+      background:'var(--dark-card)', border:'1px solid var(--border-dim)',
       borderRadius:'12px', padding:'14px 16px', marginBottom:'8px', cursor:'pointer',
-      borderLeft: isRepeat ? '3px solid var(--gold)' : '1px solid var(--border-dim)' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'6px' }}>
-        <div style={{ flex:1 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px', flexWrap:'wrap' }}>
-            <span style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.92rem' }}>{guest.name}</span>
-            {isRepeat && (
-              <span style={{ background:'rgba(200,144,58,0.2)', color:'var(--gold)', fontSize:'0.65rem',
-                fontWeight:'800', padding:'2px 7px', borderRadius:'10px' }}>
-                {guest.totalStays}× STAYS
-              </span>
-            )}
-            {guest.lastReviewRating > 0 && (
-              <span style={{ fontSize:'0.72rem', fontWeight:'700',
-                color: guest.lastReviewRating >= 4 ? '#34A853' : guest.lastReviewRating === 3 ? '#C8903A' : '#c62828',
-                background: guest.lastReviewRating >= 4 ? 'rgba(52,168,83,0.12)' : 'rgba(200,144,58,0.1)',
-                padding:'2px 7px', borderRadius:'10px' }}>
-                {'★'.repeat(guest.lastReviewRating)}{'☆'.repeat(5 - guest.lastReviewRating)}
-                {' '}{guest.lastReviewSource === 'google' ? 'G' : 'AB'}
-              </span>
-            )}
-          </div>
-          <div style={{ color:'var(--text-dim)', fontSize:'0.75rem' }}>
-            {guest.totalNights || 0} nights · Last: {fmtDate(guest.lastStay)}
-            {guest.country ? ` · ${guest.country}` : ''}
-          </div>
-        </div>
+      borderLeft: isRepeat ? '3px solid var(--gold)' : '1px solid var(--border-dim)',
+    }}>
+      {/* Name + badges row */}
+      <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'4px', flexWrap:'wrap' }}>
+        <span style={{ fontWeight:'600', fontSize:'0.92rem', color:'var(--text)' }}>{guest.name}</span>
+        {isRepeat && (
+          <span style={{ background:'rgba(200,144,58,0.2)', color:'var(--gold)',
+            fontSize:'0.65rem', fontWeight:'800', padding:'2px 7px', borderRadius:'10px' }}>
+            {guest.totalStays}× STAYS
+          </span>
+        )}
+        {guest.lastReviewRating > 0 && (
+          <span style={{
+            fontSize:'0.7rem', fontWeight:'700', padding:'2px 7px', borderRadius:'10px',
+            color: guest.lastReviewRating >= 4 ? '#34A853' : '#C8903A',
+            background: guest.lastReviewRating >= 4 ? 'rgba(52,168,83,0.12)' : 'rgba(200,144,58,0.1)',
+          }}>
+            {'★'.repeat(guest.lastReviewRating)} {guest.lastReviewSource === 'google' ? 'G' : 'AB'}
+          </span>
+        )}
+        {/* Channel badges */}
+        {sources.map(src => {
+          const m = channelMeta(src)
+          return (
+            <span key={src} style={{ fontSize:'0.65rem', fontWeight:'700', padding:'2px 6px',
+              borderRadius:'8px', color:m.color, background:m.bg }}>
+              {m.label}
+            </span>
+          )
+        })}
       </div>
+
+      {/* Sub-line */}
+      <div style={{ color:'var(--text-dim)', fontSize:'0.75rem', marginBottom:'6px' }}>
+        {guest.totalNights||0} nights · Last: {fmtDate(guest.lastStay)}
+        {guest.fromCity ? ` · ${guest.fromCity}${guest.state ? ', '+guest.state : ''}` : ''}
+        {guest.country && guest.country !== 'India' ? ` · ${guest.country}` : ''}
+      </div>
+
       {/* Segment tags */}
       {tags.length > 0 && (
-        <div style={{ display:'flex', gap:'5px', flexWrap:'wrap', marginTop:'6px' }}>
+        <div style={{ display:'flex', gap:'5px', flexWrap:'wrap', marginTop:'4px' }}>
           {tags.map(tag => (
-            <span key={tag} style={{ padding:'2px 7px', borderRadius:'10px', fontSize:'0.67rem',
-              fontWeight:'700', background: SEGMENTS[tag].bg, color: SEGMENTS[tag].color }}>
+            <span key={tag} style={{ padding:'2px 7px', borderRadius:'10px', fontSize:'0.66rem',
+              fontWeight:'700', background:SEGMENTS[tag].bg, color:SEGMENTS[tag].color }}>
               {SEGMENTS[tag].icon} {SEGMENTS[tag].label}
             </span>
           ))}
         </div>
       )}
-      {/* Contact availability */}
-      <div style={{ display:'flex', gap:'8px', marginTop:'8px' }}>
-        {guest.phone && (
-          <span style={{ fontSize:'0.7rem', color:'var(--green)' }}>📱 WhatsApp</span>
-        )}
-        {guest.email && (
-          <span style={{ fontSize:'0.7rem', color:'var(--blue)' }}>📧 Email</span>
-        )}
+
+      {/* Contact */}
+      <div style={{ display:'flex', gap:'8px', marginTop:'6px' }}>
+        {guest.phone && <span style={{ fontSize:'0.7rem', color:'var(--green)' }}>📱</span>}
+        {guest.email && <span style={{ fontSize:'0.7rem', color:'#85B7EB' }}>📧</span>}
         {!guest.phone && !guest.email && (
           <span style={{ fontSize:'0.7rem', color:'var(--text-dim)' }}>No contact info</span>
         )}
@@ -130,16 +142,13 @@ function GuestCard({ guest, stays, onClick }) {
   )
 }
 
-function GuestDetail({ guest, stays, onClose }) {
-  const tags    = getSegments(guest, stays)
+// ── GUEST DETAIL ───────────────────────────────────────────────────────────
+function GuestDetail({ guest, onClose }) {
+  const tags    = getSegments(guest)
   const actions = getMarketingActions(tags)
-  const guestStays = stays.filter(s =>
-    s.guestName?.toLowerCase() === guest.name?.toLowerCase() ||
-    s.bookerName?.toLowerCase() === guest.name?.toLowerCase()
-  ).sort((a,b) => new Date(b.checkIn) - new Date(a.checkIn))
-
-  const whatsappLink = guest.phone
-    ? `https://wa.me/${guest.phone.replace(/[^0-9]/g,'')}?text=Namaste%20${encodeURIComponent(guest.name)}%2C%20We%20hope%20you%20enjoyed%20your%20stay%20at%20GVR%20Dwarka%20Villa.`
+  const sources = [...new Set(String(guest.allSources||guest.source||'direct').split(',').map(s=>s.trim()).filter(Boolean))]
+  const wa = guest.phone
+    ? `https://wa.me/${guest.phone.replace(/[^0-9]/g,'')}?text=Namaste%20${encodeURIComponent(guest.name)}%2C%20Welcome%20back%20to%20GVR%20Dwarka%20Villa!`
     : null
 
   return (
@@ -153,16 +162,15 @@ function GuestDetail({ guest, stays, onClose }) {
           </div>
           <div style={{width:34}}/>
         </div>
-
         <div style={{ padding:'16px 16px 80px' }}>
-          {/* Segment badges */}
+          {/* Segments */}
           {tags.length > 0 && (
             <>
               <div className="card-section-label">GUEST TYPE</div>
               <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px' }}>
                 {tags.map(tag => (
                   <span key={tag} style={{ padding:'5px 12px', borderRadius:'14px', fontSize:'0.78rem',
-                    fontWeight:'700', background: SEGMENTS[tag].bg, color: SEGMENTS[tag].color,
+                    fontWeight:'700', background:SEGMENTS[tag].bg, color:SEGMENTS[tag].color,
                     border:`1px solid ${SEGMENTS[tag].color}44` }}>
                     {SEGMENTS[tag].icon} {SEGMENTS[tag].label}
                   </span>
@@ -174,26 +182,43 @@ function GuestDetail({ guest, stays, onClose }) {
           {/* Stats */}
           <div className="card-section-label">STAY HISTORY</div>
           <div className="card">
+            {[
+              ['Total stays',    guest.totalStays || 0, 'var(--gold)'],
+              ['Total nights',   guest.totalNights || 0, null],
+              ['Total spent',    fmt(guest.totalSpent), null],
+              ['First stay',     fmtDate(guest.firstStay), null],
+              ['Last stay',      fmtDate(guest.lastStay), null],
+            ].map(([label, val, color]) => (
+              <div key={label} className="net-row">
+                <span className="net-label">{label}</span>
+                <span style={color ? { color, fontWeight:'700' } : {}}>{val}</span>
+              </div>
+            ))}
+            {/* Booking channels */}
             <div className="net-row">
-              <span className="net-label">Total stays</span>
-              <span style={{ color:'var(--gold)', fontWeight:'700' }}>{guest.totalStays || guestStays.length}</span>
+              <span className="net-label">Booked via</span>
+              <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
+                {sources.map(src => {
+                  const m = channelMeta(src)
+                  return <span key={src} style={{ fontSize:'0.72rem', fontWeight:'700',
+                    padding:'2px 7px', borderRadius:'8px', color:m.color, background:m.bg }}>{m.label}</span>
+                })}
+              </div>
             </div>
-            <div className="net-row">
-              <span className="net-label">Total nights</span>
-              <span style={{ fontWeight:'600' }}>{guest.totalNights || 0}</span>
-            </div>
-            <div className="net-row">
-              <span className="net-label">First stay</span>
-              <span>{fmtDate(guest.firstStay)}</span>
-            </div>
-            <div className="net-row">
-              <span className="net-label">Last stay</span>
-              <span>{fmtDate(guest.lastStay)}</span>
-            </div>
-            {guest.country && (
+            {/* Location */}
+            {(guest.fromCity || guest.country) && (
               <div className="net-row">
                 <span className="net-label">From</span>
-                <span>{[guest.fromCity, guest.country].filter(Boolean).join(', ')}</span>
+                <span>{[guest.fromCity, guest.state, guest.country].filter(Boolean).join(', ')}</span>
+              </div>
+            )}
+            {/* Review */}
+            {guest.lastReviewRating > 0 && (
+              <div className="net-row">
+                <span className="net-label">Review</span>
+                <span style={{ color:'#34A853', fontWeight:'700' }}>
+                  {'★'.repeat(guest.lastReviewRating)} {guest.lastReviewSource === 'google' ? 'Google' : 'Airbnb'}
+                </span>
               </div>
             )}
           </div>
@@ -205,99 +230,219 @@ function GuestDetail({ guest, stays, onClose }) {
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }}>
                 <div>
                   <div className="field-label">WhatsApp</div>
-                  <div style={{ color:'var(--text)', fontSize:'0.9rem', marginTop:'3px' }}>{guest.phone}</div>
+                  <div style={{ fontSize:'0.9rem', marginTop:'3px' }}>{guest.phone}</div>
                 </div>
-                <a href={whatsappLink} target="_blank" rel="noreferrer"
+                <a href={wa} target="_blank" rel="noreferrer"
                   style={{ padding:'8px 14px', borderRadius:'10px', background:'rgba(52,168,83,0.15)',
                     color:'var(--green)', fontSize:'0.82rem', fontWeight:'700', textDecoration:'none',
                     border:'1px solid rgba(52,168,83,0.3)' }}>
                   💬 Chat
                 </a>
               </div>
-            ) : (
-              <div style={{ color:'var(--text-dim)', fontSize:'0.82rem', marginBottom:'10px' }}>No phone on record</div>
-            )}
-            {guest.email ? (
-              <div>
-                <div className="field-label">Email</div>
-                <div style={{ color:'var(--text)', fontSize:'0.85rem', marginTop:'3px' }}>{guest.email}</div>
-              </div>
-            ) : (
-              <div style={{ color:'var(--text-dim)', fontSize:'0.82rem' }}>No email on record</div>
-            )}
+            ) : <div style={{ color:'var(--text-dim)', fontSize:'0.82rem', marginBottom:'8px' }}>No phone on record</div>}
+            {guest.email
+              ? <div><div className="field-label">Email</div><div style={{ fontSize:'0.85rem', marginTop:'3px' }}>{guest.email}</div></div>
+              : <div style={{ color:'var(--text-dim)', fontSize:'0.82rem' }}>No email on record</div>}
           </div>
 
           {/* Marketing actions */}
           <div className="card-section-label">🎯 MARKETING ACTIONS</div>
           <div className="card">
-            {actions.map((action, i) => (
+            {actions.map((a, i) => (
               <div key={i} style={{ display:'flex', gap:'12px', paddingBottom:'10px', marginBottom:'10px',
                 borderBottom: i < actions.length-1 ? '1px solid var(--border-dim)' : 'none' }}>
-                <span style={{ fontSize:'1.1rem', flexShrink:0 }}>{action.icon}</span>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:'var(--text)', fontSize:'0.83rem', lineHeight:'1.4' }}>{action.text}</div>
-                  <div style={{ marginTop:'4px' }}>
-                    <span style={{ fontSize:'0.68rem', fontWeight:'700', padding:'2px 6px', borderRadius:'8px',
-                      background: action.priority==='high' ? 'rgba(229,57,53,0.15)' : action.priority==='medium' ? 'rgba(200,144,58,0.12)' : 'rgba(92,112,128,0.15)',
-                      color: action.priority==='high' ? '#E53935' : action.priority==='medium' ? 'var(--gold)' : 'var(--text-dim)' }}>
-                      {action.priority.toUpperCase()} PRIORITY
-                    </span>
-                  </div>
+                <span style={{ fontSize:'1.1rem', flexShrink:0 }}>{a.icon}</span>
+                <div>
+                  <div style={{ fontSize:'0.83rem', lineHeight:'1.4' }}>{a.text}</div>
+                  <span style={{ fontSize:'0.68rem', fontWeight:'700', padding:'2px 6px', borderRadius:'8px', marginTop:'4px', display:'inline-block',
+                    background: a.priority==='high'?'rgba(229,57,53,0.15)':a.priority==='medium'?'rgba(200,144,58,0.12)':'rgba(92,112,128,0.15)',
+                    color: a.priority==='high'?'#E53935':a.priority==='medium'?'var(--gold)':'var(--text-dim)' }}>
+                    {a.priority.toUpperCase()} PRIORITY
+                  </span>
                 </div>
               </div>
             ))}
           </div>
-
-          {/* Individual stays */}
-          {guestStays.length > 0 && (
-            <>
-              <div className="card-section-label">ALL STAYS</div>
-              <div style={{ background:'var(--dark-card)', borderRadius:'12px',
-                border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'12px' }}>
-                {guestStays.map((s, i) => (
-                  <div key={i} style={{ padding:'12px 16px',
-                    borderBottom: i < guestStays.length-1 ? '1px solid var(--border-dim)' : 'none' }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'3px' }}>
-                      <span style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.85rem' }}>
-                        {fmtDate(s.checkIn)}
-                      </span>
-                      <span style={{ color:'var(--gold)', fontWeight:'600', fontSize:'0.85rem' }}>
-                        {s.nights} night{s.nights>1?'s':''}
-                      </span>
-                    </div>
-                    <div style={{ color:'var(--text-dim)', fontSize:'0.75rem' }}>
-                      {s.channel} · {s.adults||0} adults{s.children>0?` · ${s.children} children`:''} · {s.stayId}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
         </div>
       </div>
     </div>
   )
 }
 
-export default function GuestRepository() {
-  const navigate    = useNavigate()
-  const [guests, setGuests]       = useState([])
-  const [stays,  setStays]        = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [search, setSearch]       = useState('')
-  const [filter, setFilter]       = useState('all')
-  const [selected, setSelected]   = useState(null)
+// ── MARKETING TAB ──────────────────────────────────────────────────────────
+function MarketingTab() {
+  const [stats, setStats]     = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      api.getGuests(),
-      api.getStays('dwarka', 'all'),
-    ]).then(([g, s]) => {
-      setGuests(Array.isArray(g) ? g.sort((a,b) => (b.totalStays||0) - (a.totalStays||0)) : [])
-      setStays(Array.isArray(s) ? s : [])
-      setLoading(false)
-    }).catch(() => setLoading(false))
+    api.getMarketingStats('dwarka')
+      .then(d => { setStats(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="loading"><div className="spinner"/>Loading…</div>
+  if (!stats)  return <div style={{ color:'var(--text-dim)', textAlign:'center', padding:'32px' }}>No data</div>
+
+  const maxCityCount = Math.max(...(stats.cities||[]).map(c => c.guest_count), 1)
+  const maxChRev     = Math.max(...(stats.channels||[]).map(c => c.net_revenue), 1)
+  const stale        = stats.stale || {}
+
+  return (
+    <div>
+      {/* ── CITY BREAKDOWN ── */}
+      <div className="card-section-label">GUESTS BY CITY</div>
+      <div style={{ background:'var(--dark-card)', borderRadius:'12px',
+        border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'14px' }}>
+        {(stats.cities||[]).filter(c => c.city_name !== 'Unknown').slice(0,15).map((c,i) => (
+          <div key={i} style={{ padding:'10px 16px',
+            borderBottom: i < stats.cities.length-1 ? '1px solid var(--border-dim)' : 'none' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }}>
+              <div>
+                <span style={{ fontWeight:'600', fontSize:'0.88rem' }}>
+                  {c.city_name}
+                </span>
+                {(c.state_name || c.country_name !== 'India') && (
+                  <span style={{ color:'var(--text-dim)', fontSize:'0.75rem', marginLeft:'6px' }}>
+                    {[c.state_name, c.country_name !== 'India' ? c.country_name : ''].filter(Boolean).join(', ')}
+                  </span>
+                )}
+              </div>
+              <div style={{ textAlign:'right' }}>
+                <span style={{ color:'var(--gold)', fontWeight:'700', fontSize:'0.88rem' }}>
+                  {c.guest_count} guest{c.guest_count!==1?'s':''}
+                </span>
+                <span style={{ color:'var(--text-dim)', fontSize:'0.72rem', marginLeft:'8px' }}>
+                  {c.booking_count} stays
+                </span>
+              </div>
+            </div>
+            {/* Bar */}
+            <div style={{ height:4, background:'rgba(255,255,255,0.06)', borderRadius:2, overflow:'hidden' }}>
+              <div style={{ height:'100%', borderRadius:2, background:'var(--gold)',
+                width:`${Math.round(c.guest_count/maxCityCount*100)}%`, transition:'width 0.3s' }}/>
+            </div>
+          </div>
+        ))}
+        {(stats.cities||[]).filter(c => c.city_name === 'Unknown').length > 0 && (
+          <div style={{ padding:'10px 16px', borderTop:'1px solid var(--border-dim)',
+            color:'var(--text-dim)', fontSize:'0.78rem' }}>
+            ⚠️ {stats.cities.find(c=>c.city_name==='Unknown')?.guest_count} guests with no city data
+          </div>
+        )}
+      </div>
+
+      {/* ── PURPOSE / CATEGORY ── */}
+      <div className="card-section-label">PURPOSE OF STAY</div>
+      <div style={{ background:'var(--dark-card)', borderRadius:'12px',
+        border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'14px' }}>
+        {(stats.purposes||[]).map((p,i) => (
+          <div key={i} style={{ padding:'10px 16px',
+            borderBottom: i < stats.purposes.length-1 ? '1px solid var(--border-dim)' : 'none',
+            display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <div style={{ fontWeight:'600', fontSize:'0.88rem' }}>{p.purpose}</div>
+              <div style={{ color:'var(--text-dim)', fontSize:'0.73rem', marginTop:'1px' }}>
+                {p.guests} guest{p.guests!==1?'s':''} · {p.bookings} booking{p.bookings!==1?'s':''}
+              </div>
+            </div>
+            <div style={{ color:'#34A853', fontWeight:'700', fontSize:'0.88rem' }}>
+              {fmt(p.revenue)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── CHANNEL: BOOKINGS vs REVENUE ── */}
+      <div className="card-section-label">CHANNEL — BOOKINGS vs REVENUE</div>
+      <div style={{ background:'var(--dark-card)', borderRadius:'12px',
+        border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'14px' }}>
+        {(stats.channels||[]).map((ch,i) => {
+          const m = channelMeta(ch.channel)
+          return (
+            <div key={i} style={{ padding:'12px 16px',
+              borderBottom: i < stats.channels.length-1 ? '1px solid var(--border-dim)' : 'none' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                  <span style={{ fontSize:'0.75rem', fontWeight:'700', padding:'2px 8px',
+                    borderRadius:'8px', color:m.color, background:m.bg }}>{m.label}</span>
+                  <span style={{ color:'var(--text-dim)', fontSize:'0.75rem' }}>
+                    {ch.bookings} bookings · {ch.unique_guests} guests
+                  </span>
+                </div>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ color:'#34A853', fontWeight:'700', fontSize:'0.88rem' }}>{fmt(ch.net_revenue)}</div>
+                  {ch.total_commission > 0 && (
+                    <div style={{ color:'#e74c3c', fontSize:'0.72rem' }}>-{fmt(ch.total_commission)} comm</div>
+                  )}
+                </div>
+              </div>
+              {/* Revenue bar */}
+              <div style={{ height:5, background:'rgba(255,255,255,0.06)', borderRadius:3, overflow:'hidden' }}>
+                <div style={{ height:'100%', borderRadius:3, background:m.color,
+                  width:`${Math.round(ch.net_revenue/maxChRev*100)}%` }}/>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── STALE DATA REPORT ── */}
+      <div className="card-section-label">DATA QUALITY</div>
+      <div className="card">
+        <div style={{ color:'var(--text-dim)', fontSize:'0.75rem', marginBottom:'10px' }}>
+          {stale.total} total stays · missing fields:
+        </div>
+        {[
+          ['City / origin',  stale.missing_city,    stale.total],
+          ['State',          stale.missing_state,   stale.total],
+          ['Country',        stale.missing_country, stale.total],
+          ['Phone',          stale.missing_phone,   stale.total],
+          ['Email',          stale.missing_email,   stale.total],
+        ].map(([label, missing, total]) => {
+          const pct = total ? Math.round(missing/total*100) : 0
+          return (
+            <div key={label} style={{ marginBottom:'8px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'3px' }}>
+                <span style={{ fontSize:'0.8rem' }}>{label}</span>
+                <span style={{ fontSize:'0.78rem',
+                  color: pct > 50 ? '#e74c3c' : pct > 20 ? '#e67e22' : '#34A853',
+                  fontWeight:'600' }}>
+                  {missing} missing ({pct}%)
+                </span>
+              </div>
+              <div style={{ height:4, background:'rgba(255,255,255,0.06)', borderRadius:2, overflow:'hidden' }}>
+                <div style={{ height:'100%', borderRadius:2,
+                  background: pct > 50 ? '#e74c3c' : pct > 20 ? '#e67e22' : '#34A853',
+                  width:`${pct}%` }}/>
+              </div>
+            </div>
+          )
+        })}
+        <div style={{ fontSize:'0.73rem', color:'var(--text-dim)', marginTop:'8px',
+          padding:'8px', background:'rgba(255,255,255,0.03)', borderRadius:'6px' }}>
+          💡 City data is captured from the Google Check-in Form (Full Home Address field).
+          Historical stays before the form integration will show as missing.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── MAIN COMPONENT ─────────────────────────────────────────────────────────
+export default function GuestRepository() {
+  const navigate  = useNavigate()
+  const [guests, setGuests]   = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch]   = useState('')
+  const [filter, setFilter]   = useState('all')
+  const [tab, setTab]         = useState('guests')   // 'guests' | 'marketing'
+  const [selected, setSelected] = useState(null)
+
+  useEffect(() => {
+    api.getGuests()
+      .then(g => { setGuests(Array.isArray(g) ? g.sort((a,b) => (b.totalStays||0)-(a.totalStays||0)) : []) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
   }, [])
 
   const FILTERS = [
@@ -311,26 +456,21 @@ export default function GuestRepository() {
   ]
 
   const filtered = guests.filter(g => {
-    const matchSearch = !search ||
-      g.name?.toLowerCase().includes(search.toLowerCase()) ||
-      g.country?.toLowerCase().includes(search.toLowerCase())
-    if (!matchSearch) return false
+    if (search && !g.name?.toLowerCase().includes(search.toLowerCase()) &&
+        !g.fromCity?.toLowerCase().includes(search.toLowerCase()) &&
+        !g.country?.toLowerCase().includes(search.toLowerCase())) return false
     if (filter === 'all') return true
-    const tags = getSegments(g, stays)
-    return tags.includes(filter)
+    return getSegments(g).includes(filter)
   })
 
-  // Stats
-  const repeatGuests   = guests.filter(g => (g.totalStays||0) > 1).length
-  const withContact    = guests.filter(g => g.phone || g.email).length
-  const segmentCounts  = {}
+  const repeatGuests  = guests.filter(g => (g.totalStays||0) > 1).length
+  const withContact   = guests.filter(g => g.phone || g.email).length
+  const segmentCounts = {}
   Object.keys(SEGMENTS).forEach(seg => {
-    segmentCounts[seg] = guests.filter(g => getSegments(g, stays).includes(seg)).length
+    segmentCounts[seg] = guests.filter(g => getSegments(g).includes(seg)).length
   })
 
-  if (selected) {
-    return <GuestDetail guest={selected} stays={stays} onClose={() => setSelected(null)}/>
-  }
+  if (selected) return <GuestDetail guest={selected} onClose={() => setSelected(null)}/>
 
   return (
     <div className="screen">
@@ -343,75 +483,98 @@ export default function GuestRepository() {
         <div style={{width:34}}/>
       </div>
 
-      <div className="screen-body">
-        {/* Stats row */}
-        {!loading && (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px', marginBottom:'14px' }}>
-            {[
-              { label:'Total guests', val: guests.length, color:'var(--text)' },
-              { label:'Repeat guests', val: repeatGuests, color:'var(--gold)' },
-              { label:'With contact', val: withContact, color:'var(--green)' },
-            ].map((s,i) => (
-              <div key={i} style={{ background:'var(--dark-card)', borderRadius:'10px',
-                border:'1px solid var(--border-dim)', padding:'10px', textAlign:'center' }}>
-                <div style={{ color:s.color, fontSize:'1.4rem', fontWeight:'800' }}>{s.val}</div>
-                <div style={{ color:'var(--text-dim)', fontSize:'0.68rem', marginTop:'2px' }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Tab bar */}
+      <div style={{ display:'flex', background:'var(--dark-card)',
+        borderBottom:'1px solid var(--border-dim)', flexShrink:0 }}>
+        {[
+          { key:'guests',    label:'Guests',    icon:'👥' },
+          { key:'marketing', label:'Marketing', icon:'🎯' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            flex:1, padding:'12px 4px', border:'none', background:'transparent', cursor:'pointer',
+            color:tab===t.key?'var(--gold)':'var(--text-dim)',
+            borderBottom:tab===t.key?'2px solid var(--gold)':'2px solid transparent',
+            fontSize:'0.78rem', fontWeight:tab===t.key?'700':'400',
+          }}>
+            <div style={{ fontSize:'1rem', marginBottom:'2px' }}>{t.icon}</div>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Segment summary */}
-        {!loading && (
+      <div className="screen-body">
+
+        {/* ── GUESTS TAB ── */}
+        {tab === 'guests' && (
           <>
-            <div className="card-section-label">SEGMENTS</div>
-            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px' }}>
-              {Object.entries(SEGMENTS).map(([key, seg]) => (
-                <div key={key} style={{ padding:'5px 10px', borderRadius:'12px',
-                  background: seg.bg, border:`1px solid ${seg.color}44`,
-                  fontSize:'0.72rem', fontWeight:'600', color: seg.color }}>
-                  {seg.icon} {seg.label} ({segmentCounts[key]||0})
+            {/* Stats */}
+            {!loading && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'8px', marginBottom:'14px' }}>
+                {[
+                  { label:'Total guests', val:guests.length,  color:'var(--text)' },
+                  { label:'Repeat guests', val:repeatGuests,  color:'var(--gold)' },
+                  { label:'With contact', val:withContact,    color:'var(--green)' },
+                ].map((s,i) => (
+                  <div key={i} style={{ background:'var(--dark-card)', borderRadius:'10px',
+                    border:'1px solid var(--border-dim)', padding:'10px', textAlign:'center' }}>
+                    <div style={{ color:s.color, fontSize:'1.4rem', fontWeight:'800' }}>{s.val}</div>
+                    <div style={{ color:'var(--text-dim)', fontSize:'0.68rem', marginTop:'2px' }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Segment counts */}
+            {!loading && (
+              <>
+                <div className="card-section-label">SEGMENTS</div>
+                <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px' }}>
+                  {Object.entries(SEGMENTS).map(([key, seg]) => (
+                    <div key={key} style={{ padding:'4px 10px', borderRadius:'12px',
+                      background:seg.bg, border:`1px solid ${seg.color}44`,
+                      fontSize:'0.72rem', fontWeight:'600', color:seg.color }}>
+                      {seg.icon} {seg.label} ({segmentCounts[key]||0})
+                    </div>
+                  ))}
                 </div>
+              </>
+            )}
+
+            {/* Search */}
+            <input className="field-input"
+              placeholder="🔍 Search by name, city or country…"
+              value={search} onChange={e => setSearch(e.target.value)}
+              style={{ marginBottom:'10px', width:'100%' }}/>
+
+            {/* Filter pills */}
+            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px' }}>
+              {FILTERS.map(f => (
+                <button key={f.key} onClick={() => setFilter(f.key)} style={{
+                  padding:'5px 12px', borderRadius:'20px', cursor:'pointer', fontSize:'0.75rem',
+                  border:`1px solid ${filter===f.key?'var(--gold)':'rgba(255,255,255,0.08)'}`,
+                  background: filter===f.key?'rgba(200,144,58,0.15)':'transparent',
+                  color: filter===f.key?'var(--gold)':'var(--text-dim)',
+                  fontWeight: filter===f.key?'700':'400', whiteSpace:'nowrap',
+                }}>
+                  {f.label}{filter===f.key && filtered.length ? ` (${filtered.length})` : ''}
+                </button>
               ))}
             </div>
+
+            <div className="card-section-label">{filtered.length} GUESTS</div>
+
+            {loading
+              ? Array(6).fill(0).map((_,i) => <div key={i} style={{ height:80,
+                  background:'rgba(255,255,255,0.04)', borderRadius:'12px', marginBottom:'8px' }}/>)
+              : filtered.length === 0
+                ? <div className="card" style={{ textAlign:'center', color:'var(--text-dim)', padding:'32px' }}>No guests found</div>
+                : filtered.map((g,i) => <GuestCard key={i} guest={g} onClick={() => setSelected(g)}/>)
+            }
           </>
         )}
 
-        {/* Search */}
-        <input className="field-input" placeholder="🔍 Search by name or country..."
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{ marginBottom:'10px', width:'100%' }}/>
-
-        {/* Filter pills */}
-        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px', overflowX:'auto' }}>
-          {FILTERS.map(f => (
-            <button key={f.key} onClick={() => setFilter(f.key)}
-              style={{ padding:'5px 12px', borderRadius:'20px', border:`1px solid ${filter===f.key?'var(--gold)':'rgba(255,255,255,0.08)'}`,
-                background: filter===f.key?'rgba(200,144,58,0.15)':'transparent',
-                color: filter===f.key?'var(--gold)':'var(--text-dim)',
-                fontSize:'0.75rem', fontWeight: filter===f.key?'700':'400', cursor:'pointer', whiteSpace:'nowrap' }}>
-              {f.label} {filter===f.key && filtered.length > 0 ? `(${filtered.length})` : ''}
-            </button>
-          ))}
-        </div>
-
-        {/* Guest list */}
-        <div className="card-section-label">
-          {filtered.length} GUEST{filtered.length !== 1 ? 'S' : ''}
-          {filter !== 'all' ? ` · ${FILTERS.find(f=>f.key===filter)?.label}` : ''}
-        </div>
-
-        {loading ? (
-          Array(6).fill(0).map((_, i) => <div key={i} style={{ height:80, background:'rgba(255,255,255,0.04)', borderRadius:'12px', marginBottom:'8px' }}/>)
-        ) : filtered.length === 0 ? (
-          <div className="card" style={{ textAlign:'center', color:'var(--text-dim)', padding:'32px' }}>
-            No guests found
-          </div>
-        ) : (
-          filtered.map((guest, i) => (
-            <GuestCard key={i} guest={guest} stays={stays} onClick={() => setSelected(guest)}/>
-          ))
-        )}
+        {/* ── MARKETING TAB ── */}
+        {tab === 'marketing' && <MarketingTab />}
       </div>
     </div>
   )

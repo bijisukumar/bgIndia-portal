@@ -1,105 +1,175 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
-import { CONFIG } from '../config'
 import { api } from '../api'
+import { CONFIG } from '../config'
 
 export default function RamanHome() {
-  const { logout }=useAuth()
-  const navigate=useNavigate()
-  const [activeStay,setActiveStay]=useState(null)
-  const [loading,setLoading]=useState(true)
+  const navigate = useNavigate()
+  const [activeStay,   setActiveStay]   = useState(null)
+  const [readyCount,   setReadyCount]   = useState(0)   // guests in ready_for_checkin
+  const [loadingStay,  setLoadingStay]  = useState(true)
 
-  useEffect(()=>{
-    api.getActiveStay('dwarka')
-      .then(d=>{
-        // Only set if we got a real stay object with a stayId
-        if (d && d.stayId) setActiveStay(d)
-        setLoading(false)
-      })
-      .catch(()=>setLoading(false))
-  },[])
+  useEffect(() => {
+    Promise.all([
+      api.getActiveStay('dwarka'),
+      api.getPendingCheckIns(),
+    ]).then(([stay, pending]) => {
+      setActiveStay(stay || null)
+      setReadyCount(Array.isArray(pending) ? pending.length : 0)
+      setLoadingStay(false)
+    }).catch(() => setLoadingStay(false))
+  }, [])
 
-  const villaRows=[
-    {icon:'🏠',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Check-in',sub:activeStay?`Active: ${activeStay.guestName}`:'New guest arrival',path:'/raman/checkin',disabled:false},
-    {icon:'🛒',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Kitchen incidentals',sub:activeStay?`Linked to ${activeStay.guestName}`:'No active stay',path:'/raman/kitchen',disabled:!activeStay},
-    {icon:'🍳',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Breakfast',sub:activeStay?`${activeStay.guestCount || activeStay.adultsCount || ''} guests · ₹${CONFIG.breakfastRate}/person`:'No active stay',path:'/raman/breakfast',disabled:!activeStay},
-    {icon:'🚗',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Car rental',sub:'Trip log',path:'/raman/carrental',disabled:!activeStay},
-  ]
-  const estateRows=[
-    {icon:'🌳',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Rubber tracker',sub:'Harvest · tapping log',path:'/pavutumuri/rubber'},
-    {icon:'🌿',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Income / expense',sub:'Monthly ledger',path:'/pavutumuri/ledger'},
+  // Kitchen/Breakfast/Car rental unlock when there is an active checked-in stay
+  // They are intentionally locked without one — charges must be linked to a stay
+  const activeLabel = activeStay
+    ? `Linked to ${activeStay.guestName || activeStay.guest_name}`
+    : readyCount > 0
+      ? `${readyCount} guest${readyCount>1?'s':''} ready — complete check-in first`
+      : 'Unlocks after guest checks in'
+
+  const MENU = [
+    {
+      icon: '🏠', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
+      title: 'Check-in',
+      sub: readyCount > 0
+        ? `${readyCount} guest${readyCount>1?'s':''} ready for check-in`
+        : activeStay
+          ? `Active: ${activeStay.guestName || activeStay.guest_name}`
+          : 'No guests ready yet',
+      path: '/raman/checkin',
+      disabled: false,
+      badge: readyCount > 0 ? readyCount : null,
+    },
+    {
+      icon: '🛒', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
+      title: 'Kitchen incidentals',
+      sub: activeLabel,
+      path: '/raman/kitchen',
+      // Only lock if no active stay — unlock so Raman can always enter, but warn
+      disabled: !activeStay,
+      lockReason: 'Guest must be checked in to record kitchen charges',
+    },
+    {
+      icon: '🍳', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
+      title: 'Breakfast',
+      sub: activeStay
+        ? `${activeStay.guestCount || activeStay.adults || ''} guests · ₹${CONFIG.breakfastRate}/person`
+        : activeLabel,
+      path: '/raman/breakfast',
+      disabled: !activeStay,
+      lockReason: 'Guest must be checked in to record breakfast',
+    },
+    {
+      icon: '🚗', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
+      title: 'Car rental',
+      sub: activeStay ? `Linked to ${activeStay.guestName || activeStay.guest_name}` : activeLabel,
+      path: '/raman/carrental',
+      disabled: !activeStay,
+      lockReason: 'Guest must be checked in to record car rental',
+    },
   ]
 
   return (
     <div className="screen">
-      <div style={styles.header}>
-        <img src="/icons/logo-black.png" alt="GE" style={styles.logo} onError={e=>e.target.style.display='none'}/>
-        <div style={styles.headerText}>
-          <div style={styles.brandName}>{CONFIG.brandName}</div>
-          <div style={styles.tagline}>PROPERTY MANAGEMENT PORTAL</div>
+      <div className="topbar" style={{ justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {CONFIG.logo && <img src={CONFIG.logo} alt="logo" style={{ height: 36, borderRadius: 6 }}/>}
+          <div>
+            <div className="topbar-title">{CONFIG.villaName || 'Guruvayur Estates'}</div>
+            <div className="topbar-sub">PROPERTY MANAGEMENT PORTAL</div>
+          </div>
         </div>
-        <div style={styles.badge}><span style={styles.badgeLabel}>RAMAN</span></div>
+        <span style={{ background: 'rgba(200,144,58,0.15)', color: 'var(--gold)',
+          padding: '4px 12px', borderRadius: '16px', fontSize: '0.75rem', fontWeight: '700' }}>
+          RAMAN
+        </span>
       </div>
+
       <div className="screen-body">
-        {loading?(
-          <div style={{background:'rgba(52,168,83,0.06)',border:'1px solid rgba(52,168,83,0.15)',borderRadius:'10px',padding:'12px 14px',marginBottom:'16px',display:'flex',gap:'10px',alignItems:'center'}}>
-            <div className="spinner"/><span style={{color:'#5C7080',fontSize:'0.85rem'}}>Checking active stay...</span>
+
+        {/* Active stay banner / status */}
+        {loadingStay ? (
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'12px 0', marginBottom:'8px' }}>
+            <div className="spinner"/><span style={{ color:'#5C7080', fontSize:'0.85rem' }}>Checking active stay…</span>
           </div>
-        ):activeStay?(
-          <div className="active-stay-banner" onClick={()=>navigate('/raman/checkin')}>
-            <div className="banner-dot"/>
-            <div style={{flex:1}}>
-              <div className="active-stay-name">Active: {activeStay.guestName}</div>
-              <div className="active-stay-sub">Check-in {activeStay.checkIn || activeStay.checkInDate || ''} · {activeStay.guestCount || activeStay.adultsCount || ''} guests</div>
+        ) : activeStay ? (
+          <div className="active-stay-banner" onClick={() => navigate('/raman/checkin')}>
+            <div className="active-stay-icon">🏠</div>
+            <div style={{ flex: 1 }}>
+              <div className="active-stay-name">Active: {activeStay.guestName || activeStay.guest_name}</div>
+              <div className="active-stay-sub">
+                Check-in {activeStay.checkInDate || activeStay.checkin_date || ''} · {activeStay.adults || ''} guests
+              </div>
             </div>
-            <div style={{color:'var(--green)',fontSize:'0.85rem',fontWeight:'600'}}>View ›</div>
+            <span style={{ color: 'var(--gold)', fontSize: '1.1rem' }}>›</span>
           </div>
-        ):(
-          <div style={{background:'rgba(200,144,58,0.05)',border:'1px solid rgba(200,144,58,0.15)',borderRadius:'10px',padding:'12px 14px',marginBottom:'16px',display:'flex',gap:'12px',alignItems:'center'}}>
-            <span style={{fontSize:'1.3rem'}}>🏠</span>
+        ) : readyCount > 0 ? (
+          <div className="active-stay-banner" style={{ borderColor: 'rgba(52,168,83,0.4)',
+            background: 'rgba(52,168,83,0.06)' }}
+            onClick={() => navigate('/raman/checkin')}>
+            <div style={{ fontSize: '1.3rem' }}>🔑</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#34A853', fontWeight: '700', fontSize: '0.9rem' }}>
+                {readyCount} guest{readyCount>1?'s':''} ready for check-in
+              </div>
+              <div className="active-stay-sub">Tap to open Check-in screen</div>
+            </div>
+            <span style={{ color: '#34A853', fontSize: '1.1rem' }}>›</span>
+          </div>
+        ) : (
+          <div style={{ background: 'rgba(92,112,128,0.08)', border: '1px solid rgba(92,112,128,0.2)',
+            borderRadius: '12px', padding: '12px 16px', marginBottom: '14px',
+            display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '1.3rem' }}>🏠</div>
             <div>
-              <div style={{color:'#C8903A',fontSize:'0.85rem',fontWeight:'600'}}>No active stay</div>
-              <div style={{color:'#5C7080',fontSize:'0.75rem',marginTop:'2px'}}>Tap Check-in when guests arrive</div>
+              <div style={{ color: '#C8903A', fontSize: '0.85rem', fontWeight: '600' }}>No active stay</div>
+              <div style={{ color: '#5C7080', fontSize: '0.75rem', marginTop: '2px' }}>
+                Owner marks guests "Ready for Check-in" — they appear here
+              </div>
             </div>
           </div>
         )}
+
         <div className="card-section-label">GVR DWARKA VILLA</div>
         <div className="menu-tile">
-          {villaRows.map((r,i)=>(
-            <div key={i} className="menu-row" onClick={()=>!r.disabled&&navigate(r.path)}
-              style={{...(i===villaRows.length-1?{borderBottom:'none'}:{}),cursor:r.disabled?'default':'pointer',opacity:r.disabled?0.5:1}}>
-              <div className="menu-icon" style={{background:r.bg}}>{r.icon}</div>
-              <div className="menu-label">
-                <div className="menu-title">{r.title}</div>
-                <div className="menu-sub">{r.sub}</div>
+          {MENU.map((item, i) => (
+            <div key={i}
+              className={`menu-row ${item.disabled ? 'menu-row-disabled' : ''}`}
+              style={{ borderBottom: i < MENU.length - 1 ? '1px solid var(--border-dim)' : 'none',
+                       opacity: item.disabled ? 0.55 : 1 }}
+              onClick={() => {
+                if (item.disabled) {
+                  // Show why it's locked — brief feedback
+                  return
+                }
+                navigate(item.path)
+              }}>
+              <div className="menu-icon" style={{ background: item.bg }}>{item.icon}</div>
+              <div className="menu-label" style={{ flex: 1 }}>
+                <div className="menu-title">{item.title}</div>
+                <div className="menu-sub">{item.sub}</div>
+                {item.disabled && item.lockReason && (
+                  <div style={{ fontSize: '0.68rem', color: '#5C7080', marginTop: '2px' }}>
+                    🔒 {item.lockReason}
+                  </div>
+                )}
               </div>
-              {!r.disabled&&<div className="menu-arrow" style={{background:r.arrow}}>›</div>}
-              {r.disabled&&<span style={{fontSize:'0.9rem'}}>🔒</span>}
+              {item.badge ? (
+                <div style={{ background: '#34A853', color: '#fff', borderRadius: '12px',
+                  padding: '2px 8px', fontSize: '0.75rem', fontWeight: '700', minWidth: '20px',
+                  textAlign: 'center' }}>
+                  {item.badge}
+                </div>
+              ) : item.disabled ? (
+                <span style={{ fontSize: '1rem' }}>🔒</span>
+              ) : (
+                <div className="menu-arrow" style={{ background: item.arrow }}>›</div>
+              )}
             </div>
           ))}
         </div>
-        <div className="card-section-label">PAVUTUMURI ESTATE</div>
-        <div className="menu-tile">
-          {estateRows.map((r,i)=>(
-            <div key={i} className="menu-row" onClick={()=>navigate(r.path)} style={i===estateRows.length-1?{borderBottom:'none'}:{}}>
-              <div className="menu-icon" style={{background:r.bg}}>{r.icon}</div>
-              <div className="menu-label"><div className="menu-title">{r.title}</div><div className="menu-sub">{r.sub}</div></div>
-              <div className="menu-arrow" style={{background:r.arrow}}>›</div>
-            </div>
-          ))}
-        </div>
-        <button className="logout-btn" onClick={logout}>Log out</button>
       </div>
     </div>
   )
-}
-const styles={
-  header:{background:'#111111',padding:'16px 16px 14px',display:'flex',alignItems:'center',gap:'14px',borderBottom:'1px solid rgba(200,144,58,0.18)'},
-  logo:{height:'52px',width:'52px',borderRadius:'10px',objectFit:'cover',border:'1px solid rgba(200,144,58,0.3)',boxShadow:'0 4px 12px rgba(200,144,58,0.15)'},
-  headerText:{flex:1},
-  brandName:{fontFamily:"'Cormorant Garamond',serif",fontSize:'1.15rem',fontWeight:'600',color:'#E8B86D'},
-  tagline:{fontSize:'0.6rem',color:'#5C7080',letterSpacing:'2px',marginTop:'2px'},
-  badge:{background:'rgba(200,144,58,0.1)',border:'1px solid rgba(200,144,58,0.2)',borderRadius:'20px',padding:'4px 12px'},
-  badgeLabel:{color:'#C8903A',fontSize:'0.65rem',fontWeight:'700',letterSpacing:'2px'},
 }

@@ -97,12 +97,36 @@ export async function onRequest(ctx) {
 
       if (action === 'getGuests') {
         const { results } = await DB.prepare(
-          `SELECT DISTINCT guest_name, guest_phone, guest_email, source,
-            MAX(checkin_date) as last_stay, COUNT(*) as total_stays, SUM(net) as total_spent
+          `SELECT
+            guest_name,
+            guest_phone,
+            guest_email,
+            source,
+            MAX(checkin_date)  as last_stay,
+            MIN(checkin_date)  as first_stay,
+            COUNT(*)           as total_stays,
+            SUM(COALESCE(nights,0)) as total_nights,
+            ROUND(SUM(COALESCE(net,0)),0) as total_spent,
+            MAX(adults)        as last_adults,
+            MAX(children)      as last_children
            FROM stays WHERE status != 'cancelled'
            GROUP BY guest_name ORDER BY last_stay DESC`
         ).all()
-        return json({ success: true, data: results })
+        // Map snake_case DB fields → camelCase expected by GuestRepository.jsx
+        const guests = results.map(r => ({
+          name:        r.guest_name,
+          phone:       r.guest_phone,
+          email:       r.guest_email,
+          source:      r.source,
+          lastStay:    r.last_stay,
+          firstStay:   r.first_stay,
+          totalStays:  r.total_stays,
+          totalNights: r.total_nights,
+          totalSpent:  r.total_spent,
+          adults:      r.last_adults,
+          children:    r.last_children,
+        }))
+        return json({ success: true, data: guests })
       }
 
       // VILLA DASHBOARD
@@ -299,7 +323,7 @@ export async function onRequest(ctx) {
              AND status NOT IN ('closed','cancelled','checked_out')
              AND (
                checkin_date >= date('now', '-2 days')
-               OR status = 'checked_in'
+               OR status IN ('checked_in','ready_for_checkout','ready_for_checkin')
              )
            ORDER BY checkin_date ASC`
         ).bind(villaId).all()
@@ -325,6 +349,49 @@ export async function onRequest(ctx) {
       if (action === 'createBooking') {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
+
+        // ── DOUBLE-BOOKING CHECK ──────────────────────────────────────────
+        // Check if any non-cancelled stay overlaps with the requested dates
+        const conflict = await DB.prepare(`
+          SELECT stay_id, guest_name, checkin_date, checkout_date, status
+          FROM stays
+          WHERE villa_id = ?
+            AND status NOT IN ('cancelled','closed','checked_out')
+            AND checkin_date  < ?
+            AND checkout_date > ?
+          LIMIT 1
+        `).bind(body.villaId || 'dwarka', body.checkOutDate, body.checkInDate).first()
+
+        if (conflict) {
+          // Send email alert to owner about double-booking attempt
+          try {
+            const subject = '[bgIndia] ⚠️ Double-booking attempt blocked'
+            const emailBody = [
+              'A new booking was BLOCKED due to a date conflict.',
+              '',
+              'Attempted booking:',
+              `  Guest: ${body.guestName || body.bookerName}`,
+              `  Dates: ${body.checkInDate} → ${body.checkOutDate}`,
+              '',
+              'Conflicts with existing stay:',
+              `  Stay ID: ${conflict.stay_id}`,
+              `  Guest:   ${conflict.guest_name}`,
+              `  Dates:   ${conflict.checkin_date} → ${conflict.checkout_date}`,
+              `  Status:  ${conflict.status}`,
+            ].join('\n')
+            // Log to console — email via Apps Script not available in Worker
+            console.warn('DOUBLE BOOKING BLOCKED:', conflict)
+          } catch(_) {}
+          return json({
+            success: false,
+            error: `Date conflict: ${conflict.guest_name} is already booked from ${conflict.checkin_date} to ${conflict.checkout_date} (${conflict.stay_id})`,
+            conflict: { stayId: conflict.stay_id, guestName: conflict.guest_name,
+                        checkIn: conflict.checkin_date, checkOut: conflict.checkout_date,
+                        status: conflict.status }
+          }, 409)
+        }
+        // ── END DOUBLE-BOOKING CHECK ──────────────────────────────────────
+
         await DB.prepare(`
           INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, children,

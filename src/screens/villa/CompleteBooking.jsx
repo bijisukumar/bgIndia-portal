@@ -18,6 +18,25 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Other']
+
+// Extra charge line items — each has a label and default amount
+const EXTRA_ITEMS = [
+  { label: 'Early Check-in',              amount: 500  },
+  { label: 'Late Check-out',              amount: 500  },
+  { label: 'Early Check-in + Late Check-out', amount: 1000 },
+  { label: 'Breakfast',                   amount: 0    },
+  { label: 'Floor Bed',                   amount: 750  },
+  { label: 'Taxi Pick-up',                amount: 0    },
+  { label: 'Drop-off & Pick-up',          amount: 0    },
+  { label: 'Cleaning Fee',                amount: 1000 },
+  { label: 'Other',                       amount: 0    },
+]
+
+// Airbnb-specific fee structure (from confirmation email)
+const EMPTY_AIRBNB = {
+  nightFee: '', nights: 1, cleaningFee: '', hostServiceFee: '',
+  guestServiceFee: '', youEarn: '', guestPaid: '',
+}
 const COMMISSION = { Direct:0, Airbnb:15, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Other:10 }
 
 // Status badge config
@@ -51,6 +70,8 @@ export default function CompleteBooking() {
   const [stays, setStays]       = useState([])
   const [selected, setSelected] = useState(null)
   const [form, setForm]         = useState(EMPTY_FORM)
+  const [extraLines, setExtraLines] = useState([])      // [{label, amount}]
+  const [airbnb, setAirbnb]         = useState(EMPTY_AIRBNB) // Airbnb fee breakdown
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
   const [transitioning, setTransitioning] = useState(false)
@@ -93,11 +114,13 @@ export default function CompleteBooking() {
   const nights  = selected
     ? Math.max(0, Math.round((new Date(selected.checkout_date)-new Date(selected.checkin_date))/(1000*60*60*24)))
     : 0
-  const tariff  = parseFloat(form.tariffPerNight)||0
-  const extra   = parseFloat(form.extraCharges)||0
-  const gross   = (tariff * nights) + extra
+  const tariff     = parseFloat(form.tariffPerNight)||0
+  const extraTotal = extraLines.reduce((s,l) => s + (parseFloat(l.amount)||0), 0)
+  const gross      = (tariff * nights) + extraTotal
   const commPct = COMMISSION[form.channel]||0
-  const commAmt = Math.round(gross * commPct / 100)
+  const commAmt = form.channel === 'Airbnb' && airbnb.hostServiceFee
+    ? parseFloat(airbnb.hostServiceFee) || Math.round(gross * commPct / 100)
+    : Math.round(gross * commPct / 100)
   const net     = gross - commAmt
 
   // Save financial details (updates stay record)
@@ -107,12 +130,16 @@ export default function CompleteBooking() {
     setSaving(true)
     try {
       await api.saveVillaRentalIncome({
-        stayId:    selected.stay_id,
-        villaId:   'dwarka',
-        guestName: selected.guest_name,
+        stayId:      selected.stay_id,
+        villaId:     'dwarka',
+        guestName:   selected.guest_name,
         checkInDate:  selected.checkin_date,
         checkOutDate: selected.checkout_date,
-        channel:   form.channel,
+        channel:     form.channel,
+        tariffPerNight: tariff,
+        extraCharges:   extraTotal,
+        extraLines:     JSON.stringify(extraLines),
+        airbnbFees:     form.channel === 'Airbnb' ? JSON.stringify(airbnb) : null,
         nights, gross, commPct, commAmt, net,
         notes: form.notes,
       })
@@ -269,19 +296,104 @@ export default function CompleteBooking() {
                         value={form.tariffPerNight} onChange={e=>set('tariffPerNight',e.target.value)}/>
                     </div>
                     <div className="field">
-                      <label className="field-label">Extra charges (₹)</label>
-                      <input className="field-input" type="number" placeholder="0"
-                        value={form.extraCharges} onChange={e=>set('extraCharges',e.target.value)}/>
+                      <label className="field-label">Add extra charge</label>
+                      <select className="field-input" value=""
+                        onChange={e => {
+                          if (!e.target.value) return
+                          const item = EXTRA_ITEMS.find(x => x.label === e.target.value)
+                          setExtraLines(prev => [...prev, { label: item.label, amount: item.amount }])
+                          e.target.value = ''
+                        }}>
+                        <option value="">+ Add item…</option>
+                        {EXTRA_ITEMS.map(x => <option key={x.label} value={x.label}>{x.label}</option>)}
+                      </select>
                     </div>
                   </div>
                 </div>
 
+                {/* Extra charge lines */}
+                {extraLines.length > 0 && (
+                  <div className="card" style={{padding:'10px 14px',marginBottom:'8px'}}>
+                    <div className="card-section-label" style={{marginBottom:'8px'}}>EXTRA CHARGES</div>
+                    {extraLines.map((line, i) => (
+                      <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
+                        <span style={{flex:1,fontSize:'0.85rem',color:'var(--text)'}}>{line.label}</span>
+                        <input type="number" value={line.amount} placeholder="0"
+                          onChange={e => setExtraLines(prev => prev.map((l,j) => j===i ? {...l, amount: e.target.value} : l))}
+                          style={{width:'90px',padding:'5px 8px',borderRadius:'6px',
+                            background:'var(--dark-input)',border:'1px solid var(--border-dim)',
+                            color:'var(--gold)',fontWeight:'600',fontSize:'0.85rem',textAlign:'right'}}/>
+                        <button onClick={() => setExtraLines(prev => prev.filter((_,j) => j!==i))}
+                          style={{background:'none',border:'none',color:'#c62828',cursor:'pointer',fontSize:'1rem'}}>✕</button>
+                      </div>
+                    ))}
+                    <div style={{borderTop:'1px solid var(--border-dim)',paddingTop:'6px',marginTop:'4px',
+                      display:'flex',justifyContent:'space-between',fontSize:'0.82rem'}}>
+                      <span style={{color:'var(--text-dim)'}}>Total extras</span>
+                      <span style={{color:'var(--gold)',fontWeight:'700'}}>₹{extraTotal.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Airbnb fee breakdown */}
+                {form.channel === 'Airbnb' && (
+                  <div className="card" style={{marginBottom:'8px'}}>
+                    <div className="card-section-label" style={{marginBottom:'8px'}}>AIRBNB FEE BREAKDOWN</div>
+                    <div style={{fontSize:'0.75rem',color:'var(--text-dim)',marginBottom:'10px'}}>
+                      From Airbnb confirmation email — "You earn" section
+                    </div>
+                    <div className="grid-2">
+                      {[
+                        {key:'nightFee',    label:'Night fee (₹)'},
+                        {key:'cleaningFee', label:'Cleaning fee (₹)'},
+                        {key:'hostServiceFee', label:'Host service fee (₹)'},
+                        {key:'youEarn',     label:'You earn total (₹)'},
+                      ].map(f => (
+                        <div key={f.key} className="field">
+                          <label className="field-label">{f.label}</label>
+                          <input type="number" className="field-input" placeholder="0"
+                            value={airbnb[f.key]}
+                            onChange={e => setAirbnb(prev => ({...prev, [f.key]: e.target.value}))}/>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{fontSize:'0.75rem',color:'var(--text-dim)',margin:'8px 0 6px'}}>
+                      "Guest paid" section
+                    </div>
+                    <div className="grid-2">
+                      {[
+                        {key:'guestServiceFee', label:'Guest service fee (₹)'},
+                        {key:'guestPaid',       label:'Guest paid total (₹)'},
+                      ].map(f => (
+                        <div key={f.key} className="field">
+                          <label className="field-label">{f.label}</label>
+                          <input type="number" className="field-input" placeholder="0"
+                            value={airbnb[f.key]}
+                            onChange={e => setAirbnb(prev => ({...prev, [f.key]: e.target.value}))}/>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Revenue summary */}
                 <div className="net-box">
                   <div className="net-row">
-                    <span className="net-label">Gross ({nights}N × {fmt(tariff)})</span>
-                    <span className="net-val pos">{fmt(gross)}</span>
+                    <span className="net-label">Room ({nights}N × {fmt(tariff)})</span>
+                    <span className="net-val pos">{fmt(tariff * nights)}</span>
                   </div>
+                  {extraLines.map((line,i) => (
+                    <div key={i} className="net-row">
+                      <span className="net-label">{line.label}</span>
+                      <span className="net-val pos">{fmt(parseFloat(line.amount)||0)}</span>
+                    </div>
+                  ))}
+                  {extraTotal > 0 && (
+                    <div className="net-row" style={{opacity:0.7}}>
+                      <span className="net-label">Gross total</span>
+                      <span className="net-val pos">{fmt(gross)}</span>
+                    </div>
+                  )}
                   {commPct > 0 && (
                     <div className="net-row">
                       <span className="net-label">{form.channel} commission ({commPct}%)</span>

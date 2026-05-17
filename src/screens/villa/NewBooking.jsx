@@ -83,9 +83,13 @@ export default function NewBooking() {
       setResult(res)
       showToast('Booking created! Stay ID: ' + res?.stayId)
     } catch (e) {
-      // Show actual Worker error — helps diagnose 500s
       const msg = e?.message || 'Unknown error'
-      showToast(`Save failed: ${msg}`, 'error')
+      // Check for 409 conflict response embedded in error message
+      if (msg.toLowerCase().includes('date conflict') || msg.toLowerCase().includes('already booked')) {
+        showToast(`⚠️ ${msg}`, 'error')
+      } else {
+        showToast(`Save failed: ${msg}`, 'error')
+      }
       console.error('[NewBooking] createBooking failed:', e)
     } finally {
       setSaving(false)

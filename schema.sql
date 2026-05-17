@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS stays (
   stay_id          TEXT PRIMARY KEY,
   villa_id         TEXT NOT NULL DEFAULT 'dwarka',
   source           TEXT NOT NULL DEFAULT 'direct',
-  airbnb_conf      TEXT,
   guest_name       TEXT NOT NULL,
   guest_phone      TEXT,
   guest_email      TEXT,
@@ -39,7 +38,12 @@ CREATE TABLE IF NOT EXISTS stays (
   commission_amt   REAL DEFAULT 0,
   net              REAL DEFAULT 0,
   status           TEXT DEFAULT 'confirmed',
-  drive_folder_id  TEXT,
+  drive_folder_id  TEXT,             -- D1 folder ID (without full URL)
+  drive_folder_url TEXT,             -- full Drive URL for quick access
+  review_rating    INTEGER DEFAULT 0, -- star rating 1-5 (0 = no review yet)
+  review_source    TEXT,             -- 'airbnb' | 'google'
+  review_date      TEXT,             -- YYYY-MM-DD
+  airbnb_conf      TEXT,             -- Airbnb confirmation code (for email matching)
   converted_to_direct INTEGER DEFAULT 0,
   -- Audit
   created_by  TEXT DEFAULT 'owner',   -- owner | raman | pradosh | auto | system

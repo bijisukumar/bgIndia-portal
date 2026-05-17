@@ -102,29 +102,35 @@ export async function onRequest(ctx) {
             guest_phone,
             guest_email,
             source,
-            MAX(checkin_date)  as last_stay,
-            MIN(checkin_date)  as first_stay,
-            COUNT(*)           as total_stays,
-            SUM(COALESCE(nights,0)) as total_nights,
+            MAX(checkin_date)   as last_stay,
+            MIN(checkin_date)   as first_stay,
+            COUNT(*)            as total_stays,
+            SUM(COALESCE(nights,0))       as total_nights,
             ROUND(SUM(COALESCE(net,0)),0) as total_spent,
-            MAX(adults)        as last_adults,
-            MAX(children)      as last_children
+            MAX(adults)         as last_adults,
+            MAX(children)       as last_children,
+            MAX(review_rating)  as last_review_rating,
+            MAX(review_source)  as last_review_source,
+            MAX(review_date)    as last_review_date
            FROM stays WHERE status != 'cancelled'
            GROUP BY guest_name ORDER BY last_stay DESC`
         ).all()
         // Map snake_case DB fields → camelCase expected by GuestRepository.jsx
         const guests = results.map(r => ({
-          name:        r.guest_name,
-          phone:       r.guest_phone,
-          email:       r.guest_email,
-          source:      r.source,
-          lastStay:    r.last_stay,
-          firstStay:   r.first_stay,
-          totalStays:  r.total_stays,
-          totalNights: r.total_nights,
-          totalSpent:  r.total_spent,
-          adults:      r.last_adults,
-          children:    r.last_children,
+          name:             r.guest_name,
+          phone:            r.guest_phone,
+          email:            r.guest_email,
+          source:           r.source,
+          lastStay:         r.last_stay,
+          firstStay:        r.first_stay,
+          totalStays:       r.total_stays,
+          totalNights:      r.total_nights,
+          totalSpent:       r.total_spent,
+          adults:           r.last_adults,
+          children:         r.last_children,
+          lastReviewRating: r.last_review_rating || 0,
+          lastReviewSource: r.last_review_source || '',
+          lastReviewDate:   r.last_review_date   || '',
         }))
         return json({ success: true, data: guests })
       }
@@ -367,6 +373,34 @@ export async function onRequest(ctx) {
         if (!sql) return err(`Unknown query key: ${key}`)
         const { results } = await DB.prepare(sql).all()
         return json({ success: true, data: results, sql })
+      }
+
+      // FIND STAY FOR REVIEW MATCHING — called by Apps Script Gmail poller
+      // Matches guest name + checkout within 14 days before reviewDate
+      if (action === 'findStayForReview') {
+        const guestName  = url.searchParams.get('guestName') || ''
+        const reviewDate = url.searchParams.get('reviewDate') || ''
+        if (!guestName || !reviewDate) return err('guestName and reviewDate required')
+
+        const reviewDt = new Date(reviewDate)
+        const windowStart = new Date(reviewDt)
+        windowStart.setDate(windowStart.getDate() - 14)
+
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkout_date FROM stays
+           WHERE guest_name LIKE ?
+             AND checkout_date >= ?
+             AND checkout_date <= ?
+             AND status NOT IN ('cancelled')
+           ORDER BY checkout_date DESC LIMIT 1`
+        ).bind(`%${guestName.split(' ')[0]}%`,
+               windowStart.toISOString().slice(0,10),
+               reviewDate).all()
+
+        if (results.length > 0) {
+          return json({ success: true, data: { stayId: results[0].stay_id, guestName: results[0].guest_name }})
+        }
+        return json({ success: true, data: null })
       }
 
       // UPCOMING STAYS — for Complete Booking screen
@@ -670,6 +704,38 @@ export async function onRequest(ctx) {
                 parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
                 actor, actor, now(), now()).run()
         return json({ success: true, data: { harvestId: id } })
+      }
+
+      // SAVE REVIEW — called by Apps Script when review email arrives
+      if (action === 'saveReview') {
+        const { stayId, rating, source, reviewDate, guestName } = body
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `UPDATE stays
+           SET review_rating = ?, review_source = ?, review_date = ?,
+               updated_by = ?, updated_at = ?
+           WHERE stay_id = ?`
+        ).bind(rating || 0, source || 'airbnb', reviewDate || now(),
+               'auto', now(), stayId).run()
+        return json({ success: true, data: { stayId, rating, source } })
+      }
+
+      // SET READY FOR CHECK-IN — called by Drive file watcher when both docs detected
+      if (action === 'setReadyForCheckIn') {
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        // Only transition if currently in booked/confirmed/docs_uploaded
+        const stay = await DB.prepare(
+          `SELECT status FROM stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!stay) return json({ success: true, data: { changed: false, reason: 'stay not found' }})
+        if (!['booked','confirmed','docs_uploaded'].includes(stay.status)) {
+          return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status }})
+        }
+        await DB.prepare(
+          `UPDATE stays SET status = 'ready_for_checkin', updated_by = 'auto', updated_at = ? WHERE stay_id = ?`
+        ).bind(now(), stayId).run()
+        return json({ success: true, data: { changed: true, stayId, status: 'ready_for_checkin' }})
       }
 
       // UPDATE STAY STATUS — used by Complete Booking and CheckIn screens

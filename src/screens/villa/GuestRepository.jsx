@@ -79,12 +79,21 @@ function GuestCard({ guest, stays, onClick }) {
       borderLeft: isRepeat ? '3px solid var(--gold)' : '1px solid var(--border-dim)' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'6px' }}>
         <div style={{ flex:1 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'3px', flexWrap:'wrap' }}>
             <span style={{ color:'var(--text)', fontWeight:'600', fontSize:'0.92rem' }}>{guest.name}</span>
             {isRepeat && (
               <span style={{ background:'rgba(200,144,58,0.2)', color:'var(--gold)', fontSize:'0.65rem',
                 fontWeight:'800', padding:'2px 7px', borderRadius:'10px' }}>
                 {guest.totalStays}× STAYS
+              </span>
+            )}
+            {guest.lastReviewRating > 0 && (
+              <span style={{ fontSize:'0.72rem', fontWeight:'700',
+                color: guest.lastReviewRating >= 4 ? '#34A853' : guest.lastReviewRating === 3 ? '#C8903A' : '#c62828',
+                background: guest.lastReviewRating >= 4 ? 'rgba(52,168,83,0.12)' : 'rgba(200,144,58,0.1)',
+                padding:'2px 7px', borderRadius:'10px' }}>
+                {'★'.repeat(guest.lastReviewRating)}{'☆'.repeat(5 - guest.lastReviewRating)}
+                {' '}{guest.lastReviewSource === 'google' ? 'G' : 'AB'}
               </span>
             )}
           </div>

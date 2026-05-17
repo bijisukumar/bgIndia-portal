@@ -393,8 +393,11 @@ function checkAirbnbConfExists(confCode) {
 // From:     automated@airbnb.com
 
 function pollAirbnbReviews() {
+  var after2 = new Date();
+  after2.setDate(after2.getDate() - 30);
+  var dateFilter2 = 'after:' + after2.toISOString().slice(0,10).replace(/-/g,'/');
   var threads = GmailApp.search(
-    'from:automated@airbnb.com subject:"left a" subject:"review" is:unread',
+    'from:automated@airbnb.com subject:"left a" subject:"review" is:unread ' + dateFilter2,
     0, 20
   );
 
@@ -451,8 +454,12 @@ function pollAirbnbReviews() {
 // Subject: "<GuestName> left a review for Dvaraka- Luxury Villas of Guruvayur"
 
 function pollGoogleReviews() {
+  // Only process emails from the last 30 days to avoid re-processing old reviews
+  var after = new Date();
+  after.setDate(after.getDate() - 30);
+  var dateFilter = 'after:' + after.toISOString().slice(0,10).replace(/-/g,'/');
   var threads = GmailApp.search(
-    'subject:"left a review for Dvaraka" is:unread',
+    'subject:"left a review for Dvaraka" is:unread ' + dateFilter,
     0, 20
   );
 
@@ -644,4 +651,23 @@ function setupTriggers() {
 
   Logger.log('✅ Triggers set up: pollGmail (5min) + pollDriveCheckIns (10min)');
   Logger.log('Also set up onFormSubmit manually: Triggers → Add Trigger → onGuestFormSubmit → From spreadsheet → On form submit');
+}
+
+// ============================================================
+// ONE-TIME UTILITY — run once manually to mark all old review
+// emails as read so the poller doesn't re-process them.
+// After running, delete or ignore this function.
+// ============================================================
+function markOldReviewEmailsRead() {
+  var count = 0;
+
+  // Mark old Google review emails as read
+  var gThreads = GmailApp.search('subject:"left a review for Dvaraka"', 0, 500);
+  gThreads.forEach(function(t) { t.markRead(); count++; });
+
+  // Mark old Airbnb review emails as read
+  var aThreads = GmailApp.search('from:automated@airbnb.com subject:"left a" subject:"review"', 0, 500);
+  aThreads.forEach(function(t) { t.markRead(); count++; });
+
+  Logger.log('Marked ' + count + ' review email threads as read.');
 }

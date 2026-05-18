@@ -178,12 +178,75 @@ function finishProcessing(dryRun, stayList, guestData) {
       q(g.email),q(g.phone),'',q(g.homeAddress)].join(','));
   });
 
+  var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
   var csvName = 'backfill-v3-' + today() + '.csv';
   del(root, csvName);
   var csvFile = root.createFile(csvName, csv.join('\n'), 'text/csv');
 
   // Stats
   var pct = stayList.length ? Math.round(matched.length/stayList.length*100) : 0;
+
+  // ── UNMATCHED ANALYSIS ─────────────────────────────────────────────────
+  // Categorise why each unmatched record failed
+  var unmatchedAnalysis = unmatched.map(function(g) {
+    var reason = '';
+    if (!g.bookerName || g.bookerName.length < 2) {
+      reason = 'NO_NAME: booker name missing or too short';
+    } else if (!g.checkIn || g.checkIn.length < 8) {
+      reason = 'NO_DATE: check-in date missing or unparseable';
+    } else {
+      // Try to find partial matches to understand why full match failed
+      var bn = g.bookerName.toLowerCase().trim();
+      var bFirst = bn.split(/\s+/)[0];
+      var partialNames = stayList.filter(function(s) {
+        var sn = String(s.bookerName||s.guestName||s.booker_name||s.guest_name||'').toLowerCase();
+        return sn.indexOf(bFirst) >= 0 && bFirst.length > 2;
+      });
+      if (partialNames.length === 0) {
+        reason = 'NAME_NOT_IN_DB: "'+g.bookerName+'" — first name "'+bFirst+'" not found in any stay';
+      } else {
+        // Name found but date didn't match
+        var ciDate = new Date(g.checkIn);
+        var closestDiff = 999;
+        var closestStay = '';
+        partialNames.forEach(function(s) {
+          var stayCI = String(s.checkIn||s.checkin_date||'');
+          if (stayCI) {
+            var diff = Math.abs((ciDate - new Date(stayCI)) / 86400000);
+            if (diff < closestDiff) { closestDiff = diff; closestStay = s.stayId||s.stay_id; }
+          }
+        });
+        if (closestDiff <= 30) {
+          reason = 'DATE_MISMATCH: name matches stay '+closestStay+' but dates differ by '+Math.round(closestDiff)+' days (form:'+g.checkIn+')';
+        } else {
+          reason = 'DATE_TOO_FAR: name "'+g.bookerName+'" found in DB but nearest stay is '+Math.round(closestDiff)+' days away';
+        }
+      }
+    }
+    return { bookerName: g.bookerName, checkIn: g.checkIn, source: g.source,
+             email: g.email, reason: reason };
+  });
+
+  // Group by reason category
+  var reasonGroups = {};
+  unmatchedAnalysis.forEach(function(u) {
+    var cat = u.reason.split(':')[0];
+    if (!reasonGroups[cat]) reasonGroups[cat] = [];
+    reasonGroups[cat].push(u);
+  });
+
+  var analysisLines = ['', '── UNMATCHED ANALYSIS (' + unmatched.length + ' records) ──'];
+  Object.keys(reasonGroups).forEach(function(cat) {
+    var group = reasonGroups[cat];
+    analysisLines.push('');
+    analysisLines.push(cat + ' (' + group.length + ' records):');
+    group.forEach(function(u) {
+      analysisLines.push('  • "' + u.bookerName + '" (' + u.checkIn + ') [' + u.source + ']');
+      analysisLines.push('    → ' + u.reason);
+      if (u.email) analysisLines.push('    email: ' + u.email);
+    });
+  });
+
   var summary = [
     (dryRun?'📋 DRY RUN v3':'✅ BACKFILL v3'),
     'Stays total:    ' + stayList.length,
@@ -195,12 +258,7 @@ function finishProcessing(dryRun, stayList, guestData) {
     'With govt ID:   ' + matched.filter(function(m){return m.guest.govtIdNum;}).length + '/' + matched.length,
     '',
     'CSV: ' + csvFile.getUrl(),
-    '',
-    'UNMATCHED (first 30):',
-    unmatched.slice(0,30).map(function(g){
-      return '  • "'+g.bookerName+'" ('+g.checkIn+') ['+g.source+']';
-    }).join('\n'),
-  ].join('\n');
+  ].concat(analysisLines).join('\n');
 
   Logger.log(summary);
 

@@ -1,528 +1,554 @@
 // ============================================================
-// bgIndia Portal — STANDALONE LOCATION BACKFILL SCRIPT
+// bgIndia Portal — STANDALONE LOCATION BACKFILL SCRIPT v2
 // ============================================================
 // CREATE A NEW STANDALONE Apps Script project:
-//   1. Go to https://script.google.com
-//   2. Click "+ New project"
-//   3. Paste this ENTIRE file — replace all default code
-//   4. Save (Ctrl+S), name it "bgIndia Location Backfill"
-//   5. Run runDryRun() first — review the validation report
-//   6. If satisfied, run runBackfill() to generate SQL
-//   7. Download the SQL from Drive, run against D1
+//   1. Go to https://script.google.com → New project
+//   2. Paste this ENTIRE file — replace all default code
+//   3. Save, name it "bgIndia Location Backfill v2"
+//   4. Run runDryRun() first → review email + CSV
+//   5. If satisfied, run runBackfill() → download SQL → run against D1
 //
-// NO other files or V20 script needed — fully self-contained.
+// Fully self-contained — no V21 script dependency.
 // ============================================================
 
-// ── CONFIG ────────────────────────────────────────────────────────────────
-var OWNER_EMAIL    = 'bijisukumar@gmail.com';
-var DRIVE_ROOT_ID  = '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva';
-var MAIN_SHEET_ID  = '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ';
-var STAYS_SHEET    = 'Stays';
+var OWNER_EMAIL   = 'bijisukumar@gmail.com';
+var DRIVE_ROOT_ID = '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva';
+var MAIN_SHEET_ID = '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ';
+var STAYS_SHEET   = 'Stays';
+var FORM_SHEET_ID = '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0';
+var WORKER_URL    = 'https://manage.luxuryvillasofguruvayur.com/api';
 
-// Check-in form response sheet (Google Form linked sheet — has Full Home Address)
-var FORM_SHEET_ID  = '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0';
+// Year folder IDs
+var FOLDER_2026 = '1IOisLwV7QxihMSRvlalolq1sMtW51QFt';
+var FOLDER_2025 = '15fXmazoHTIeUf6Jq9bsaZHzZghzLBcaU';
+var FOLDER_2024 = '1HYV_PRNezuHWC9iyL80TTtPuaNqBgJQs';
 
-// Check-in DOCX folder structure:
-// 2026: LVG Guest-Checkin/2026/MM-Month/GuestFolder/GuestName-LVGGuestCheckIn.docx
-// 2025: LVG Guest-Checkin/2025/MM-Month/GuestFolder/...
-// 2024: LVG Guest-Checkin/2024/MM-Month/GuestFolder/...
-var FOLDER_2026    = '1IOisLwV7QxihMSRvlalolq1sMtW51QFt';
-var FOLDER_2025    = '15fXmazoHTIeUf6Jq9bsaZHzZghzLBcaU';
-var FOLDER_2024    = '1HYV_PRNezuHWC9iyL80TTtPuaNqBgJQs';
+// ── ENTRY POINTS ──────────────────────────────────────────────────────────
+function runDryRun()  { processAll(true);  }
+function runBackfill(){ processAll(false); }
 
-// ── STEP 1: DRY RUN — run this first ──────────────────────────────────────
-// Scans all check-in docs, matches to Stays sheet, shows coverage stats.
-// Produces a validation CSV in Drive — review it before running backfill.
-function runDryRun() {
-  Logger.log('=== DRY RUN STARTED ===');
-  var result = processAll(true);
-  Logger.log('=== DRY RUN COMPLETE ===');
-  Logger.log('Matched: '   + result.matched);
-  Logger.log('Unmatched: ' + result.unmatched);
-  Logger.log('Coverage: '  + result.coveragePct + '%');
-  Logger.log('Report: '    + result.reportUrl);
-  GmailApp.sendEmail(OWNER_EMAIL,
-    '[bgIndia] Dry Run: ' + result.matched + ' matched, ' + result.unmatched + ' unmatched (' + result.coveragePct + '% coverage)',
-    result.summary + '\n\nValidation CSV: ' + result.reportUrl
-  );
-}
-
-// ── STEP 2: FULL BACKFILL — run after reviewing dry run ───────────────────
-// Generates SQL UPDATE file in Drive. Download and run against D1.
-function runBackfill() {
-  Logger.log('=== BACKFILL STARTED ===');
-  var result = processAll(false);
-  Logger.log('=== BACKFILL COMPLETE ===');
-  Logger.log('SQL file: ' + result.sqlUrl);
-  GmailApp.sendEmail(OWNER_EMAIL,
-    '[bgIndia] Backfill SQL ready — ' + result.matched + ' stays updated',
-    result.summary + '\n\nSQL file: ' + result.sqlUrl +
-    '\n\nTo apply:\n' +
-    'wrangler d1 execute bgindia-db --file=backfill-location.sql --remote'
-  );
-}
-
-// ── CORE PROCESSOR ────────────────────────────────────────────────────────
+// ── CORE ──────────────────────────────────────────────────────────────────
 function processAll(dryRun) {
-  // 1. Load all stays from Sheets (our source of truth for matching)
-  var allStays = loadStaysFromSheet();
-  Logger.log('Loaded ' + allStays.length + ' stays from Sheets');
+  Logger.log('=== ' + (dryRun ? 'DRY RUN' : 'BACKFILL') + ' STARTED ===');
 
-  // 2. Collect guest data from all sources
+  // Load stays from TWO sources: Sheets (HIST- rows) + D1 via Worker
+  var sheetStays  = loadStaysFromSheet();
+  var workerStays = loadStaysFromWorker();
+  var allStays    = sheetStays.concat(workerStays);
+  // Deduplicate by stayId
+  var seen = {}; var stayList = [];
+  allStays.forEach(function(s) {
+    var id = s.stayId || s.stay_id || '';
+    if (!seen[id]) { seen[id] = true; stayList.push(s); }
+  });
+  Logger.log('Total stays: ' + stayList.length + ' (' + sheetStays.length + ' sheet + ' + workerStays.length + ' D1)');
+
+  // Collect guest data from all DOCX folders + form sheet
   var guestData = [];
+  guestData = guestData.concat(readFormResponseSheet());
+  guestData = guestData.concat(readAllDocxFolders());
+  guestData = dedup(guestData);
+  Logger.log('Unique guest records: ' + guestData.length);
 
-  // Source A: Google Form response sheet (richest — has Full Home Address)
-  var formData = readFormResponseSheet();
-  Logger.log('Form responses: ' + formData.length);
-  guestData = guestData.concat(formData);
-
-  // Source B: DOCX check-in forms in Drive folders (2024/2025/2026)
-  var docxData = readAllDocxFolders();
-  Logger.log('DOCX check-in docs: ' + docxData.length);
-  guestData = guestData.concat(docxData);
-
-  // Deduplicate by bookerName+checkIn (form response wins over DOCX)
-  guestData = deduplicateGuestData(guestData);
-  Logger.log('Unique guest records after dedup: ' + guestData.length);
-
-  // 3. Match each guest record to a stay
-  var matched   = [];
-  var unmatched = [];
-
+  // Match
+  var matched = [], unmatched = [];
   guestData.forEach(function(g) {
-    var stay = findMatchingStay(g.bookerName, g.checkIn, allStays);
-    if (stay) {
-      matched.push({ guest: g, stay: stay });
-    } else {
-      unmatched.push(g);
+    if (!g.bookerName || g.bookerName.length < 2) { unmatched.push(g); return; }
+    var stay = findMatch(g.bookerName, g.checkIn, stayList);
+    if (stay) matched.push({ guest: g, stay: stay });
+    else       unmatched.push(g);
+  });
+
+  // For unmatched, try Google Places API to get city/state from address
+  unmatched.forEach(function(g) {
+    if (g.homeAddress && (!g.city || !g.state)) {
+      var loc = geocodeAddress(g.homeAddress);
+      if (loc.city)  g.city    = loc.city;
+      if (loc.state) g.state   = loc.state;
+      if (loc.country && loc.country !== 'India') g.country = loc.country;
+      if (loc.pincode) g.pincode = loc.pincode;
+    }
+  });
+  // Same for matched with missing city
+  matched.forEach(function(m) {
+    var g = m.guest;
+    if (g.homeAddress && (!g.city || !g.state)) {
+      var loc = geocodeAddress(g.homeAddress);
+      if (loc.city)  g.city    = loc.city;
+      if (loc.state) g.state   = loc.state;
+      if (loc.country && loc.country !== 'India') g.country = loc.country;
+      if (loc.pincode) g.pincode = loc.pincode;
     }
   });
 
-  // 4. Build validation CSV report
-  var csvLines = [
-    'Status,StayId,BookerName,CheckIn,Source,City,State,Country,Pincode,GovtIdType,GovtIdNum,Email,Phone,MatchScore,Notes'
-  ];
-
+  // Build CSV report
+  var csv = ['Status,StayId,BookerName,CheckIn,Source,Address,City,State,Country,Pincode,IdType,IdNum,Email,Phone,Score'];
   matched.forEach(function(m) {
-    csvLines.push([
-      'MATCHED',
-      m.stay.stayId,
-      csvEscape(m.guest.bookerName),
-      m.guest.checkIn,
-      m.guest.source,
-      csvEscape(m.guest.city),
-      csvEscape(m.guest.state),
-      m.guest.country,
-      m.guest.pincode,
-      m.guest.govtIdType,
-      csvEscape(m.guest.govtIdNum),
-      csvEscape(m.guest.email),
-      csvEscape(m.guest.phone),
-      m.stay._matchScore,
-      ''
+    csv.push([
+      'MATCHED', m.stay.stayId||m.stay.stay_id,
+      q(m.guest.bookerName), m.guest.checkIn, m.guest.source,
+      q(m.guest.homeAddress), q(m.guest.city), q(m.guest.state),
+      m.guest.country, m.guest.pincode,
+      m.guest.govtIdType, q(m.guest.govtIdNum),
+      q(m.guest.email), q(m.guest.phone), m.stay._score
     ].join(','));
   });
-
   unmatched.forEach(function(g) {
-    csvLines.push([
-      'UNMATCHED',
-      '',
-      csvEscape(g.bookerName),
-      g.checkIn,
-      g.source,
-      csvEscape(g.city),
-      csvEscape(g.state),
-      g.country,
-      g.pincode,
-      g.govtIdType,
-      csvEscape(g.govtIdNum),
-      csvEscape(g.email),
-      csvEscape(g.phone),
-      '',
-      'No matching stay found — may be Airbnb booking or cancelled'
+    csv.push([
+      'UNMATCHED','',
+      q(g.bookerName), g.checkIn, g.source,
+      q(g.homeAddress), q(g.city), q(g.state),
+      g.country, g.pincode,
+      g.govtIdType, q(g.govtIdNum),
+      q(g.email), q(g.phone), ''
     ].join(','));
   });
 
-  // Save CSV report to Drive
   var root    = DriveApp.getFolderById(DRIVE_ROOT_ID);
-  var csvName = 'backfill-validation-' + todayStr() + '.csv';
-  deleteIfExists(root, csvName);
-  var csvFile = root.createFile(csvName, csvLines.join('\n'), 'text/csv');
-  Logger.log('Validation CSV: ' + csvFile.getUrl());
+  var csvName = 'backfill-validation-v2-' + today() + '.csv';
+  del(root, csvName);
+  var csvFile = root.createFile(csvName, csv.join('\n'), 'text/csv');
 
-  // 5. Coverage stats
-  var totalStays    = allStays.length;
-  var matchedCount  = matched.length;
-  var coveragePct   = totalStays > 0 ? Math.round(matchedCount / totalStays * 100) : 0;
-
-  // Field completeness of matched records
-  var withCity    = matched.filter(function(m){ return m.guest.city; }).length;
-  var withEmail   = matched.filter(function(m){ return m.guest.email; }).length;
-  var withPhone   = matched.filter(function(m){ return m.guest.phone; }).length;
-  var withId      = matched.filter(function(m){ return m.guest.govtIdNum; }).length;
-  var withAddress = matched.filter(function(m){ return m.guest.homeAddress; }).length;
+  // Stats
+  var withCity  = matched.filter(function(m){ return m.guest.city; }).length;
+  var withEmail = matched.filter(function(m){ return m.guest.email; }).length;
+  var withPhone = matched.filter(function(m){ return m.guest.phone; }).length;
+  var withId    = matched.filter(function(m){ return m.guest.govtIdNum; }).length;
+  var pct = stayList.length ? Math.round(matched.length/stayList.length*100) : 0;
 
   var summary = [
-    '📍 Location Backfill ' + (dryRun ? 'DRY RUN' : 'RESULTS'),
-    '==========================================',
-    'Total stays in sheet:    ' + totalStays,
-    'Guest records found:     ' + guestData.length,
-    'Stays matched:           ' + matchedCount + ' (' + coveragePct + '% coverage)',
-    'Unmatched (exceptions):  ' + unmatched.length,
+    (dryRun ? '📋 DRY RUN REPORT' : '✅ BACKFILL COMPLETE'),
+    'Total stays:      ' + stayList.length + ' (Sheets + D1)',
+    'Guest records:    ' + guestData.length,
+    'Matched:          ' + matched.length + ' (' + pct + '% coverage)',
+    'Unmatched:        ' + unmatched.length,
     '',
-    'DATA QUALITY (of matched):',
-    '  With home address:     ' + withAddress + '/' + matchedCount,
-    '  With city:             ' + withCity    + '/' + matchedCount,
-    '  With email:            ' + withEmail   + '/' + matchedCount,
-    '  With phone:            ' + withPhone   + '/' + matchedCount,
-    '  With govt ID:          ' + withId      + '/' + matchedCount,
+    'Of matched records:',
+    '  With address:   ' + matched.filter(function(m){return m.guest.homeAddress;}).length,
+    '  With city:      ' + withCity,
+    '  With email:     ' + withEmail,
+    '  With phone:     ' + withPhone,
+    '  With govt ID:   ' + withId,
     '',
-    'UNMATCHED EXCEPTIONS:',
-    unmatched.map(function(g) {
+    'Validation CSV: ' + csvFile.getUrl(),
+    '',
+    'UNMATCHED (first 20):',
+    unmatched.slice(0,20).map(function(g){
       return '  • ' + g.bookerName + ' (' + g.checkIn + ') [' + g.source + ']';
-    }).join('\n') || '  None',
+    }).join('\n'),
   ].join('\n');
 
   Logger.log(summary);
+  Logger.log('=== MATCHED: ' + matched.length + ' UNMATCHED: ' + unmatched.length + ' ===');
 
-  // 6. Generate SQL (only in full run)
   var sqlUrl = '';
   if (!dryRun && matched.length > 0) {
-    var sqlLines = buildSql(matched);
-    var sqlName  = 'backfill-location-' + todayStr() + '.sql';
-    deleteIfExists(root, sqlName);
-    var sqlFile = root.createFile(sqlName, sqlLines.join('\n'), 'text/plain');
+    var sql    = buildSql(matched);
+    var sqlName = 'backfill-location-v2-' + today() + '.sql';
+    del(root, sqlName);
+    var sqlFile = root.createFile(sqlName, sql, 'text/plain');
     sqlUrl = sqlFile.getUrl();
-    Logger.log('SQL file: ' + sqlUrl);
+    Logger.log('SQL: ' + sqlUrl);
+    summary += '\n\nSQL file: ' + sqlUrl +
+      '\nRun: wrangler d1 execute bgindia-db --file=' + sqlName + ' --remote';
   }
 
-  return {
-    matched:     matchedCount,
-    unmatched:   unmatched.length,
-    coveragePct: coveragePct,
-    summary:     summary,
-    reportUrl:   csvFile.getUrl(),
-    sqlUrl:      sqlUrl,
-  };
+  GmailApp.sendEmail(OWNER_EMAIL,
+    '[bgIndia] ' + (dryRun?'Dry Run':'Backfill') + ': ' + matched.length + ' matched / ' + pct + '% coverage',
+    summary
+  );
+
+  return { matched: matched.length, unmatched: unmatched.length, pct: pct };
 }
 
-// ── SOURCE A: GOOGLE FORM RESPONSE SHEET ──────────────────────────────────
+// ── LOAD STAYS ────────────────────────────────────────────────────────────
+function loadStaysFromSheet() {
+  try {
+    var sheet = SpreadsheetApp.openById(MAIN_SHEET_ID).getSheetByName(STAYS_SHEET);
+    if (!sheet) return [];
+    var data = sheet.getDataRange().getValues();
+    var h = data[0];
+    return data.slice(1).map(function(row) {
+      var o = {}; h.forEach(function(k,i){ o[k]=row[i]; }); return o;
+    }).filter(function(r){ return r.stayId||r.stay_id; });
+  } catch(e) { Logger.log('loadStaysFromSheet error: '+e.message); return []; }
+}
+
+function loadStaysFromWorker() {
+  try {
+    var resp = callWorker('GET', 'getStays', { villaId:'dwarka', year:'all' });
+    if (resp && resp.success && Array.isArray(resp.data)) return resp.data;
+  } catch(e) { Logger.log('loadStaysFromWorker error: '+e.message); }
+  return [];
+}
+
+// ── SOURCE A: FORM RESPONSE SHEET ─────────────────────────────────────────
 function readFormResponseSheet() {
   var results = [];
   try {
-    var ss      = SpreadsheetApp.openById(FORM_SHEET_ID);
-    var sheet   = ss.getSheets()[0];
-    var data    = sheet.getDataRange().getValues();
+    var data = SpreadsheetApp.openById(FORM_SHEET_ID).getSheets()[0].getDataRange().getValues();
     if (data.length < 2) return results;
-
-    var headers = data[0];
-    var lc      = headers.map(function(h){ return String(h).toLowerCase().trim(); });
-
-    function col(keyword) {
-      for (var i = 0; i < lc.length; i++) {
-        if (lc[i].indexOf(keyword) >= 0) return i;
-      }
-      return -1;
-    }
-
-    var idxAddr    = col('full home address');
-    var idxBooker  = col('bookers full name');
-    var idxCheckIn = col('check in date');
-    var idxEmail   = col('email address');
-    var idxPhone   = col('phone number');
-    var idxGovtId  = col('adhar') >= 0 ? col('adhar') : col('government id');
-    var idxPassNum = col('passport number');
-    var idxPurpose = col('purpose');
+    var h = data[0];
+    var lc = h.map(function(x){ return String(x).toLowerCase().trim(); });
+    function col(kw) { for(var i=0;i<lc.length;i++) if(lc[i].indexOf(kw)>=0) return i; return -1; }
+    var iAddr=col('full home address'), iBook=col('bookers full name'),
+        iCI=col('check in date'), iEmail=col('email address'), iPhone=col('phone number'),
+        iId=col('adhar')>=0?col('adhar'):col('government id'), iPass=col('passport number'),
+        iPurp=col('purpose');
 
     data.slice(1).forEach(function(row) {
-      var bookerName  = idxBooker  >= 0 ? String(row[idxBooker]  || '').trim() : '';
-      var checkIn     = idxCheckIn >= 0 ? normDate(row[idxCheckIn])             : '';
-      var homeAddress = idxAddr    >= 0 ? String(row[idxAddr]    || '').trim() : '';
-      var email       = idxEmail   >= 0 ? String(row[idxEmail]   || '').trim() : '';
-      var phone       = idxPhone   >= 0 ? String(row[idxPhone]   || '').trim() : '';
-      var govtIdRaw   = idxGovtId  >= 0 ? String(row[idxGovtId]  || '').trim() : '';
-      var passNum     = idxPassNum >= 0 ? String(row[idxPassNum]  || '').trim() : '';
-      var purpose     = idxPurpose >= 0 ? String(row[idxPurpose]  || '').trim() : '';
+      var booker = iBook>=0 ? String(row[iBook]||'').trim() : '';
+      var addr   = iAddr>=0 ? String(row[iAddr]||'').trim() : '';
+      var ci     = iCI>=0   ? normDate(row[iCI]) : '';
+      var email  = iEmail>=0? String(row[iEmail]||'').toLowerCase().trim() : '';
+      var phone  = iPhone>=0? cleanPhone(String(row[iPhone]||'')) : '';
+      var idRaw  = iId>=0   ? String(row[iId]||'').trim() : '';
+      var passNum= iPass>=0 ? String(row[iPass]||'').trim() : '';
+      var purpose= iPurp>=0 ? String(row[iPurp]||'').trim() : '';
+      if (!booker) return;
 
-      if (!bookerName) return;
-
-      // Determine ID type and number
-      var govtIdType = '', govtIdNum = '';
-      if (passNum) {
-        govtIdType = 'Passport'; govtIdNum = passNum;
-      } else if (govtIdRaw) {
-        // Format: "AADHAR - 421928926428" or just the number
-        var aadharMatch = govtIdRaw.match(/\d{12}/);
-        if (aadharMatch) {
-          govtIdType = 'Aadhaar'; govtIdNum = aadharMatch[0];
-        } else {
-          govtIdType = 'Other'; govtIdNum = govtIdRaw.replace(/^(AADHAR|AADHAAR|PASSPORT)[:\s\-]*/i, '').trim();
-        }
+      var idType='', idNum='';
+      if (passNum) { idType='Passport'; idNum=passNum; }
+      else if (idRaw) {
+        var am = idRaw.replace(/[\s\-]/g,'').match(/\d{12}/);
+        if (am) { idType='Aadhaar'; idNum=am[0]; }
+        else { idType='Other'; idNum=idRaw.replace(/^(AADHAR|AADHAAR|PASSPORT)[:\s\-]*/i,'').trim(); }
       }
 
-      var loc = parseAddress(homeAddress);
-
-      results.push({
-        source:      'GoogleForm',
-        bookerName:  bookerName,
-        checkIn:     checkIn,
-        homeAddress: homeAddress,
-        city:        loc.city,
-        state:       loc.state,
-        country:     loc.country,
-        pincode:     loc.pincode,
-        fromCity:    loc.city,
-        email:       email,
-        phone:       cleanPhone(phone),
-        govtIdType:  govtIdType,
-        govtIdNum:   govtIdNum,
-        purpose:     purpose,
-      });
+      var loc = parseAddress(addr);
+      results.push({ source:'GoogleForm', bookerName:booker, checkIn:ci,
+        homeAddress:addr, city:loc.city, state:loc.state, country:loc.country,
+        pincode:loc.pincode, email:email, phone:phone,
+        govtIdType:idType, govtIdNum:idNum, purpose:purpose });
     });
-  } catch(e) {
-    Logger.log('readFormResponseSheet error: ' + e.message);
-  }
-  Logger.log('Form sheet: ' + results.length + ' records');
+  } catch(e) { Logger.log('readFormSheet: '+e.message); }
+  Logger.log('Form sheet: '+results.length);
   return results;
 }
 
-// ── SOURCE B: DOCX CHECK-IN FORMS IN DRIVE FOLDERS ────────────────────────
+// ── SOURCE B: DOCX CHECK-IN FORMS ─────────────────────────────────────────
 function readAllDocxFolders() {
   var results = [];
-  [[FOLDER_2026,'2026'], [FOLDER_2025,'2025'], [FOLDER_2024,'2024']].forEach(function(pair) {
-    var folderId = pair[0], year = pair[1];
+  [[FOLDER_2026,'2026'],[FOLDER_2025,'2025'],[FOLDER_2024,'2024']].forEach(function(p){
     try {
-      var r = readYearFolder(folderId, year);
-      Logger.log('Year ' + year + ': ' + r.length + ' DOCX records');
+      var r = readYearFolder(p[0], p[1]);
+      Logger.log('Year '+p[1]+': '+r.length+' records');
       results = results.concat(r);
-    } catch(e) {
-      Logger.log('Error reading ' + year + ' folder: ' + e.message);
-    }
+    } catch(e) { Logger.log('Folder '+p[1]+' error: '+e.message); }
   });
   return results;
 }
 
 function readYearFolder(yearFolderId, year) {
   var results = [];
-  // Iterate month sub-folders
   var monthFolders = DriveApp.getFolderById(yearFolderId).getFolders();
   while (monthFolders.hasNext()) {
     var monthFolder = monthFolders.next();
-    // Iterate guest sub-folders
     var guestFolders = monthFolder.getFolders();
     while (guestFolders.hasNext()) {
       var guestFolder = guestFolders.next();
-      // Find the DOCX check-in file
+      // Try DOCX first
       var files = guestFolder.getFiles();
+      var docxFile = null, pdfFile = null, aadhaarPdf = null;
       while (files.hasNext()) {
-        var file = files.next();
-        var fname = file.getName().toLowerCase();
-        var mime  = file.getMimeType();
-
-        // Only process DOCX check-in forms (not ID documents)
-        var isDocx = mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-                  || mime === 'application/vnd.google-apps.document';
-        var isCheckInDoc = fname.indexOf('checkin') >= 0 || fname.indexOf('check-in') >= 0
-                        || fname.indexOf('lvg') >= 0     || fname.indexOf('gvr') >= 0;
-
-        if (!isDocx || !isCheckInDoc) continue;
-
-        try {
-          var parsed = parseCheckInDocx(file, year);
-          if (parsed) results.push(parsed);
-        } catch(e) {
-          Logger.log('Error parsing ' + file.getName() + ': ' + e.message);
+        var f = files.next();
+        var fn = f.getName().toLowerCase();
+        var mt = f.getMimeType();
+        if ((mt.indexOf('wordprocessing')>=0 || mt.indexOf('document')>=0) &&
+            (fn.indexOf('checkin')>=0||fn.indexOf('check-in')>=0||fn.indexOf('lvg')>=0||fn.indexOf('gvr')>=0))
+          docxFile = f;
+        if (mt==='application/pdf') {
+          pdfFile = f;
+          if (fn.indexOf('aadhaar')>=0||fn.indexOf('adhar')>=0||fn.indexOf('uid')>=0||fn.indexOf('unique')>=0)
+            aadhaarPdf = f;
         }
       }
+      var parsed = null;
+      if (docxFile) {
+        parsed = parseCheckInDocx(docxFile, year);
+      }
+      // If no DOCX or DOCX missing city, try reading Aadhaar/Passport PDF for address
+      if (pdfFile && (!parsed || !parsed.city)) {
+        var pdfData = parsePdf(pdfFile);
+        if (parsed) {
+          // Merge PDF address data into parsed
+          if (!parsed.city    && pdfData.city)    parsed.city    = pdfData.city;
+          if (!parsed.state   && pdfData.state)   parsed.state   = pdfData.state;
+          if (!parsed.pincode && pdfData.pincode) parsed.pincode = pdfData.pincode;
+          if (!parsed.homeAddress && pdfData.homeAddress) parsed.homeAddress = pdfData.homeAddress;
+          if (!parsed.govtIdNum && pdfData.govtIdNum) {
+            parsed.govtIdNum  = pdfData.govtIdNum;
+            parsed.govtIdType = pdfData.govtIdType;
+          }
+        } else if (pdfData.name) {
+          parsed = pdfData;
+          parsed.source = 'PDF-'+year;
+        }
+      }
+      if (parsed) results.push(parsed);
     }
   }
   return results;
 }
 
 function parseCheckInDocx(file, year) {
-  // Export DOCX as plain text for parsing
-  var content;
+  var content = '';
   try {
-    var exportUrl = 'https://docs.google.com/feeds/download/documents/export/Export?id=' +
-      file.getId() + '&exportFormat=txt';
-    var resp = UrlFetchApp.fetch(exportUrl, {
-      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-      muteHttpExceptions: true,
+    var url = 'https://docs.google.com/feeds/download/documents/export/Export?id='+file.getId()+'&exportFormat=txt';
+    var resp = UrlFetchApp.fetch(url, {
+      headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},
+      muteHttpExceptions:true
     });
     content = resp.getContentText();
   } catch(e) {
-    // Fallback: try reading via DriveApp
-    content = file.getAs('text/plain').getDataAsString();
+    try { content = file.getAs('text/plain').getDataAsString(); } catch(e2){}
   }
-
   if (!content || content.length < 50) return null;
 
-  // ── Parse the check-in DOCX table structure ────────────────────────
-  // Key fields from the document:
-  //   "Booked By/Approved Guest: Sangeeth"
-  //   "Check-in: May 12th"
-  //   "Adhar/Passport Number: X9171135"
-  //   "Email: sangeeth.sat@gmail.com"
-  //   "Phone: +91 96337 30791"
-  //   Guest 1 row has full address
+  // ── BOOKER NAME ───────────────────────────────────────────────────────
+  // Handles: "Booked By/Approved Guest:Amith" (no space after colon)
+  //          "Booked By/Approved GuestBivin Babu" (no colon at all)
+  //          "Booked By/Approved Guest: Sangeeth"
+  var bookerName = '';
+  var bookerMatch = content.match(/Booked By\/Approved Guest[:\s]*([^|\n\r]+)/i) ||
+                    content.match(/Booked By[:\s]*([^|\n\r]+)/i) ||
+                    content.match(/Approved Guest[:\s]*([^|\n\r]+)/i);
+  if (bookerMatch) {
+    // Clean: remove everything from "Booking Partner" onwards
+    bookerName = bookerMatch[1]
+      .replace(/Booking Partner.*/i, '')
+      .replace(/Number of Guests.*/i, '')
+      .replace(/Nights of stay.*/i, '')
+      .trim();
+  }
+  // Validate — reject garbage values
+  if (!bookerName || bookerName.toLowerCase().indexOf('booking partner') >= 0 ||
+      bookerName.toLowerCase() === 'list' || bookerName.toLowerCase() === 'name:' ||
+      bookerName.length < 2) {
+    bookerName = '';
+  }
 
-  var bookerName  = '';
-  var checkIn     = '';
-  var checkOut    = '';
-  var govtIdNum   = '';
-  var govtIdType  = '';
-  var email       = '';
-  var phone       = '';
-  var homeAddress = '';
-  var purpose     = '';
-  var nights      = '';
-  var bookingPartner = '';
-
-  // Booker name — "Booked By/Approved Guest: Name" or "Booked By: Name"
-  var bookerMatch = content.match(/(?:Booked By\/Approved Guest|Booked By|Approved Guest)[:\s]+([^\n\|]+)/i);
-  if (bookerMatch) bookerName = bookerMatch[1].trim();
-
-  // Check-in date
+  // ── CHECK-IN DATE ─────────────────────────────────────────────────────
+  var checkIn = '';
   var ciMatch = content.match(/Check[-\s]in[:\s]+([A-Za-z]+ \d{1,2}(?:st|nd|rd|th)?[,\s]+(?:\d{4})?)/i) ||
-                content.match(/Check[-\s]in[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
-  if (ciMatch) checkIn = normDate(ciMatch[1] + (ciMatch[1].indexOf(year) < 0 ? ' ' + year : ''));
+                content.match(/Check[-\s]in[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i) ||
+                content.match(/Check[-\s]in[:\s]+([A-Za-z]+ \d{1,2})/i);
+  if (ciMatch) {
+    var rawDate = ciMatch[1].replace(/\b(\d+)(st|nd|rd|th)\b/gi,'$1');
+    if (rawDate.indexOf(year) < 0) rawDate += ' ' + year;
+    checkIn = normDate(rawDate);
+  }
 
-  // Booking partner
-  var partnerMatch = content.match(/Booking Partner[:\s]+([^\n\|]+)/i);
-  if (partnerMatch) bookingPartner = partnerMatch[1].trim();
-
-  // Govt ID number (Aadhaar or Passport)
-  var idMatch = content.match(/Adhar\/Passport Number[:\s]+([^\n\|]+)/i) ||
-                content.match(/Aadhaar[:\s]+([0-9\s]{12,14})/i) ||
+  // ── GOVT ID ───────────────────────────────────────────────────────────
+  var govtIdType='', govtIdNum='';
+  var idMatch = content.match(/Adhar\/Passport Number[:\s|]*([^\n|]+)/i) ||
+                content.match(/Aadhaar[:\s]+([0-9\s]{11,15})/i) ||
                 content.match(/Passport[:\s#]+([A-Z]\d{7})/i);
   if (idMatch) {
-    govtIdNum = idMatch[1].trim();
-    if (/^\d{12}$/.test(govtIdNum.replace(/\s/g,''))) {
-      govtIdType = 'Aadhaar'; govtIdNum = govtIdNum.replace(/\s/g,'');
-    } else if (/^[A-Z]\d{7}$/.test(govtIdNum)) {
-      govtIdType = 'Passport';
-    } else {
-      govtIdType = 'Other';
+    var raw = idMatch[1].trim().replace(/^\||\|$/g,'').trim();
+    var digits = raw.replace(/[\s\-]/g,'');
+    if (/^\d{12}$/.test(digits)) { govtIdType='Aadhaar'; govtIdNum=digits; }
+    else if (/^[A-Z]\d{7}$/.test(raw)) { govtIdType='Passport'; govtIdNum=raw; }
+    else if (raw.length > 2 && raw !== '|') { govtIdType='Other'; govtIdNum=raw; }
+  }
+
+  // ── EMAIL & PHONE ─────────────────────────────────────────────────────
+  var emailMatch = content.match(/Email[:\s|]+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i);
+  var email = emailMatch ? emailMatch[1].trim().toLowerCase() : '';
+
+  var phoneMatch = content.match(/Phone[^:|\n]*[:\s|]+(\+?[\d\s\-\(\)]{7,18})/i);
+  var phone = phoneMatch ? cleanPhone(phoneMatch[1]) : '';
+
+  // ── PURPOSE ───────────────────────────────────────────────────────────
+  var purposeMatch = content.match(/Purpose of (?:Visit|Stay)[:\s|]*([^\n|]+)/i);
+  var purpose = purposeMatch ? purposeMatch[1].replace(/^\||\|$/g,'').trim() : '';
+
+  // ── ADDRESS from guest table row 1 ────────────────────────────────────
+  // Match table row: "| 1 | GuestName/Age | Address |"
+  // The address field uses periods, commas, spaces — need to capture all of it
+  var homeAddress = '';
+  var addrPatterns = [
+    /\|\s*1\s*\|[^|]+\|\s*([^|]{10,})\s*\|/,          // standard 3-col table
+    /Guest 1[:\s]+[^,\n]+[,\n]+([^|]{10,})/i,           // "Guest 1: Name, Address"
+  ];
+  for (var ap=0; ap<addrPatterns.length; ap++) {
+    var am2 = content.match(addrPatterns[ap]);
+    if (am2) {
+      homeAddress = am2[1].trim()
+        .replace(/\n/g, ', ')
+        .replace(/\s+/g,' ')
+        .replace(/,\s*,/g,',')
+        .trim();
+      // Remove if it's just the guest name repeated
+      if (homeAddress.split(',').length < 2 && homeAddress.indexOf(' ') < 0) homeAddress = '';
+      if (homeAddress) break;
     }
   }
 
-  // Email
-  var emailMatch = content.match(/Email[:\s]+([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i);
-  if (emailMatch) email = emailMatch[1].trim().toLowerCase();
+  var loc = parseAddress(homeAddress);
 
-  // Phone
-  var phoneMatch = content.match(/Phone[^:]*[:\s]+(\+?[\d\s\-]{8,15})/i);
-  if (phoneMatch) phone = cleanPhone(phoneMatch[1]);
-
-  // Purpose of visit
-  var purposeMatch = content.match(/Purpose of (?:Visit|Stay)[:\|]*\s*([^\n\|]+)/i);
-  if (purposeMatch) purpose = purposeMatch[1].trim();
-
-  // Guest 1 address — in the guest table, Guest 1 has the home address
-  // Pattern: "| 1 | GuestName/Age | Full Address |"
-  var addrMatch = content.match(/\|\s*1\s*\|\s*[^\|]+\|\s*([^\|]{15,})\|/);
-  if (addrMatch) {
-    var raw = addrMatch[1].trim();
-    // Sometimes the address is repeated (copy-paste artifact) — take first clean part
-    homeAddress = raw.split(/\n/)[0].trim();
-  }
-
-  if (!bookerName && !email) return null; // skip blank rows
-
-  var loc = parseAddress(homeAddress || '');
+  if (!bookerName && !email) return null;
 
   return {
-    source:         'DOCX-' + year,
-    bookerName:     bookerName,
-    checkIn:        checkIn,
-    homeAddress:    homeAddress,
-    city:           loc.city,
-    state:          loc.state,
-    country:        loc.country,
-    pincode:        loc.pincode,
-    fromCity:       loc.city,
-    email:          email,
-    phone:          phone,
-    govtIdType:     govtIdType,
-    govtIdNum:      govtIdNum,
-    purpose:        purpose,
-    bookingPartner: bookingPartner,
+    source:      'DOCX-'+year,
+    bookerName:  bookerName,
+    checkIn:     checkIn,
+    homeAddress: homeAddress,
+    city:        loc.city,
+    state:       loc.state,
+    country:     loc.country,
+    pincode:     loc.pincode,
+    email:       email,
+    phone:       phone,
+    govtIdType:  govtIdType,
+    govtIdNum:   govtIdNum,
+    purpose:     purpose,
   };
 }
 
-// ── MATCHING LOGIC ────────────────────────────────────────────────────────
-function loadStaysFromSheet() {
-  var ss    = SpreadsheetApp.openById(MAIN_SHEET_ID);
-  var sheet = ss.getSheetByName(STAYS_SHEET);
-  if (!sheet) { Logger.log('Stays sheet not found'); return []; }
-  var data    = sheet.getDataRange().getValues();
-  var headers = data[0];
-  return data.slice(1).map(function(row) {
-    var obj = {};
-    headers.forEach(function(h,i){ obj[h] = row[i]; });
-    return obj;
-  }).filter(function(r){ return r.stayId || r.stay_id; });
+// ── PARSE PDF (Aadhaar / Passport) FOR ADDRESS ────────────────────────────
+// Used as fallback when DOCX address is missing/incomplete
+function parsePdf(file) {
+  var result = { source:'PDF', name:'', homeAddress:'', city:'', state:'', country:'India',
+                 pincode:'', govtIdType:'', govtIdNum:'' };
+  try {
+    var content = '';
+    try {
+      var url = 'https://docs.google.com/feeds/download/documents/export/Export?id='+
+        file.getId()+'&exportFormat=txt';
+      var resp = UrlFetchApp.fetch(url, {
+        headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},
+        muteHttpExceptions:true
+      });
+      content = resp.getContentText();
+    } catch(e) {}
+
+    if (!content || content.length < 20) {
+      // Read as plain text via MimeType conversion
+      try { content = file.getAs('text/plain').getDataAsString(); } catch(e2){}
+    }
+    if (!content) return result;
+
+    // Name — Aadhaar or Passport
+    var nameMatch = content.match(/^([A-Z][a-z]+ [A-Z][a-zA-Z ]+)$/m) ||
+                    content.match(/Given Name\(s\)[:\s]+([A-Z ]+)/i) ||
+                    content.match(/Vikram|Amith|Sangeeth|Bivin/); // last resort
+
+    // Aadhaar address block
+    var addrMatch = content.match(/Address:\s*([\s\S]{10,200})(?=\n\n|\d{4} \d{4} \d{4}|$)/i) ||
+                    content.match(/#\d+[,.]?[^,\n]+(,\s*[^,\n]+){2,}/);
+    if (addrMatch) {
+      result.homeAddress = addrMatch[1].replace(/\n/g,', ').replace(/\s+/g,' ').trim();
+      var loc = parseAddress(result.homeAddress);
+      result.city    = loc.city;
+      result.state   = loc.state;
+      result.country = loc.country;
+      result.pincode = loc.pincode;
+    }
+
+    // Aadhaar number
+    var uidMatch = content.match(/(\d{4}\s\d{4}\s\d{4})/);
+    if (uidMatch) { result.govtIdType='Aadhaar'; result.govtIdNum=uidMatch[1].replace(/\s/g,''); }
+
+    // Passport number
+    var ppMatch = content.match(/Passport No\.\s*([A-Z]\d{7})/i) ||
+                  content.match(/\b([A-Z]\d{7})\b/);
+    if (ppMatch && !result.govtIdNum) { result.govtIdType='Passport'; result.govtIdNum=ppMatch[1]; }
+
+    // PIN code from address
+    if (!result.pincode) {
+      var pinMatch = content.match(/\bPIN[:\s]+(\d{6})\b/i) || content.match(/\b(\d{6})\b/);
+      if (pinMatch) result.pincode = pinMatch[1];
+    }
+
+  } catch(e) { Logger.log('parsePdf error: '+e.message); }
+  return result;
 }
 
-function findMatchingStay(bookerName, checkIn, allStays) {
-  if (!bookerName) return null;
-  var bn      = String(bookerName).toLowerCase().trim();
-  var bFirst  = bn.split(/\s+/)[0];
-  var bLast   = bn.split(/\s+/).slice(-1)[0];
-  var ciDate  = checkIn ? new Date(checkIn) : null;
+// ── GEOCODE via Google Maps API (fallback for missing city/state) ──────────
+// Uses Apps Script's built-in Maps service — no API key needed
+function geocodeAddress(address) {
+  var result = { city:'', state:'', country:'India', pincode:'' };
+  if (!address || address.length < 5) return result;
+  try {
+    var resp = Maps.newGeocoder().geocode(address + ', India');
+    if (!resp || !resp.results || !resp.results.length) return result;
+    var components = resp.results[0].address_components || [];
+    components.forEach(function(c) {
+      var types = c.types || [];
+      if (types.indexOf('locality') >= 0)              result.city    = c.long_name;
+      else if (types.indexOf('sublocality_level_1') >= 0 && !result.city) result.city = c.long_name;
+      if (types.indexOf('administrative_area_level_1') >= 0) result.state   = c.long_name;
+      if (types.indexOf('country') >= 0)               result.country = c.long_name;
+      if (types.indexOf('postal_code') >= 0)           result.pincode = c.long_name;
+    });
+  } catch(e) {
+    Logger.log('geocode error for "'+address+'": '+e.message);
+  }
+  return result;
+}
+
+// ── MATCHING ──────────────────────────────────────────────────────────────
+function findMatch(bookerName, checkIn, allStays) {
+  if (!bookerName || bookerName.length < 2) return null;
+  var bn     = bookerName.toLowerCase().trim();
+  var bParts = bn.split(/\s+/);
+  var bFirst = bParts[0];
+  var bLast  = bParts[bParts.length-1];
+  var ciDate = checkIn ? new Date(checkIn) : null;
 
   var best = null, bestScore = 0;
 
   allStays.forEach(function(stay) {
-    var sn = String(stay.bookerName || stay.guestName || stay.booker_name || stay.guest_name || '').toLowerCase().trim();
-    if (!sn) return;
-    var sFirst = sn.split(/\s+/)[0];
-    var sLast  = sn.split(/\s+/).slice(-1)[0];
+    var sRaw = String(stay.bookerName||stay.guestName||stay.booker_name||stay.guest_name||'');
+    var sn   = sRaw.toLowerCase().trim();
+    if (!sn || sn.length < 2) return;
+    var sParts = sn.split(/\s+/);
+    var sFirst = sParts[0];
+    var sLast  = sParts[sParts.length-1];
 
-    // Name score
+    // Name score — flexible matching
     var nameScore = 0;
-    if (sn === bn)                                        nameScore = 100;
-    else if (sFirst === bFirst && sLast === bLast)        nameScore = 90;
-    else if (sn.indexOf(bFirst) >= 0 && sn.indexOf(bLast) >= 0) nameScore = 75;
-    else if (sFirst === bFirst)                           nameScore = 50;
-    else if (sLast  === bLast)                            nameScore = 45;
-    else if (sn.indexOf(bFirst) >= 0)                    nameScore = 35;
-    if (nameScore < 35) return; // too different
+    if (sn === bn)                                           nameScore = 100;
+    else if (sFirst===bFirst && sLast===bLast)               nameScore = 95;
+    else if (sn.indexOf(bFirst)>=0 && sn.indexOf(bLast)>=0) nameScore = 80;
+    else if (sFirst===bFirst && sn.indexOf(bLast)>=0)        nameScore = 75;
+    else if (sFirst===bFirst)                                nameScore = 50;
+    else if (sLast===bLast && bLast.length>3)                nameScore = 45;
+    else if (sn.indexOf(bFirst)>=0 && bFirst.length>3)       nameScore = 35;
+    if (nameScore < 35) return;
 
     // Date score
     var dateScore = 0;
-    var stayCheckIn = stay.checkIn || stay.checkin_date || stay.checkInDate || '';
-    if (ciDate && stayCheckIn) {
-      var diff = Math.abs((ciDate - new Date(stayCheckIn)) / 86400000);
+    var stayCI = stay.checkIn||stay.checkin_date||stay.checkInDate||'';
+    if (ciDate && stayCI) {
+      var diff = Math.abs((ciDate - new Date(stayCI)) / 86400000);
       if (diff === 0)     dateScore = 100;
-      else if (diff <= 1) dateScore = 60;
-      else if (diff <= 3) dateScore = 30;
-      else if (diff <= 7) dateScore = 10;
-    } else {
-      dateScore = 15; // no date — weight name more
+      else if (diff <= 1) dateScore = 65;
+      else if (diff <= 3) dateScore = 35;
+      else if (diff <= 7) dateScore = 15;
+    } else if (!ciDate) {
+      dateScore = 20; // no date — name-only match
     }
 
     var total = nameScore + dateScore;
-    if (total > bestScore && total >= 85) {
+    if (total > bestScore && total >= 80) {
       bestScore = total;
-      best = stay;
-      best._matchScore = total;
+      best = Object.assign({}, stay);
+      best._score = total;
     }
   });
-
   return best;
 }
 
 // ── SQL BUILDER ────────────────────────────────────────────────────────────
 function buildSql(matched) {
   var lines = [
-    '-- ============================================================',
-    '-- bgIndia Portal — Location Backfill SQL',
+    '-- bgIndia Portal — Location Backfill v2',
     '-- Generated: ' + new Date().toISOString(),
-    '-- Matched stays: ' + matched.length,
-    '-- ============================================================',
+    '-- Matched: ' + matched.length,
     '',
-    '-- Add new columns (safe to re-run — errors for existing cols are ok):',
+    '-- Add columns (ignore "duplicate column" errors — already added):',
     "ALTER TABLE stays ADD COLUMN home_address TEXT;",
     "ALTER TABLE stays ADD COLUMN city         TEXT;",
     "ALTER TABLE stays ADD COLUMN state        TEXT;",
@@ -534,229 +560,214 @@ function buildSql(matched) {
     '',
   ];
 
+  // Deduplicate matched by stay_id (take highest score)
+  var byStay = {};
   matched.forEach(function(m) {
-    var g    = m.guest;
-    var stay = m.stay;
-    var sid  = stay.stayId || stay.stay_id;
+    var sid = m.stay.stayId || m.stay.stay_id;
+    if (!byStay[sid] || m.stay._score > byStay[sid].stay._score) byStay[sid] = m;
+  });
 
-    lines.push('-- ' + g.bookerName + ' · ' + g.checkIn + ' → ' + sid + ' [' + g.source + ']');
+  Object.keys(byStay).forEach(function(sid) {
+    var m = byStay[sid], g = m.guest;
+    lines.push('-- ' + g.bookerName + ' · ' + (g.checkIn||'?') + ' → ' + sid + ' [score:'+m.stay._score+']');
+    var sets = [
+      "  updated_by   = 'system'",
+      "  updated_at   = datetime('now')",
+    ];
+    if (g.homeAddress) sets.push("  home_address = "+s(g.homeAddress));
+    if (g.city)        sets.push("  city         = "+s(g.city),
+                                 "  from_city    = "+s(g.city));
+    if (g.state)       sets.push("  state        = "+s(g.state));
+    if (g.country)     sets.push("  country      = "+s(g.country||'India'));
+    if (g.pincode)     sets.push("  pincode      = "+s(g.pincode));
+    if (g.govtIdType)  sets.push("  govt_id_type = "+s(g.govtIdType));
+    if (g.govtIdNum)   sets.push("  govt_id_num  = "+s(g.govtIdNum));
+    if (g.email)       sets.push("  guest_email  = COALESCE(NULLIF(guest_email,''), "+s(g.email)+")");
+    if (g.phone)       sets.push("  guest_phone  = COALESCE(NULLIF(guest_phone,''), "+s(g.phone)+")");
     lines.push('UPDATE stays SET');
-    lines.push('  home_address = ' + sqlStr(g.homeAddress) + ',');
-    lines.push('  city         = ' + sqlStr(g.city)        + ',');
-    lines.push('  state        = ' + sqlStr(g.state)       + ',');
-    lines.push('  country      = ' + sqlStr(g.country || 'India') + ',');
-    lines.push('  from_city    = ' + sqlStr(g.city)        + ',');
-    lines.push('  pincode      = ' + sqlStr(g.pincode)     + ',');
-    lines.push('  govt_id_type = ' + sqlStr(g.govtIdType)  + ',');
-    lines.push('  govt_id_num  = ' + sqlStr(g.govtIdNum)   + ',');
-    lines.push('  guest_email  = COALESCE(NULLIF(guest_email, \'\'), ' + sqlStr(g.email) + '),');
-    lines.push('  guest_phone  = COALESCE(NULLIF(guest_phone, \'\'), ' + sqlStr(g.phone) + '),');
-    lines.push('  updated_by   = \'system\',');
-    lines.push('  updated_at   = datetime(\'now\')');
-    lines.push('WHERE stay_id = ' + sqlStr(sid) + ';');
+    lines.push(sets.join(',\n'));
+    lines.push('WHERE stay_id = '+s(sid)+';');
     lines.push('');
   });
 
-  lines.push('-- VERIFICATION');
-  lines.push("SELECT 'Updated stays:' label, COUNT(*) cnt FROM stays WHERE from_city IS NOT NULL AND from_city != '';");
-  lines.push("SELECT 'With govt ID:' label, COUNT(*) cnt FROM stays WHERE govt_id_num IS NOT NULL AND govt_id_num != '';");
-  lines.push("SELECT 'Missing city:' label, COUNT(*) cnt FROM stays WHERE (from_city IS NULL OR from_city = '') AND status NOT IN ('cancelled');");
-
-  return lines;
+  lines.push("SELECT 'Updated:' label, COUNT(*) cnt FROM stays WHERE from_city IS NOT NULL AND from_city != '';");
+  lines.push("SELECT 'Missing city:' label, COUNT(*) cnt FROM stays WHERE (from_city IS NULL OR from_city='') AND status NOT IN ('cancelled');");
+  return lines.join('\n');
 }
 
-// ── ADDRESS PARSER ────────────────────────────────────────────────────────
-function parseAddress(address) {
+// ── ADDRESS PARSER ─────────────────────────────────────────────────────────
+// Handles dots AND commas as separators (Bivin Babu uses dots)
+function parseAddress(addr) {
   var r = { city:'', state:'', country:'India', pincode:'' };
-  if (!address) return r;
-  var s = address.trim();
+  if (!addr) return r;
 
-  // PIN code
-  var pin = s.match(/\b(\d{6})\b/);
-  if (pin) { r.pincode = pin[1]; s = s.replace(pin[0],'').trim(); }
+  // Normalise: replace dots used as separators with commas
+  // But don't replace dots in abbreviations (P.O., St.)
+  var s2 = addr.replace(/\.\s+/g, ', ').replace(/\.\s*$/, '');
+  s2 = s2.replace(/PIN[:\.\s]+(\d{6})/gi, function(m,p){ r.pincode=p; return ''; });
 
-  // ZIP code (USA 5-digit)
-  var zip = s.match(/\b(\d{5})\b/);
-  if (zip && !pin) r.pincode = zip[1];
+  // 6-digit pincode
+  if (!r.pincode) {
+    var pm = s2.match(/\b(\d{6})\b/);
+    if (pm) { r.pincode = pm[1]; s2 = s2.replace(pm[0],''); }
+  }
+
+  var sl = s2.toLowerCase();
 
   // Countries
-  var countries = {
-    'usa':'USA','united states':'USA','u.s.a':'USA',
-    'uk':'UK','united kingdom':'UK','england':'UK',
-    'australia':'Australia','canada':'Canada',
-    'uae':'UAE','dubai':'UAE','sharjah':'UAE','abu dhabi':'UAE',
-    'singapore':'Singapore','germany':'Germany','france':'France',
-    'malaysia':'Malaysia','new zealand':'New Zealand',
-    'netherlands':'Netherlands','bahrain':'Bahrain','kuwait':'Kuwait',
-    'qatar':'Qatar','oman':'Oman','saudi arabia':'Saudi Arabia',
-  };
-  var sl = s.toLowerCase();
-  Object.keys(countries).forEach(function(k) {
-    if (sl.indexOf(k) >= 0) r.country = countries[k];
-  });
+  var cmap = {'usa':'USA','united states':'USA','uk':'UK','united kingdom':'UK',
+    'australia':'Australia','canada':'Canada','uae':'UAE','dubai':'UAE',
+    'singapore':'Singapore','germany':'Germany','france':'France','malaysia':'Malaysia',
+    'new zealand':'New Zealand','bahrain':'Bahrain','qatar':'Qatar','oman':'Oman',
+    'kuwait':'Kuwait','saudi arabia':'Saudi Arabia','saudi':'Saudi Arabia'};
+  Object.keys(cmap).forEach(function(k){if(sl.indexOf(k)>=0)r.country=cmap[k];});
 
-  // Indian states
-  var states = {
+  // States
+  var stmap = {
     'karnataka':'Karnataka','tamil nadu':'Tamil Nadu','kerala':'Kerala',
     'maharashtra':'Maharashtra','delhi':'Delhi','new delhi':'Delhi',
     'telangana':'Telangana','andhra pradesh':'Andhra Pradesh',
     'gujarat':'Gujarat','rajasthan':'Rajasthan','goa':'Goa',
     'uttar pradesh':'Uttar Pradesh','west bengal':'West Bengal',
-    'madhya pradesh':'Madhya Pradesh','punjab':'Punjab',
-    'haryana':'Haryana','odisha':'Odisha','jharkhand':'Jharkhand',
-    'himachal pradesh':'Himachal Pradesh','uttarakhand':'Uttarakhand',
-    'chandigarh':'Chandigarh',
-    // Abbreviations
-    'ka':'Karnataka','tn':'Tamil Nadu','kl':'Kerala',
-    'mh':'Maharashtra','ts':'Telangana','ap':'Andhra Pradesh',
-    'gj':'Gujarat','rj':'Rajasthan','up':'Uttar Pradesh',
-    'wb':'West Bengal','mp':'Madhya Pradesh',
-    // District names that map to state
-    'kannur':'Kerala','kollam':'Kerala','thrissur':'Kerala',
-    'palakkad':'Kerala','malappuram':'Kerala','kozhikode':'Kerala',
-    'ernakulam':'Kerala','wayanad':'Kerala','idukki':'Kerala',
-    'pathanamthitta':'Kerala','alappuzha':'Kerala',
-    'thiruvananthapuram':'Kerala','kasaragod':'Kerala',
+    'madhya pradesh':'Madhya Pradesh','punjab':'Punjab','haryana':'Haryana',
+    'odisha':'Odisha','jharkhand':'Jharkhand','uttarakhand':'Uttarakhand',
+    'himachal pradesh':'Himachal Pradesh','chandigarh':'Chandigarh',
     'bengaluru':'Karnataka','mysuru':'Karnataka','mangaluru':'Karnataka',
-    'chennai':'Tamil Nadu','coimbatore':'Tamil Nadu','madurai':'Tamil Nadu',
-    'mumbai':'Maharashtra','pune':'Maharashtra','nagpur':'Maharashtra',
+    'ernakulam':'Kerala','thrissur':'Kerala','kozhikode':'Kerala',
+    'kannur':'Kerala','kollam':'Kerala','thiruvananthapuram':'Kerala',
+    'pathanamthitta':'Kerala','alappuzha':'Kerala','kottayam':'Kerala',
+    'palakkad':'Kerala','malappuram':'Kerala','idukki':'Kerala','wayanad':'Kerala',
+    'kasaragod':'Kerala','coimbatore':'Tamil Nadu','madurai':'Tamil Nadu',
+    'trichy':'Tamil Nadu','tirunelveli':'Tamil Nadu','vellore':'Tamil Nadu',
     'hyderabad':'Telangana','warangal':'Telangana',
     'ahmedabad':'Gujarat','surat':'Gujarat','vadodara':'Gujarat',
-    'kolkata':'West Bengal',
+    'kolkata':'West Bengal','bhubaneswar':'Odisha','bhopal':'Madhya Pradesh',
+    'indore':'Madhya Pradesh','jaipur':'Rajasthan','lucknow':'Uttar Pradesh',
+    'noida':'Uttar Pradesh','gurgaon':'Haryana','faridabad':'Haryana',
   };
-  Object.keys(states).forEach(function(k) {
-    if (sl.indexOf(k) >= 0) {
-      if (!r.state) r.state = states[k];
-    }
+  Object.keys(stmap).forEach(function(k){
+    if(sl.indexOf(k)>=0&&!r.state)r.state=stmap[k];
   });
 
-  // Cities / suburbs
-  var cities = {
-    // Karnataka
+  // Cities (including suburb→city mappings)
+  var ctmap = {
     'whitefield':'Bangalore','koramangala':'Bangalore','indiranagar':'Bangalore',
-    'electronic city':'Bangalore','sarjapur':'Bangalore','jp nagar':'Bangalore',
-    'yelahanka':'Bangalore','hebbal':'Bangalore','marathahalli':'Bangalore',
-    'bangalore':'Bangalore','bengaluru':'Bangalore','blr':'Bangalore',
-    'mysore':'Mysore','mysuru':'Mysore','mangalore':'Mangalore','mangaluru':'Mangalore',
-    'hubli':'Hubli','dharwad':'Hubli',
-    // Tamil Nadu
+    'electronic city':'Bangalore','sarjapur':'Bangalore','marathahalli':'Bangalore',
+    'hebbal':'Bangalore','yelahanka':'Bangalore','jp nagar':'Bangalore',
+    'bangalore':'Bangalore','bengaluru':'Bangalore',
+    'mysore':'Mysore','mysuru':'Mysore',
+    'mangalore':'Mangalore','mangaluru':'Mangalore',
+    'dombivili':'Mumbai','dombivali':'Mumbai','thane':'Mumbai',
+    'bandra':'Mumbai','andheri':'Mumbai','powai':'Mumbai','mulund':'Mumbai',
+    'mumbai':'Mumbai','bombay':'Mumbai',
+    'pune':'Pune','nagpur':'Nagpur',
     'chennai':'Chennai','madras':'Chennai','anna nagar':'Chennai',
-    'adyar':'Chennai','t nagar':'Chennai','velachery':'Chennai',
+    'adyar':'Chennai','velachery':'Chennai','porur':'Chennai',
     'coimbatore':'Coimbatore','madurai':'Madurai','trichy':'Trichy',
-    'salem':'Salem','tirunelveli':'Tirunelveli','vellore':'Vellore',
-    // Kerala
-    'trivandrum':'Thiruvananthapuram','thiruvananthapuram':'Thiruvananthapuram',
-    'tvm':'Thiruvananthapuram',
-    'kochi':'Kochi','ernakulam':'Kochi','cochin':'Kochi','aluva':'Kochi',
+    'delhi':'Delhi','new delhi':'Delhi','gurgaon':'Gurgaon','gurugram':'Gurgaon',
+    'noida':'Noida','faridabad':'Faridabad','ghaziabad':'Ghaziabad',
+    'hyderabad':'Hyderabad','secunderabad':'Hyderabad','gachibowli':'Hyderabad',
+    'hitec city':'Hyderabad','kondapur':'Hyderabad',
+    'ahmedabad':'Ahmedabad','surat':'Surat','vadodara':'Vadodara',
+    'kolkata':'Kolkata','calcutta':'Kolkata',
+    'kochi':'Kochi','cochin':'Kochi','ernakulam':'Kochi',
+    'aluva':'Kochi','mulanthuruthy':'Kochi','kakkanad':'Kochi',
     'thrissur':'Thrissur','trichur':'Thrissur','tcr':'Thrissur',
     'chavakkad':'Thrissur','guruvayur':'Thrissur','guruvayoor':'Thrissur',
     'kozhikode':'Kozhikode','calicut':'Kozhikode',
-    'palakkad':'Palakkad','pkd':'Palakkad',
-    'kannur':'Kannur','cannanore':'Kannur',
-    'kollam':'Kollam','quilon':'Kollam',
+    'kannur':'Kannur','cannanore':'Kannur','mattannur':'Kannur',
+    'kollam':'Kollam','karunagappally':'Kollam','vadakkumthala':'Kollam',
     'alappuzha':'Alappuzha','alleppey':'Alappuzha',
-    'malappuram':'Malappuram','kottayam':'Kottayam',
-    'idukki':'Idukki','wayanad':'Wayanad','kasaragod':'Kasaragod',
+    'thiruvananthapuram':'Thiruvananthapuram','trivandrum':'Thiruvananthapuram',
+    'kottayam':'Kottayam','palakkad':'Palakkad','malappuram':'Malappuram',
+    'wayanad':'Wayanad','idukki':'Idukki','kasaragod':'Kasaragod',
     'pathanamthitta':'Pathanamthitta',
-    // Maharashtra
-    'mumbai':'Mumbai','bombay':'Mumbai','bandra':'Mumbai','powai':'Mumbai',
-    'andheri':'Mumbai','thane':'Mumbai','pune':'Pune','nagpur':'Nagpur',
-    // Delhi
-    'delhi':'Delhi','new delhi':'Delhi','noida':'Noida','gurgaon':'Gurgaon',
-    'gurugram':'Gurgaon','faridabad':'Faridabad','ghaziabad':'Ghaziabad',
-    // Telangana
-    'hyderabad':'Hyderabad','secunderabad':'Hyderabad',
-    'gachibowli':'Hyderabad','hitec city':'Hyderabad','kondapur':'Hyderabad',
-    // Others
-    'ahmedabad':'Ahmedabad','surat':'Surat','vadodara':'Vadodara',
-    'kolkata':'Kolkata','calcutta':'Kolkata',
     'chandigarh':'Chandigarh','jaipur':'Jaipur','lucknow':'Lucknow',
-    'bhopal':'Bhopal','indore':'Indore','patna':'Patna',
-    'bhubaneswar':'Bhubaneswar','raipur':'Raipur',
-    // UAE
+    'bhopal':'Bhopal','indore':'Indore','bhubaneswar':'Bhubaneswar',
     'dubai':'Dubai','sharjah':'Sharjah','abu dhabi':'Abu Dhabi',
-    // Singapore / others
-    'singapore':'Singapore',
+    'singapore':'Singapore','kuala lumpur':'Kuala Lumpur',
+    'sydney':'Sydney','melbourne':'Melbourne','london':'London',
+    'toronto':'Toronto','new york':'New York','dallas':'Dallas',
   };
-  Object.keys(cities).forEach(function(k) {
-    if (sl.indexOf(k) >= 0) {
-      if (!r.city) r.city = cities[k];
-    }
+  Object.keys(ctmap).forEach(function(k){
+    if(sl.indexOf(k)>=0&&!r.city)r.city=ctmap[k];
   });
 
-  // Fallback: take last 2 comma-separated parts as city/state
+  // Fallback: parse comma/dot-separated parts
   if (!r.city) {
-    var parts = s.split(',').map(function(p){ return p.trim(); }).filter(Boolean);
+    var parts = s2.split(/[,]+/).map(function(p){return p.trim();}).filter(Boolean);
+    // Remove parts that are pure numbers, very short, or "India"
+    parts = parts.filter(function(p){
+      return p.length>2 && !/^\d+$/.test(p) && p.toLowerCase()!=='india';
+    });
     if (parts.length >= 2) {
-      // Strip PIN and common junk from last parts
-      var last = parts[parts.length-1].replace(/\d+/,'').trim();
-      var secondLast = parts[parts.length-2].replace(/\d+/,'').trim();
-      if (last.length > 2 && !r.state) r.state = last;
-      if (secondLast.length > 2 && !r.city) r.city = secondLast;
-    } else if (parts.length === 1 && parts[0].length > 2) {
+      r.city = parts[parts.length-2];
+    } else if (parts.length === 1) {
       r.city = parts[0];
     }
+    // Clean street-level noise
+    r.city = r.city.replace(/^(flat|house|no|plot|door|h\.?no|ph\.? ?[0-9]|phase)[^\,]*/i,'').trim();
   }
 
   return r;
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────
-function deduplicateGuestData(data) {
-  var seen = {};
-  var result = [];
+function dedup(data) {
+  var seen = {}, result = [];
   data.forEach(function(g) {
-    var key = (g.bookerName||'').toLowerCase().trim() + '|' + (g.checkIn||'');
-    if (!seen[key]) {
-      seen[key] = true;
-      result.push(g);
-    }
-    // GoogleForm wins: if we already have a form entry, skip DOCX entry
+    var key = (g.bookerName||'').toLowerCase().trim()+'|'+(g.checkIn||'');
+    if (!seen[key]) { seen[key]=true; result.push(g); }
   });
   return result;
 }
 
 function normDate(val) {
   if (!val) return '';
-  if (val instanceof Date) {
-    if (isNaN(val)) return '';
-    return val.toISOString().slice(0,10);
-  }
-  var s = String(val).trim();
-  // Handle "May 12th 2026", "12/05/2026", "2026-05-12" etc.
-  s = s.replace(/(\d+)(st|nd|rd|th)/gi, '$1');
+  if (val instanceof Date) return isNaN(val)?'':val.toISOString().slice(0,10);
+  var v = String(val).trim().replace(/\b(\d+)(st|nd|rd|th)\b/gi,'$1');
+  try { var d=new Date(v); if(!isNaN(d)) return d.toISOString().slice(0,10); } catch(e){}
+  return v;
+}
+
+function cleanPhone(p) {
+  return String(p||'').replace(/[^+\d]/g,'').slice(0,15);
+}
+
+function s(v) {  // SQL string escape
+  if(!v||String(v).trim()==='')return 'NULL';
+  return "'"+String(v).replace(/'/g,"''")+"'";
+}
+
+function q(v) {  // CSV quote
+  if(!v)return'';
+  var sv=String(v);
+  if(sv.indexOf(',')>=0||sv.indexOf('"')>=0||sv.indexOf('\n')>=0)
+    return'"'+sv.replace(/"/g,'""')+'"';
+  return sv;
+}
+
+function today() { return new Date().toISOString().slice(0,10); }
+
+function del(folder, name) {
+  var f=folder.getFilesByName(name);
+  while(f.hasNext())f.next().setTrashed(true);
+}
+
+function callWorker(method, action, payload) {
   try {
-    var d = new Date(s);
-    if (!isNaN(d)) return d.toISOString().slice(0,10);
-  } catch(e) {}
-  return s;
-}
-
-function cleanPhone(phone) {
-  if (!phone) return '';
-  // Normalise to +91XXXXXXXXXX format where possible
-  return String(phone).replace(/[\s\-\(\)]/g,'').trim();
-}
-
-function sqlStr(val) {
-  if (val === null || val === undefined || String(val).trim() === '') return 'NULL';
-  return "'" + String(val).replace(/'/g, "''") + "'";
-}
-
-function csvEscape(val) {
-  if (!val) return '';
-  var s = String(val);
-  if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
-    return '"' + s.replace(/"/g,'""') + '"';
-  }
-  return s;
-}
-
-function todayStr() {
-  return new Date().toISOString().slice(0,10);
-}
-
-function deleteIfExists(folder, name) {
-  var files = folder.getFilesByName(name);
-  while (files.hasNext()) { files.next().setTrashed(true); }
+    var url = WORKER_URL+'/'+action;
+    var opts = {
+      method:method.toLowerCase(),
+      headers:{'Content-Type':'application/json','X-Actor':'auto'},
+      muteHttpExceptions:true
+    };
+    if (method==='GET'&&payload&&Object.keys(payload).length>0)
+      url+='?'+Object.keys(payload).map(function(k){
+        return encodeURIComponent(k)+'='+encodeURIComponent(String(payload[k]||''));
+      }).join('&');
+    if (method==='POST') opts.payload=JSON.stringify(payload||{});
+    var r=UrlFetchApp.fetch(url,opts);
+    return JSON.parse(r.getContentText());
+  } catch(e) { Logger.log('callWorker('+action+'): '+e.message); return null; }
 }

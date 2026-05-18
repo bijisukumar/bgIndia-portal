@@ -147,8 +147,15 @@ function processAll(dryRun) {
 function finishProcessing(dryRun, stayList, guestData) {
   var matched = [], unmatched = [];
   guestData.forEach(function(g) {
-    if (!g.bookerName || g.bookerName.length < 2) { unmatched.push(g); return; }
-    var stay = findMatch(g.bookerName, g.checkIn, stayList);
+    var stay = null;
+    // Try name+date match first
+    if (g.bookerName && g.bookerName.length >= 2) {
+      stay = findMatch(g.bookerName, g.checkIn, stayList);
+    }
+    // Fallback: email match (for NO_NAME and DATE_TOO_FAR cases)
+    if (!stay && g.email) {
+      stay = findMatchByEmail(g.email, stayList);
+    }
     if (stay) matched.push({ guest:g, stay:stay });
     else       unmatched.push(g);
   });
@@ -314,6 +321,12 @@ function readYearFolder(folderId, year, tempFolder) {
         }
       }
       if (!docxFile) continue;
+      // Skip blank template files
+      var fname2 = docxFile.getName().toLowerCase();
+      if (fname2.indexOf('template') >= 0 || fname2 === 'copy of template.docx') {
+        Logger.log('Skipping template: ' + docxFile.getName());
+        continue;
+      }
       try {
         var parsed = parseDocx(docxFile, year, tempFolder);
         if (parsed) results.push(parsed);
@@ -456,10 +469,13 @@ function parseCheckInText(content, year, filename) {
              .replace(/Nights of stay.*/i, '')
              .replace(/Check[\s-]in.*/i, '')
              .replace(/^[\s\/\-:]+/, '')  // leading slashes/colons
+             .replace(/^(Ms\.?|Mr\.?|Mrs\.?|Dr\.?)\s*/i, '') // strip titles
+             .replace(/\/.*$/, '')           // strip everything after / (e.g. "Aparna/")
              .trim();
     // Reject garbage
     var garbage = ['booking partner','approved guest','booked by','number of','check in',
-                   'check-in','check out','nights','list','name:','direct','airbnb',''];
+                   'check-in','check out','nights','list','name:','direct','airbnb',
+                   'copy of','template',''];
     var isGarbage = garbage.some(function(g){ return raw.toLowerCase().indexOf(g)>=0; });
     if (!isGarbage && raw.length >= 2 && raw.length <= 60) bookerName = raw;
   }
@@ -619,13 +635,40 @@ function loadStaysFromSheet() {
 
 function loadStaysFromWorker() {
   try {
-    var resp = callWorker('GET','getStays',{villaId:'dwarka',year:'all'});
-    if (resp&&resp.success&&Array.isArray(resp.data)) return resp.data;
+    // Fetch multiple years explicitly since year='all' may not be supported
+    var allStays = [];
+    var years = [2024, 2025, 2026];
+    years.forEach(function(yr) {
+      try {
+        var resp = callWorker('GET','getStays',{villaId:'dwarka',year:String(yr)});
+        if (resp&&resp.success&&Array.isArray(resp.data)) {
+          allStays = allStays.concat(resp.data);
+          Logger.log('D1 year '+yr+': '+resp.data.length+' stays');
+        }
+      } catch(e){ Logger.log('D1 year '+yr+': '+e.message); }
+    });
+    Logger.log('D1 total: '+allStays.length+' stays');
+    return allStays;
   } catch(e){ Logger.log('Worker stays: '+e.message); }
   return [];
 }
 
 // ── MATCHING ──────────────────────────────────────────────────────────────
+function findMatch(bookerName, checkIn, stayList) {
+  if (!bookerName||bookerName.length<2) return null;}
+
+function findMatchByEmail(email, stayList) {
+  if (!email||email.length<5) return null;
+  var em = email.toLowerCase().trim();
+  var best = null;
+  stayList.forEach(function(stay) {
+    var se = String(stay.guestEmail||stay.guest_email||'').toLowerCase().trim();
+    if (se && se === em) best = Object.assign({},stay,{_score:70});
+  });
+  return best;
+}
+
+// Original findMatch continues:
 function findMatch(bookerName, checkIn, stayList) {
   if (!bookerName||bookerName.length<2) return null;
   var bn=bookerName.toLowerCase().trim();

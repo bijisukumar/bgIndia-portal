@@ -37,7 +37,8 @@ const EMPTY_AIRBNB = {
   nightFee: '', nights: 1, cleaningFee: '', hostServiceFee: '',
   guestServiceFee: '', youEarn: '', guestPaid: '',
 }
-const COMMISSION = { Direct:0, Airbnb:15, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Other:10 }
+// Airbnb: 3% HOST fee only (guest pays 15% separately — not your deduction)
+const COMMISSION = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Other:10 }
 
 // Status badge config
 const STATUS_META = {

@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
 const TODAY    = new Date().toISOString().split('T')[0]
 const CHANNELS = ['Direct', 'Airbnb', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Other']
-const COMM     = { Direct: 0, Airbnb: 15, MakeMyTrip: 18, 'Booking.com': 15, Goibibo: 18, Other: 10 }
+// Commission = HOST fee only (what Airbnb/OTAs deduct from your payout)
+// Airbnb: 3% host service fee. Guest service fee (15%) is paid by guest, not deducted from you.
+const COMM     = { Direct: 0, Airbnb: 3, MakeMyTrip: 18, 'Booking.com': 15, Goibibo: 18, Other: 10 }
 
 const STATUS_FLOW = [
   { key: 'booked',      label: 'Booked',      color: '#185FA5', desc: 'Booking received, not yet confirmed' },
@@ -21,6 +23,8 @@ function fmt(n) {
 export default function NewBooking() {
   const navigate = useNavigate()
   const [saving, setSaving]   = useState(false)
+  // Airbnb breakdown — shown when channel = Airbnb
+  const [airbnb, setAirbnb] = useState({ nightFee:'', cleaningFee:'1000', hostServiceFee:'', youEarn:'', guestServiceFee:'', guestPaid:'' })
   const [toast, setToast]     = useState(null)
   const [result, setResult]   = useState(null) // { stayId, folderUrl }
   const [form, setForm]       = useState({
@@ -273,43 +277,132 @@ export default function NewBooking() {
           <div className="field">
             <label className="field-label">Booking channel</label>
             <select className="field-input" value={form.channel} onChange={e => set('channel', e.target.value)}>
-              {CHANNELS.map(c => <option key={c}>{c}</option>)}
+              {CHANNELS.map(ch => <option key={ch}>{ch}</option>)}
             </select>
           </div>
-          <div className="grid-2">
-            <div className="field">
-              <label className="field-label">Tariff / night (₹)</label>
-              <input className="field-input gold" type="number" placeholder="0"
-                value={form.tariffPerNight} onChange={e => set('tariffPerNight', e.target.value)} />
+
+          {form.channel === 'Airbnb' ? (
+            <>
+              <div style={{ fontSize:'0.72rem', color:'var(--text-dim)', margin:'10px 0 6px',
+                padding:'6px 10px', background:'rgba(255,90,95,0.08)', borderRadius:'6px',
+                borderLeft:'2px solid rgba(255,90,95,0.4)' }}>
+                From Airbnb confirmation email. Enter "You earn" — it auto-fills your tariff.
+              </div>
+              <div className="field-label" style={{marginTop:'8px'}}>HOST PAYOUT</div>
+              <div className="grid-2">
+                <div className="field">
+                  <label className="field-label">Night fee (₹)</label>
+                  <input className="field-input" type="number" placeholder="e.g. 7770"
+                    value={airbnb.nightFee}
+                    onChange={e => setAirbnb(a => ({...a, nightFee:e.target.value}))} />
+                </div>
+                <div className="field">
+                  <label className="field-label">Cleaning fee (₹)</label>
+                  <input className="field-input" type="number" placeholder="1000"
+                    value={airbnb.cleaningFee}
+                    onChange={e => setAirbnb(a => ({...a, cleaningFee:e.target.value}))} />
+                </div>
+                <div className="field">
+                  <label className="field-label">Host service fee (₹)</label>
+                  <input className="field-input" type="number" placeholder="e.g. 263"
+                    value={airbnb.hostServiceFee}
+                    onChange={e => setAirbnb(a => ({...a, hostServiceFee:e.target.value}))} />
+                </div>
+                <div className="field">
+                  <label className="field-label" style={{color:'var(--gold)'}}>You earn (₹) ← enter this</label>
+                  <input className="field-input gold" type="number" placeholder="e.g. 8506.90"
+                    value={airbnb.youEarn}
+                    onChange={e => {
+                      setAirbnb(a => ({...a, youEarn:e.target.value}))
+                      set('tariffPerNight', e.target.value)
+                    }} />
+                </div>
+              </div>
+              <div className="field-label" style={{marginTop:'8px'}}>GUEST PAID</div>
+              <div className="grid-2">
+                <div className="field">
+                  <label className="field-label">Guest service fee (₹)</label>
+                  <input className="field-input" type="number" placeholder="e.g. 1725"
+                    value={airbnb.guestServiceFee}
+                    onChange={e => setAirbnb(a => ({...a, guestServiceFee:e.target.value}))} />
+                </div>
+                <div className="field">
+                  <label className="field-label">Guest paid total (₹)</label>
+                  <input className="field-input" type="number" placeholder="e.g. 10495.80"
+                    value={airbnb.guestPaid}
+                    onChange={e => setAirbnb(a => ({...a, guestPaid:e.target.value}))} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="grid-2">
+              <div className="field">
+                <label className="field-label">Tariff / night (₹)</label>
+                <input className="field-input gold" type="number" placeholder="0"
+                  value={form.tariffPerNight} onChange={e => set('tariffPerNight', e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="field-label">Extra charges (₹)</label>
+                <input className="field-input" type="number" placeholder="0"
+                  value={form.extraCharges} onChange={e => set('extraCharges', e.target.value)} />
+              </div>
             </div>
-            <div className="field">
-              <label className="field-label">Extra charges (₹)</label>
-              <input className="field-input" type="number" placeholder="0"
-                value={form.extraCharges} onChange={e => set('extraCharges', e.target.value)} />
-            </div>
-          </div>
+          )}
         </div>
 
-        {/* Revenue summary */}
-        {nights > 0 && tariff > 0 && (
+        {/* Revenue preview */}
+        {nights > 0 && (parseFloat(form.tariffPerNight) > 0 || parseFloat(airbnb.youEarn) > 0) && (
           <>
             <div className="card-section-label">REVENUE PREVIEW</div>
             <div className="net-box">
-              <div className="net-row">
-                <span className="net-label">Gross ({nights} nights × {fmt(tariff)})</span>
-                <span className="net-val pos">{fmt(gross)}</span>
-              </div>
-              {commPct > 0 && (
-                <div className="net-row">
-                  <span className="net-label">{form.channel} commission ({commPct}%)</span>
-                  <span className="net-val neg">−{fmt(commAmt)}</span>
-                </div>
+              {form.channel === 'Airbnb' ? (
+                <>
+                  {airbnb.nightFee && <div className="net-row">
+                    <span className="net-label">Night fee × {nights}N</span>
+                    <span className="net-val pos">{fmt(parseFloat(airbnb.nightFee) * nights)}</span>
+                  </div>}
+                  {airbnb.cleaningFee && <div className="net-row">
+                    <span className="net-label">Cleaning fee</span>
+                    <span className="net-val pos">{fmt(airbnb.cleaningFee)}</span>
+                  </div>}
+                  {airbnb.hostServiceFee && <div className="net-row">
+                    <span className="net-label">Host service fee (3%)</span>
+                    <span className="net-val neg">−{fmt(airbnb.hostServiceFee)}</span>
+                  </div>}
+                  <div className="net-divider" />
+                  <div className="net-row">
+                    <span style={{ color:'#EDF2F7', fontWeight:'600', fontSize:'1rem' }}>You earn</span>
+                    <span className="net-val big">{fmt(airbnb.youEarn || form.tariffPerNight)}</span>
+                  </div>
+                  {airbnb.guestPaid && <>
+                    <div className="net-divider" style={{marginTop:'10px'}}/>
+                    <div className="net-row" style={{opacity:0.6}}>
+                      <span className="net-label">Guest paid total</span>
+                      <span className="net-val">{fmt(airbnb.guestPaid)}</span>
+                    </div>
+                    {airbnb.guestServiceFee && <div className="net-row" style={{opacity:0.6}}>
+                      <span className="net-label">Of which: guest service fee</span>
+                      <span className="net-val neg">−{fmt(airbnb.guestServiceFee)}</span>
+                    </div>}
+                  </>}
+                </>
+              ) : (
+                <>
+                  <div className="net-row">
+                    <span className="net-label">Gross ({nights}N × {fmt(tariff)})</span>
+                    <span className="net-val pos">{fmt(gross)}</span>
+                  </div>
+                  {commPct > 0 && <div className="net-row">
+                    <span className="net-label">{form.channel} commission ({commPct}%)</span>
+                    <span className="net-val neg">−{fmt(commAmt)}</span>
+                  </div>}
+                  <div className="net-divider" />
+                  <div className="net-row">
+                    <span style={{ color:'#EDF2F7', fontWeight:'600', fontSize:'1rem' }}>Net to owner</span>
+                    <span className="net-val big">{fmt(net)}</span>
+                  </div>
+                </>
               )}
-              <div className="net-divider" />
-              <div className="net-row">
-                <span style={{ color: '#EDF2F7', fontWeight: '600', fontSize: '1rem' }}>Net to owner</span>
-                <span className="net-val big">{fmt(net)}</span>
-              </div>
             </div>
           </>
         )}

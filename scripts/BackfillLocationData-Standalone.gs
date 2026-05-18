@@ -377,33 +377,33 @@ function parseCheckInText(content, year, filename) {
   var purpose  = purposeM ? purposeM[1].replace(/^\||\|$/g,'').trim() : '';
 
   // ── ADDRESS from Guest row 1 ──────────────────────────────────────────
-  // Match: "1\tGuest Name/Age\tAddress" (tab-separated from Doc body)
-  // or: "1  Guest Name  Address" (space-separated)
-  // or the table pattern: find the line after "Guest Full Name/Age" header
+  // After XML strip, each table cell is on its own line.
+  // Row 1 structure: line="1", line+1="GuestName/Age", line+2="Address"
   var homeAddress = '';
-  var lines = content.split('\n');
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i].trim();
-    // Look for "1 " or "1\t" at start followed by name/age pattern
-    if (/^1[\s\t]/.test(line)) {
-      var cols = line.split(/\t/);
-      if (cols.length >= 3) {
-        homeAddress = cols[2].trim();
-      } else {
-        // Space-based: try to find address after name/age (contains / or number)
-        var afterNum = line.replace(/^1\s+/,'');
-        // Skip the name/age part (up to first comma or after pattern like "Name/55")
-        var addrMatch2 = afterNum.match(/[A-Za-z]+\/\d+[\s,]+(.{10,})/);
-        if (addrMatch2) homeAddress = addrMatch2[1].trim();
+  var lines = content.split('\n').map(function(l){ return l.trim(); }).filter(Boolean);
+  for (var i = 0; i < lines.length - 2; i++) {
+    if (lines[i] === '1') {
+      var nextLine = lines[i+1] || '';
+      var addrLine = lines[i+2] || '';
+      // Verify line+1 looks like a name/age field (contains / with digit, or just a name)
+      var looksLikeName = /\/\d/.test(nextLine) || (nextLine.split(' ').length >= 2);
+      // Verify line+2 looks like an address (has comma or digit or length > 8)
+      var looksLikeAddr = addrLine.length > 5 && 
+        (addrLine.indexOf(',') >= 0 || addrLine.indexOf('.') >= 0 || /\d/.test(addrLine));
+      if (looksLikeName && looksLikeAddr) {
+        homeAddress = addrLine;
+        break;
       }
-      if (homeAddress && homeAddress.length > 5) break;
     }
   }
 
-  // Fallback: look for lines that look like addresses (have PIN code, or city+state keywords)
+  // Fallback: look for line with 6-digit PIN code
   if (!homeAddress) {
-    var pinLine = content.match(/\b\d{6}\b[^\n]*/);
-    if (pinLine) homeAddress = pinLine[0].trim();
+    for (var j = 0; j < lines.length; j++) {
+      if (/\b\d{6}\b/.test(lines[j]) && lines[j].indexOf('@') < 0 && lines[j].length > 8) {
+        homeAddress = lines[j]; break;
+      }
+    }
   }
 
   var loc = parseAddress(homeAddress);

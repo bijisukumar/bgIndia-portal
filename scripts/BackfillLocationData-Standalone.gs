@@ -265,7 +265,9 @@ function parseDocx(file, year, tempFolder) {
 
 // Extract plain text from DOCX blob by unzipping and reading word/document.xml
 function extractTextFromDocxBlob(blob) {
-  var zipBlobs = Utilities.unzip(blob);
+  // Utilities.unzip requires application/zip content type
+  var zipBlob = blob.setContentType('application/zip');
+  var zipBlobs = Utilities.unzip(zipBlob);
   var docXml = null;
   for (var i = 0; i < zipBlobs.length; i++) {
     if (zipBlobs[i].getName() === 'word/document.xml') {

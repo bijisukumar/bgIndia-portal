@@ -188,47 +188,103 @@ function readYearFolder(folderId, year, tempFolder) {
   return results;
 }
 
-// ── KEY FIX: Convert DOCX → Google Doc to read content reliably ───────────
+// ── DOCX READER: Upload+convert via Drive REST API ──────────────────────────
+// Drive.Files.copy with convert:true is unreliable for DOCX.
+// The correct method: use the Drive v2 upload API to re-upload the file
+// with ?convert=true which forces Google to create a Google Doc copy.
+// Then read with DocumentApp, then delete the copy.
 function parseDocx(file, year, tempFolder) {
   var content = '';
+  var tempDocId = null;
 
-  // Method 1: Copy DOCX as Google Doc, read paragraphs, delete copy
-  var docCopy = null;
+  // Method 1: Re-upload DOCX as Google Doc via multipart upload
   try {
-    // Create a Google Doc copy in the temp folder
-    var copyFile = Drive.Files.copy(
-      { title: 'tmp_' + file.getId(), mimeType: 'application/vnd.google-apps.document' },
-      file.getId(),
-      { convert: true }
-    );
-    docCopy = DriveApp.getFileById(copyFile.id);
-    // Move to temp folder
-    tempFolder.addFile(docCopy);
-    DriveApp.getRootFolder().removeFile(docCopy);
+    var blob = file.getBlob();
+    var metadata = JSON.stringify({
+      title: 'tmp_backfill_' + file.getId(),
+      mimeType: 'application/vnd.google-apps.document',
+      parents: [{ id: tempFolder.getId() }]
+    });
+    var boundary = '-------314159265358979';
+    var body = '--' + boundary + '\r\n' +
+      'Content-Type: application/json\r\n\r\n' +
+      metadata + '\r\n' +
+      '--' + boundary + '\r\n' +
+      'Content-Type: ' + blob.getContentType() + '\r\n' +
+      'Content-Transfer-Encoding: base64\r\n\r\n' +
+      Utilities.base64Encode(blob.getBytes()) + '\r\n' +
+      '--' + boundary + '--';
 
-    // Read the Google Doc
-    var doc = DocumentApp.openById(copyFile.id);
-    content = doc.getBody().getText();
+    var resp = UrlFetchApp.fetch(
+      'https://www.googleapis.com/upload/drive/v2/files?uploadType=multipart&convert=true',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
+          'Content-Type': 'multipart/mixed; boundary="' + boundary + '"',
+        },
+        payload: body,
+        muteHttpExceptions: true,
+      }
+    );
+
+    var result = JSON.parse(resp.getContentText());
+    if (result.id) {
+      tempDocId = result.id;
+      var doc = DocumentApp.openById(tempDocId);
+      content = doc.getBody().getText();
+    } else {
+      Logger.log('Upload convert failed for ' + file.getName() + ': ' + resp.getContentText().slice(0,200));
+    }
   } catch(e) {
-    Logger.log('Doc convert error for ' + file.getName() + ': ' + e.message);
+    Logger.log('parseDocx upload error ' + file.getName() + ': ' + e.message);
   } finally {
-    // Always delete the copy
-    if (docCopy) { try { docCopy.setTrashed(true); } catch(e2){} }
+    if (tempDocId) {
+      try { DriveApp.getFileById(tempDocId).setTrashed(true); } catch(e2) {}
+    }
   }
 
-  // Method 2 fallback: export as plain text via Drive API
+  // Method 2 fallback: read the DOCX blob bytes, extract text from XML
+  // DOCX is a ZIP — word/document.xml contains the text
   if (!content || content.length < 30) {
     try {
-      var blob = Drive.Files.export(file.getId(), 'text/plain');
-      content = blob.getDataAsString ? blob.getDataAsString() : String(blob);
-    } catch(e) { Logger.log('Drive export fallback failed: ' + e.message); }
+      content = extractTextFromDocxBlob(file.getBlob());
+    } catch(e) {
+      Logger.log('DOCX XML extract failed ' + file.getName() + ': ' + e.message);
+    }
   }
 
-  if (!content || content.length < 30) return null;
-  // Reject if we got HTML instead of text
+  if (!content || content.length < 30) {
+    Logger.log('No content extracted for: ' + file.getName());
+    return null;
+  }
   if (content.trim().startsWith('<!') || content.trim().startsWith('<html')) return null;
 
   return parseCheckInText(content, year, file.getName());
+}
+
+// Extract plain text from DOCX blob by unzipping and reading word/document.xml
+function extractTextFromDocxBlob(blob) {
+  var zipBlobs = Utilities.unzip(blob);
+  var docXml = null;
+  for (var i = 0; i < zipBlobs.length; i++) {
+    if (zipBlobs[i].getName() === 'word/document.xml') {
+      docXml = zipBlobs[i].getDataAsString('UTF-8');
+      break;
+    }
+  }
+  if (!docXml) return '';
+  // Strip XML tags, preserve whitespace/newlines between paragraphs
+  var text = docXml
+    .replace(/<w:br[^>]*\/>/g, '\n')
+    .replace(/<\/w:p>/g, '\n')
+    .replace(/<\/w:tc>/g, '\t')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+    .replace(/\r\n|\r/g,'\n')
+    .replace(/\n{3,}/g,'\n\n')
+    .trim();
+  return text;
 }
 
 // ── PARSE THE TEXT CONTENT OF A CHECK-IN DOC ─────────────────────────────

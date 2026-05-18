@@ -29,6 +29,89 @@ var TEMP_FOLDER_NAME = '_bgIndia_backfill_temp';
 function runDryRun()  { processAll(true);  }
 function runBackfill(){ processAll(false); }
 
+// ── BATCH ENTRY POINTS (use these to avoid 6-min timeout) ─────────────────
+// Run in order: step1 → step2 → step3 → step4 → stepFinish
+// Each saves progress to Drive. Safe to re-run if one fails.
+
+function step1_loadStays() {
+  var stays = loadStaysFromSheet().concat(loadStaysFromWorker());
+  var map = {};
+  stays.forEach(function(s){ var id=s.stayId||s.stay_id||''; if(id&&!map[id])map[id]=s; });
+  saveProgress('stays', Object.values(map));
+  Logger.log('Saved ' + Object.values(map).length + ' stays');
+}
+
+function step2_readForms() {
+  var data = readFormResponseSheet();
+  saveProgress('guestData', data);
+  Logger.log('Saved ' + data.length + ' form records');
+}
+
+function step3_read2026() {
+  var existing = loadProgress('guestData') || [];
+  var data = readYearFolder(FOLDER_2026, '2026', getTempFolder());
+  var combined = dedup(existing.concat(data));
+  saveProgress('guestData', combined);
+  Logger.log('2026: ' + data.length + ' records. Total: ' + combined.length);
+}
+
+function step4_read2025() {
+  var existing = loadProgress('guestData') || [];
+  var data = readYearFolder(FOLDER_2025, '2025', getTempFolder());
+  var combined = dedup(existing.concat(data));
+  saveProgress('guestData', combined);
+  Logger.log('2025: ' + data.length + ' records. Total: ' + combined.length);
+}
+
+function step5_read2024() {
+  var existing = loadProgress('guestData') || [];
+  var data = readYearFolder(FOLDER_2024, '2024', getTempFolder());
+  var combined = dedup(existing.concat(data));
+  saveProgress('guestData', combined);
+  Logger.log('2024: ' + data.length + ' records. Total: ' + combined.length);
+}
+
+function step6_matchAndReport() {
+  var stayList  = loadProgress('stays')     || [];
+  var guestData = loadProgress('guestData') || [];
+  Logger.log('Matching ' + guestData.length + ' guests against ' + stayList.length + ' stays');
+  finishProcessing(true, stayList, guestData);   // true = dry run
+}
+
+function step7_generateSQL() {
+  var stayList  = loadProgress('stays')     || [];
+  var guestData = loadProgress('guestData') || [];
+  Logger.log('Generating SQL for ' + guestData.length + ' guests');
+  finishProcessing(false, stayList, guestData);  // false = full run
+}
+
+// ── PROGRESS HELPERS ───────────────────────────────────────────────────────
+function getTempFolder() {
+  var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
+  var tf = root.getFoldersByName(TEMP_FOLDER_NAME);
+  return tf.hasNext() ? tf.next() : root.createFolder(TEMP_FOLDER_NAME);
+}
+
+function saveProgress(key, data) {
+  var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
+  var fname = 'backfill_progress_' + key + '.json';
+  del(root, fname);
+  root.createFile(fname, JSON.stringify(data), 'application/json');
+}
+
+function loadProgress(key) {
+  var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
+  var files = root.getFilesByName('backfill_progress_' + key + '.json');
+  if (!files.hasNext()) return null;
+  return JSON.parse(files.next().getBlob().getDataAsString());
+}
+
+function cleanProgress() {
+  var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
+  ['stays','guestData'].forEach(function(k) { del(root, 'backfill_progress_' + k + '.json'); });
+  Logger.log('Progress files cleaned');
+}
+
 // Utility: clean up temp folder after run
 function cleanupTemp() {
   var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
@@ -40,13 +123,8 @@ function cleanupTemp() {
 // ── CORE ──────────────────────────────────────────────────────────────────
 function processAll(dryRun) {
   Logger.log('=== ' + (dryRun?'DRY RUN':'BACKFILL') + ' v3 STARTED ===');
+  var tempFolder = getTempFolder();
 
-  // Ensure temp folder exists
-  var root = DriveApp.getFolderById(DRIVE_ROOT_ID);
-  var tf = root.getFoldersByName(TEMP_FOLDER_NAME);
-  var tempFolder = tf.hasNext() ? tf.next() : root.createFolder(TEMP_FOLDER_NAME);
-
-  // Load all stays (Sheets + D1)
   var sheetStays  = loadStaysFromSheet();
   var workerStays = loadStaysFromWorker();
   var stayMap = {};
@@ -57,14 +135,16 @@ function processAll(dryRun) {
   var stayList = Object.values(stayMap);
   Logger.log('Stays loaded: ' + stayList.length);
 
-  // Collect guest data
   var guestData = [];
   guestData = guestData.concat(readFormResponseSheet());
   guestData = guestData.concat(readAllDocxFolders(tempFolder));
   guestData = dedup(guestData);
   Logger.log('Unique guest records: ' + guestData.length);
 
-  // Match to stays
+  finishProcessing(dryRun, stayList, guestData);
+}
+
+function finishProcessing(dryRun, stayList, guestData) {
   var matched = [], unmatched = [];
   guestData.forEach(function(g) {
     if (!g.bookerName || g.bookerName.length < 2) { unmatched.push(g); return; }
@@ -73,7 +153,6 @@ function processAll(dryRun) {
     else       unmatched.push(g);
   });
 
-  // Geocode missing city/state for matched records
   matched.forEach(function(m) {
     var g = m.guest;
     if (g.homeAddress && (!g.city || !g.state)) {

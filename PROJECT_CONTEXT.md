@@ -32,7 +32,7 @@ A Progressive Web App (PWA) for managing Guruvayur Estates properties — villa 
 ## Key IDs & Config
 
 ```
-Apps Script URL:    https://script.google.com/macros/s/AKfycbxvidJkt9yOGgMc7bN2ILDVZ1aoGq7EGzVcp472h1dAujBnzDhSql6Ki6UEzSIasJ4R/exec
+Apps Script URL:    https://script.google.com/macros/s/AKfycbzpW7u02Ss_uUkd7539Ja2RrjzanBrIWIfC8b6Q9wCZa7X4xDLjWHnJiRmr7m9VE1DK/exec
 Spreadsheet ID:     1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ
 Guest Form Sheet:   1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0
 Google Drive Root:  1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva

@@ -34,11 +34,15 @@ function runBackfill(){ processAll(false); }
 // Each saves progress to Drive. Safe to re-run if one fails.
 
 function step1_loadStays() {
-  var stays = loadStaysFromSheet().concat(loadStaysFromWorker());
+  var sheetStays  = loadStaysFromSheet();
+  var workerStays = loadStaysFromWorker();
   var map = {};
-  stays.forEach(function(s){ var id=s.stayId||s.stay_id||''; if(id&&!map[id])map[id]=s; });
-  saveProgress('stays', Object.values(map));
-  Logger.log('Saved ' + Object.values(map).length + ' stays');
+  // Sheet stays first, D1 wins on conflict (more up to date)
+  sheetStays.forEach(function(s){ var id=s.stayId||s.stay_id||''; if(id) map[id]=s; });
+  workerStays.forEach(function(s){ var id=s.stayId||s.stay_id||''; if(id) map[id]=s; }); // D1 overwrites
+  var unique = Object.values(map);
+  Logger.log('Stays: '+sheetStays.length+' sheet + '+workerStays.length+' D1 = '+unique.length+' unique');
+  saveProgress('stays', unique);
 }
 
 function step2_readForms() {

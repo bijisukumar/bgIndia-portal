@@ -11,6 +11,8 @@ ALTER TABLE stays ADD COLUMN state        TEXT;
 ALTER TABLE stays ADD COLUMN country      TEXT DEFAULT 'India';
 ALTER TABLE stays ADD COLUMN from_city    TEXT;
 ALTER TABLE stays ADD COLUMN pincode      TEXT;
+ALTER TABLE stays ADD COLUMN govt_id_type TEXT;
+ALTER TABLE stays ADD COLUMN govt_id_num  TEXT;
 
 -- ── STALE DATA REPORT ─────────────────────────────────────────────────────
 -- Shows how much data is missing location info.

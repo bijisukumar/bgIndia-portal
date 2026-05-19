@@ -98,7 +98,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
 
   const upcoming   = parsed.filter(s => s.checkInDate > today && s.status !== 'cancelled').sort((a,b) => a.checkInDate - b.checkInDate)
   const active     = parsed.filter(s => s.status === 'active')
-  const unclosed   = parsed.filter(s => !['checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate))
+  const unclosed   = parsed.filter(s => !['closed','checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate))
   const byMonth    = parsed.filter(s => {
     if (selMonth === 'all') return s.checkInDate.getFullYear() === year
     return s.checkInDate.getMonth() === selMonth && s.checkInDate.getFullYear() === year
@@ -268,7 +268,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
               { label:'Active now',        val: parsedYear.filter(s=>s.status==='active').length },
               { label:'Upcoming',          val: parsedYear.filter(s=>s.checkInDate > today && s.status !== 'cancelled').length },
               { label:'Cancelled',         val: parsedYear.filter(s=>s.status==='cancelled').length },
-              { label:'Unclosed (action)', val: parsedYear.filter(s=>!['checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate)).length, alert: true },
+              { label:'Unclosed (action)', val: parsedYear.filter(s=>!['closed','checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate)).length, alert: true },
             ].map((row, i) => (
               <div key={i} className="net-row">
                 <span className="net-label">{row.label}</span>

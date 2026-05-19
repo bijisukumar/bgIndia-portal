@@ -291,8 +291,9 @@ function BookingLeadTimeChart({ allStays }) {
   const monthlyLead = Array.from({length:12}, () => [])
 
   ;(allStays || []).forEach(s => {
-    const bd = s.bookedDate || s.bookeddate || ''
-    const ci = s.checkIn || s.checkInDate || ''
+    // Use created_at as booking date proxy (D1 has no separate booked_date)
+    const bd = s.bookedDate || s.bookeddate || s.created_at || s.createdAt || ''
+    const ci = s.checkIn || s.checkInDate || s.checkin_date || ''
     if (!bd || !ci) return
     try {
       const d1 = new Date(bd), d2 = new Date(ci)
@@ -820,9 +821,9 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
         )}
       </div>
 
-      <MonthlyTrendChart stays={stays} currentYear={year} />
-      <EarningsComparisonChart allStays={stays} selectedYears={YEARS.slice(0,2)} />
-      <BookingLeadTimeChart allStays={stays} />
+      <MonthlyTrendChart stays={allStays} currentYear={year} />
+      <EarningsComparisonChart allStays={allStays} selectedYears={YEARS.slice(0,2)} />
+      <BookingLeadTimeChart allStays={allStays} />
     </div>
   )
 }
@@ -988,7 +989,7 @@ export default function VillaDashboard() {
     })
   }, [year])
 
-  // Load all stays once for the 10-year trend chart
+  // Load all stays for multi-year charts (now supported via year=all)
   useEffect(() => {
     api.getStays('dwarka', 'all').catch(() => []).then(all => {
       setAllStays(Array.isArray(all) ? all : [])

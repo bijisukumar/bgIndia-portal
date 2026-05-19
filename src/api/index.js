@@ -106,7 +106,7 @@ export const api = {
   // ── RAMAN ────────────────────────────────────────────────
   getRamanUnpaid:       ()       => get('getRamanUnpaid'),
   getRamanDashboard:    ()       => get('getRamanDashboard'),
-  getMarketingStats:    (villaId) => get('getMarketingStats', { villaId: villaId || 'dwarka' }),
+  getMarketingStats:    (villaId, statYear) => get('getMarketingStats', { villaId: villaId || 'dwarka', ...(statYear ? { statYear: String(statYear) } : {}) }),
   getRamanHistory:      ()       => get('getRamanHistory'),
   markRamanPaid:        (data)   => post('markRamanPaid', data),
 

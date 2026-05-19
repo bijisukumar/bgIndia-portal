@@ -270,15 +270,22 @@ function GuestDetail({ guest, onClose }) {
 }
 
 // ── MARKETING TAB ──────────────────────────────────────────────────────────
+const CUR_YEAR_MKT = new Date().getFullYear()
+const YEARS_MKT = [null, CUR_YEAR_MKT, CUR_YEAR_MKT-1, CUR_YEAR_MKT-2, CUR_YEAR_MKT-3, CUR_YEAR_MKT-4]
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const STATE_COLORS = ['#C8903A','#34A853','#185FA5','#8B5CF6','#EC4899','#F59E0B','#06B6D4','#10B981']
+
 function MarketingTab() {
   const [stats, setStats]     = useState(null)
   const [loading, setLoading] = useState(true)
+  const [statYear, setStatYear] = useState(null) // null = all years
 
   useEffect(() => {
-    api.getMarketingStats('dwarka')
+    setLoading(true)
+    api.getMarketingStats('dwarka', statYear)
       .then(d => { setStats(d); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [])
+  }, [statYear])
 
   if (loading) return <div className="loading"><div className="spinner"/>Loading…</div>
   if (!stats)  return <div style={{ color:'var(--text-dim)', textAlign:'center', padding:'32px' }}>No data</div>
@@ -287,10 +294,78 @@ function MarketingTab() {
   const maxChRev     = Math.max(...(stats.channels||[]).map(c => c.net_revenue), 1)
   const stale        = stats.stale || {}
 
+  // Build state-by-month matrix from monthlyByRegion
+  const monthlyData = stats.monthlyByRegion || []
+  const topStates   = [...new Set(monthlyData.map(r => r.region))].slice(0, 6)
+  // Group by month for current/selected year
+  const displayYear = statYear || CUR_YEAR_MKT
+  const monthMatrix = MONTH_NAMES.map((mn, mi) => {
+    const month = String(mi + 1).padStart(2, '0')
+    const rows  = monthlyData.filter(r => r.year === String(displayYear) && r.month === month)
+    return { month: mn, rows, total: rows.reduce((s,r) => s + (r.guests||0), 0) }
+  })
+  const maxMonthTotal = Math.max(...monthMatrix.map(m => m.total), 1)
+
   return (
     <div>
+      {/* ── YEAR SELECTOR ── */}
+      <div style={{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px' }}>
+        {YEARS_MKT.map(y => (
+          <button key={y||'all'} onClick={() => setStatYear(y)} style={{
+            padding:'4px 12px', borderRadius:'20px', cursor:'pointer', fontSize:'0.78rem',
+            border:`1px solid ${statYear===y?'var(--gold)':'rgba(255,255,255,0.08)'}`,
+            background: statYear===y?'rgba(200,144,58,0.15)':'transparent',
+            color: statYear===y?'var(--gold)':'var(--text-dim)',
+            fontWeight: statYear===y?'700':'400',
+          }}>{y||'All years'}</button>
+        ))}
+      </div>
+
+      {/* ── GUESTS BY STATE/REGION BY MONTH ── */}
+      {monthMatrix.some(m => m.total > 0) && (
+        <>
+          <div className="card-section-label">GUESTS BY STATE · {statYear || 'ALL YEARS'}</div>
+          <div style={{ background:'var(--dark-card)', borderRadius:'12px',
+            border:'1px solid var(--border-dim)', padding:'12px', marginBottom:'14px' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(12,1fr)', gap:'3px', marginBottom:'8px' }}>
+              {monthMatrix.map((m,i) => (
+                <div key={i} style={{ textAlign:'center' }}>
+                  <div style={{ fontSize:'0.6rem', color:'var(--text-dim)', marginBottom:'4px' }}>{m.month}</div>
+                  <div style={{ position:'relative', height:'60px', display:'flex', flexDirection:'column',
+                    justifyContent:'flex-end', gap:'1px' }}>
+                    {topStates.map((state, si) => {
+                      const row = m.rows.find(r => r.region === state)
+                      const guests = row ? row.guests : 0
+                      const pct = maxMonthTotal > 0 ? (guests/maxMonthTotal*100) : 0
+                      return pct > 0 ? (
+                        <div key={state} title={`${state}: ${guests} guests`} style={{
+                          height:`${Math.max(pct*0.6, 2)}px`, borderRadius:'1px',
+                          background: STATE_COLORS[si % STATE_COLORS.length], opacity:0.85
+                        }}/>
+                      ) : null
+                    })}
+                  </div>
+                  {m.total > 0 && <div style={{ fontSize:'0.6rem', color:'var(--gold)', marginTop:'2px' }}>{m.total}</div>}
+                </div>
+              ))}
+            </div>
+            {/* Legend */}
+            <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', paddingTop:'6px',
+              borderTop:'1px solid var(--border-dim)' }}>
+              {topStates.map((state, si) => (
+                <div key={state} style={{ display:'flex', alignItems:'center', gap:'4px', fontSize:'0.7rem' }}>
+                  <div style={{ width:8, height:8, borderRadius:2,
+                    background:STATE_COLORS[si%STATE_COLORS.length] }}/>
+                  <span style={{ color:'var(--text-dim)' }}>{state}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
       {/* ── CITY BREAKDOWN ── */}
-      <div className="card-section-label">GUESTS BY CITY</div>
+      <div className="card-section-label">GUESTS BY CITY · {statYear || 'ALL YEARS'}</div>
       <div style={{ background:'var(--dark-card)', borderRadius:'12px',
         border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'14px' }}>
         {(stats.cities||[]).filter(c => c.city_name !== 'Unknown').slice(0,15).map((c,i) => (

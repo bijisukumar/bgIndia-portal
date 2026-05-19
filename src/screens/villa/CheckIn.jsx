@@ -261,6 +261,45 @@ export default function CheckIn() {
                       )}
                     </div>
 
+                    {/* Extra services requested — from booking */}
+                    {(() => {
+                      let extras = []
+                      try {
+                        const raw = selected.extra_lines || selected.extraLines
+                        if (raw) extras = JSON.parse(raw)
+                      } catch(e) {}
+                      const hasExtras = extras.length > 0 || (selected.extra_charges > 0)
+                      if (!hasExtras) return null
+                      return (
+                        <>
+                          <div className="card-section-label">EXTRA SERVICES REQUESTED</div>
+                          <div className="card" style={{marginBottom:'12px'}}>
+                            {extras.length > 0 ? extras.map((ex,i) => (
+                              <div key={i} style={{display:'flex',justifyContent:'space-between',
+                                alignItems:'center',padding:'6px 0',
+                                borderBottom:i<extras.length-1?'1px solid var(--border-dim)':'none'}}>
+                                <span style={{fontSize:'0.85rem',fontWeight:'600'}}>
+                                  {i+1}. {ex.label||ex.item||ex.type||ex.name}
+                                </span>
+                                {(ex.amount||ex.price) > 0 && (
+                                  <span style={{color:'var(--gold)',fontWeight:'700'}}>
+                                    {'₹'}{Number(ex.amount||ex.price).toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
+                            )) : (
+                              <div style={{display:'flex',justifyContent:'space-between'}}>
+                                <span style={{fontSize:'0.85rem'}}>Extra charges</span>
+                                <span style={{color:'var(--gold)',fontWeight:'700'}}>
+                                  {'₹'}{Number(selected.extra_charges).toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )
+                    })()}
+
                     {/* Car photos — Raman's main task */}
                     <div className="card-section-label">YOUR TASK — TAKE CAR PHOTOS</div>
                     <div className="card">

@@ -17,7 +17,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
-const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Other']
+const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
 
 // Extra charge line items — each has a label and default amount
 const EXTRA_ITEMS = [
@@ -38,7 +38,9 @@ const EMPTY_AIRBNB = {
   guestServiceFee: '', youEarn: '', guestPaid: '',
 }
 // Airbnb: 3% HOST fee only (guest pays 15% separately — not your deduction)
-const COMMISSION = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Other:10 }
+// Host-side commission % only (what OTA deducts from your payout)
+// Airbnb: 3% host fee. Booking.com: 15%. MakeMyTrip/Goibibo: 18%. Expedia/VRBO: 3% (similar to Airbnb)
+const COMMISSION = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Expedia:3, VRBO:3, Other:10 }
 
 // Status badge config
 const STATUS_META = {
@@ -117,12 +119,23 @@ export default function CompleteBooking() {
     : 0
   const tariff     = parseFloat(form.tariffPerNight)||0
   const extraTotal = extraLines.reduce((s,l) => s + (parseFloat(l.amount)||0), 0)
-  const gross      = (tariff * nights) + extraTotal
-  const commPct = COMMISSION[form.channel]||0
-  const commAmt = form.channel === 'Airbnb' && airbnb.hostServiceFee
-    ? parseFloat(airbnb.hostServiceFee) || Math.round(gross * commPct / 100)
+  const commPct    = COMMISSION[form.channel]||0
+  // Airbnb: gross = nightFee + cleaningFee, commAmt = hostServiceFee, net = youEarn
+  // Other:  gross = tariff * nights + extras, commAmt = gross * commPct%, net = gross - commAmt
+  const isAirbnb   = form.channel === 'Airbnb'
+  const nightFeeAmt   = parseFloat(airbnb.nightFee) || 0
+  const cleanFeeAmt   = parseFloat(airbnb.cleaningFee) || 0
+  const hostSvcAmt    = parseFloat(airbnb.hostServiceFee) || 0
+  const youEarnAmt    = parseFloat(airbnb.youEarn) || tariff
+  const gross      = isAirbnb
+    ? (nightFeeAmt * nights) + cleanFeeAmt + extraTotal
+    : (tariff * nights) + extraTotal
+  const commAmt    = isAirbnb
+    ? (hostSvcAmt || Math.round(gross * 0.03))
     : Math.round(gross * commPct / 100)
-  const net     = gross - commAmt
+  const net        = isAirbnb
+    ? youEarnAmt + extraTotal          // youEarn already has 3% deducted
+    : gross - commAmt
 
   // Save financial details (updates stay record)
   async function handleSaveFinancials() {
@@ -395,7 +408,22 @@ export default function CompleteBooking() {
                       <span className="net-val pos">{fmt(gross)}</span>
                     </div>
                   )}
-                  {commPct > 0 && (
+                  {isAirbnb ? (
+                    <>
+                      {nightFeeAmt > 0 && <div className="net-row">
+                        <span className="net-label">Night fee × {nights}N</span>
+                        <span className="net-val pos">{fmt(nightFeeAmt * nights)}</span>
+                      </div>}
+                      {cleanFeeAmt > 0 && <div className="net-row">
+                        <span className="net-label">Cleaning fee</span>
+                        <span className="net-val pos">{fmt(cleanFeeAmt)}</span>
+                      </div>}
+                      {hostSvcAmt > 0 && <div className="net-row">
+                        <span className="net-label">Host service fee (3%)</span>
+                        <span className="net-val neg">−{fmt(hostSvcAmt)}</span>
+                      </div>}
+                    </>
+                  ) : commPct > 0 && (
                     <div className="net-row">
                       <span className="net-label">{form.channel} commission ({commPct}%)</span>
                       <span className="net-val neg">−{fmt(commAmt)}</span>

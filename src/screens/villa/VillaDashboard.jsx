@@ -439,17 +439,22 @@ function BookingLeadTimeChart({ allStays }) {
         )}
       </div>
 
-      {/* Marketing insight box */}
-      <div style={{background:'rgba(200,144,58,0.06)',border:'1px solid rgba(200,144,58,0.2)',
-        borderRadius:'10px',padding:'12px 14px',marginBottom:'12px'}}>
-        <div style={{color:'var(--gold)',fontSize:'0.75rem',fontWeight:'700',marginBottom:'6px'}}>
-          🎯 MARKETING IMPLICATION
+      {stats.some(Boolean) && (
+        <div style={{background:'rgba(200,144,58,0.06)',border:'1px solid rgba(200,144,58,0.2)',
+          borderRadius:'10px',padding:'12px 14px',marginBottom:'12px'}}>
+          <div style={{color:'var(--gold)',fontSize:'0.75rem',fontWeight:'700',marginBottom:'6px'}}>
+            🎯 MARKETING IMPLICATION (from your booking data)
+          </div>
+          <div style={{color:'var(--text-dim)',fontSize:'0.78rem',lineHeight:'1.7'}}>
+            {stats[mostImpulsive] && <>
+              <strong style={{color:'var(--text)'}}>{MONTHS[mostImpulsive]}</strong> has the most last-minute bookings ({stats[mostImpulsive].u7pct}% booked &lt;7 days out) — run WhatsApp flash offers this month.{' '}
+            </>}
+            {stats[mostPlanned] && <>
+              <strong style={{color:'var(--text)'}}>{MONTHS[mostPlanned]}</strong> guests plan {stats[mostPlanned].avg} days ahead on average — send early-bird packages 2–3 months before.
+            </>}
+          </div>
         </div>
-        <div style={{color:'var(--text-dim)',fontSize:'0.78rem',lineHeight:'1.7'}}>
-          <strong style={{color:'var(--text)'}}>January, April, June</strong> attract last-minute bookers — run flash offers and "book now" WhatsApp campaigns in these months.{' '}
-          <strong style={{color:'var(--text)'}}>Aug, Sep, Oct</strong> guests plan ahead — send Guruvayur festival calendars and early-bird packages 60–90 days before.
-        </div>
-      </div>
+      )}
     </>
   )
 }

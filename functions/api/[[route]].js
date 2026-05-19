@@ -66,9 +66,10 @@ export async function onRequest(ctx) {
       if (action === 'getStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const year    = url.searchParams.get('year') || new Date().getFullYear()
-        const { results } = await DB.prepare(
-          `SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? ORDER BY checkin_date DESC`
-        ).bind(villaId, `${year}%`).all()
+        // year='all' returns all stays (for trend/comparison/lead-time charts)
+        const { results } = year === 'all'
+          ? await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? ORDER BY checkin_date DESC`).bind(villaId).all()
+          : await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? ORDER BY checkin_date DESC`).bind(villaId, `${year}%`).all()
         // Map snake_case → camelCase for frontend compatibility
         const mapped = results.map(r => ({
           ...r,
@@ -80,6 +81,7 @@ export async function onRequest(ctx) {
           checkOut:     r.checkout_date,
           checkInDate:  r.checkin_date,
           checkOutDate: r.checkout_date,
+          bookedDate:   r.booked_date || r.created_at,
           commPct:      r.commission_pct,
           commAmt:      r.commission_amt,
           channel:      r.source,
@@ -242,9 +244,19 @@ export async function onRequest(ctx) {
         // Direct ratio for full year
         const totalDirect = stays.filter(s => (s.source||'').toLowerCase() === 'direct').length
 
+        // Key insights
+        const bestMonthIdx = Object.keys(months).reduce((b,m) => (months[m].gross||0) > (months[b]?.gross||0) ? m : b, 1)
+        const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        const bestMonth = MONTH_NAMES[bestMonthIdx] || '—'
+        const channelTotals = {}
+        stays.forEach(s => { const ch = s.source||'direct'; if(!channelTotals[ch])channelTotals[ch]=0; channelTotals[ch]+=(s.net||0) })
+        const topChannel = Object.keys(channelTotals).sort((a,b)=>channelTotals[b]-channelTotals[a])[0] || '—'
+        const directSaving = stays.filter(s=>(s.source||'').toLowerCase()!=='direct').reduce((sum,s)=>sum+(s.commission_amt||0),0)
+        const avgNights = totalBookings > 0 ? Math.round((totalNights/totalBookings)*10)/10 : 0
         return json({ success: true, data: {
           totalBookings, totalNights, grossRevenue, totalNet, totalComm,
-          totalDirect, byChannel, stays, months, quarterly
+          totalDirect, byChannel, stays, months, quarterly,
+          bestMonth, topChannel, directSaving, avgNights
         }})
       }
 

@@ -195,6 +195,28 @@ function onGuestFormSubmit(e) {
       email:       email,
     });
 
+    // Create OnlineCheckIn marker file so Drive watcher triggers ready_for_checkin
+    try {
+      var markerName = 'OnlineCheckIn-' + stayId + '-' + firstName(bookerName) + '.txt';
+      var lines = [
+        'Guest Registration Form Submitted',
+        'Stay ID:     ' + stayId,
+        'Guest:       ' + bookerName,
+        'Check-in:    ' + checkInDate + ' to ' + checkOutDate,
+        'Submitted:   ' + new Date().toISOString(),
+        'Adults:      ' + adults + (children ? ' | Children: ' + children : ''),
+        'Citizenship: ' + citizenship,
+        'ETA:         ' + eta,
+        'Purpose:     ' + purpose,
+        'Location:    ' + city + (state?', '+state:'') + (country?', '+country:''),
+        'Pincode:     ' + pincode,
+        'Email:       ' + email,
+        'Phone:       ' + phone,
+      ];
+      guestFolder.createFile(markerName, lines.join('\n'), 'text/plain');
+      Logger.log('Created: ' + markerName);
+    } catch(me) { Logger.log('Marker error: ' + me.message); }
+
     callWorker('POST', 'updateStayStatus', {
       stayId:    stayId,
       status:    'docs_uploaded',

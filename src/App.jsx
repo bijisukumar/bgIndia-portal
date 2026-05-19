@@ -58,7 +58,6 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
-        <Route path="/raman/dashboard"         element={<RDashboardSnapshot />} />
         {/* Rental */}
         <Route path="/owner/rental"           element={<RentalProperties />} />
         <Route path="/owner/rental/agreement" element={<RentalAgreement />} />
@@ -91,6 +90,7 @@ function ProtectedRoutes() {
         <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />
+        <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
       </>}

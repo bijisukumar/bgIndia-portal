@@ -73,21 +73,30 @@ export async function onRequest(ctx) {
         // Map snake_case → camelCase for frontend compatibility
         const mapped = results.map(r => ({
           ...r,
-          stayId:       r.stay_id,
-          guestName:    r.guest_name,
-          bookerName:   r.guest_name,
-          villaId:      r.villa_id,
-          checkIn:      r.checkin_date,
-          checkOut:     r.checkout_date,
-          checkInDate:  r.checkin_date,
-          checkOutDate: r.checkout_date,
-          bookedDate:   r.booked_date || r.created_at,
-          commPct:      r.commission_pct,
-          commAmt:      r.commission_amt,
-          channel:      r.source,
-          driveFolder:  r.drive_folder_url,
-          reviewRating: r.review_rating,
-          fromCity:     r.from_city,
+          stayId:          r.stay_id,
+          guestName:       r.guest_name,
+          bookerName:      r.guest_name,
+          villaId:         r.villa_id,
+          checkIn:         r.checkin_date,
+          checkOut:        r.checkout_date,
+          checkInDate:     r.checkin_date,
+          checkOutDate:    r.checkout_date,
+          bookedDate:      r.booked_date || r.created_at,
+          commPct:         r.commission_pct,
+          commAmt:         r.commission_amt,
+          channel:         r.source,
+          driveFolder:     r.drive_folder_url,
+          driveFolderUrl:  r.drive_folder_url,
+          driveFolderId:   r.drive_folder_id,
+          reviewRating:    r.review_rating,
+          fromCity:        r.from_city,
+          nightFee:        r.night_fee         || 0,
+          cleaningFee:     r.cleaning_fee      || 0,
+          hostServiceFee:  r.host_service_fee  || 0,
+          youEarn:         r.you_earn          || 0,
+          guestServiceFee: r.guest_service_fee || 0,
+          guestPaidTotal:  r.guest_paid_total  || 0,
+          airbnbConf:      r.airbnb_conf       || '',
         }))
         return json({ success: true, data: mapped })
       }
@@ -729,8 +738,10 @@ export async function onRequest(ctx) {
             checkin_date, checkout_date, nights, adults, children,
             tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status,
             home_address, city, state, country, from_city,
+            night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total,
+            airbnb_conf,
             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           stayId, body.villaId || 'dwarka', body.source || (body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : 'direct'),
           body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null,
@@ -740,6 +751,9 @@ export async function onRequest(ctx) {
           body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0,
           body.homeAddress || null, body.city || null, body.state || null,
           body.country || 'India', body.fromCity || body.city || null,
+          body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0,
+          body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0,
+          body.airbnbConf || null,
           actor, actor, now(), now()
         ).run()
         // Raman commission is created at check-OUT (not here) to avoid

@@ -100,15 +100,26 @@ export default function CompleteBooking() {
 
   function selectStay(stay) {
     setSelected(stay)
-    // Pre-fill form from existing stay data
+    const ch = stay.source
+      ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
+      : 'Direct'
     setForm({
-      channel:        stay.source
-                        ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
-                        : 'Direct',
-      tariffPerNight: stay.tariff_per_night || '',
-      extraCharges:   stay.extra_charges    || '0',
+      channel:        ch,
+      tariffPerNight: stay.tariff_per_night || stay.tariffPerNight || '',
+      extraCharges:   stay.extra_charges    || stay.extraCharges   || '0',
       notes:          stay.notes            || '',
     })
+    // Pre-fill Airbnb breakdown if data exists
+    if (ch === 'Airbnb') {
+      setAirbnb({
+        nightFee:        String(stay.night_fee         || stay.nightFee        || ''),
+        cleaningFee:     String(stay.cleaning_fee      || stay.cleaningFee     || '1000'),
+        hostServiceFee:  String(stay.host_service_fee  || stay.hostServiceFee  || ''),
+        youEarn:         String(stay.you_earn          || stay.youEarn         || stay.tariff_per_night || stay.tariffPerNight || ''),
+        guestServiceFee: String(stay.guest_service_fee || stay.guestServiceFee || ''),
+        guestPaid:       String(stay.guest_paid_total  || stay.guestPaidTotal  || ''),
+      })
+    }
   }
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
@@ -283,8 +294,8 @@ export default function CompleteBooking() {
                   </div>
                 </div>
 
-                {/* Drive folder link */}
-                {s.drive_folder_id && (
+                {/* Drive folder — show link or create prompt */}
+                {s.drive_folder_id ? (
                   <a href={`https://drive.google.com/drive/folders/${s.drive_folder_id}`}
                     target="_blank" rel="noreferrer"
                     style={{display:'block',padding:'10px 14px',background:'var(--dark-card)',
@@ -292,6 +303,15 @@ export default function CompleteBooking() {
                       color:'#85B7EB',fontSize:'0.82rem',textDecoration:'none'}}>
                     📁 Open guest Drive folder → verify ID + registration docs uploaded
                   </a>
+                ) : (
+                  <div style={{marginBottom:'14px'}}>
+                    <div style={{padding:'10px 14px',background:'rgba(200,144,58,0.06)',
+                      border:'1px dashed rgba(200,144,58,0.3)',borderRadius:'10px',
+                      fontSize:'0.78rem',color:'var(--text-dim)',textAlign:'center'}}>
+                      📁 No Drive folder yet — will be created automatically when
+                      guest submits the check-in form, or via the Apps Script poller.
+                    </div>
+                  </div>
                 )}
 
                 {/* Channel & Tariff */}

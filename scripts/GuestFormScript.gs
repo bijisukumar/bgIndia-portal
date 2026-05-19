@@ -51,41 +51,47 @@ function onGuestFormSubmit(e) {
     var guestList    = get('list all guest') || get('guest names');
     var homeAddress  = get('full home address') || get('address');
 
-    // Parse city, state, country from full home address
-    // Expected format: "House, Area, City, State - PIN" or "City, State, Country"
-    var city = '', state = '', country = 'India', fromCity = '';
-    if (homeAddress) {
+    // Try structured fields first (new form layout)
+    // If form has separate City/State/Country/Pincode fields, use them directly
+    var city     = get('city')    || '';
+    var state    = get('state')   || '';
+    var country  = get('country') || '';
+    var pincode  = get('pincode') || get('pin code') || get('postal code') || '';
+    var fromCity = city;
+
+    // Fallback: parse from full home address if structured fields not filled
+    if (!city && homeAddress) {
       var parts = homeAddress.split(',').map(function(p) { return p.trim(); });
+      // Extract pincode
+      var pinMatch = homeAddress.match(/\b(\d{6})\b/);
+      if (pinMatch && !pincode) pincode = pinMatch[1];
+
       if (parts.length >= 3) {
-        // Last meaningful part is often State - PIN or Country
-        var last = parts[parts.length - 1].replace(/\d+/g, '').trim();
+        var last       = parts[parts.length - 1].replace(/\d+/g, '').trim();
         var secondLast = parts[parts.length - 2].trim();
         var thirdLast  = parts[parts.length - 3].trim();
-
-        // Detect if last part is a country (non-Indian)
         var knownCountries = ['USA','UK','United States','United Kingdom',
-          'Australia','Canada','UAE','Singapore','Germany','France','Malaysia'];
-        var isCountry = knownCountries.some(function(c) {
-          return last.toLowerCase().indexOf(c.toLowerCase()) >= 0;
+          'Australia','Canada','UAE','Singapore','Germany','France','Malaysia',
+          'New Zealand','Netherlands','Bahrain','Qatar','Oman','Kuwait'];
+        var isCountry = knownCountries.some(function(cn) {
+          return last.toLowerCase().indexOf(cn.toLowerCase()) >= 0;
         });
-
         if (isCountry) {
-          country  = last;
-          state    = secondLast;
-          fromCity = thirdLast;
+          country = last; state = secondLast; fromCity = thirdLast; city = thirdLast;
         } else {
-          // Assume India — state is last, city is second-last
-          country  = 'India';
-          state    = last.replace(/-.*/, '').trim();  // remove PIN code
-          fromCity = secondLast;
+          country = 'India';
+          state   = last.replace(/[-–].*/,'').trim();
+          fromCity = secondLast; city = secondLast;
         }
-        city = fromCity;
       } else if (parts.length === 2) {
         fromCity = parts[0]; city = parts[0]; state = parts[1];
+        if (!country) country = 'India';
       } else if (parts.length === 1) {
         fromCity = parts[0]; city = parts[0];
+        if (!country) country = 'India';
       }
     }
+    if (!country) country = 'India';
 
     Logger.log('Form submit: booker=' + bookerName + '  checkIn=' + checkInDate);
 
@@ -184,6 +190,7 @@ function onGuestFormSubmit(e) {
       state:       state,
       country:     country,
       fromCity:    fromCity,
+      pincode:     pincode,
       phone:       phone,
       email:       email,
     });

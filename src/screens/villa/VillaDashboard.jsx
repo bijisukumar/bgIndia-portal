@@ -844,9 +844,9 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
         )}
       </div>
 
-      <MonthlyTrendChart stays={allStays} currentYear={year} />
-      <EarningsComparisonChart allStays={allStays} selectedYears={YEARS.slice(0,2)} />
-      <BookingLeadTimeChart allStays={allStays} />
+      <MonthlyTrendChart stays={stays} currentYear={year} />
+      <EarningsComparisonChart allStays={stays} selectedYears={YEARS.slice(0,2)} />
+      <BookingLeadTimeChart allStays={stays} />
     </div>
   )
 }

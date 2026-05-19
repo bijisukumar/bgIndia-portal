@@ -46,7 +46,7 @@ function ProtectedRoutes() {
   const role = user.role
 
   return (
-    <Routes>
+    <ErrorBoundary><Routes>
       {/* ── OWNER ──────────────────────────────────── */}
       {role === 'owner' && <>
         <Route path="/"                       element={<OwnerHome />} />
@@ -96,7 +96,7 @@ function ProtectedRoutes() {
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    </Routes></ErrorBoundary>
   )
 }
 
@@ -104,10 +104,10 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Routes>
+        <ErrorBoundary><Routes>
           <Route path="/login" element={<LoginGate />} />
           <Route path="/*"     element={<ProtectedRoutes />} />
-        </Routes>
+        </Routes></ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   )

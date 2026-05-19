@@ -180,17 +180,72 @@ export async function onRequest(ctx) {
           byChannel[s.source].bookings++
           byChannel[s.source].net += (s.net || 0)
         })
-        // Build months map (1-12) for TestRunner compatibility
+        // Also fetch kitchen, breakfast, car rental for revenue breakdown
+        const { results: kitchenRows } = await DB.prepare(
+          `SELECT strftime('%m', timestamp) as month, SUM(total_amount) as total
+           FROM stay_incidentals WHERE strftime('%Y', timestamp) = ? GROUP BY month`
+        ).bind(String(year)).all()
+        const { results: breakfastRows } = await DB.prepare(
+          `SELECT strftime('%m', date) as month, SUM(total) as total
+           FROM guest_requests WHERE type = 'breakfast' AND strftime('%Y', date) = ? GROUP BY month`
+        ).bind(String(year)).all()
+        const { results: carRows } = await DB.prepare(
+          `SELECT strftime('%m', date) as month, SUM(net) as total
+           FROM guest_requests WHERE type = 'car_rental' AND strftime('%Y', date) = ? GROUP BY month`
+        ).bind(String(year)).all()
+
+        // Index supplementary data by month
+        const kitchenByMonth   = Object.fromEntries((kitchenRows   || []).map(r => [parseInt(r.month), r.total || 0]))
+        const breakfastByMonth = Object.fromEntries((breakfastRows || []).map(r => [parseInt(r.month), r.total || 0]))
+        const carByMonth       = Object.fromEntries((carRows       || []).map(r => [parseInt(r.month), r.total || 0]))
+
+        // Build months map (1-12)
         const months = {}
         for (let m = 1; m <= 12; m++) {
-          const mStays = stays.filter(s => new Date(s.checkin_date).getMonth() + 1 === m)
+          const mStays  = stays.filter(s => new Date(s.checkin_date).getMonth() + 1 === m)
+          const gross   = mStays.reduce((s, r) => s + (r.gross || 0), 0)
+          const fees    = mStays.reduce((s, r) => s + (r.commission_amt || 0), 0)
+          const net     = mStays.reduce((s, r) => s + (r.net || 0), 0)
+          const kitchen   = kitchenByMonth[m]   || 0
+          const breakfast = breakfastByMonth[m] || 0
+          const carRental = carByMonth[m]        || 0
+          const tariff    = gross  // room tariff = gross (before commission)
+          const profit    = net - 0  // net already = gross - commission; no expense data yet
+          const direct    = mStays.filter(s => (s.source || '').toLowerCase() === 'direct').length
+
           months[m] = {
-            bookings: mStays.length,
-            revenue:  mStays.reduce((s, r) => s + (r.net || 0), 0),
-            gross:    mStays.reduce((s, r) => s + (r.gross || 0), 0),
+            bookings:  mStays.length,
+            revenue:   gross,          // gross revenue from room
+            gross,
+            fees,                      // commission paid to channels
+            profit:    net,            // net after commission (profit before expenses)
+            net,
+            direct,
+            breakdown: {
+              tariff,
+              kitchen,
+              breakfast,
+              carRental,
+              events: 0,
+            }
           }
         }
-        return json({ success: true, data: { totalBookings, totalNights, grossRevenue, totalNet, totalComm, byChannel, stays, months } })
+
+        // Quarterly net
+        const quarterly = {
+          Q1: [1,2,3].reduce((s,m)  => s + (months[m].net||0), 0),
+          Q2: [4,5,6].reduce((s,m)  => s + (months[m].net||0), 0),
+          Q3: [7,8,9].reduce((s,m)  => s + (months[m].net||0), 0),
+          Q4: [10,11,12].reduce((s,m) => s + (months[m].net||0), 0),
+        }
+
+        // Direct ratio for full year
+        const totalDirect = stays.filter(s => (s.source||'').toLowerCase() === 'direct').length
+
+        return json({ success: true, data: {
+          totalBookings, totalNights, grossRevenue, totalNet, totalComm,
+          totalDirect, byChannel, stays, months, quarterly
+        }})
       }
 
       // RAMAN COMMISSION

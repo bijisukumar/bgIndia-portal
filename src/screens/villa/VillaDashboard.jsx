@@ -713,7 +713,9 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
     : (monthData.direct || 0)
 
   const directRatio = totalBookings > 0 ? `${totalDirect} / ${totalBookings}` : '—'
-  const margin = monthData.revenue > 0 ? Math.round((monthData.profit / monthData.revenue) * 100) : 0
+  const gross4margin = monthData.revenue || monthData.gross || 0
+  const net4margin   = monthData.net || monthData.profit || 0
+  const margin = gross4margin > 0 ? Math.round((net4margin / gross4margin) * 100) : 0
 
   const breakdown = monthData.breakdown || {}
   const maxBreakdown = Math.max(...Object.values(breakdown).map(v => v||0), 1)
@@ -740,11 +742,12 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
       </div>
 
       <div className="card-section-label">{typeof month==='number'?MONTHS_FULL[month]:'Full Year'} {year}</div>
-      {/* Notice for years with no revenue recorded */}
-      {!loading && monthData.revenue === 0 && totalBookings === 0 && year === 2025 && (
+      {/* Notice for years with no revenue */}
+      {!loading && (monthData.revenue||0) === 0 && totalBookings > 0 && (
         <div style={{ background:'rgba(92,112,128,0.08)', border:'1px solid rgba(92,112,128,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'12px' }}>
           <div style={{ color:'var(--text-dim)', fontSize:'0.82rem' }}>
-            ℹ️ <strong style={{color:'var(--text)'}}>2025 revenue not recorded</strong> — bookings exist but tariff amounts were not entered in the source sheet. Upload the 2025 financial data to see revenue figures.
+            ℹ️ {totalBookings} bookings found but <strong style={{color:'var(--text)'}}>no tariff amounts recorded</strong> for this period.
+            Historical bookings imported from Airbnb CSV may not have tariff data.
           </div>
         </div>
       )}
@@ -753,14 +756,14 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
       ) : (
         <div className="stats-grid">
           <div className="stat-card">
-            <div className="stat-label">Revenue</div>
-            <div className="stat-val gold">{fmt(monthData.revenue)}</div>
-            <div className="stat-sub">{totalBookings} bookings</div>
+            <div className="stat-label">Gross revenue</div>
+            <div className="stat-val gold">{fmt(monthData.revenue || monthData.gross)}</div>
+            <div className="stat-sub">{totalBookings} bookings · {totalNights} nights</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Net profit</div>
-            <div className="stat-val green">{fmt(monthData.profit)}</div>
-            <div className="stat-sub">{margin}% margin</div>
+            <div className="stat-label">Net to owner</div>
+            <div className="stat-val green">{fmt(monthData.net || monthData.profit)}</div>
+            <div className="stat-sub">{margin}% of gross</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Commissions</div>
@@ -770,7 +773,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
           <div className="stat-card">
             <div className="stat-label">Direct ratio</div>
             <div className="stat-val green">{directRatio}</div>
-            <div className="stat-sub">Direct / total</div>
+            <div className="stat-sub">Direct / total bookings</div>
           </div>
         </div>
       )}

@@ -182,24 +182,17 @@ export async function onRequest(ctx) {
           byChannel[s.source].bookings++
           byChannel[s.source].net += (s.net || 0)
         })
-        // Also fetch kitchen, breakfast, car rental for revenue breakdown
-        const { results: kitchenRows } = await DB.prepare(
-          `SELECT strftime('%m', timestamp) as month, SUM(total_amount) as total
-           FROM stay_incidentals WHERE strftime('%Y', timestamp) = ? GROUP BY month`
-        ).bind(String(year)).all()
-        const { results: breakfastRows } = await DB.prepare(
-          `SELECT strftime('%m', date) as month, SUM(total) as total
-           FROM guest_requests WHERE type = 'breakfast' AND strftime('%Y', date) = ? GROUP BY month`
-        ).bind(String(year)).all()
-        const { results: carRows } = await DB.prepare(
-          `SELECT strftime('%m', date) as month, SUM(net) as total
-           FROM guest_requests WHERE type = 'car_rental' AND strftime('%Y', date) = ? GROUP BY month`
-        ).bind(String(year)).all()
-
-        // Index supplementary data by month
-        const kitchenByMonth   = Object.fromEntries((kitchenRows   || []).map(r => [parseInt(r.month), r.total || 0]))
-        const breakfastByMonth = Object.fromEntries((breakfastRows || []).map(r => [parseInt(r.month), r.total || 0]))
-        const carByMonth       = Object.fromEntries((carRows       || []).map(r => [parseInt(r.month), r.total || 0]))
+        // Fetch kitchen revenue from stay_incidentals (uses created_at and total columns)
+        let kitchenByMonth = {}, breakfastByMonth = {}, carByMonth = {}
+        try {
+          const { results: kitchenRows } = await DB.prepare(
+            `SELECT strftime('%m', created_at) as month, SUM(total) as total
+             FROM stay_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
+          ).bind(String(year)).all()
+          kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month),r.total||0]))
+        } catch(e) {}
+        // guest_requests table does not have amount/total columns yet — will add later
+        // breakfastByMonth and carByMonth remain empty ({}) for now
 
         // Build months map (1-12)
         const months = {}

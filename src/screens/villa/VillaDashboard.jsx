@@ -994,7 +994,7 @@ function VillaDashboardInner() {
   const navigate = useNavigate()
   const [tab,    setTab]    = useState('guests')
   const [month,  setMonth]  = useState('fy')
-  const [year,   setYear]   = useState(2023)
+  const [year,   setYear]   = useState(CUR_YEAR)
   const [data,     setData]     = useState(null)
   const [stays,    setStays]    = useState([])
   const [allStays, setAllStays] = useState([])

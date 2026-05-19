@@ -59,6 +59,21 @@ export default function RDashboardSnapshot() {
     </div>
   )
 
+  if (error || !data) return (
+    <div className="screen">
+      <div className="topbar">
+        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <div><div className="topbar-title">My earnings</div></div>
+      </div>
+      <div className="screen-body">
+        <div style={{background:'rgba(198,40,40,0.1)',border:'1px solid rgba(198,40,40,0.3)',
+          borderRadius:'10px',padding:'14px',color:'#EF9A9A',fontSize:'0.85rem',marginTop:'16px'}}>
+          {error || 'No earnings data yet. Commissions are recorded when a guest checks out.'}
+        </div>
+      </div>
+    </div>
+  )
+
   const curYear  = String(new Date().getFullYear())
   const curQKey  = currentQuarterKey()
 

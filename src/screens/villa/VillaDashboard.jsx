@@ -1,6 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(e) { return { error: e } }
+  componentDidCatch(e, info) { console.error('Dashboard crash:', e, info) }
+  render() {
+    if (this.state.error) return (
+      <div style={{padding:'20px',color:'#e74c3c',background:'#1a1a2e',minHeight:'100vh'}}>
+        <h3>Dashboard Error</h3>
+        <pre style={{fontSize:'0.75rem',wordBreak:'break-all',whiteSpace:'pre-wrap'}}>
+          {this.state.error?.message}
+          {this.state.error?.stack}
+        </pre>
+      </div>
+    )
+    return this.props.children
+  }
+}
 
 const MONTHS     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const MONTHS_FULL= ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -972,7 +990,7 @@ function MarketingTab({ data, stays, loading, year }) {
 
 // ── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-export default function VillaDashboard() {
+function VillaDashboardInner() {
   const navigate = useNavigate()
   const [tab,    setTab]    = useState('guests')
   const [month,  setMonth]  = useState('fy')
@@ -1040,6 +1058,10 @@ export default function VillaDashboard() {
       </div>
     </div>
   )
+}
+
+export default function VillaDashboard() {
+  return <ErrorBoundary><VillaDashboardInner /></ErrorBoundary>
 }
 
 const MOCK = {

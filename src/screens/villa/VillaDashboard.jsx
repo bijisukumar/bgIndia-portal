@@ -718,13 +718,18 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
     ? Object.values(data?.months || {}).reduce((s,m) => s+(m.direct||0), 0)
     : (monthData.direct || 0)
 
+  const totalNights = month === 'fy'
+    ? Object.values(data?.months || {}).reduce((s,m) => s+(m.nights||0), 0)
+    : (monthData.nights || 0)
+
   const directRatio = totalBookings > 0 ? `${totalDirect} / ${totalBookings}` : '—'
   const gross4margin = monthData.revenue || monthData.gross || 0
   const net4margin   = monthData.net || monthData.profit || 0
   const margin = gross4margin > 0 ? Math.round((net4margin / gross4margin) * 100) : 0
 
   const breakdown = monthData.breakdown || {}
-  const maxBreakdown = Math.max(...Object.values(breakdown).map(v => v||0), 1)
+  const breakdownVals = Object.values(breakdown).map(v => parseFloat(v)||0).filter(v => !isNaN(v))
+  const maxBreakdown = breakdownVals.length > 0 ? Math.max(...breakdownVals, 1) : 1
 
   return (
     <div>

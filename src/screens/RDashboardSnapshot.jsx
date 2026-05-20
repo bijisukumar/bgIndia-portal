@@ -34,6 +34,23 @@ function currentQuarterKey() {
   const now = new Date()
   return `${now.getFullYear()}-Q${Math.floor(now.getMonth()/3)+1}`
 }
+const Q_MONTHS = { Q1:'Jan–Mar', Q2:'Apr–Jun', Q3:'Jul–Sep', Q4:'Oct–Dec' }
+function qLabel(key) {
+  // key = "2026-Q1" → "Q1 2026 (Jan–Mar)"
+  const parts = key.split('-')
+  const q = parts[1], yr = parts[0]
+  return `${q} ${yr} (${Q_MONTHS[q]||''})`
+}
+function quarterHasPassed(key) {
+  const parts = key.split('-')
+  const yr = parseInt(parts[0]), q = parseInt(parts[1].replace('Q',''))
+  const now = new Date()
+  const curYr = now.getFullYear()
+  const curQ  = Math.floor(now.getMonth()/3) + 1
+  if (yr < curYr) return true
+  if (yr === curYr && q < curQ) return true
+  return false
+}
 
 export default function RDashboardSnapshot() {
   const navigate    = useNavigate()
@@ -128,75 +145,65 @@ export default function RDashboardSnapshot() {
           )}
         </div>
 
-        {/* Current quarter — unpaid detail */}
-        {curQ ? (
-          <>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-              padding:'6px 2px',marginBottom:'6px'}}>
-              <span style={{color:'#e67e22',fontWeight:'700',fontSize:'0.82rem',letterSpacing:'0.5px'}}>
-                ⏳ {curQ.label} — UNPAID
-              </span>
-              <span style={{color:'#e67e22',fontWeight:'700',fontSize:'0.9rem'}}>
-                {fmt(curQ.total)}
-              </span>
-            </div>
-            <div style={{background:'var(--dark-card)',borderRadius:'12px',
-              border:'1px solid rgba(230,126,34,0.25)',overflow:'hidden',marginBottom:'12px'}}>
-              {curQ.stays.map((s,i) => (
-                <div key={i} style={{padding:'10px 16px',
-                  borderBottom:i<curQ.stays.length-1?'1px solid var(--border-dim)':'none',
-                  display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <div>
-                    <div style={{fontWeight:'600',fontSize:'0.88rem',color:'var(--text)'}}>
-                      {s.guestName}
-                    </div>
-                    <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'1px'}}>
-                      {fmtDate(s.checkIn)} · {s.nights} night{s.nights!==1?'s':''}
-                    </div>
-                  </div>
-                  <div style={{color:'#e67e22',fontWeight:'700',fontSize:'0.9rem'}}>
-                    {fmt(s.commission)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div style={{background:'rgba(52,168,83,0.06)',border:'1px solid rgba(52,168,83,0.2)',
-            borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',
-            color:'#34A853',fontSize:'0.85rem',fontWeight:'600'}}>
-            ✅ {curQKey.split('-')[1]} — All paid
-          </div>
-        )}
+        {/* All quarters of current year — show each with correct status */}
+        {['Q1','Q2','Q3','Q4'].map(q => {
+          const key     = `${curYear}-${q}`
+          const isCurQ  = key === curQKey
+          const isPast  = quarterHasPassed(key)
+          const unpaidQ = unpaidCurYear.find(uq => uq.key === key)
+          const isFuture = !isPast && !isCurQ
 
-        {/* Other quarters of current year */}
-        {otherQs.length > 0 && otherQs.map(q => (
-          <div key={q.key} style={{display:'flex',justifyContent:'space-between',
-            padding:'10px 14px',background:'rgba(198,40,40,0.06)',
-            border:'1px solid rgba(198,40,40,0.2)',borderRadius:'10px',
-            marginBottom:'8px'}}>
-            <span style={{color:'#EF9A9A',fontSize:'0.85rem',fontWeight:'600'}}>
-              ⏳ {q.label} unpaid
-            </span>
-            <span style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(q.total)}</span>
-          </div>
-        ))}
+          if (isFuture) return null  // Don't show future quarters at all
 
-        {/* Paid quarters this year (other than current) */}
-        {['Q1','Q2','Q3','Q4']
-          .map(q => `${curYear}-${q}`)
-          .filter(key => key !== curQKey && !unpaidCurYear.find(q => q.key === key))
-          .map(key => {
-            const qLabel = key.split('-')[1]
-            // Get paid total for this quarter from paid data — approximate from byYear
-            return (
-              <div key={key} style={{display:'flex',justifyContent:'space-between',
-                padding:'8px 14px',marginBottom:'6px'}}>
-                <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>{qLabel} {curYear}</span>
-                <span style={{color:'#34A853',fontSize:'0.82rem',fontWeight:'600'}}>✓ Paid</span>
+          if (unpaidQ) return (
+            <div key={key} style={{marginBottom:'12px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+                padding:'6px 2px',marginBottom:'6px'}}>
+                <span style={{color:'#e67e22',fontWeight:'700',fontSize:'0.82rem'}}>
+                  ⏳ {qLabel(key)} — UNPAID
+                </span>
+                <span style={{color:'#e67e22',fontWeight:'600',fontSize:'0.82rem'}}>
+                  {unpaidQ.stays.length} guest{unpaidQ.stays.length!==1?'s':''}
+                </span>
               </div>
-            )
-          })}
+              <div style={{background:'var(--dark-card)',borderRadius:'12px',
+                border:'1px solid rgba(230,126,34,0.25)',overflow:'hidden'}}>
+                {unpaidQ.stays.map((s,i) => (
+                  <div key={i} style={{padding:'10px 16px',
+                    borderBottom:i<unpaidQ.stays.length-1?'1px solid var(--border-dim)':'none',
+                    display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div>
+                      <div style={{fontWeight:'600',fontSize:'0.88rem',color:'var(--text)'}}>
+                        {s.guestName}
+                      </div>
+                      <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'1px'}}>
+                        {fmtDate(s.checkIn)} · {s.nights} night{s.nights!==1?'s':''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+
+          if (isPast && !unpaidQ) return (
+            <div key={key} style={{display:'flex',justifyContent:'space-between',
+              padding:'8px 14px',marginBottom:'6px'}}>
+              <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>{qLabel(key)}</span>
+              <span style={{color:'#34A853',fontSize:'0.82rem',fontWeight:'600'}}>✓ Paid</span>
+            </div>
+          )
+
+          if (isCurQ && !unpaidQ) return (
+            <div key={key} style={{background:'rgba(52,168,83,0.06)',border:'1px solid rgba(52,168,83,0.2)',
+              borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',
+              color:'#34A853',fontSize:'0.85rem',fontWeight:'600'}}>
+              ✅ {qLabel(key)} — All paid
+            </div>
+          )
+
+          return null
+        })}
 
         {/* ── PAST YEARS ── */}
         {(pastYears.length > 0 || unpaidPast.length > 0) && (

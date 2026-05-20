@@ -17,9 +17,28 @@
  * Access: Raman (manager role)
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+
+class EB extends Component {
+  constructor(p){super(p);this.state={err:null}}
+  static getDerivedStateFromError(e){return{err:e}}
+  render(){
+    if(this.state.err) return(
+      <div style={{padding:'20px',color:'#e74c3c',background:'#0d0d1a',minHeight:'100vh'}}>
+        <div style={{fontWeight:'700',marginBottom:'8px'}}>My Earnings Error</div>
+        <div style={{fontSize:'0.8rem',wordBreak:'break-all'}}>{this.state.err?.message}</div>
+        <pre style={{fontSize:'0.65rem',color:'#888',marginTop:'8px',whiteSpace:'pre-wrap'}}>{this.state.err?.stack}</pre>
+        <button onClick={()=>window.history.back()} style={{marginTop:'12px',padding:'8px 16px',background:'#e74c3c',color:'white',border:'none',borderRadius:'6px',cursor:'pointer'}}>← Back</button>
+      </div>
+    )
+    return this.props.children
+  }
+}
+
+
+export default function RDashboardSnapshot(){return <EB><RDashboardSnapshotInner/></EB>}
 
 function fmt(n) {
   if (!n && n !== 0) return '—'
@@ -52,7 +71,7 @@ function quarterHasPassed(key) {
   return false
 }
 
-export default function RDashboardSnapshot() {
+function RDashboardSnapshotInner() {
   const navigate    = useNavigate()
   const [data, setData]     = useState(null)
   const [loading, setLoading] = useState(true)

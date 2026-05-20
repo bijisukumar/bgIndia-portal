@@ -296,7 +296,7 @@ export async function onRequest(ctx) {
       if (action === 'getRamanDashboard') {
         // Paid totals by year
         const { results: byYear } = await DB.prepare(
-          `SELECT strftime('%Y', paid_date) as year,
+          `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year,
                   SUM(commission) as total_paid,
                   COUNT(*) as stays_paid
            FROM raman_commissions

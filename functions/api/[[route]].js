@@ -265,7 +265,12 @@ export async function onRequest(ctx) {
       // RAMAN COMMISSION
       if (action === 'getRamanUnpaid') {
         const { results } = await DB.prepare(
-          `SELECT * FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
+          `SELECT rc.*,
+                  COALESCE(s.review_rating, 0) as review_rating
+           FROM raman_commissions rc
+           LEFT JOIN stays s ON s.id = rc.stay_id
+           WHERE rc.is_paid = 0
+           ORDER BY rc.checkin_date ASC`
         ).all()
         const totalUnpaid = results.reduce((s, r) => s + (r.commission || 0), 0)
         // Group by quarter
@@ -274,7 +279,7 @@ export async function onRequest(ctx) {
           const d = new Date(r.checkin_date)
           const q = `Q${Math.ceil((d.getMonth() + 1) / 3)} ${d.getFullYear()}`
           if (!quarters[q]) quarters[q] = { label: q, stays: [], total: 0 }
-          quarters[q].stays.push({ guestName: r.guest_name, checkIn: r.checkin_date, nights: r.nights, ramanComm: r.commission, commId: r.comm_id })
+          quarters[q].stays.push({ guestName: r.guest_name, checkIn: r.checkin_date, nights: r.nights, ramanComm: r.commission, commId: r.comm_id, reviewRating: r.review_rating || 0 })
           quarters[q].total += r.commission
         })
         return json({ success: true, data: {

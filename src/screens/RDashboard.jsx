@@ -16,6 +16,23 @@ function calcCommission(nights) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+function StarRating({ rating }) {
+  if (!rating || rating === 0) return null
+  const isBad = rating < 5
+  return (
+    <span style={{
+      color: isBad ? '#E05C5C' : '#C8903A',
+      fontSize: '0.72rem',
+      fontWeight: 700,
+      marginLeft: 6,
+      letterSpacing: '-0.5px',
+    }}>
+      {'★'.repeat(Math.floor(rating))}{rating % 1 >= 0.5 ? '½' : ''}
+      {isBad && <span style={{ fontSize: '0.6rem', marginLeft: 2 }}>{rating.toFixed(1)}</span>}
+    </span>
+  )
+}
+
 const CUR_YEAR = new Date().getFullYear()
 
 function fmt(n) {
@@ -338,6 +355,7 @@ export default function RDashboard() {
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ color: 'var(--text)', fontSize: '0.85rem', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {s.guestName || s.bookerName}
+                                  <StarRating rating={s.reviewRating} />
                                 </div>
                                 <div style={{ color: 'var(--text-dim)', fontSize: '0.73rem', marginTop: '1px' }}>
                                   {fmtDate(s.checkIn)} · {s.nights} night{s.nights > 1 ? 's' : ''}

@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { CONFIG } from '../config'
+import TopBar from '../components/TopBar'
 
 export default function PradoshHome() {
   const { logout } = useAuth()
@@ -31,17 +32,7 @@ export default function PradoshHome() {
 
   return (
     <div className="screen">
-      <div style={styles.header}>
-        <img src="/icons/logo-black.png" alt="GE" style={styles.logo}
-          onError={e => e.target.style.display = 'none'} />
-        <div style={styles.headerText}>
-          <div style={styles.brandName}>{CONFIG.brandName}</div>
-          <div style={styles.tagline}>PROPERTY MANAGEMENT PORTAL</div>
-        </div>
-        <div style={styles.welcomeBadge}>
-          <span style={styles.welcomeLabel}>PRADOSH</span>
-        </div>
-      </div>
+      <TopBar title="Pradosh" sub="ESTATE MANAGER · POLLACHI" />
 
       <div className="screen-body">
         <div className="card-section-label">POLLACHI COCONUT ESTATE</div>
@@ -89,7 +80,7 @@ export default function PradoshHome() {
           </div>
         </div>
 
-        <button className="logout-btn" onClick={logout}>Log out</button>
+        <button className="logout-btn" onClick={logout} style={{ marginTop: 8 }}>Log out</button>
       </div>
     </div>
   )

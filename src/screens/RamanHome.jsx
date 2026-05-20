@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { CONFIG } from '../config'
+import TopBar from '../components/TopBar'
 
 export default function RamanHome() {
   const navigate = useNavigate()
@@ -79,19 +80,7 @@ export default function RamanHome() {
 
   return (
     <div className="screen">
-      <div className="topbar" style={{ justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {CONFIG.logo && <img src={CONFIG.logo} alt="logo" style={{ height: 36, borderRadius: 6 }}/>}
-          <div>
-            <div className="topbar-title">{CONFIG.villaName || 'Guruvayur Estates'}</div>
-            <div className="topbar-sub">PROPERTY MANAGEMENT PORTAL</div>
-          </div>
-        </div>
-        <span style={{ background: 'rgba(200,144,58,0.15)', color: 'var(--gold)',
-          padding: '4px 12px', borderRadius: '16px', fontSize: '0.75rem', fontWeight: '700' }}>
-          RAMAN
-        </span>
-      </div>
+      <TopBar title={CONFIG.villaName || 'Guruvayur Estates'} sub="RAMAN · VILLA MANAGER" />
 
       <div className="screen-body">
 

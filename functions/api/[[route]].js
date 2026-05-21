@@ -53,6 +53,23 @@ async function verifyJwt(token, secret) {
   } catch { return null }
 }
 
+// ── EMAIL ALERT via MailChannels (free on Cloudflare Workers) ──
+async function sendAlert(env, subject, lines) {
+  try {
+    const body = {
+      personalizations: [{ to: [{ email: env.OWNER_EMAIL || 'bijisukumar@gmail.com' }] }],
+      from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Security' },
+      subject,
+      content: [{ type: 'text/plain', value: lines.join('\n') }],
+    }
+    await fetch('https://api.mailchannels.net/tx/v1/send', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    })
+  } catch (_) { /* silent — never block the response for email */ }
+}
+
 // ── RATE LIMITER — 5 attempts per IP per 15 min ──────────────
 // In-memory map resets on worker restart; good enough for PIN brute-force protection
 const loginAttempts = new Map()
@@ -108,29 +125,67 @@ export async function onRequest(ctx) {
 
   // ── LOGIN — validate PIN server-side, return JWT ───────
   if (action === 'login' && method === 'POST') {
-    const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+    const ip        = request.headers.get('CF-Connecting-IP') || 'unknown'
+    const country   = request.headers.get('CF-IPCountry')     || 'unknown'
+    const city      = request.cf?.city                         || 'unknown'
+    const region    = request.cf?.region                       || ''
+    const userAgent = request.headers.get('User-Agent')        || 'unknown'
+    const referer   = request.headers.get('Referer')           || ''
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+
     const rl = checkRateLimit(ip)
     if (rl.limited) {
+      // Send lockout alert
+      await sendAlert(env, '🔒 bgIndia — Login LOCKED (rate limit hit)', [
+        'A login has been LOCKED after too many failed attempts.',
+        '',
+        `Time:       ${timestamp}`,
+        `IP Address: ${ip}`,
+        `Location:   ${city}${region ? ', ' + region : ''}, ${country}`,
+        `User Agent: ${userAgent}`,
+        `Referer:    ${referer || 'direct'}`,
+        '',
+        `Locked for: ${rl.retryAfter} minutes`,
+        '',
+        'If this was you — wait and try again.',
+        'If this was not you — consider changing your PIN.',
+      ])
       return json({ success: false, error: 'Too many attempts', retryAfter: rl.retryAfter }, 429)
     }
+
     const { pin } = await request.json().catch(() => ({}))
     if (!pin) return err('PIN required', 400)
 
-    // PIN lookup against worker env vars (never in frontend bundle)
     const users = {
       [env.PIN_OWNER]:   { name: 'Owner',        role: 'owner',          actor: 'owner'   },
       [env.PIN_RAMAN]:   { name: 'RamananKutty', role: 'manager',        actor: 'raman'   },
       [env.PIN_PRADOSH]: { name: 'Pradosh',       role: 'estate_manager', actor: 'pradosh' },
     }
     const found = users[String(pin)]
-    if (!found) return json({ success: false, error: 'Invalid PIN' }, 401)
+
+    if (!found) {
+      // Send failed attempt alert (every wrong PIN)
+      await sendAlert(env, '⚠️ bgIndia — Failed login attempt', [
+        'Someone entered a wrong PIN.',
+        '',
+        `Time:       ${timestamp}`,
+        `IP Address: ${ip}`,
+        `Location:   ${city}${region ? ', ' + region : ''}, ${country}`,
+        `User Agent: ${userAgent}`,
+        `Referer:    ${referer || 'direct'}`,
+        `PIN tried:  ${String(pin).length} digits (not shown for security)`,
+        '',
+        'No action needed unless you see many of these.',
+      ])
+      return json({ success: false, error: 'Invalid PIN' }, 401)
+    }
 
     const token = await signJwt({
       name:  found.name,
       role:  found.role,
       actor: found.actor,
       iat:   Math.floor(Date.now() / 1000),
-      exp:   Math.floor(Date.now() / 1000) + (12 * 60 * 60), // 12 hours
+      exp:   Math.floor(Date.now() / 1000) + (12 * 60 * 60),
     }, env.JWT_SECRET)
 
     return json({ success: true, token })

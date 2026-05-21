@@ -549,12 +549,22 @@ export async function onRequest(ctx) {
         const netIncome      = results.reduce((s, r) => s + (r.net_income || 0), 0)
         const totalExpense   = results.reduce((s, r) => s + (r.total_expense || 0), 0)
         const harvests = results.map(r => ({
-          date: r.harvest_date, monthShort: new Date(r.harvest_date).toLocaleString('en-IN',{month:'short'}),
-          year: new Date(r.harvest_date).getFullYear(),
-          count: r.total_nuts, weight: r.total_weight_kg, pricePerKg: r.price_per_kg,
-          harvester: r.harvester_name, netIncome: r.net_income, balanceDue: r.balance_due
+          date:         r.harvest_date,
+          monthShort:   new Date(r.harvest_date).toLocaleString('en-IN', { month: 'short' }),
+          year:         new Date(r.harvest_date).getFullYear(),
+          count:        r.total_nuts        || 0,
+          rejected:     r.nuts_rejected     || 0,
+          weight:       r.total_weight_kg   || 0,
+          pricePerKg:   r.price_per_kg      || 0,
+          harvester:    r.harvester_name    || '—',
+          netIncome:    r.net_income        || 0,
+          totalExpense: r.total_expense     || 0,
+          balanceDue:   r.balance_due       || 0,
+          nextHarvest:  r.next_harvest_date || null,
         }))
-        return json({ success: true, data: { totalHarvests, totalCount, grossRevenue, netIncome, totalExpense, harvests } })
+        // Compute next harvest date from most recent record
+        const nextHarvestDate = results[0]?.next_harvest_date || null
+        return json({ success: true, data: { totalHarvests, totalCount, grossRevenue, netIncome, totalExpense, harvests, nextHarvestDate } })
       }
 
       // RUBBER

@@ -417,7 +417,7 @@ export async function onRequest(ctx) {
           `SELECT rc.*,
                   COALESCE(s.review_rating, 0) as review_rating
            FROM raman_commissions rc
-           LEFT JOIN stays s ON s.id = rc.stay_id
+           LEFT JOIN stays s ON s.stay_id = rc.stay_id
            WHERE rc.is_paid = 0
            ORDER BY rc.checkin_date ASC`
         ).all()

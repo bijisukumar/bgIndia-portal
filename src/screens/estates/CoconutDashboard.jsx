@@ -352,7 +352,7 @@ const s = {
     textAlign: 'center',
   },
   nextLabel:  { fontSize: '0.6rem', color: '#5C7080', letterSpacing: '2px', marginBottom: 4 },
-  nextDate:   { fontSize: '1.05rem', fontWeight: 700, color: '#E8B86D', fontFamily: "'Cormorant Garamond', serif" },
+  nextDate:   { fontSize: '1.4rem', fontWeight: 700, color: '#E8B86D', fontFamily: "'Cormorant Garamond', serif" },
   nextDays:   { fontSize: '0.8rem', fontWeight: 600, marginTop: 4 },
   nextNote:   { fontSize: '0.6rem', color: '#3A4550', marginTop: 4 },
 

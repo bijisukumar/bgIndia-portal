@@ -136,11 +136,18 @@ export default function CoconutDashboard() {
 
   const harvests = data?.harvests || []
 
-  // Compute delay between harvests (days)
+  // Compute delay: for each harvest, next row's actualNext vs this row's scheduledNext
+  // actualNext = the date the NEXT harvest actually happened (filled when that harvest is recorded)
+  // scheduledNext = this harvest date + 45 days (what should have happened)
   const withDelay = harvests.map((h, i) => {
-    const prev  = harvests[i + 1]
-    const delay = prev ? daysBetween(prev.date, h.date) : null
-    return { ...h, delay }
+    const prev = harvests[i + 1]  // previous harvest (harvests sorted newest first)
+    // Gap between prev harvest date and this harvest date
+    const gap = prev ? daysBetween(prev.date, h.date) : null
+    // Delay vs scheduled: how many days late/early compared to prev.scheduledNext
+    const vsScheduled = (prev?.scheduledNext && h.date)
+      ? daysBetween(prev.scheduledNext, h.date)  // positive = late, negative = early
+      : null
+    return { ...h, gap, vsScheduled }
   })
 
   // Next harvest date — from most recent record's next_harvest_date
@@ -202,28 +209,55 @@ export default function CoconutDashboard() {
             {withDelay.length === 0 ? (
               <div style={s.empty}>No harvests recorded{year !== 0 ? ` for ${year}` : ''}</div>
             ) : withDelay.map((h, i) => {
-              const rejPctVal = h.count > 0 ? ((h.rejected / h.count) * 100).toFixed(1) : 0
-              const rejHigh   = parseFloat(rejPctVal) > 10
-              const delayOk   = h.delay !== null && h.delay >= 40 && h.delay <= 55
-              const delayLow  = h.delay !== null && h.delay < 40
-              const delayHigh = h.delay !== null && h.delay > 55
+              const rejPctVal  = h.count > 0 ? ((h.rejected / h.count) * 100).toFixed(1) : 0
+              const rejHigh    = parseFloat(rejPctVal) > 10
+              const gapOk      = h.gap !== null && h.gap >= 40 && h.gap <= 55
+              const gapLow     = h.gap !== null && h.gap < 40
+              const delayDays  = h.vsScheduled  // positive = late, negative = early
+              const isLate     = delayDays !== null && delayDays > 3
+              const isEarly    = delayDays !== null && delayDays < -3
+              const onTime     = delayDays !== null && Math.abs(delayDays) <= 3
 
               return (
                 <div key={i} style={s.harvestCard}>
-                  {/* Row 1 — date + delay badge */}
+                  {/* Row 1 — date + delay badges */}
                   <div style={s.cardHeader}>
                     <span style={s.harvestDate}>{fmtDate(h.date)}</span>
-                    {h.delay !== null && (
-                      <span style={{
-                        ...s.delayBadge,
-                        background: delayOk ? 'rgba(76,175,80,0.15)' : 'rgba(200,144,58,0.15)',
-                        color: delayOk ? '#4CAF50' : delayLow ? '#EF9A9A' : '#FFCC80',
-                        borderColor: delayOk ? 'rgba(76,175,80,0.3)' : 'rgba(200,144,58,0.3)',
-                      }}>
-                        {h.delay}d gap {delayOk ? '✓' : delayLow ? '↓ early' : '↑ late'}
-                      </span>
-                    )}
+                    <div style={{ display:'flex', gap:6 }}>
+                      {h.gap !== null && (
+                        <span style={{
+                          ...s.delayBadge,
+                          background: gapOk ? 'rgba(76,175,80,0.15)' : 'rgba(200,144,58,0.15)',
+                          color:       gapOk ? '#4CAF50' : gapLow ? '#EF9A9A' : '#FFCC80',
+                          borderColor: gapOk ? 'rgba(76,175,80,0.3)' : 'rgba(200,144,58,0.3)',
+                        }}>
+                          {h.gap}d gap
+                        </span>
+                      )}
+                      {delayDays !== null && (
+                        <span style={{
+                          ...s.delayBadge,
+                          background: onTime  ? 'rgba(76,175,80,0.15)'  : isLate ? 'rgba(220,53,53,0.15)' : 'rgba(33,150,243,0.15)',
+                          color:      onTime  ? '#4CAF50'               : isLate ? '#EF9A9A'              : '#90CAF9',
+                          borderColor:onTime  ? 'rgba(76,175,80,0.3)'   : isLate ? 'rgba(220,53,53,0.3)'  : 'rgba(33,150,243,0.3)',
+                        }}>
+                          {onTime  ? '✓ on time' : isLate ? `${delayDays}d late` : `${Math.abs(delayDays)}d early`}
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Scheduled vs actual line */}
+                  {h.scheduledNext && (
+                    <div style={{ fontSize:'0.65rem', color:'#5C7080', marginBottom:8 }}>
+                      Scheduled next: <span style={{ color:'#C8903A' }}>{fmtDate(h.scheduledNext)}</span>
+                      {h.actualNext && (
+                        <span style={{ marginLeft:8, color: isLate ? '#EF9A9A' : '#4CAF50' }}>
+                          · Actual: {fmtDate(h.actualNext)}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Row 2 — main metrics grid */}
                   <div style={s.metricGrid}>

@@ -549,21 +549,22 @@ export async function onRequest(ctx) {
         const netIncome      = results.reduce((s, r) => s + (r.net_income || 0), 0)
         const totalExpense   = results.reduce((s, r) => s + (r.total_expense || 0), 0)
         const harvests = results.map(r => ({
-          date:         r.harvest_date,
-          monthShort:   new Date(r.harvest_date).toLocaleString('en-IN', { month: 'short' }),
-          year:         new Date(r.harvest_date).getFullYear(),
-          count:        r.total_nuts        || 0,
-          rejected:     r.nuts_rejected     || 0,
-          weight:       r.total_weight_kg   || 0,
-          pricePerKg:   r.price_per_kg      || 0,
-          harvester:    r.harvester_name    || '—',
-          netIncome:    r.net_income        || 0,
-          totalExpense: r.total_expense     || 0,
-          balanceDue:   r.balance_due       || 0,
-          nextHarvest:  r.next_harvest_date || null,
+          date:              r.harvest_date,
+          monthShort:        new Date(r.harvest_date).toLocaleString('en-IN', { month: 'short' }),
+          year:              new Date(r.harvest_date).getFullYear(),
+          count:             r.total_nuts        || 0,
+          rejected:          r.nuts_rejected     || 0,
+          weight:            r.total_weight_kg   || 0,
+          pricePerKg:        r.price_per_kg      || 0,
+          harvester:         r.harvester_name    || '—',
+          netIncome:         r.net_income        || 0,
+          totalExpense:      r.total_expense     || 0,
+          balanceDue:        r.balance_due       || 0,
+          scheduledNext:     r.scheduled_harvest_date || null,  // harvest_date + 45 days (auto)
+          actualNext:        r.next_harvest_date || null,       // real date of next harvest
         }))
-        // Compute next harvest date from most recent record
-        const nextHarvestDate = results[0]?.next_harvest_date || null
+        // Next harvest = scheduled date of most recent harvest (harvest[0] + 45 days)
+        const nextHarvestDate = results[0]?.scheduled_harvest_date || null
         return json({ success: true, data: { totalHarvests, totalCount, grossRevenue, netIncome, totalExpense, harvests, nextHarvestDate } })
       }
 
@@ -1080,6 +1081,11 @@ export async function onRequest(ctx) {
       // COCONUT HARVEST
       if (action === 'saveCoconutHarvest') {
         const id = genId('CH')
+        // Auto-calculate scheduled next harvest = harvest_date + 45 days
+        const harvestDate = body.harvestDate
+        const scheduledNext = harvestDate
+          ? new Date(new Date(harvestDate).getTime() + 45 * 86400000).toISOString().slice(0, 10)
+          : null
         await ActiveDB.prepare(`
           INSERT INTO coconut_harvests
             (harvest_id, estate_id, harvester_name, harvest_date, final_payment_date,
@@ -1091,9 +1097,9 @@ export async function onRequest(ctx) {
              dehusk_nuts, dehusk_cost_nut, dehusk_expense,
              tractor_expense, other_expense, total_expense, net_income,
              advance_payment, advance_date, second_payment, final_settlement, balance_due,
-             next_harvest_date, notes,
+             next_harvest_date, scheduled_harvest_date, notes,
              created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           id, body.estate || 'pollachi', body.harvesterName, body.harvestDate, body.finalPaymentDate || null,
           parseInt(body.totalNuts)||0, parseInt(body.netGoodNuts)||0, parseInt(body.nutsRejected)||0, parseInt(body.additionalUnaccounted)||0,
@@ -1106,10 +1112,11 @@ export async function onRequest(ctx) {
           parseFloat(body.tractorExpense)||0, parseFloat(body.otherExpense)||0, parseFloat(body.totalExpense)||0, parseFloat(body.netIncome)||0,
           parseFloat(body.advancePayment)||0, body.advancePaymentDate||null,
           parseFloat(body.secondPayment)||0, parseFloat(body.finalSettlement)||0, parseFloat(body.balanceDue)||0,
-          body.nextHarvestDate||null, body.notes||null,
+          body.nextHarvestDate||null, scheduledNext,
+          body.notes||null,
           actor, actor, now(), now()
         ).run()
-        return json({ success: true, data: { harvestId: id } })
+        return json({ success: true, data: { harvestId: id, scheduledNextHarvest: scheduledNext } })
       }
 
       // RUBBER HARVEST

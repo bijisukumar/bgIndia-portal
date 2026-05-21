@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS coconut_harvests (
   second_payment         REAL DEFAULT 0,
   final_settlement       REAL DEFAULT 0,
   balance_due            REAL DEFAULT 0,
-  next_harvest_date      TEXT,
+  next_harvest_date      TEXT,             -- actual date of the next harvest (filled after it happens)
+  scheduled_harvest_date TEXT,             -- harvest_date + 45 days (auto-calculated on save)
   notes                  TEXT,
   created_by  TEXT DEFAULT 'pradosh',
   created_at  TEXT DEFAULT (datetime('now')),

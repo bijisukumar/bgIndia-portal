@@ -849,6 +849,38 @@ export async function onRequest(ctx) {
       return err(`Unknown GET action: ${action}`, 404)
     }
 
+      // PRADOSH HOME — quick info (next harvest, last price, irrigation alert)
+      if (action === 'getPradoshQuickInfo') {
+        const harvest = await ActiveDB.prepare(
+          `SELECT harvest_date, price_per_kg, scheduled_harvest_date
+           FROM coconut_harvests WHERE estate_id = 'pollachi'
+           ORDER BY harvest_date DESC LIMIT 1`
+        ).first()
+        const irrigation = await ActiveDB.prepare(
+          `SELECT logged_date FROM irrigation_logs
+           WHERE estate = 'pollachi'
+           ORDER BY logged_date DESC LIMIT 1`
+        ).first()
+        const today          = new Date().toISOString().slice(0, 10)
+        const lastPrice      = harvest?.price_per_kg           || null
+        const nextHarvest    = harvest?.scheduled_harvest_date || null
+        const lastIrrigation = irrigation?.logged_date         || null
+        const irrigationDays = lastIrrigation
+          ? Math.round((new Date(today) - new Date(lastIrrigation)) / 86400000)
+          : null
+        const harvestDays = nextHarvest
+          ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000)
+          : null
+        return json({ success: true, data: {
+          nextHarvestDate:    nextHarvest,
+          harvestDaysAway:    harvestDays,
+          lastPricePerKg:     lastPrice,
+          lastIrrigationDate: lastIrrigation,
+          irrigationDaysAgo:  irrigationDays,
+          irrigationAlert:    irrigationDays === null || irrigationDays > 14,
+        }})
+      }
+
     // ── POST ROUTES ─────────────────────────────────────
     if (method === 'POST') {
       const body = await request.json()
@@ -1347,47 +1379,6 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { transactions: results, income, expense, net: income - expense } })
       }
 
-      // PRADOSH HOME — quick info (next harvest, last price, irrigation alert)
-      if (action === 'getPradoshQuickInfo') {
-        // Most recent coconut harvest
-        const harvest = await ActiveDB.prepare(
-          `SELECT harvest_date, price_per_kg, scheduled_harvest_date
-           FROM coconut_harvests
-           WHERE estate_id = 'pollachi'
-           ORDER BY harvest_date DESC LIMIT 1`
-        ).first()
-
-        // Most recent irrigation log
-        const irrigation = await ActiveDB.prepare(
-          `SELECT logged_date FROM irrigation_logs
-           WHERE estate = 'pollachi'
-           ORDER BY logged_date DESC LIMIT 1`
-        ).first()
-
-        const today          = new Date().toISOString().slice(0, 10)
-        const lastPrice      = harvest?.price_per_kg      || null
-        const nextHarvest    = harvest?.scheduled_harvest_date || null
-        const lastIrrigation = irrigation?.logged_date    || null
-
-        // Days since last irrigation
-        const irrigationDays = lastIrrigation
-          ? Math.round((new Date(today) - new Date(lastIrrigation)) / 86400000)
-          : null
-
-        // Days until next harvest
-        const harvestDays = nextHarvest
-          ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000)
-          : null
-
-        return json({ success: true, data: {
-          nextHarvestDate:  nextHarvest,
-          harvestDaysAway:  harvestDays,
-          lastPricePerKg:   lastPrice,
-          lastIrrigationDate: lastIrrigation,
-          irrigationDaysAgo:  irrigationDays,
-          irrigationAlert:    irrigationDays === null || irrigationDays > 14,
-        }})
-      }
       // IRRIGATION LOG — record that Pradosh logged irrigation today
       if (action === 'logIrrigation') {
         const date = body?.date || new Date().toISOString().slice(0, 10)

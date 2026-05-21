@@ -35,7 +35,16 @@ function genId(prefix) {
 // ── ROUTER ────────────────────────────────────────────────
 export async function onRequest(ctx) {
   const { request, env } = ctx
-  const DB = env.bgindia_db
+  const DB        = env.bgindia_db   // villa operations DB (Dwarka etc.)
+  const DB_ESTATES = env.DB_ESTATES  // v2.0 — BGIndiaDB-Estates (coconut, rubber, estate ledger)
+
+  // Actions that belong to the estates DB
+  const ESTATE_ACTIONS = new Set([
+    'getCoconutHarvests', 'saveCoconutHarvest',
+    'getRubberHarvests',  'saveRubberHarvest',
+    'getEstateTransactions', 'saveEstateTransaction',
+    'getEstateDashboard',
+  ])
 
   // ── AUDIT: resolve who is making this request ──────────
   // The client sends X-Actor header with the role of the logged-in user.
@@ -57,6 +66,16 @@ export async function onRequest(ctx) {
   // Strip /api/ prefix to get the action
   const action = url.pathname.replace(/^\/api\//, '').replace(/\/$/, '')
   const method = request.method
+
+  // v2.0 — Route to correct DB based on action type
+  // Estate actions → DB_ESTATES (BGIndiaDB-Estates)
+  // All other actions → DB (BGIndiaDB-Dwarka / villa DB)
+  const ActiveDB = ESTATE_ACTIONS.has(action) ? DB_ESTATES : DB
+
+  // Guard: if estate action but DB_ESTATES not yet bound (before migration)
+  if (ESTATE_ACTIONS.has(action) && !DB_ESTATES) {
+    return err('Estates DB not configured — run estate migration first', 503)
+  }
 
   try {
     // ── GET ROUTES ──────────────────────────────────────
@@ -392,8 +411,8 @@ export async function onRequest(ctx) {
         if (year && year !== 'all') { query += ` WHERE harvest_date LIKE ?`; binds.push(`${year}%`) }
         query += ` ORDER BY harvest_date DESC`
         const { results } = binds.length
-          ? await DB.prepare(query).bind(...binds).all()
-          : await DB.prepare(query).all()
+          ? await ActiveDB.prepare(query).bind(...binds).all()
+          : await ActiveDB.prepare(query).all()
         const totalHarvests  = results.length
         const totalCount     = results.reduce((s, r) => s + (r.total_nuts || 0), 0)
         const grossRevenue   = results.reduce((s, r) => s + (r.total_earnings || 0), 0)
@@ -411,7 +430,7 @@ export async function onRequest(ctx) {
       // RUBBER
       if (action === 'getRubberHarvests') {
         const year = url.searchParams.get('year') || new Date().getFullYear()
-        const { results } = await DB.prepare(
+        const { results } = await ActiveDB.prepare(
           `SELECT * FROM rubber_harvests WHERE harvest_date LIKE ? ORDER BY harvest_date DESC`
         ).bind(`${year}%`).all()
         return json({ success: true, data: results })
@@ -921,7 +940,7 @@ export async function onRequest(ctx) {
       // COCONUT HARVEST
       if (action === 'saveCoconutHarvest') {
         const id = genId('CH')
-        await DB.prepare(`
+        await ActiveDB.prepare(`
           INSERT INTO coconut_harvests
             (harvest_id, estate_id, harvester_name, harvest_date, final_payment_date,
              total_nuts, net_good_nuts, nuts_rejected, additional_unaccounted,
@@ -958,7 +977,7 @@ export async function onRequest(ctx) {
         const id = genId('RH')
         const gross = (parseFloat(body.weightKg)||0) * (parseFloat(body.pricePerKg)||0)
         const net   = gross - (parseFloat(body.expense)||0)
-        await DB.prepare(`
+        await ActiveDB.prepare(`
           INSERT INTO rubber_harvests
             (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes,
              created_by, updated_by, created_at, updated_at)
@@ -1144,7 +1163,7 @@ export async function onRequest(ctx) {
           return err('Missing required fields: estate, type, date, category, amount', 400)
         }
         const id = genId('ET')
-        await DB.prepare(`
+        await ActiveDB.prepare(`
           INSERT INTO estate_transactions
             (txn_id, estate, type, date, category, amount, paid_to, description,
              created_by, updated_by, created_at, updated_at)
@@ -1164,7 +1183,7 @@ export async function onRequest(ctx) {
         const estate = url.searchParams.get('estate') || body?.estate
         const year   = url.searchParams.get('year')   || new Date().getFullYear()
         if (!estate) return err('estate param required', 400)
-        const { results } = await DB.prepare(`
+        const { results } = await ActiveDB.prepare(`
           SELECT * FROM estate_transactions
           WHERE estate = ? AND strftime('%Y', date) = ?
           ORDER BY date DESC

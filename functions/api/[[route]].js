@@ -1292,20 +1292,25 @@ export async function onRequest(ctx) {
         if (!estate || !type || !date || !category || !amount) {
           return err('Missing required fields: estate, type, date, category, amount', 400)
         }
-        const id = genId('ET')
-        await ActiveDB.prepare(`
-          INSERT INTO estate_transactions
-            (txn_id, estate, type, date, category, amount, paid_to, description,
-             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        `).bind(
-          id, estate, type, date, category,
-          parseFloat(amount) || 0,
-          paidTo || null,
-          description || null,
-          actor, actor, now(), now()
-        ).run()
-        return json({ success: true, data: { id } })
+        try {
+          const id = genId('ET')
+          await ActiveDB.prepare(`
+            INSERT INTO estate_transactions
+              (txn_id, estate, type, date, category, amount, paid_to, description,
+               created_by, updated_by, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            id, estate, type, date, category,
+            parseFloat(amount) || 0,
+            paidTo || null,
+            description || null,
+            actor, actor, now(), now()
+          ).run()
+          return json({ success: true, data: { id } })
+        } catch (dbErr) {
+          console.error('saveEstateTransaction error:', dbErr?.message)
+          return err(`DB error: ${dbErr?.message || 'unknown'}`, 500)
+        }
       }
 
       // ESTATE LEDGER — GET transactions

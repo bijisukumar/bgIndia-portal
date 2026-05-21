@@ -27,7 +27,7 @@ export default function EstateLedger({ estate }) {
       await api.saveEstateTransaction({...form,type,estate})
       showToast('Transaction saved ✓')
       setForm({date:TODAY,category:'',amount:'',description:'',paidTo:''})
-    } catch { showToast('Failed to save','error') }
+    } catch(e) { showToast(e?.message || 'Failed to save','error') }
     finally { setSaving(false) }
   }
 

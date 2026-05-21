@@ -90,6 +90,9 @@ export const api = {
   getRentalAgreements:  ()       => get('getRentalAgreements'),
   saveRentalAgreement:  (data)   => post('saveRentalAgreement', data),
 
+  getPradoshQuickInfo:  ()       => get('getPradoshQuickInfo'),
+  logIrrigation:        (data)   => post('logIrrigation', data),
+
   // ── COCONUT ──────────────────────────────────────────────
   saveCoconutHarvest:   (data)   => post('saveCoconutHarvest', data),
   getCoconutHarvests:   (year)   => get('getCoconutHarvests', { year }),

@@ -97,3 +97,16 @@ CREATE INDEX IF NOT EXISTS idx_estate_txn_type   ON estate_transactions(estate, 
 -- Verify
 SELECT 'BGIndiaDB-Estates schema ready' as status;
 SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+
+-- Irrigation log timestamps (tracks when Pradosh submits irrigation data)
+-- Since the actual form is Google Forms, we record the tap/submit event here
+CREATE TABLE IF NOT EXISTS irrigation_logs (
+  log_id      TEXT PRIMARY KEY,
+  estate      TEXT DEFAULT 'pollachi',
+  logged_date TEXT NOT NULL,   -- YYYY-MM-DD when Pradosh logged irrigation
+  notes       TEXT,
+  created_by  TEXT DEFAULT 'pradosh',
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_irrigation_date ON irrigation_logs(estate, logged_date DESC);

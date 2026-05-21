@@ -1,83 +1,175 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { CONFIG } from '../config'
+import { api } from '../api'
 import TopBar from '../components/TopBar'
 
+function fmtDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 export default function PradoshHome() {
-  const { logout } = useAuth()
-  const navigate = useNavigate()
+  const { logout }    = useAuth()
+  const navigate      = useNavigate()
+  const [info, setInfo]       = useState(null)
+  const [loggingIrr, setLoggingIrr] = useState(false)
+
+  useEffect(() => {
+    api.getPradoshQuickInfo()
+      .then(d => setInfo(d))
+      .catch(() => setInfo(null))
+  }, [])
+
+  const handleIrrigationTap = async () => {
+    // Open the Google Form first
+    window.open('https://docs.google.com/forms/d/e/1FAIpQLSep04wSbC-NThiPvnREMzm4-ICShVtQ_Po1vE1zf2b5Z98buQ/viewform', '_blank')
+    // Then record the tap in D1 so we track last logged date
+    try {
+      setLoggingIrr(true)
+      await api.logIrrigation({ date: new Date().toISOString().slice(0, 10) })
+      // Refresh quick info so alert clears
+      const d = await api.getPradoshQuickInfo()
+      setInfo(d)
+    } catch (_) {}
+    finally { setLoggingIrr(false) }
+  }
 
   const rows = [
     {
-      icon: '🌴', bg: 'rgba(59,109,17,0.08)', arrow: '#3B6D11',
-      title: 'Irrigation log', sub: 'Daily zone tracking',
-      action: () => window.open('https://docs.google.com/forms/d/e/1FAIpQLSep04wSbC-NThiPvnREMzm4-ICShVtQ_Po1vE1zf2b5Z98buQ/viewform', '_blank'),
+      icon: '🌴', title: 'Irrigation log', sub: 'Daily zone tracking',
+      action: handleIrrigationTap,
+      alert: info?.irrigationAlert,
     },
     {
-      icon: '🌿', bg: 'rgba(59,109,17,0.08)', arrow: '#3B6D11',
-      title: 'Income / expense', sub: 'Monthly ledger',
+      icon: '🌿', title: 'Income / expense', sub: 'Monthly ledger',
       action: () => navigate('/pollachi/ledger'),
     },
     {
-      icon: '🥥', bg: 'rgba(59,109,17,0.08)', arrow: '#3B6D11',
-      title: 'Coconut tracker', sub: 'Harvest · count · weight · revenue',
+      icon: '🥥', title: 'Coconut tracker', sub: 'Harvest · count · weight · revenue',
       action: () => navigate('/pollachi/coconut'),
     },
     {
-      icon: '📊', bg: 'rgba(59,109,17,0.08)', arrow: '#3B6D11',
-      title: 'Pollachi dashboard', sub: 'Harvest history · income · expenses',
+      icon: '📊', title: 'Pollachi dashboard', sub: 'Harvest history · income · expenses',
       action: () => navigate('/pollachi/dashboard'),
     },
   ]
+
+  const irrigationDays = info?.irrigationDaysAgo
+  const harvestDays    = info?.harvestDaysAway
+  const lastPrice      = info?.lastPricePerKg
 
   return (
     <div className="screen">
       <TopBar title="Pradosh" sub="ESTATE MANAGER · POLLACHI" />
 
       <div className="screen-body">
-        <div className="card-section-label">POLLACHI COCONUT ESTATE</div>
 
-        <div style={styles.estateCard}>
-          <div style={styles.estateHeader}>
-            <span style={styles.estateName}>Pollachi Estate</span>
-            <span style={styles.estateTag}>Active</span>
-          </div>
-          <div className="menu-tile" style={{ marginBottom: 0, borderRadius: 0, border: 'none', background: 'transparent' }}>
-            {rows.map((row, i) => (
-              <div
-                key={i}
-                className="menu-row"
-                onClick={row.action}
-                style={i === rows.length - 1 ? { borderBottom: 'none' } : {}}
-              >
-                <div className="menu-icon" style={{ background: row.bg }}>{row.icon}</div>
-                <div className="menu-label">
-                  <div className="menu-title">{row.title}</div>
-                  <div className="menu-sub">{row.sub}</div>
-                </div>
-                <div className="menu-arrow" style={{ background: row.arrow }}>›</div>
+        {/* ── IRRIGATION ALERT BANNER ── */}
+        {info?.irrigationAlert && (
+          <div style={s.alertBanner} onClick={handleIrrigationTap}>
+            <span style={s.alertIcon}>🚨</span>
+            <div style={s.alertText}>
+              <div style={s.alertTitle}>Irrigation data missing</div>
+              <div style={s.alertSub}>
+                {irrigationDays === null
+                  ? 'No irrigation log found — please log today'
+                  : `Last logged ${irrigationDays} days ago — over 2 weeks`}
               </div>
-            ))}
+            </div>
+            <span style={s.alertArrow}>›</span>
           </div>
+        )}
+
+        {/* ── MENU ── */}
+        <div className="card-section-label">POLLACHI COCONUT ESTATE</div>
+        <div style={s.estateCard}>
+          <div style={s.estateHeader}>
+            <span style={s.estateName}>Pollachi Estate</span>
+            <span style={s.estateTag}>Active</span>
+          </div>
+          {rows.map((row, i) => (
+            <div
+              key={i}
+              className="menu-row"
+              onClick={row.action}
+              style={{
+                ...(i === rows.length - 1 ? { borderBottom: 'none' } : {}),
+                position: 'relative',
+              }}
+            >
+              <div className="menu-icon" style={{ background: 'rgba(59,109,17,0.08)' }}>
+                {row.icon}
+              </div>
+              <div className="menu-label">
+                <div className="menu-title" style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  {row.title}
+                  {row.alert && (
+                    <span style={s.alertDot}>!</span>
+                  )}
+                </div>
+                <div className="menu-sub">{row.sub}</div>
+              </div>
+              <div className="menu-arrow" style={{ background: '#3B6D11' }}>›</div>
+            </div>
+          ))}
         </div>
 
-        {/* Quick stats strip */}
+        {/* ── QUICK INFO ── */}
         <div className="card-section-label" style={{ marginTop: 20 }}>QUICK INFO</div>
-        <div style={styles.infoStrip}>
-          <div style={styles.infoItem}>
-            <div style={styles.infoVal}>~45 days</div>
-            <div style={styles.infoLabel}>Next harvest</div>
+        <div style={s.infoStrip}>
+
+          {/* Next harvest date */}
+          <div style={s.infoItem}>
+            <div style={{
+              ...s.infoVal,
+              color: harvestDays !== null && harvestDays < 7 ? '#EF9A9A'
+                   : harvestDays !== null && harvestDays < 14 ? '#FFCC80'
+                   : '#C8903A',
+              fontSize: '0.82rem',
+            }}>
+              {info?.nextHarvestDate ? fmtDate(info.nextHarvestDate) : '—'}
+            </div>
+            <div style={s.infoLabel}>
+              Next harvest
+              {harvestDays !== null && (
+                <div style={{ color: harvestDays < 0 ? '#EF9A9A' : '#5C7080' }}>
+                  {harvestDays < 0 ? `${Math.abs(harvestDays)}d overdue` : `in ${harvestDays}d`}
+                </div>
+              )}
+            </div>
           </div>
-          <div style={styles.infoDivider} />
-          <div style={styles.infoItem}>
-            <div style={styles.infoVal}>₹1.50</div>
-            <div style={styles.infoLabel}>Dehusk rate</div>
+
+          <div style={s.infoDivider} />
+
+          {/* Irrigation status */}
+          <div style={s.infoItem}>
+            <div style={{
+              ...s.infoVal,
+              color: info?.irrigationAlert ? '#EF9A9A' : '#4CAF50',
+              fontSize: '0.85rem',
+            }}>
+              {irrigationDays === null ? 'Never' : `${irrigationDays}d ago`}
+            </div>
+            <div style={{
+              ...s.infoLabel,
+              color: info?.irrigationAlert ? '#EF9A9A' : '#5C7080',
+            }}>
+              Irrigation
+              {info?.irrigationAlert && <div>⚠ Log now</div>}
+            </div>
           </div>
-          <div style={styles.infoDivider} />
-          <div style={styles.infoItem}>
-            <div style={styles.infoVal}>₹28/kg</div>
-            <div style={styles.infoLabel}>Last price</div>
+
+          <div style={s.infoDivider} />
+
+          {/* Last coconut price */}
+          <div style={s.infoItem}>
+            <div style={s.infoVal}>
+              {lastPrice ? `₹${lastPrice}/kg` : '—'}
+            </div>
+            <div style={s.infoLabel}>Last price</div>
           </div>
+
         </div>
 
         <button className="logout-btn" onClick={logout} style={{ marginTop: 8 }}>Log out</button>
@@ -86,54 +178,42 @@ export default function PradoshHome() {
   )
 }
 
-const styles = {
-  header: {
-    background: '#111111',
-    padding: '16px 16px 14px',
+const s = {
+  alertBanner: {
+    background: 'rgba(198,40,40,0.1)',
+    border: '1px solid rgba(198,40,40,0.35)',
+    borderRadius: 12,
+    padding: '12px 14px',
+    marginBottom: 12,
     display: 'flex',
     alignItems: 'center',
-    gap: '14px',
-    borderBottom: '1px solid rgba(200,144,58,0.18)',
+    gap: 10,
+    cursor: 'pointer',
   },
-  logo: {
-    height: '52px',
-    width: '52px',
-    borderRadius: '10px',
-    objectFit: 'cover',
-    border: '1px solid rgba(200,144,58,0.3)',
-    boxShadow: '0 4px 12px rgba(200,144,58,0.15)',
-  },
-  headerText: { flex: 1 },
-  brandName: {
-    fontFamily: "'Cormorant Garamond', serif",
-    fontSize: '1.15rem',
-    fontWeight: '600',
-    color: '#E8B86D',
-  },
-  tagline: {
+  alertIcon:  { fontSize: '1.2rem' },
+  alertText:  { flex: 1 },
+  alertTitle: { color: '#EF9A9A', fontWeight: 700, fontSize: '0.85rem' },
+  alertSub:   { color: '#EF9A9A', fontSize: '0.72rem', marginTop: 2, opacity: 0.8 },
+  alertArrow: { color: '#EF9A9A', fontSize: '1.2rem' },
+
+  alertDot: {
+    background: '#c62828',
+    color: '#fff',
+    borderRadius: '50%',
+    width: 16, height: 16,
     fontSize: '0.6rem',
-    color: '#5C7080',
-    letterSpacing: '2px',
-    marginTop: '2px',
+    fontWeight: 700,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  welcomeBadge: {
-    background: 'rgba(59,109,17,0.12)',
-    border: '1px solid rgba(59,109,17,0.3)',
-    borderRadius: '20px',
-    padding: '4px 12px',
-  },
-  welcomeLabel: {
-    color: '#81C995',
-    fontSize: '0.65rem',
-    fontWeight: '700',
-    letterSpacing: '2px',
-  },
+
   estateCard: {
     background: '#1E2535',
-    borderRadius: '14px',
+    borderRadius: 14,
     border: '1px solid rgba(59,109,17,0.2)',
     overflow: 'hidden',
-    marginBottom: '4px',
+    marginBottom: 4,
   },
   estateHeader: {
     background: 'rgba(59,109,17,0.08)',
@@ -143,26 +223,23 @@ const styles = {
     justifyContent: 'space-between',
     borderBottom: '1px solid rgba(59,109,17,0.15)',
   },
-  estateName: { color: '#81C995', fontSize: '0.85rem', fontWeight: '700' },
+  estateName: { color: '#81C995', fontSize: '0.85rem', fontWeight: 700 },
   estateTag: {
-    fontSize: '0.7rem',
-    padding: '2px 10px',
-    borderRadius: '10px',
-    background: 'rgba(52,168,83,0.15)',
-    color: '#81C995',
-    fontWeight: '700',
+    fontSize: '0.7rem', padding: '2px 10px', borderRadius: 10,
+    background: 'rgba(52,168,83,0.15)', color: '#81C995', fontWeight: 700,
   },
+
   infoStrip: {
     background: '#1E2535',
-    borderRadius: '12px',
+    borderRadius: 12,
     border: '1px solid rgba(255,255,255,0.06)',
-    padding: '14px 16px',
+    padding: '14px 10px',
     display: 'flex',
-    alignItems: 'center',
-    marginBottom: '8px',
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
-  infoItem: { flex: 1, textAlign: 'center' },
-  infoVal: { color: '#C8903A', fontSize: '1rem', fontWeight: '700' },
-  infoLabel: { color: '#5C7080', fontSize: '0.7rem', marginTop: '2px' },
-  infoDivider: { width: '1px', height: '36px', background: 'rgba(255,255,255,0.06)' },
+  infoItem:    { flex: 1, textAlign: 'center' },
+  infoVal:     { color: '#C8903A', fontSize: '0.92rem', fontWeight: 700 },
+  infoLabel:   { color: '#5C7080', fontSize: '0.65rem', marginTop: 3, lineHeight: 1.4 },
+  infoDivider: { width: 1, height: 48, background: 'rgba(255,255,255,0.06)', flexShrink: 0 },
 }

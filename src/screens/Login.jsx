@@ -24,7 +24,7 @@ export default function Login() {
     if (result.reason === 'rate_limited') {
       setLocked(true)
       setRetryMins(result.retryAfter || 15)
-      setError(`Too many attempts. Try again in ${result.retryAfter || 15} minutes.`)
+      setError(`You've been locked out after multiple failed attempts. Please reach out to the administrator or try again in ${result.retryAfter || 15} minutes.`)
     } else {
       setError('Invalid PIN. Please try again.')
       setShake(true)

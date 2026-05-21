@@ -20,6 +20,10 @@ function decodeJwt(token) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
+      // v2.0 — clear legacy session keys from before JWT auth
+      sessionStorage.removeItem('ge_user')
+      sessionStorage.removeItem('ge_actor')
+
       const token = sessionStorage.getItem('ge_token')
       if (!token) return null
       const payload = decodeJwt(token)

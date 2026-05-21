@@ -223,9 +223,14 @@ export default function RDashboard() {
         {/* API error */}
         {apiError && (
           <div style={{ background: 'rgba(198,40,40,0.12)', border: '1px solid rgba(198,40,40,0.4)', borderRadius: '12px', padding: '12px 14px', marginBottom: '12px' }}>
-            <div style={{ color: '#EF9A9A', fontWeight: '700', fontSize: '0.82rem', marginBottom: '4px' }}>⚠️ Database connection error</div>
-            <div style={{ color: '#EF9A9A', fontSize: '0.75rem', fontFamily: 'monospace' }}>{apiError}</div>
-            <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '6px' }}>Check: Cloudflare Pages → Settings → Bindings → D1 binding named <strong>bgindia_db</strong> must exist</div>
+            <div style={{ color: '#EF9A9A', fontWeight: '700', fontSize: '0.82rem', marginBottom: '4px' }}>
+              {apiError.includes('401') ? '🔒 Session expired' : '⚠️ Could not load data'}
+            </div>
+            <div style={{ color: '#EF9A9A', fontSize: '0.75rem' }}>
+              {apiError.includes('401')
+                ? 'Your session has expired. Please sign off and log in again.'
+                : apiError}
+            </div>
           </div>
         )}
 

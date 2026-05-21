@@ -1387,9 +1387,8 @@ export async function onRequest(ctx) {
 
       // RENTAL AGREEMENTS — save tenant agreement for a rental property
       if (action === 'saveRentalAgreement') {
-        const { propId, tenantName, deposit, agreedRent, maintenance, leaseStart, leaseEnd, notes } = body
+        const { propId, propName, location, tenantName, deposit, agreedRent, maintenance, leaseStart, leaseEnd, notes } = body
         if (!propId) return err('propId is required')
-        // Upsert: update if exists, insert if not
         const existing = await DB.prepare(
           `SELECT prop_id FROM rental_props WHERE prop_id = ?`
         ).bind(propId).first()
@@ -1404,12 +1403,14 @@ export async function onRequest(ctx) {
                  leaseStart||null, leaseEnd||null, notes||null,
                  actor, now(), propId).run()
         } else {
+          // New property — include name and location
           await DB.prepare(
             `INSERT INTO rental_props
-               (prop_id, tenant_name, deposit, agreed_rent, maintenance_fee, lease_start, lease_end, notes,
-                created_by, updated_by, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-          ).bind(propId, tenantName||'', deposit||0, agreedRent||0, maintenance||0,
+               (prop_id, prop_name, location, tenant_name, deposit, agreed_rent, maintenance_fee,
+                lease_start, lease_end, notes, created_by, updated_by, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          ).bind(propId, propName||propId, location||'',
+                 tenantName||'', deposit||0, agreedRent||0, maintenance||0,
                  leaseStart||null, leaseEnd||null, notes||null,
                  actor, actor, now(), now()).run()
         }

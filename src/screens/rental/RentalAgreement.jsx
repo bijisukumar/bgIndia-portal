@@ -53,9 +53,34 @@ export default function RentalAgreement() {
   const [error, setError]     = useState('')
   const [toast, setToast]     = useState(null)
 
-  const showToast = (msg, type='success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3500)
+  const [showAddProp, setShowAddProp] = useState(false)
+  const [newProp, setNewProp]         = useState({ name: '', location: '' })
+  const [addingProp, setAddingProp]   = useState(false)
+
+  async function handleAddProperty() {
+    if (!newProp.name.trim()) return
+    setAddingProp(true)
+    try {
+      const id = 'rental_' + Date.now()
+      await api.saveRentalAgreement({
+        propId:     id,
+        propName:   newProp.name.trim(),
+        location:   newProp.location.trim(),
+        tenantName: '', deposit: 0, agreedRent: 0,
+        maintenance: 0, leaseStart: '', leaseEnd: '', notes: '',
+      })
+      // Add to local config list for this session
+      CONFIG.rentalProperties.push({ id, name: newProp.name.trim(), location: newProp.location.trim(), tenantName: '', leaseEnd: '' })
+      setSelectedProp(id)
+      setForm(EMPTY_FORM)
+      setNewProp({ name: '', location: '' })
+      setShowAddProp(false)
+      showToast(`${newProp.name} added`)
+    } catch (e) {
+      showToast('Could not add property: ' + e.message, 'error')
+    } finally {
+      setAddingProp(false)
+    }
   }
 
   useEffect(() => { loadAgreements() }, [])
@@ -180,8 +205,8 @@ export default function RentalAgreement() {
 
       <div className="screen-body">
 
-        {/* Property tabs */}
-        <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
+        {/* Property tabs + Add button */}
+        <div style={{ display:'flex', gap:'8px', marginBottom:'16px', alignItems:'stretch' }}>
           {CONFIG.rentalProperties.map(p => {
             const a = agreements[p.id]
             const d = a?.lease_end ? daysUntil(a.lease_end) : null
@@ -200,7 +225,45 @@ export default function RentalAgreement() {
               </button>
             )
           })}
+          {/* Add new property */}
+          <button onClick={() => setShowAddProp(true)} style={{
+            width:40, flexShrink:0, borderRadius:'10px', cursor:'pointer',
+            border:'1px dashed rgba(200,144,58,0.4)',
+            background:'rgba(200,144,58,0.06)', color:'var(--gold)',
+            fontSize:'1.4rem', display:'flex', alignItems:'center', justifyContent:'center',
+          }} title="Add new property">+</button>
         </div>
+
+        {/* Add Property modal */}
+        {showAddProp && (
+          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
+            <div style={{ background:'var(--dark-card)', borderRadius:'16px', padding:'24px', width:'100%', maxWidth:'360px', border:'1px solid rgba(200,144,58,0.2)' }}>
+              <div style={{ color:'var(--gold)', fontWeight:'700', fontSize:'1rem', marginBottom:'16px' }}>Add New Property</div>
+              <div style={{ marginBottom:'12px' }}>
+                <div style={{ fontSize:'0.72rem', color:'var(--text-dim)', marginBottom:'6px', letterSpacing:'1px' }}>PROPERTY NAME</div>
+                <input value={newProp.name} onChange={e => setNewProp(p => ({...p, name: e.target.value}))}
+                  placeholder="e.g. Pinnacle 2" autoFocus
+                  style={{ width:'100%', background:'var(--dark)', border:'1px solid var(--border-dim)', borderRadius:'8px', padding:'10px 12px', color:'var(--text)', fontSize:'0.9rem', boxSizing:'border-box' }} />
+              </div>
+              <div style={{ marginBottom:'20px' }}>
+                <div style={{ fontSize:'0.72rem', color:'var(--text-dim)', marginBottom:'6px', letterSpacing:'1px' }}>LOCATION</div>
+                <input value={newProp.location} onChange={e => setNewProp(p => ({...p, location: e.target.value}))}
+                  placeholder="e.g. Kochi, KL"
+                  style={{ width:'100%', background:'var(--dark)', border:'1px solid var(--border-dim)', borderRadius:'8px', padding:'10px 12px', color:'var(--text)', fontSize:'0.9rem', boxSizing:'border-box' }} />
+              </div>
+              <div style={{ display:'flex', gap:'10px' }}>
+                <button onClick={() => { setShowAddProp(false); setNewProp({ name:'', location:'' }) }}
+                  style={{ flex:1, padding:'10px', borderRadius:'8px', border:'1px solid var(--border-dim)', background:'transparent', color:'var(--text-dim)', cursor:'pointer' }}>
+                  Cancel
+                </button>
+                <button onClick={handleAddProperty} disabled={addingProp || !newProp.name.trim()}
+                  style={{ flex:2, padding:'10px', borderRadius:'8px', border:'none', background:'var(--gold)', color:'#111', fontWeight:'700', cursor:'pointer', opacity: addingProp||!newProp.name.trim() ? 0.6 : 1 }}>
+                  {addingProp ? 'Adding…' : 'Add Property'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading && (
           <div style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px' }}>Loading agreements…</div>

@@ -1,22 +1,30 @@
 // ============================================================
-//  bgIndia Portal — API Layer
-//  NOW CONNECTED TO: Cloudflare D1 via Pages Function (/api/*)
-//  All methods have identical signatures to before — screens
-//  don't need any changes.
+//  bgIndia Portal — API Layer  (v2.0 — JWT auth)
+//  All methods identical signatures to before — screens unchanged.
+//  X-Actor header replaced with Authorization: Bearer <jwt>
+//  401 responses trigger automatic logout.
 // ============================================================
 import { logger } from '../utils/logger.js'
 
-// In production (Cloudflare Pages), /api/* is handled by the Worker.
-// In local dev (npm run dev), requests proxy to the Worker via vite proxy.
 const BASE = '/api'
 
-// ── AUDIT: resolve the current actor from session storage ──────────────────
-// Set by Login.jsx on successful PIN entry: sessionStorage.setItem('ge_actor', role)
-// Allowed values: owner | raman | pradosh | auto | system
-// The Worker reads the X-Actor header to stamp created_by / updated_by on every row.
-function getActor() {
-  try { return sessionStorage.getItem('ge_actor') || 'owner' }
-  catch { return 'owner' }
+function getToken() {
+  try { return sessionStorage.getItem('ge_token') || '' }
+  catch { return '' }
+}
+
+function authHeaders(extra = {}) {
+  const token = getToken()
+  return {
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...extra,
+  }
+}
+
+// On 401 — clear session and reload to login screen
+function handle401() {
+  sessionStorage.removeItem('ge_token')
+  window.location.href = '/'
 }
 
 async function get(action, params = {}) {
@@ -24,9 +32,8 @@ async function get(action, params = {}) {
   try {
     const qs  = new URLSearchParams(params).toString()
     const url = qs ? `${BASE}/${action}?${qs}` : `${BASE}/${action}`
-    const res = await fetch(url, {
-      headers: { 'X-Actor': getActor() },
-    })
+    const res = await fetch(url, { headers: authHeaders() })
+    if (res.status === 401) { handle401(); return }
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
     const data = await res.json()
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
@@ -43,12 +50,10 @@ async function post(action, payload) {
   try {
     const res = await fetch(`${BASE}/${action}`, {
       method:  'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Actor':      getActor(),   // stamps created_by / updated_by in D1
-      },
-      body: JSON.stringify(payload),
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body:    JSON.stringify(payload),
     })
+    if (res.status === 401) { handle401(); return }
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
     const data = await res.json()
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
@@ -95,7 +100,7 @@ export const api = {
 
   // ── ESTATES ──────────────────────────────────────────────
   saveEstateTransaction:(data)   => post('saveEstateTransaction', data),
-  getEstateTransactions:(estate, y)  => get('getEstateTransactions', { estate, year: y || new Date().getFullYear() }),
+  getEstateTransactions:(estate, y) => get('getEstateTransactions', { estate, year: y || new Date().getFullYear() }),
   getEstateDashboard:   (year)   => get('getEstateDashboard', { year }),
 
   // ── DASHBOARDS ───────────────────────────────────────────
@@ -117,23 +122,23 @@ export const api = {
   getInventory:         (vId)    => get('getInventory', { villaId: vId }),
 
   // ── AD-HOC QUERIES (D1Explorer) ──────────────────────────
-  // Free-form SQL — any SELECT query
   runSQL: async (sql) => {
     const qs  = new URLSearchParams({ sql }).toString()
-    const res = await fetch(`${BASE}/runSQL?${qs}`)
+    const res = await fetch(`${BASE}/runSQL?${qs}`, { headers: authHeaders() })
+    if (res.status === 401) { handle401(); return }
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const body = await res.json()
     if (body?.success === false) throw new Error(body.error || 'Query failed')
     return body.data
   },
 
-  // Returns full response object (not just .data) so D1Explorer gets both rows + sql
   runQuery: async (key) => {
     const qs  = new URLSearchParams({ key }).toString()
-    const res = await fetch(`${BASE}/runQuery?${qs}`)
+    const res = await fetch(`${BASE}/runQuery?${qs}`, { headers: authHeaders() })
+    if (res.status === 401) { handle401(); return }
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const body = await res.json()
     if (body?.success === false) throw new Error(body.error || 'Query failed')
-    return body.data   // array of rows
+    return body.data
   },
 }

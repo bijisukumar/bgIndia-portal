@@ -1,14 +1,12 @@
 // ============================================================
 //  bgIndia Portal — Cloudflare Pages Function (D1 Worker)
-//  File: functions/api/[[route]].js
-//  This catches ALL requests to /api/* and routes them.
-//  D1 binding name: bgindia_db (matches wrangler.toml)
+//  v2.0 — JWT authentication (PINs server-side only)
 // ============================================================
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
 function json(data, status = 200) {
@@ -19,6 +17,60 @@ function json(data, status = 200) {
 }
 function err(msg, status = 400) {
   return json({ success: false, error: msg }, status)
+}
+
+// ── JWT HELPERS (Web Crypto API — available in all CF Workers) ──
+async function signJwt(payload, secret) {
+  const enc     = new TextEncoder()
+  const header  = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+  const body    = btoa(JSON.stringify(payload))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(`${header}.${body}`))
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+  return `${header}.${body}.${sigB64}`
+}
+
+async function verifyJwt(token, secret) {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const [header, body, sig] = parts
+    const enc = new TextEncoder()
+    const key = await crypto.subtle.importKey(
+      'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
+    )
+    const sigBytes = Uint8Array.from(atob(sig.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
+    const valid = await crypto.subtle.verify('HMAC', key, sigBytes, enc.encode(`${header}.${body}`))
+    if (!valid) return null
+    const payload = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')))
+    if (payload.exp * 1000 < Date.now()) return null  // expired
+    return payload
+  } catch { return null }
+}
+
+// ── RATE LIMITER — 5 attempts per IP per 15 min ──────────────
+// In-memory map resets on worker restart; good enough for PIN brute-force protection
+const loginAttempts = new Map()
+function checkRateLimit(ip) {
+  const now    = Date.now()
+  const window = 15 * 60 * 1000  // 15 minutes
+  const max    = 5
+  const entry  = loginAttempts.get(ip) || { count: 0, firstAt: now }
+  if (now - entry.firstAt > window) {
+    loginAttempts.set(ip, { count: 1, firstAt: now })
+    return { limited: false }
+  }
+  if (entry.count >= max) {
+    const retryAfter = Math.ceil((window - (now - entry.firstAt)) / 60000)
+    return { limited: true, retryAfter }
+  }
+  loginAttempts.set(ip, { ...entry, count: entry.count + 1 })
+  return { limited: false }
 }
 
 // ── ID GENERATORS ─────────────────────────────────────────
@@ -35,10 +87,9 @@ function genId(prefix) {
 // ── ROUTER ────────────────────────────────────────────────
 export async function onRequest(ctx) {
   const { request, env } = ctx
-  const DB        = env.bgindia_db   // villa operations DB (Dwarka etc.)
-  const DB_ESTATES = env.DB_ESTATES  // v2.0 — BGIndiaDB-Estates (coconut, rubber, estate ledger)
+  const DB         = env.bgindia_db
+  const DB_ESTATES = env.DB_ESTATES
 
-  // Actions that belong to the estates DB
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest',
     'getRubberHarvests',  'saveRubberHarvest',
@@ -46,35 +97,59 @@ export async function onRequest(ctx) {
     'getEstateDashboard',
   ])
 
-  // ── AUDIT: resolve who is making this request ──────────
-  // The client sends X-Actor header with the role of the logged-in user.
-  // Allowed values: owner | raman | pradosh | auto | system
-  // Falls back to 'owner' if header is absent (e.g. direct API calls).
-  const actor = (() => {
-    const h = request.headers.get('X-Actor') || ''
-    const allowed = ['owner', 'raman', 'pradosh', 'auto', 'system']
-    return allowed.includes(h) ? h : 'owner'
-  })()
-  const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
-
   // OPTIONS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: CORS })
   }
 
   const url    = new URL(request.url)
-  // Strip /api/ prefix to get the action
   const action = url.pathname.replace(/^\/api\//, '').replace(/\/$/, '')
   const method = request.method
 
-  // v2.0 — Route to correct DB based on action type
-  // Estate actions → DB_ESTATES (BGIndiaDB-Estates)
-  // All other actions → DB (BGIndiaDB-Dwarka / villa DB)
-  const ActiveDB = ESTATE_ACTIONS.has(action) ? DB_ESTATES : DB
+  // ── LOGIN — validate PIN server-side, return JWT ───────
+  if (action === 'login' && method === 'POST') {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+    const rl = checkRateLimit(ip)
+    if (rl.limited) {
+      return json({ success: false, error: 'Too many attempts', retryAfter: rl.retryAfter }, 429)
+    }
+    const { pin } = await request.json().catch(() => ({}))
+    if (!pin) return err('PIN required', 400)
 
-  // Guard: if estate action but DB_ESTATES not yet bound (before migration)
+    // PIN lookup against worker env vars (never in frontend bundle)
+    const users = {
+      [env.PIN_OWNER]:   { name: 'Owner',        role: 'owner',          actor: 'owner'   },
+      [env.PIN_RAMAN]:   { name: 'RamananKutty', role: 'manager',        actor: 'raman'   },
+      [env.PIN_PRADOSH]: { name: 'Pradosh',       role: 'estate_manager', actor: 'pradosh' },
+    }
+    const found = users[String(pin)]
+    if (!found) return json({ success: false, error: 'Invalid PIN' }, 401)
+
+    const token = await signJwt({
+      name:  found.name,
+      role:  found.role,
+      actor: found.actor,
+      iat:   Math.floor(Date.now() / 1000),
+      exp:   Math.floor(Date.now() / 1000) + (12 * 60 * 60), // 12 hours
+    }, env.JWT_SECRET)
+
+    return json({ success: true, token })
+  }
+
+  // ── AUTH GUARD — verify JWT on every other request ─────
+  const authHeader = request.headers.get('Authorization') || ''
+  const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const payload    = token ? await verifyJwt(token, env.JWT_SECRET) : null
+  if (!payload) return json({ success: false, error: 'Unauthorized' }, 401)
+
+  // Actor comes from verified JWT — not from any client header
+  const actor = payload.actor || 'owner'
+  const now   = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
+
+  // Route to correct DB
+  const ActiveDB = ESTATE_ACTIONS.has(action) ? DB_ESTATES : DB
   if (ESTATE_ACTIONS.has(action) && !DB_ESTATES) {
-    return err('Estates DB not configured — run estate migration first', 503)
+    return err('Estates DB not configured', 503)
   }
 
   try {

@@ -53,20 +53,6 @@ export const CONFIG = {
   additionalGuestRate: 750,   // ₹ per night
   dehuskDefaultRate:   1.50,  // ₹ per coconut
 
-  // ── USER ACCESS CONTROL ──────────────────────────────────
-  //  PINs are loaded from Vite environment variables.
-  //  Set these in Cloudflare Pages → Settings → Environment variables:
-  //    VITE_PIN_OWNER   = your owner PIN
-  //    VITE_PIN_RAMAN   = Raman's PIN
-  //    VITE_PIN_PRADOSH = Pradosh's PIN
-  //  For local dev, set them in .env.local (never commit that file)
-  // ─────────────────────────────────────────────────────────
-  users: {
-    [import.meta.env.VITE_PIN_OWNER]:   { name: 'Owner',        role: 'owner'          },
-    [import.meta.env.VITE_PIN_RAMAN]:   { name: 'RamananKutty', role: 'manager'         },
-    [import.meta.env.VITE_PIN_PRADOSH]: { name: 'Pradosh',      role: 'estate_manager'  },
-  },
-
   // Theme colours
   theme: {
     gold:      '#C8903A',

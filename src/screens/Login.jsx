@@ -3,15 +3,29 @@ import { useAuth } from '../hooks/useAuth'
 import { CONFIG } from '../config'
 
 export default function Login() {
-  const { login } = useAuth()
-  const [pin, setPin]       = useState('')
-  const [error, setError]   = useState('')
-  const [shake, setShake]   = useState(false)
+  const { login }     = useAuth()
+  const [pin, setPin]         = useState('')
+  const [error, setError]     = useState('')
+  const [shake, setShake]     = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [locked, setLocked]   = useState(false)   // rate limited
+  const [retryMins, setRetryMins] = useState(15)
 
-  const handleLogin = () => {
-    if (!pin) return
-    const ok = login(pin)
-    if (!ok) {
+  const handleLogin = async () => {
+    if (!pin || loading || locked) return
+    setLoading(true)
+    setError('')
+
+    const result = await login(pin)
+    setLoading(false)
+
+    if (result.ok) return // AuthProvider sets user, App re-renders to correct screen
+
+    if (result.reason === 'rate_limited') {
+      setLocked(true)
+      setRetryMins(result.retryAfter || 15)
+      setError(`Too many attempts. Try again in ${result.retryAfter || 15} minutes.`)
+    } else {
       setError('Invalid PIN. Please try again.')
       setShake(true)
       setPin('')
@@ -50,17 +64,26 @@ export default function Login() {
           maxLength={6}
           placeholder="••••"
           autoFocus
+          disabled={loading || locked}
           style={{
             ...styles.pinInput,
             ...(shake ? styles.shake : {}),
             ...(error ? styles.pinInputError : {}),
+            ...(loading || locked ? { opacity: 0.5 } : {}),
           }}
         />
 
         {error && <p style={styles.error}>{error}</p>}
 
-        <button style={styles.loginBtn} onClick={handleLogin}>
-          ENTER
+        <button
+          style={{
+            ...styles.loginBtn,
+            ...(loading || locked ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
+          }}
+          onClick={handleLogin}
+          disabled={loading || locked}
+        >
+          {loading ? 'CHECKING…' : locked ? `LOCKED · ${retryMins}m` : 'ENTER'}
         </button>
       </div>
 

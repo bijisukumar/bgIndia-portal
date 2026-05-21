@@ -1,34 +1,72 @@
-import { createContext, useContext, useState, useEffect } from 'react'
-import { CONFIG } from '../config.js'
+// ============================================================
+//  v2.0 — Authentication via server-side JWT
+//  PINs are validated in the Worker (never in browser bundle).
+//  On success the Worker returns a signed JWT stored in
+//  sessionStorage. Every API call sends it as Bearer token.
+//  Session clears when the tab closes (sessionStorage).
+// ============================================================
+import { createContext, useContext, useState } from 'react'
 
 const AuthContext = createContext(null)
 
+// Decode JWT payload without verification (Worker verifies on every request)
+function decodeJwt(token) {
+  try {
+    const payload = token.split('.')[1]
+    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+  } catch { return null }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    // Persist session in sessionStorage — clears when browser/tab closes
     try {
-      const saved = sessionStorage.getItem('ge_user')
-      return saved ? JSON.parse(saved) : null
+      const token = sessionStorage.getItem('ge_token')
+      if (!token) return null
+      const payload = decodeJwt(token)
+      if (!payload || payload.exp * 1000 < Date.now()) {
+        sessionStorage.removeItem('ge_token')
+        return null
+      }
+      return { name: payload.name, role: payload.role, actor: payload.actor }
     } catch { return null }
   })
 
-  const login = (pin) => {
-    const found = CONFIG.users[pin]
-    if (!found) return false
-    const userData = { ...found, pin }
-    setUser(userData)
-    sessionStorage.setItem('ge_user', JSON.stringify(userData))
-    // Store actor for X-Actor header — maps role to DB actor value
-    // owner → 'owner', manager (Raman) → 'raman', estate_manager (Pradosh) → 'pradosh'
-    const actorMap = { owner: 'owner', manager: 'raman', estate_manager: 'pradosh' }
-    sessionStorage.setItem('ge_actor', actorMap[found.role] || 'owner')
-    return true
+  // Returns: { ok: true } | { ok: false, reason: 'invalid' | 'rate_limited', retryAfter }
+  const login = async (pin) => {
+    try {
+      const res = await fetch('/api/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ pin }),
+      })
+
+      if (res.status === 429) {
+        const data = await res.json().catch(() => ({}))
+        return { ok: false, reason: 'rate_limited', retryAfter: data.retryAfter || 15 }
+      }
+      if (res.status === 401) {
+        return { ok: false, reason: 'invalid' }
+      }
+      if (!res.ok) {
+        return { ok: false, reason: 'invalid' }
+      }
+
+      const { token } = await res.json()
+      const payload   = decodeJwt(token)
+      if (!payload) return { ok: false, reason: 'invalid' }
+
+      sessionStorage.setItem('ge_token', token)
+      const userData = { name: payload.name, role: payload.role, actor: payload.actor }
+      setUser(userData)
+      return { ok: true }
+    } catch {
+      return { ok: false, reason: 'invalid' }
+    }
   }
 
   const logout = () => {
     setUser(null)
-    sessionStorage.removeItem('ge_user')
-    sessionStorage.removeItem('ge_actor')
+    sessionStorage.removeItem('ge_token')
   }
 
   return (

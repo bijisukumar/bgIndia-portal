@@ -95,7 +95,7 @@ export const api = {
 
   // ── ESTATES ──────────────────────────────────────────────
   saveEstateTransaction:(data)   => post('saveEstateTransaction', data),
-  getEstateTransactions:(id, y)  => get('getEstateTransactions', { estateId: id, year: y }),
+  getEstateTransactions:(estate, y)  => get('getEstateTransactions', { estate, year: y || new Date().getFullYear() }),
   getEstateDashboard:   (year)   => get('getEstateDashboard', { year }),
 
   // ── DASHBOARDS ───────────────────────────────────────────

@@ -1137,6 +1137,43 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { id } })
       }
 
+      // ESTATE LEDGER — income / expense entry (Pollachi & Pavutumuri)
+      if (action === 'saveEstateTransaction') {
+        const { estate, type, date, category, amount, paidTo, description } = body
+        if (!estate || !type || !date || !category || !amount) {
+          return err('Missing required fields: estate, type, date, category, amount', 400)
+        }
+        const id = genId('ET')
+        await DB.prepare(`
+          INSERT INTO estate_transactions
+            (txn_id, estate, type, date, category, amount, paid_to, description,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        `).bind(
+          id, estate, type, date, category,
+          parseFloat(amount) || 0,
+          paidTo || null,
+          description || null,
+          actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { id } })
+      }
+
+      // ESTATE LEDGER — GET transactions
+      if (action === 'getEstateTransactions') {
+        const estate = url.searchParams.get('estate') || body?.estate
+        const year   = url.searchParams.get('year')   || new Date().getFullYear()
+        if (!estate) return err('estate param required', 400)
+        const { results } = await DB.prepare(`
+          SELECT * FROM estate_transactions
+          WHERE estate = ? AND strftime('%Y', date) = ?
+          ORDER BY date DESC
+        `).bind(estate, String(year)).all()
+        const income  = results.filter(r => r.type === 'income').reduce((s,r)  => s + r.amount, 0)
+        const expense = results.filter(r => r.type === 'expense').reduce((s,r) => s + r.amount, 0)
+        return json({ success: true, data: { transactions: results, income, expense, net: income - expense } })
+      }
+
       // RAMAN — MARK PAID
       // Supports three modes:
       //   commIds: [...] — pay specific selected stays by their comm_id

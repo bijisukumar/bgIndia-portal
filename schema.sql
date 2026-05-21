@@ -266,3 +266,23 @@ VALUES
   ('bathroom_cleaner','dwarka', 'Bathroom cleaner',    'bottle', 'bathroom', 10, 60,  0, 'system', 'system'),
   ('tissue',          'dwarka', 'Tissue/toilet paper', 'roll',   'bathroom', 10, 25,  0, 'system', 'system'),
   ('bed_essential',   'dwarka', 'Bedroom essentials',  'set',    'bedroom',  10,  0,  0, 'system', 'system');
+
+-- Estate income/expense ledger
+-- Covers both Pollachi (coconut) and Pavutumuri (rubber) estates
+CREATE TABLE IF NOT EXISTS estate_transactions (
+  txn_id       TEXT PRIMARY KEY,
+  estate       TEXT NOT NULL,              -- 'pollachi' | 'pavutumuri'
+  type         TEXT NOT NULL,              -- 'income' | 'expense'
+  date         TEXT NOT NULL,             -- YYYY-MM-DD
+  category     TEXT NOT NULL,
+  amount       REAL NOT NULL,
+  paid_to      TEXT,                      -- party name (payer or payee)
+  description  TEXT,
+  created_by   TEXT DEFAULT 'pradosh',
+  updated_by   TEXT DEFAULT 'pradosh',
+  created_at   TEXT DEFAULT (datetime('now')),
+  updated_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_estate_txn_estate_date ON estate_transactions(estate, date DESC);
+CREATE INDEX IF NOT EXISTS idx_estate_txn_type        ON estate_transactions(estate, type, date DESC);

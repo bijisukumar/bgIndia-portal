@@ -7,9 +7,7 @@ database_name = "bgindia-db"
 database_id = "6047aa03-9893-4fd9-8ba2-b3d7f5264ed1"
 
 # v2.0 — Estates DB (coconut, rubber, estate ledger — owner + pradosh only)
-# Create this DB first: npx wrangler d1 create BGIndiaDB-Estates
-# Then replace the database_id below with the one returned
 [[d1_databases]]
 binding = "DB_ESTATES"
-database_name = "BGIndiaDB-Estates"
-database_id = "REPLACE_WITH_ESTATES_DB_ID"
+database_name = "bgindiadb-estates"
+database_id = "6e23cb84-d341-4b2e-8062-e8244844309d"

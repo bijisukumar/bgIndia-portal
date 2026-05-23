@@ -586,7 +586,7 @@ function callWorker(method, action, payload) {
     var url  = WORKER_URL + '/' + action;
     var opts = {
       method:             method.toLowerCase(),
-      headers:            { 'Content-Type': 'application/json', 'X-Actor': 'auto' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getSystemToken() },
       muteHttpExceptions: true,
     };
     if (method === 'GET' && payload && Object.keys(payload).length > 0) {

@@ -196,7 +196,15 @@ export async function onRequest(ctx) {
   // ── AUTH GUARD — verify JWT on every other request ─────
   const authHeader = request.headers.get('Authorization') || ''
   const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const payload    = token ? await verifyJwt(token, env.JWT_SECRET) : null
+
+  // System token — long-lived token for Apps Script automation (not a JWT)
+  // Stored in Cloudflare env as SYSTEM_TOKEN
+  let payload = null
+  if (token && env.SYSTEM_TOKEN && token === env.SYSTEM_TOKEN) {
+    payload = { name: 'System', role: 'owner', actor: 'auto' }
+  } else {
+    payload = token ? await verifyJwt(token, env.JWT_SECRET) : null
+  }
   if (!payload) return json({ success: false, error: 'Unauthorized' }, 401)
 
   // Actor comes from verified JWT — not from any client header

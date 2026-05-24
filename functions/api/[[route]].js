@@ -193,6 +193,140 @@ export async function onRequest(ctx) {
     return json({ success: true, token })
   }
 
+
+      // SUBMIT GUEST CHECK-IN FORM — public endpoint (no auth required for guests)
+      // Creates or updates stay, stores all Form C fields, sets status to pending_review
+      if (action === 'submitGuestCheckIn') {
+        const {
+          villaId = 'dwarka', partner = 'direct', stayId: existingStayId,
+          guestName, dob, gender, nationality = 'Indian',
+          phone, email,
+          homeAddress, city, state, pincode, country = 'India', fromCity,
+          homeCountryAddress,
+          checkInDate, checkOutDate, nights,
+          adults = 1, children = 0, guestList,
+          purposeOfVisit, modeOfTransport, vehicleNumber, eta,
+          govtIdType, govtIdNum,
+          passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
+          visaNumber, visaType, visaIssueDate, visaIssuePlace,
+          arrivalDateIndia, portOfArrival, nextDestination,
+          idFileB64, idFileName,
+        } = body
+
+        if (!guestName) return err('guestName is required')
+        if (!checkInDate) return err('checkInDate is required')
+
+        const submittedAt = now()
+        let stayId = existingStayId
+
+        // Try to match existing stay first
+        if (!stayId) {
+          const firstName = guestName.split(' ')[0]
+          const found = await DB.prepare(
+            `SELECT stay_id, status FROM stays
+             WHERE guest_name LIKE ? AND checkin_date = ?
+               AND villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
+             LIMIT 1`
+          ).bind(`%${firstName}%`, checkInDate, villaId).first()
+          if (found) stayId = found.stay_id
+        }
+
+        if (stayId) {
+          // Update existing stay with all form fields
+          await DB.prepare(`
+            UPDATE stays SET
+              guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
+              guest_email = COALESCE(NULLIF(guest_email,''), ?),
+              dob = ?, gender = ?, nationality = ?,
+              home_address = ?, city = ?, state = ?, country = ?, from_city = ?, pincode = ?,
+              home_country_address = ?,
+              checkout_date = COALESCE(checkout_date, ?),
+              nights = COALESCE(NULLIF(nights,0), ?),
+              adults = ?, children = ?,
+              guest_list = ?, purpose_of_visit = ?,
+              mode_of_transport = ?, vehicle_number = ?, eta = ?,
+              govt_id_type = ?, govt_id_num = ?,
+              passport_number = ?, passport_issue_date = ?, passport_issue_place = ?,
+              passport_expiry = ?, visa_number = ?, visa_type = ?,
+              visa_issue_date = ?, visa_issue_place = ?,
+              arrival_date_india = ?, port_of_arrival = ?, next_destination = ?,
+              checkin_form_submitted = 1, checkin_form_submitted_at = ?,
+              status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
+              updated_by = 'auto', updated_at = ?
+            WHERE stay_id = ?
+          `).bind(
+            phone||null, email||null,
+            dob||null, gender||null, nationality,
+            homeAddress||null, city||null, state||null, country, fromCity||city||null, pincode||null,
+            homeCountryAddress||null,
+            checkOutDate||null, parseInt(nights)||1,
+            parseInt(adults)||1, parseInt(children)||0,
+            guestList||null, purposeOfVisit||null,
+            modeOfTransport||null, vehicleNumber||null, eta||null,
+            govtIdType||null, govtIdNum||null,
+            passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
+            passportExpiry||null, visaNumber||null, visaType||null,
+            visaIssueDate||null, visaIssuePlace||null,
+            arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
+            submittedAt, submittedAt, stayId
+          ).run()
+        } else {
+          // Create new provisional stay
+          stayId = genStayId(villaId)
+          const n = parseInt(nights) || (checkOutDate
+            ? Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / 86400000))
+            : 1)
+          await DB.prepare(`
+            INSERT INTO stays (
+              stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+              checkin_date, checkout_date, nights, adults, children, gross, net,
+              dob, gender, nationality,
+              home_address, city, state, country, from_city, pincode, home_country_address,
+              guest_list, purpose_of_visit, mode_of_transport, vehicle_number, eta,
+              govt_id_type, govt_id_num,
+              passport_number, passport_issue_date, passport_issue_place, passport_expiry,
+              visa_number, visa_type, visa_issue_date, visa_issue_place,
+              arrival_date_india, port_of_arrival, next_destination,
+              checkin_form_submitted, checkin_form_submitted_at,
+              status, created_by, updated_by, created_at, updated_at
+            ) VALUES (
+              ?,?,?,?,?,?,?,?,?,?,?,0,0,
+              ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+              ?,?,?,?,?,?,?,?,?,?,?,?,
+              1,?,'pending_review','auto','auto',?,?
+            )
+          `).bind(
+            stayId, villaId, partner || 'direct',
+            guestName, phone||null, email||null,
+            checkInDate, checkOutDate||null, n,
+            parseInt(adults)||1, parseInt(children)||0,
+            dob||null, gender||null, nationality,
+            homeAddress||null, city||null, state||null, country, fromCity||city||null,
+            pincode||null, homeCountryAddress||null,
+            guestList||null, purposeOfVisit||null,
+            modeOfTransport||null, vehicleNumber||null, eta||null,
+            govtIdType||null, govtIdNum||null,
+            passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
+            passportExpiry||null, visaNumber||null, visaType||null,
+            visaIssueDate||null, visaIssuePlace||null,
+            arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
+            submittedAt, submittedAt, submittedAt
+          ).run()
+        }
+
+        // Store ID file reference in guest_requests if file provided
+        if (idFileB64 && stayId) {
+          const reqId = genId('GF')
+          await DB.prepare(`
+            INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at)
+            VALUES (?,?,'id_document',?,  'uploaded','auto','auto',?,?)
+          `).bind(reqId, stayId, JSON.stringify({ fileName: idFileName, nationality, idType: govtIdType||'passport' }), submittedAt, submittedAt).run()
+        }
+
+        return json({ success: true, data: { stayId, status: 'pending_review' } })
+      }
+
+
   // ── AUTH GUARD — verify JWT on every other request ─────
   const authHeader = request.headers.get('Authorization') || ''
   const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null

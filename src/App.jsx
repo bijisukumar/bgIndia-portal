@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import './index.css'
 
+// Guest check-in form (public — no auth)
+import GuestCheckIn from './screens/GuestCheckIn'
+
 // Root screens
 import Login          from './screens/Login'
 import OwnerHome      from './screens/OwnerHome'
@@ -105,6 +108,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public guest check-in form — no auth required */}
+          <Route path="/checkin" element={<GuestCheckIn />} />
           <Route path="/login" element={<LoginGate />} />
           <Route path="/*"     element={<ProtectedRoutes />} />
         </Routes>

@@ -1491,6 +1491,75 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { propId } })
       }
 
+
+      // CREATE PROVISIONAL BOOKING — called by GuestFormScript when no match found
+      if (action === 'createProvisionalBooking') {
+        const guestName   = body.guestName || ''
+        const checkInDate = body.checkInDate || ''
+        if (!guestName || !checkInDate) return err('guestName and checkInDate required')
+
+        // Duplicate guard: same villa + guest name + checkin date
+        const existing = await DB.prepare(
+          `SELECT stay_id FROM stays WHERE villa_id = ? AND guest_name = ? AND checkin_date = ? AND status != 'cancelled' LIMIT 1`
+        ).bind(body.villaId || 'dwarka', guestName, checkInDate).first()
+        if (existing) {
+          return json({ success: true, data: { stayId: existing.stay_id, existed: true } })
+        }
+
+        const stayId = genStayId(body.villaId || 'dwarka')
+        const nights = (body.checkInDate && body.checkOutDate)
+          ? Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))
+          : 1
+
+        await DB.prepare(`
+          INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+            checkin_date, checkout_date, nights, adults, children, gross, net, status,
+            created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,1,0,0,0,'pending_review',?,?,?,?)
+        `).bind(
+          stayId, body.villaId || 'dwarka', body.source || 'guest_form',
+          guestName, body.guestPhone || null, body.guestEmail || null,
+          checkInDate, body.checkOutDate || null, nights,
+          actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { stayId, created: true } })
+      }
+
+      // APPROVE PENDING BOOKING — owner approves provisional → ready_for_checkin
+      if (action === 'approvePendingBooking') {
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        const stay = await DB.prepare(`SELECT status FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        if (stay.status !== 'pending_review') {
+          return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status } })
+        }
+        await DB.prepare(
+          `UPDATE stays SET status = 'ready_for_checkin', updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(actor, now(), stayId).run()
+        return json({ success: true, data: { stayId, status: 'ready_for_checkin' } })
+      }
+
+      // GET PENDING REVIEW STAYS — for owner portal block
+      if (action === 'getPendingReviewStays') {
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
+                  guest_phone, guest_email, drive_folder_url, created_at
+           FROM stays WHERE status = 'pending_review' ORDER BY checkin_date ASC`
+        ).all()
+        return json({ success: true, data: results.map(r => ({
+          stayId:        r.stay_id,
+          guestName:     r.guest_name,
+          checkIn:       r.checkin_date,
+          checkOut:      r.checkout_date,
+          nights:        r.nights,
+          phone:         r.guest_phone,
+          email:         r.guest_email,
+          driveFolderUrl:r.drive_folder_url,
+          createdAt:     r.created_at,
+        })) })
+      }
+
       return err(`Unknown POST action: ${action}`, 404)
     }
 

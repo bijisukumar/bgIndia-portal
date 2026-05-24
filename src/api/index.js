@@ -66,6 +66,11 @@ async function post(action, payload) {
 }
 
 export const api = {
+  // ── PROVISIONAL / PENDING REVIEW ───────────────────────────
+  getPendingReviewStays:    ()       => get('getPendingReviewStays'),
+  createProvisionalBooking: (data)   => post('createProvisionalBooking', data),
+  approvePendingBooking:    (data)   => post('approvePendingBooking', data),
+
   // ── STAY / CHECK-IN ──────────────────────────────────────
   getPendingCheckIns:   ()       => get('getPendingCheckIns'),
   createBooking:        (data)   => post('createBooking', data),

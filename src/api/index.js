@@ -66,6 +66,9 @@ async function post(action, payload) {
 }
 
 export const api = {
+  // ── GUEST CHECK-IN FORM (public) ───────────────────────────
+  submitGuestCheckIn:       (data)   => post('submitGuestCheckIn', data),
+
   // ── PROVISIONAL / PENDING REVIEW ───────────────────────────
   getPendingReviewStays:    ()       => get('getPendingReviewStays'),
   createProvisionalBooking: (data)   => post('createProvisionalBooking', data),

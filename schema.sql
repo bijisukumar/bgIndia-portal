@@ -286,3 +286,10 @@ CREATE TABLE IF NOT EXISTS estate_transactions (
 
 CREATE INDEX IF NOT EXISTS idx_estate_txn_estate_date ON estate_transactions(estate, date DESC);
 CREATE INDEX IF NOT EXISTS idx_estate_txn_type        ON estate_transactions(estate, type, date DESC);
+
+-- ── DUPLICATE PROTECTION (added 2026-05-24) ─────────────────────────────
+-- Prevents duplicate active bookings for same guest + checkin date per villa.
+-- Excludes cancelled and closed stays so historical records are unaffected.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_stay
+  ON stays(villa_id, guest_name, checkin_date)
+  WHERE status NOT IN ('cancelled', 'closed');

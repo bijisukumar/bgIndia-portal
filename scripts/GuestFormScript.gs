@@ -124,16 +124,62 @@ function onGuestFormSubmit(e) {
         guestFolder = getOrCreateGuestFolder(bookerName, stayId, checkInDate);
       }
     } else {
-      Logger.log('No open stay found for: ' + bookerName);
-      sendAlert('⚠️ Check-in form received — no matching booking',
-        'Guest: '      + bookerName +
-        '\nCheck-in: ' + checkInDate +
-        '\nEmail: '    + email +
-        '\nPhone: '    + phone +
-        '\n\nNo open booking found in the system.' +
-        '\nPlease create a booking first, then ask the guest to re-submit,' +
-        '\nor manually move the uploaded files to the correct Drive folder.');
-      return;
+      // ── FALLBACK: no matching booking — auto-create provisional ──────────
+      Logger.log('No open stay found for: ' + bookerName + ' — creating provisional booking');
+
+      var provResp = callWorker('POST', 'createProvisionalBooking', {
+        guestName:   bookerName,
+        checkInDate: checkInDate,
+        checkOutDate: checkOutDate,
+        guestEmail:  email,
+        guestPhone:  phone,
+        villaId:     'dwarka',
+        source:      'guest_form',
+      });
+
+      if (!provResp || !provResp.success) {
+        sendAlert('🚨 Failed to auto-create provisional booking',
+          'Guest: ' + bookerName +
+          '\nCheck-in: ' + checkInDate +
+          '\nError: ' + JSON.stringify(provResp));
+        return;
+      }
+
+      stayId = provResp.data.stayId;
+      Logger.log('Provisional booking created: ' + stayId);
+
+      // Create Drive folder for provisional booking
+      guestFolder = getOrCreateGuestFolder(bookerName, stayId, checkInDate);
+
+      // Create provisional info TXT in folder
+      try {
+        var nights = checkInDate && checkOutDate
+          ? Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / 86400000))
+          : 1;
+        var txtLines = [
+          'Villa: Guruvayur Villa (Dwarka)',
+          'Guest: ' + bookerName,
+          'Check-in: ' + checkInDate,
+          'Phone: ' + phone,
+          'Email: ' + email,
+          'Nights: ' + nights,
+          'Status: Provisional — pending owner review',
+        ];
+        guestFolder.createFile('Provisional-' + stayId + '.txt', txtLines.join('\n'), 'text/plain');
+      } catch(txtErr) { Logger.log('TXT create error: ' + txtErr.message); }
+
+      // Notify owner — provisional booking created, needs review
+      sendAlert('🔶 Provisional booking auto-created — pending review',
+        'Guest submitted check-in form but NO matching booking was found.' +
+        '\n\nA provisional booking has been auto-created:' +
+        '\n  Stay ID:   ' + stayId +
+        '\n  Guest:     ' + bookerName +
+        '\n  Check-in:  ' + checkInDate +
+        '\n  Check-out: ' + checkOutDate +
+        '\n  Email:     ' + email +
+        '\n  Phone:     ' + phone +
+        '\n\nDrive folder: ' + guestFolder.getUrl() +
+        '\n\n👉 Open the portal → Owner Home → approve or edit before Raman can check in.');
     }
 
     // ── Rename and move uploaded files ───────────────────────────────────
@@ -316,6 +362,17 @@ function normaliseDate(str) {
     if (!isNaN(d)) return d.toISOString().slice(0, 10);
   } catch(e) {}
   return str;
+}
+
+
+// ── SYSTEM TOKEN — reads from Script Properties ──────────────────────────
+function getSystemToken() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN') || '';
+  } catch(e) {
+    Logger.log('getSystemToken error: ' + e.message);
+    return '';
+  }
 }
 
 function callWorker(method, action, payload) {

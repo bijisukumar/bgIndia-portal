@@ -18,9 +18,25 @@
 //   4. Authorise when prompted
 // ============================================================
 
-var WORKER_URL  = 'https://manage.luxuryvillasofguruvayur.com/api';
-var OWNER_EMAIL = 'kerala.luxuryvillas@gmail.com';
-var DRIVE_ROOT  = '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva';
+// ── CLIENT CONFIG — update this block when onboarding a new property ──────
+var CLIENT = {
+  name:          'Guruvayur Estates',
+  villaName:     'Guruvayur Villa (Dwarka)',
+  villaId:       'dwarka',
+  phone1:        '+91 99950 43283',
+  phone2:        '+91 97287 65101',
+  ownerEmail:    'kerala.luxuryvillas@gmail.com',
+  ownerEmailCC:  'bijisukumar@gmail.com',
+  driveRootId:   '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2',
+  workerUrl:     'https://manage.luxuryvillasofguruvayur.com/api',
+  spreadsheetId: '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
+  address:       'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101',
+};
+
+// ── Convenience aliases (used throughout script) ───────────────────────────
+var WORKER_URL  = CLIENT.workerUrl;
+var OWNER_EMAIL = CLIENT.ownerEmail;
+var DRIVE_ROOT  = CLIENT.driveRootId;
 
 // ── MAIN TRIGGER — fires on every form submission ─────────────────────────
 function onGuestFormSubmit(e) {

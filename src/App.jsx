@@ -110,6 +110,7 @@ export default function App() {
         <Routes>
           {/* Public guest check-in form — no auth required */}
           <Route path="/checkin" element={<GuestCheckIn />} />
+          <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
           <Route path="/login" element={<LoginGate />} />
           <Route path="/*"     element={<ProtectedRoutes />} />
         </Routes>

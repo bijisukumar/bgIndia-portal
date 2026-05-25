@@ -250,6 +250,8 @@ export async function onRequest(ctx) {
               passport_expiry = ?, visa_number = ?, visa_type = ?,
               visa_issue_date = ?, visa_issue_place = ?,
               arrival_date_india = ?, port_of_arrival = ?, next_destination = ?,
+              request_early_checkin = ?, request_late_checkout = ?,
+              request_breakfast = ?, breakfast_choice = ?, request_cab = ?,
               checkin_form_submitted = 1, checkin_form_submitted_at = ?,
               status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
               updated_by = 'auto', updated_at = ?
@@ -268,6 +270,7 @@ export async function onRequest(ctx) {
             passportExpiry||null, visaNumber||null, visaType||null,
             visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
+            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
             submittedAt, submittedAt, stayId
           ).run()
         } else {
@@ -287,12 +290,15 @@ export async function onRequest(ctx) {
               passport_number, passport_issue_date, passport_issue_place, passport_expiry,
               visa_number, visa_type, visa_issue_date, visa_issue_place,
               arrival_date_india, port_of_arrival, next_destination,
+              request_early_checkin, request_late_checkout,
+              request_breakfast, breakfast_choice, request_cab,
               checkin_form_submitted, checkin_form_submitted_at,
               status, created_by, updated_by, created_at, updated_at
             ) VALUES (
               ?,?,?,?,?,?,?,?,?,?,?,0,0,
               ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
               ?,?,?,?,?,?,?,?,?,?,?,?,
+              ?,?,?,?,?,
               1,?,'pending_review','auto','auto',?,?
             )
           `).bind(
@@ -310,6 +316,7 @@ export async function onRequest(ctx) {
             passportExpiry||null, visaNumber||null, visaType||null,
             visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
+            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
             submittedAt, submittedAt, submittedAt
           ).run()
         }

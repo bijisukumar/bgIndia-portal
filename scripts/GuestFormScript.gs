@@ -446,6 +446,15 @@ function processPendingCheckInForms() {
       });
       Logger.log('Drive folder URL saved to D1 for ' + stay.stayId);
 
+      // Clean up base64 images from D1 — they are now safely in Drive
+      // This keeps the guest_documents table lean
+      try {
+        callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId });
+        Logger.log('Cleaned guest_documents from D1 for ' + stay.stayId);
+      } catch(cleanErr) {
+        Logger.log('Cleanup warning (non-fatal): ' + cleanErr.message);
+      }
+
       // Send confirmation emails
       sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'));
 

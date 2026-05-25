@@ -465,7 +465,23 @@ function processPendingCheckInForms() {
       sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'), s);
 
     } catch(e) {
-      Logger.log('Error processing ' + stay.stayId + ': ' + e.message);
+      var errMsg = 'Error processing ' + stay.stayId + ': ' + e.message;
+      Logger.log(errMsg);
+      // Email owner immediately on processing error
+      try {
+        GmailApp.sendEmail(
+          OWNER_EMAIL,
+          '[GVR Portal] ⚠️ Processing error — ' + stay.stayId,
+          'An error occurred while processing check-in for ' + stay.guestName + '\n\n' +
+          'Stay ID  : ' + stay.stayId + '\n' +
+          'Check-in : ' + stay.checkIn + '\n' +
+          'Error    : ' + e.message + '\n\n' +
+          'The record is still in D1 and will be retried on next trigger run.\n' +
+          'If this error persists, set folder_created=0 and check the execution logs.'
+        );
+      } catch(mailErr) {
+        Logger.log('Error email failed: ' + mailErr.message);
+      }
     }
   });
 

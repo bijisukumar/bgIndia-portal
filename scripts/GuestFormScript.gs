@@ -19,7 +19,7 @@
 // ============================================================
 
 var WORKER_URL  = 'https://manage.luxuryvillasofguruvayur.com/api';
-var OWNER_EMAIL = 'bijisukumar@gmail.com';
+var OWNER_EMAIL = 'kerala.luxuryvillas@gmail.com';
 var DRIVE_ROOT  = '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva';
 
 // ── MAIN TRIGGER — fires on every form submission ─────────────────────────
@@ -301,10 +301,6 @@ function onGuestFormSubmit(e) {
 // Creates: Guests/YYYY/MM-MonthName/GuestName-DD-StayID
 // Example: Guests/2026/05-May/Vikram Ramasubramanian-08-DWK-AB123
 
-
-// ── EMAIL CONFIG ────────────────────────────────────────────────────────
-var OWNER_EMAIL = 'kerala.luxuryvillas@gmail.com';
-// Guest email comes from the stay record
 
 // ── PROCESS PENDING CHECK-IN FORMS ─────────────────────────────────────
 // Triggered every 5 minutes (set up in Apps Script triggers)

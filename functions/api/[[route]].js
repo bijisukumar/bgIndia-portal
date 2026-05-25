@@ -197,6 +197,7 @@ export async function onRequest(ctx) {
       // SUBMIT GUEST CHECK-IN FORM — public endpoint (no auth required for guests)
       // Creates or updates stay, stores all Form C fields, sets status to pending_review
       if (action === 'submitGuestCheckIn') {
+        const publicBody = await request.json().catch(() => ({}))
         const {
           villaId = 'dwarka', partner = 'direct', stayId: existingStayId,
           guestName, dob, gender, nationality = 'Indian',
@@ -211,7 +212,15 @@ export async function onRequest(ctx) {
           visaNumber, visaType, visaIssueDate, visaIssuePlace,
           arrivalDateIndia, portOfArrival, nextDestination,
           idFileB64, idFileName,
-        } = body
+          requestEarlyCheckIn, requestLateCheckOut,
+          requestBreakfast, breakfastChoice, requestCab,
+        } = publicBody
+        const reqEarly     = requestEarlyCheckIn ? 1 : 0
+        const reqLate      = requestLateCheckOut ? 1 : 0
+        const reqBreakfast = requestBreakfast    ? 1 : 0
+        const bfChoice     = breakfastChoice     || null
+        const reqCab       = requestCab          ? 1 : 0
+        const now          = () => new Date().toISOString().slice(0,19).replace('T',' ')
 
         if (!guestName) return err('guestName is required')
         if (!checkInDate) return err('checkInDate is required')
@@ -330,12 +339,10 @@ export async function onRequest(ctx) {
 
 
 
-      // ── PUBLIC POST routes — parse body here since auth guard hasn't run yet ──
-      const publicBody = method === 'POST' ? await request.json().catch(() => ({})) : {}
-
       // RESOLVE CHECKIN LINK — public endpoint (no auth)
       if (action === 'resolveCheckinLink') {
-        const { token: linkToken } = publicBody
+        const rlBody = await request.json().catch(() => ({}))
+        const { token: linkToken } = rlBody
         if (!linkToken) return err('token required')
         const link = await DB.prepare(
           `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
@@ -1715,21 +1722,7 @@ export async function onRequest(ctx) {
       }
 
 
-      // RESOLVE CHECKIN LINK — handled above auth guard
-      // if (action === 'resolveCheckinLink') {
-        const { token: linkToken } = body
-        if (!linkToken) return err('token required')
-        const link = await DB.prepare(
-          `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
-        ).bind(linkToken).first()
-        if (!link) return err('Invalid or expired link', 404)
-        if (!link.is_active) return err('This check-in link has been deactivated', 403)
-        // Increment use count
-        await DB.prepare(
-          `UPDATE checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`
-        ).bind(now(), linkToken).run()
-        return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
-      }
+      // RESOLVE CHECKIN LINK — handled in public section above auth guard
 
       // GET ALL CHECKIN LINKS — owner only (auth required below)
       if (action === 'getCheckinLinks') {

@@ -2,9 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import './index.css'
 
-// Guest check-in form (public — no auth)
-import GuestCheckIn from './screens/GuestCheckIn'
-
 // Root screens
 import Login          from './screens/Login'
 import OwnerHome      from './screens/OwnerHome'
@@ -105,22 +102,14 @@ function ProtectedRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* ── PUBLIC routes — no auth, no AuthProvider needed ── */}
-        <Route path="/checkin" element={<GuestCheckIn />} />
-        <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
-        {/* ── AUTH routes — wrapped in AuthProvider ── */}
-        <Route path="/*" element={
-          <AuthProvider>
-            <Routes>
-              <Route path="/login" element={<LoginGate />} />
-              <Route path="/*" element={<ProtectedRoutes />} />
-            </Routes>
-          </AuthProvider>
-        } />
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginGate />} />
+          <Route path="/*"     element={<ProtectedRoutes />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
 

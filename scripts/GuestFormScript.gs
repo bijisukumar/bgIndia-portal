@@ -455,8 +455,8 @@ function processPendingCheckInForms() {
         Logger.log('Cleanup warning (non-fatal): ' + cleanErr.message);
       }
 
-      // Send confirmation emails
-      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'));
+      // Send confirmation emails — pass full stay details for requests section
+      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'), s);
 
     } catch(e) {
       Logger.log('Error processing ' + stay.stayId + ': ' + e.message);
@@ -467,66 +467,92 @@ function processPendingCheckInForms() {
 }
 
 // ── SEND CHECK-IN CONFIRMATION EMAILS ───────────────────────────────────
-function sendCheckinConfirmationEmails(stay, folderUrl, txtContent) {
-  var guestName  = stay.guestName  || 'Guest';
-  var guestEmail = stay.email      || '';
-  var checkIn    = stay.checkIn    || '';
-  var checkOut   = stay.checkOut   || '';
-  var nights     = stay.nights     || 1;
-  var stayId     = stay.stayId     || '';
+function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails) {
+  var guestName  = stay.guestName || 'Guest';
+  var guestEmail = (stayDetails && stayDetails.email) || stay.email || '';
+  var checkIn    = stay.checkIn   || '';
+  var checkOut   = (stayDetails && stayDetails.checkoutDate) || stay.checkOut || '';
+  var nights     = (stayDetails && stayDetails.nights) || stay.nights || 1;
+  var stayId     = stay.stayId    || '';
+  var adults     = (stayDetails && stayDetails.adults)   || 1;
+  var children   = (stayDetails && stayDetails.children) || 0;
+  var phone      = (stayDetails && stayDetails.phone)    || stay.phone || '';
 
-  var subject = 'Your Check-in Registration — Guruvayur Villa (Dwarka)';
+  // Build additional requests section
+  var reqLines = [];
+  if (stayDetails) {
+    if (stayDetails.requestBreakfast)    reqLines.push('  ✓ Breakfast — ' + (stayDetails.breakfastChoice || 'Idli'));
+    if (stayDetails.requestCab)          reqLines.push('  ✓ Cab service');
+    if (stayDetails.requestEarlyCheckin) reqLines.push('  ✓ Early check-in');
+    if (stayDetails.requestLateCheckout) reqLines.push('  ✓ Late check-out');
+  }
+  var reqSection = reqLines.length > 0
+    ? 'ADDITIONAL REQUESTS:\n' + reqLines.join('\n') + '\n\n'
+    : 'ADDITIONAL REQUESTS: None\n\n';
+
+  var subject = 'Your Check-in Registration — ' + CLIENT.villaName;
 
   var guestBody =
     'Dear ' + guestName + ',\n\n' +
-    'Thank you for completing your check-in registration for Guruvayur Villa (Dwarka).\n\n' +
+    'Thank you for completing your check-in registration for ' + CLIENT.villaName + '.\n\n' +
     'Please verify the following details we have on record:\n\n' +
-    '  Stay ID:      ' + stayId + '\n' +
-    '  Check-in:     ' + checkIn + '\n' +
+    '  Stay ID:      ' + stayId   + '\n' +
+    '  Check-in:     ' + checkIn  + '\n' +
     '  Check-out:    ' + checkOut + '\n' +
-    '  Nights:       ' + nights + '\n' +
-    '  Phone:        ' + (stay.phone  || 'Not provided') + '\n' +
-    '  Email:        ' + (stay.email  || 'Not provided') + '\n\n' +
-    txtContent.split('ADDITIONAL REQUESTS:')[1] ? 
-      'Your additional requests:\n' + txtContent.split('ADDITIONAL REQUESTS:')[1].trim() + '\n\n' : '' +
-    'If any of the above is incorrect, please contact us immediately at +91 97287 65101.\n\n' +
+    '  Nights:       ' + nights   + '\n' +
+    '  Adults:       ' + adults   + '\n' +
+    '  Children:     ' + children + '\n' +
+    '  Phone:        ' + (phone  || 'Not provided') + '\n' +
+    '  Email:        ' + (guestEmail || 'Not provided') + '\n\n' +
+    reqSection +
+    'If any of the above is incorrect, please contact us immediately at ' + CLIENT.phone2 + '.\n\n' +
     'Our team will verify your details and confirm your check-in shortly.\n\n' +
     'Warm regards,\n' +
-    'Guruvayur Villa (Dwarka)\n' +
-    '+91 99950 43283\n' +
-    '+91 97287 65101';
+    CLIENT.villaName + '\n' +
+    CLIENT.phone1 + '  |  ' + CLIENT.phone2;
 
   var ownerBody =
-    '🔶 NEW GUEST CHECK-IN FORM SUBMITTED\n\n' +
-    'Guest: '     + guestName  + '\n' +
-    'Stay ID: '   + stayId     + '\n' +
-    'Check-in: '  + checkIn    + '\n' +
-    'Check-out: ' + checkOut   + '\n' +
-    'Nights: '    + nights     + '\n' +
-    'Phone: '     + (stay.phone  || 'Not provided') + '\n' +
-    'Email: '     + (stay.email  || 'Not provided') + '\n\n' +
+    'NEW GUEST CHECK-IN FORM SUBMITTED\n\n' +
+    'Guest:      ' + guestName  + '\n' +
+    'Stay ID:    ' + stayId     + '\n' +
+    'Check-in:   ' + checkIn    + '\n' +
+    'Check-out:  ' + checkOut   + '\n' +
+    'Nights:     ' + nights     + '\n' +
+    'Adults:     ' + adults     + '\n' +
+    'Children:   ' + children   + '\n' +
+    'Phone:      ' + (phone     || 'Not provided') + '\n' +
+    'Email:      ' + (guestEmail || 'Not provided') + '\n\n' +
+    reqSection +
     'Full details:\n' + txtContent + '\n\n' +
     'Drive folder: ' + folderUrl + '\n\n' +
     'ACTION REQUIRED: Please review and approve in the Owner Portal.';
 
   // Send to owner
   try {
-    MailApp.sendEmail(OWNER_EMAIL, '🔶 Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody);
+    GmailApp.sendEmail(OWNER_EMAIL, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody);
     Logger.log('Owner email sent to ' + OWNER_EMAIL);
   } catch(e) {
     Logger.log('Owner email error: ' + e.message);
   }
 
-  // Send to guest
+  // CC to owner personal email
+  try {
+    GmailApp.sendEmail(CLIENT.ownerEmailCC, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody);
+    Logger.log('CC email sent to ' + CLIENT.ownerEmailCC);
+  } catch(e) {
+    Logger.log('CC email error: ' + e.message);
+  }
+
+  // Send to guest — use GmailApp which supports external domains (Hotmail, Yahoo etc)
   if (guestEmail) {
     try {
-      MailApp.sendEmail(guestEmail, subject, guestBody);
+      GmailApp.sendEmail(guestEmail, subject, guestBody);
       Logger.log('Guest email sent to ' + guestEmail);
     } catch(e) {
       Logger.log('Guest email error: ' + e.message);
     }
   } else {
-    Logger.log('No guest email — skipping guest confirmation');
+    Logger.log('No guest email on record — skipping guest confirmation');
   }
 }
 

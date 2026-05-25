@@ -9,6 +9,24 @@ import { useState, useRef, useEffect } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
 
 const VILLA_NAMES = { dwarka: 'Guruvayur Villa (Dwarka)' }
+
+function LogoImg() {
+  const [failed, setFailed] = useState(false)
+  if (failed) return (
+    <div style={{ width:'56px', height:'56px', borderRadius:'12px', fontSize:'1.8rem',
+      background:'rgba(200,144,58,0.15)', border:'1px solid rgba(200,144,58,0.3)',
+      display:'flex', alignItems:'center', justifyContent:'center' }}>🏡</div>
+  )
+  return (
+    <img
+      src="/icons/logo-black.png"
+      alt="Guruvayur Estates"
+      onError={() => setFailed(true)}
+      style={{ width:'56px', height:'56px', borderRadius:'12px', objectFit:'cover',
+        border:'1px solid rgba(200,144,58,0.3)', boxShadow:'0 4px 12px rgba(200,144,58,0.15)' }}
+    />
+  )
+}
 const VILLA_ADDRESSES = {
   dwarka: {
     address:  'Edappully Gandhinagar Rd, Palayoor',
@@ -314,13 +332,7 @@ export default function GuestCheckIn() {
       {/* ── HEADER ── */}
       <div style={s.header}>
         <div style={s.brandRow}>
-          <img
-            src="/icons/logo-black.png"
-            alt="Guruvayur Estates"
-            style={s.logoImg}
-            onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex' }}
-          />
-          <div style={{ ...s.brandIcon, display:'none' }}>🏡</div>
+          <LogoImg />
           <div>
             <div style={s.brandName}>{villaName}</div>
             <div style={s.brandSub}>GURUVAYUR · KERALA</div>

@@ -20,17 +20,18 @@
 
 // ── CLIENT CONFIG — update this block when onboarding a new property ──────
 var CLIENT = {
-  name:          'Guruvayur Estates',
-  villaName:     'Guruvayur Villa (Dwarka)',
-  villaId:       'dwarka',
-  phone1:        '+91 99950 43283',
-  phone2:        '+91 97287 65101',
-  ownerEmail:    'kerala.luxuryvillas@gmail.com',
-  ownerEmailCC:  'bijisukumar@gmail.com',
-  driveRootId:   '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2',
-  workerUrl:     'https://manage.luxuryvillasofguruvayur.com/api',
-  spreadsheetId: '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
-  address:       'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101',
+  name:               'Guruvayur Estates',
+  villaName:          'Guruvayur Villa (Dwarka)',
+  villaId:            'dwarka',
+  phone1:             '+91 99950 43283',   // Villa landline / main
+  phone2:             '+91 97287 65101',   // Owner mobile (operations)
+  guestContactPhone:  '+91 97287 65101',   // Number shown to guests for queries
+  ownerEmail:         'kerala.luxuryvillas@gmail.com',
+  ownerEmailCC:       'bijisukumar@gmail.com',
+  driveRootId:        '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2',
+  workerUrl:          'https://manage.luxuryvillasofguruvayur.com/api',
+  spreadsheetId:      '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
+  address:            'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101',
 };
 
 // ── Convenience aliases (used throughout script) ───────────────────────────
@@ -507,6 +508,8 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
 
   var subject = 'Your Check-in Registration — ' + CLIENT.villaName;
 
+  var eta = (stayDetails && stayDetails.eta) ? stayDetails.eta : '';
+
   var guestBody =
     'Dear ' + guestName + ',\n\n' +
     'Thank you for completing your check-in registration. ' +
@@ -515,15 +518,19 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
     '  Check-in :  ' + checkIn  + '\n' +
     '  Check-out:  ' + checkOut + '\n' +
     '  Nights   :  ' + nights   + '\n' +
+    (eta        ? '  ETA      :  ' + eta        + '\n' : '') +
+    '\n' +
+    'GUEST DETAILS\n' +
     '  Adults   :  ' + adults   + (children > 0 ? '\n  Children :  ' + children : '') + '\n' +
     (phone      ? '  Phone    :  ' + phone      + '\n' : '') +
     (guestEmail ? '  Email    :  ' + guestEmail + '\n' : '') +
     '\n' + reqSection +
-    'If anything looks incorrect, contact us immediately at ' + CLIENT.phone2 + '.\n\n' +
-    'We look forward to welcoming you!\n\n' +
+    'If anything looks incorrect, please contact us immediately at ' +
+    CLIENT.guestContactPhone + '.\n\n' +
+    'We look forward to welcoming you to ' + CLIENT.villaName + '!\n\n' +
     'Warm regards,\n' +
     CLIENT.villaName + '\n' +
-    CLIENT.phone1 + '  |  ' + CLIENT.phone2;
+    CLIENT.phone1 + '  |  ' + CLIENT.guestContactPhone;
 
   var ownerBody =
     'NEW CHECK-IN FORM SUBMITTED\n' +

@@ -297,8 +297,15 @@ export default function GuestCheckIn() {
           <div style={s.partnerBadge}>Booked via {partnerName}</div>
         )}
         <div style={s.welcomeText}>
-          Welcome! Please complete your guest registration below — it takes about 2 minutes
-          and is required for check-in.
+          {partner === 'direct'
+            ? <>Welcome to <strong style={{ color:'#E8B86D' }}>{villaName}</strong>.</>
+            : <>Welcome to <strong style={{ color:'#E8B86D' }}>{villaName}</strong> — booked through <strong style={{ color:'#85B7EB' }}>{partnerName}</strong>.</>
+          }
+          <br /><br />
+          As required under the <strong style={{ color:'#D0D0D0' }}>Registration of Foreigners Act</strong> and
+          the <strong style={{ color:'#D0D0D0' }}>Kerala Police Hotel Guest Rules</strong>, all guests must
+          complete this registration before check-in. This is a mandatory government requirement —
+          please complete it at the earliest.
         </div>
       </div>
 

@@ -601,10 +601,13 @@ function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
   var newFolder = monthFolder.createFolder(folderName);
 
   // Tell Worker the folder ID so it can link it to the stay in D1
+  // folderCreated:1 marks that folder has been successfully created
   callWorker('POST', 'updateDriveFolder', {
     stayId:         stayId,
     driveFolderId:  newFolder.getId(),
     driveFolderUrl: newFolder.getUrl(),
+    folderCreated:  1,
+    processingNote: 'Created by getOrCreateGuestFolder — ' + new Date().toISOString(),
   });
 
   Logger.log('Created folder: ' + folderName);

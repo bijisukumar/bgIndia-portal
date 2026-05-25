@@ -363,55 +363,54 @@ function processPendingCheckInForms() {
       var nights = stay.nights || 1;
       var checkOut = stay.checkOut || '';
 
-      // Build TXT content from full stay details
+      // Build TXT content — only show fields that have data
       var s = (fullStay && fullStay.data) ? fullStay.data : {};
-      var guestCount = (parseInt(s.adults) || 1) + (parseInt(s.children) || 0);
+      var adults   = parseInt(s.adults)   || 1;
+      var children = parseInt(s.children) || 0;
       var lines = [
         '============================================================',
         '  GUEST REGISTRATION — ' + CLIENT.villaName,
         '============================================================',
         '',
         'STAY DETAILS',
-        '  Stay ID:      ' + stay.stayId,
-        '  Check-in:     ' + stay.checkIn,
-        '  Check-out:    ' + (s.checkoutDate || stay.checkOut || 'TBD'),
-        '  Nights:       ' + (s.nights || nights),
+        '  Check-in :  ' + stay.checkIn,
+        '  Check-out:  ' + (s.checkoutDate || stay.checkOut || 'TBD'),
+        '  Nights   :  ' + (s.nights || nights),
         '',
         'GUEST DETAILS',
-        '  Name:         ' + stay.guestName,
-        '  Nationality:  ' + (s.nationality || 'Indian'),
-        '  Adults:       ' + (s.adults || 1),
-        '  Children:     ' + (s.children || 0),
-        '  Total guests: ' + guestCount,
-        '  Phone:        ' + (s.phone || stay.phone || 'Not provided'),
-        '  Email:        ' + (s.email || stay.email || 'Not provided'),
-        '  From:         ' + [s.city, s.state, s.country].filter(Boolean).join(', '),
-        '',
-        'TRAVEL',
-        '  Purpose:      ' + (s.purposeOfVisit || 'Not provided'),
-        '  Transport:    ' + (s.modeOfTransport || 'Not provided'),
-        '  Vehicle No:   ' + (s.vehicleNumber || 'N/A'),
-        '  ETA:          ' + (s.eta || 'Not provided'),
-        '',
-        'IDENTITY',
-        '  ID Type:      ' + (s.govtIdType || 'Not provided'),
-        '  ID Number:    ' + (s.govtIdNum || 'Not provided'),
-        '',
-        'ADDITIONAL REQUESTS',
+        '  Name     :  ' + stay.guestName,
+        '  Nationality: ' + (s.nationality || 'Indian'),
+        '  Adults   :  ' + adults,
       ];
+      if (children > 0) lines.push('  Children :  ' + children);
+      lines.push('  Total    :  ' + (adults + children) + ' guest(s)');
+      if (s.phone || stay.phone) lines.push('  Phone    :  ' + (s.phone || stay.phone));
+      if (s.email || stay.email) lines.push('  Email    :  ' + (s.email || stay.email));
+      lines.push('');
 
-      if (s.requestBreakfast)    lines.push('  ✓ Breakfast — ' + (s.breakfastChoice || 'Idli'));
-      if (s.requestCab)          lines.push('  ✓ Cab service');
-      if (s.requestEarlyCheckin) lines.push('  ✓ Early check-in requested');
-      if (s.requestLateCheckout) lines.push('  ✓ Late check-out requested');
-      if (!s.requestBreakfast && !s.requestCab && !s.requestEarlyCheckin && !s.requestLateCheckout) {
-        lines.push('  None');
+      // Travel — only if data exists
+      var hasTravel = s.purposeOfVisit || s.modeOfTransport || s.eta;
+      if (hasTravel) {
+        lines.push('TRAVEL');
+        if (s.purposeOfVisit)  lines.push('  Purpose  :  ' + s.purposeOfVisit);
+        if (s.modeOfTransport) lines.push('  Transport:  ' + s.modeOfTransport);
+        if (s.vehicleNumber)   lines.push('  Vehicle  :  ' + s.vehicleNumber);
+        if (s.eta)             lines.push('  ETA      :  ' + s.eta);
+        lines.push('');
       }
 
+      // Additional requests — only if any selected
+      var hasRequests = s.requestBreakfast || s.requestCab || s.requestEarlyCheckin || s.requestLateCheckout;
+      lines.push('ADDITIONAL REQUESTS');
+      if (hasRequests) {
+        if (s.requestBreakfast)    lines.push('  ✓  Breakfast — ' + (s.breakfastChoice || 'Idli'));
+        if (s.requestCab)          lines.push('  ✓  Cab service');
+        if (s.requestEarlyCheckin) lines.push('  ✓  Early check-in');
+        if (s.requestLateCheckout) lines.push('  ✓  Late check-out');
+      } else {
+        lines.push('  None requested');
+      }
       lines.push('');
-      lines.push('STATUS: Pending Owner Review');
-      lines.push('Submitted via: Guest Check-in Web Form');
-      lines.push('Generated: ' + new Date().toISOString());
       lines.push('============================================================');
 
       folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
@@ -510,38 +509,38 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
 
   var guestBody =
     'Dear ' + guestName + ',\n\n' +
-    'Thank you for completing your check-in registration for ' + CLIENT.villaName + '.\n\n' +
-    'Please verify the following details we have on record:\n\n' +
-    '  Stay ID:      ' + stayId   + '\n' +
-    '  Check-in:     ' + checkIn  + '\n' +
-    '  Check-out:    ' + checkOut + '\n' +
-    '  Nights:       ' + nights   + '\n' +
-    '  Adults:       ' + adults   + '\n' +
-    '  Children:     ' + children + '\n' +
-    '  Phone:        ' + (phone  || 'Not provided') + '\n' +
-    '  Email:        ' + (guestEmail || 'Not provided') + '\n\n' +
-    reqSection +
-    'If any of the above is incorrect, please contact us immediately at ' + CLIENT.phone2 + '.\n\n' +
-    'Our team will verify your details and confirm your check-in shortly.\n\n' +
+    'Thank you for completing your check-in registration. ' +
+    'Please verify the details we have on record:\n\n' +
+    'STAY DETAILS\n' +
+    '  Check-in :  ' + checkIn  + '\n' +
+    '  Check-out:  ' + checkOut + '\n' +
+    '  Nights   :  ' + nights   + '\n' +
+    '  Adults   :  ' + adults   + (children > 0 ? '\n  Children :  ' + children : '') + '\n' +
+    (phone      ? '  Phone    :  ' + phone      + '\n' : '') +
+    (guestEmail ? '  Email    :  ' + guestEmail + '\n' : '') +
+    '\n' + reqSection +
+    'If anything looks incorrect, contact us immediately at ' + CLIENT.phone2 + '.\n\n' +
+    'We look forward to welcoming you!\n\n' +
     'Warm regards,\n' +
     CLIENT.villaName + '\n' +
     CLIENT.phone1 + '  |  ' + CLIENT.phone2;
 
   var ownerBody =
-    'NEW GUEST CHECK-IN FORM SUBMITTED\n\n' +
-    'Guest:      ' + guestName  + '\n' +
-    'Stay ID:    ' + stayId     + '\n' +
-    'Check-in:   ' + checkIn    + '\n' +
+    'NEW CHECK-IN FORM SUBMITTED\n' +
+    '============================================================\n' +
+    'Guest    :  ' + guestName  + '\n' +
+    'Check-in :  ' + checkIn    + '\n' +
     'Check-out:  ' + checkOut   + '\n' +
-    'Nights:     ' + nights     + '\n' +
-    'Adults:     ' + adults     + '\n' +
-    'Children:   ' + children   + '\n' +
-    'Phone:      ' + (phone     || 'Not provided') + '\n' +
-    'Email:      ' + (guestEmail || 'Not provided') + '\n\n' +
-    reqSection +
-    'Full details:\n' + txtContent + '\n\n' +
+    'Nights   :  ' + nights     + '\n' +
+    'Adults   :  ' + adults     + (children > 0 ? '  |  Children: ' + children : '') + '\n' +
+    (phone      ? 'Phone    :  ' + phone      + '\n' : '') +
+    (guestEmail ? 'Email    :  ' + guestEmail + '\n' : '') +
+    '\n' + reqSection +
+    '------------------------------------------------------------\n' +
+    txtContent + '\n' +
+    '------------------------------------------------------------\n' +
     'Drive folder: ' + folderUrl + '\n\n' +
-    'ACTION REQUIRED: Please review and approve in the Owner Portal.';
+    '>> ACTION REQUIRED: Review and approve in the Owner Portal <<';
 
   // Send to owner
   try {

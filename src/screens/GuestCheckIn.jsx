@@ -323,7 +323,7 @@ export default function GuestCheckIn() {
         {/* ── NATIONALITY TOGGLE ── */}
         <Field label="Nationality" required>
           <div style={{ display:'flex', gap:'8px' }}>
-            {[['Indian','🇮🇳 Indian National'],['Foreign','✈️ Foreign National']].map(([val,lbl]) => (
+            {[['Indian','🇮🇳  Indian'],['Foreign','🌍  Foreign National']].map(([val,lbl]) => (
               <button key={val} onClick={() => setNationality(val)}
                 style={{ flex:1, padding:'11px 8px', borderRadius:'10px', cursor:'pointer',
                   border: nationality===val ? '1px solid #C8903A' : '1px solid rgba(255,255,255,0.1)',

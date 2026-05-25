@@ -314,7 +314,13 @@ export default function GuestCheckIn() {
       {/* ── HEADER ── */}
       <div style={s.header}>
         <div style={s.brandRow}>
-          <div style={s.brandIcon}>🏡</div>
+          <img
+            src="/icons/logo-black.png"
+            alt="Guruvayur Estates"
+            style={s.logoImg}
+            onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex' }}
+          />
+          <div style={{ ...s.brandIcon, display:'none' }}>🏡</div>
           <div>
             <div style={s.brandName}>{villaName}</div>
             <div style={s.brandSub}>GURUVAYUR · KERALA</div>
@@ -676,8 +682,11 @@ const s = {
   header: { background:'linear-gradient(135deg, #111827 0%, #1A2332 100%)',
             padding:'24px 20px 20px', borderBottom:'1px solid rgba(200,144,58,0.2)' },
   brandRow:    { display:'flex', alignItems:'center', gap:'14px', marginBottom:'12px' },
+  logoImg:     { height:'56px', width:'56px', borderRadius:'12px', objectFit:'cover',
+                 border:'1px solid rgba(200,144,58,0.3)', boxShadow:'0 4px 12px rgba(200,144,58,0.15)' },
   brandIcon:   { fontSize:'2rem', background:'rgba(200,144,58,0.15)', borderRadius:'12px',
-                 padding:'8px 10px', border:'1px solid rgba(200,144,58,0.3)' },
+                 padding:'8px 10px', border:'1px solid rgba(200,144,58,0.3)',
+                 alignItems:'center', justifyContent:'center' },
   brandName:   { fontFamily:"'Georgia',serif", fontSize:'1.1rem', fontWeight:'700',
                  color:'#E8B86D', letterSpacing:'0.5px' },
   brandSub:    { fontSize:'0.6rem', color:'#5C7080', letterSpacing:'3px', marginTop:'2px' },

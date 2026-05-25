@@ -469,6 +469,16 @@ function processPendingCheckInForms() {
     }
   });
 
+  // ── CLEANUP: delete guest_documents older than 24hrs where folder is created ──
+  try {
+    var cleanResp = callWorker('POST', 'cleanupExpiredDocuments', {});
+    if (cleanResp && cleanResp.success) {
+      Logger.log('Cleanup: deleted ' + (cleanResp.data.deleted || 0) + ' expired document(s)');
+    }
+  } catch(cleanupErr) {
+    Logger.log('Cleanup error (non-fatal): ' + cleanupErr.message);
+  }
+
   Logger.log('=== processPendingCheckInForms END ===');
 }
 

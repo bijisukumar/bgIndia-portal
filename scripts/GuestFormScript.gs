@@ -416,6 +416,28 @@ function processPendingCheckInForms() {
       folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
       Logger.log('TXT file created for ' + stay.stayId);
 
+      // Upload ID documents from D1 to Drive folder
+      try {
+        var docsResp = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
+        if (docsResp && docsResp.success && docsResp.data && docsResp.data.length > 0) {
+          docsResp.data.forEach(function(doc) {
+            if (!doc.file_b64) return;
+            try {
+              var decoded  = Utilities.base64Decode(doc.file_b64);
+              var blob     = Utilities.newBlob(decoded, 'image/jpeg', doc.file_name || ('ID-' + stay.stayId + '.jpg'));
+              folder.createFile(blob);
+              Logger.log('Uploaded doc to Drive: ' + doc.file_name + ' (' + doc.doc_type + ')');
+            } catch(docErr) {
+              Logger.log('Doc upload error (' + doc.doc_type + '): ' + docErr.message);
+            }
+          });
+        } else {
+          Logger.log('No documents found in D1 for ' + stay.stayId);
+        }
+      } catch(docsErr) {
+        Logger.log('getGuestDocuments error: ' + docsErr.message);
+      }
+
       // Update D1 with folder URL
       callWorker('POST', 'updateDriveFolder', {
         stayId:         stay.stayId,

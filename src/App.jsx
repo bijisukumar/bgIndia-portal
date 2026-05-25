@@ -108,11 +108,12 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Public guest check-in form — no auth required */}
+          {/* /checkin routes are public — handled above ProtectedRoutes */}
+          <Route path="/login" element={<LoginGate />} />
+          {/* Public — no auth required */}
           <Route path="/checkin" element={<GuestCheckIn />} />
           <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
-          <Route path="/login" element={<LoginGate />} />
-          <Route path="/*"     element={<ProtectedRoutes />} />
+          <Route path="/*" element={<ProtectedRoutes />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

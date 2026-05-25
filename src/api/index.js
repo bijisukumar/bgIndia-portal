@@ -66,6 +66,12 @@ async function post(action, payload) {
 }
 
 export const api = {
+  // ── CHECKIN LINKS ────────────────────────────────────────────
+  resolveCheckinLink: (data)   => post('resolveCheckinLink', data),
+  getCheckinLinks:    ()       => get('getCheckinLinks'),
+  createCheckinLink:  (data)   => post('createCheckinLink', data),
+  toggleCheckinLink:  (data)   => post('toggleCheckinLink', data),
+
   // ── GUEST CHECK-IN FORM (public) ───────────────────────────
   submitGuestCheckIn:       (data)   => post('submitGuestCheckIn', data),
 

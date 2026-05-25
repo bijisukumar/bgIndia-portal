@@ -330,9 +330,12 @@ export async function onRequest(ctx) {
 
 
 
+      // ── PUBLIC POST routes — parse body here since auth guard hasn't run yet ──
+      const publicBody = method === 'POST' ? await request.json().catch(() => ({})) : {}
+
       // RESOLVE CHECKIN LINK — public endpoint (no auth)
       if (action === 'resolveCheckinLink') {
-        const { token: linkToken } = body
+        const { token: linkToken } = publicBody
         if (!linkToken) return err('token required')
         const link = await DB.prepare(
           `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`

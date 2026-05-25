@@ -1734,6 +1734,18 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, status: 'ready_for_checkin' } })
       }
 
+      // DELETE GUEST DOCUMENTS — called by Apps Script after uploading to Drive
+      // Cleans up base64 image data from D1 once safely stored in Drive
+      if (action === 'deleteGuestDocuments') {
+        const stayId = url.searchParams.get('stayId') || body?.stayId || ''
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `DELETE FROM guest_documents WHERE stay_id = ?`
+        ).bind(stayId).run()
+        Logger.log && console.log('Cleaned guest_documents for', stayId)
+        return json({ success: true, data: { stayId, cleaned: true } })
+      }
+
       // GET GUEST DOCUMENTS — for Apps Script to fetch and upload to Drive
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''

@@ -301,14 +301,13 @@ export async function onRequest(ctx) {
               arrival_date_india, port_of_arrival, next_destination,
               request_early_checkin, request_late_checkout,
               request_breakfast, breakfast_choice, request_cab,
-              checkin_form_submitted, checkin_form_submitted_at,
-              status, created_by, updated_by, created_at, updated_at
+              checkin_form_submitted, status, created_by, updated_by
             ) VALUES (
               ?,?,?,?,?,?,?,?,?,?,?,0,0,
               ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
               ?,?,?,?,?,?,?,?,?,?,?,?,
               ?,?,?,?,?,
-              1,?,'pending_review','auto','auto',?,?
+              1,'pending_review','auto','auto'
             )
           `).bind(
             stayId, villaId, partner || 'direct',
@@ -325,8 +324,7 @@ export async function onRequest(ctx) {
             passportExpiry||null, visaNumber||null, visaType||null,
             visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
-            submittedAt, submittedAt, submittedAt
+            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab
           ).run()
         }
 

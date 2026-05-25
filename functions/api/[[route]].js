@@ -326,7 +326,7 @@ export async function onRequest(ctx) {
             visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
             reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
-            submittedAt, submittedAt, submittedAt
+            submittedAt, submittedAt
           ).run()
         }
 

@@ -1401,17 +1401,20 @@ export async function onRequest(ctx) {
         const prevLog = existing?.processing_log ? existing.processing_log + '\n' : ''
         const logEntry = now() + ' — Drive folder created: ' + (driveFolderUrl || '') +
           (processingNote ? ' | ' + processingNote : '')
+        const setFolderCreated = body.folderCreated !== undefined ? (body.folderCreated ? 1 : 0) : (existing?.folder_created || 0)
         await DB.prepare(
           `UPDATE stays SET
-            drive_folder_id  = ?,
-            drive_folder_url = ?,
+            drive_folder_id   = ?,
+            drive_folder_url  = ?,
+            folder_created    = ?,
             folder_created_at = ?,
-            processing_log   = ?,
+            processing_log    = ?,
             updated_by = 'auto', updated_at = datetime('now')
            WHERE stay_id = ?`
         ).bind(
           driveFolderId || null,
           driveFolderUrl || null,
+          setFolderCreated,
           folderCreatedAt,
           prevLog + logEntry,
           stayId
@@ -1780,19 +1783,22 @@ export async function onRequest(ctx) {
       if (action === 'getPendingReviewStays') {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
-                  guest_phone, guest_email, drive_folder_url, created_at
+                  guest_phone, guest_email, drive_folder_url, created_at,
+                  folder_created, folder_created_at
            FROM stays WHERE status = 'pending_review' ORDER BY checkin_date ASC`
         ).all()
         return json({ success: true, data: results.map(r => ({
-          stayId:        r.stay_id,
-          guestName:     r.guest_name,
-          checkIn:       r.checkin_date,
-          checkOut:      r.checkout_date,
-          nights:        r.nights,
-          phone:         r.guest_phone,
-          email:         r.guest_email,
-          driveFolderUrl:r.drive_folder_url,
-          createdAt:     r.created_at,
+          stayId:          r.stay_id,
+          guestName:       r.guest_name,
+          checkIn:         r.checkin_date,
+          checkOut:        r.checkout_date,
+          nights:          r.nights,
+          phone:           r.guest_phone,
+          email:           r.guest_email,
+          driveFolderUrl:  r.drive_folder_url,
+          createdAt:       r.created_at,
+          folderCreated:   r.folder_created || 0,
+          folderCreatedAt: r.folder_created_at || null,
         })) })
       }
 

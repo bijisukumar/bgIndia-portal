@@ -5,8 +5,8 @@
 // Supports Indian and Foreign national flows (Form C compliance)
 // ============================================================
 
-import { useState, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useState, useRef, useEffect } from 'react'
+import { useSearchParams, useParams } from 'react-router-dom'
 
 const VILLA_NAMES = { dwarka: 'Guruvayur Villa (Dwarka)' }
 const VILLA_ADDRESSES = {
@@ -106,13 +106,40 @@ function UploadBox({ label, preview, onClick, color='#C8903A', icon='📷', hint
 }
 
 export default function GuestCheckIn() {
-  const [params]  = useSearchParams()
-  const villaId   = params.get('villa')   || 'dwarka'
-  const partner   = params.get('partner') || 'direct'
-  const stayId    = params.get('stay')    || ''
-  const villaName = VILLA_NAMES[villaId]  || 'Guruvayur Villa'
-  const villaAddr = VILLA_ADDRESSES[villaId] || {}
-  const partnerName = PARTNER_NAMES[partner] || partner
+  const [params]    = useSearchParams()
+  const { linkToken } = useParams()
+  const stayId      = params.get('stay') || ''
+
+  // Resolved from token or fallback to query params
+  const [villaId,     setVillaId]     = useState(params.get('villa')   || 'dwarka')
+  const [partner,     setPartner]     = useState(params.get('partner') || 'direct')
+  const [linkLoading, setLinkLoading] = useState(!!linkToken)
+  const [linkError,   setLinkError]   = useState('')
+
+  const villaName   = VILLA_NAMES[villaId]      || 'Guruvayur Villa'
+  const villaAddr   = VILLA_ADDRESSES[villaId]  || {}
+  const partnerName = PARTNER_NAMES[partner]    || partner
+
+  // Resolve opaque token → villa + partner
+  useEffect(() => {
+    if (!linkToken) return
+    fetch('/api/resolveCheckinLink', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: linkToken }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          setVillaId(data.data.villaId)
+          setPartner(data.data.partner)
+        } else {
+          setLinkError(data.error || 'Invalid check-in link')
+        }
+      })
+      .catch(() => setLinkError('Unable to verify check-in link'))
+      .finally(() => setLinkLoading(false))
+  }, [linkToken])
 
   // Nationality
   const [nationality, setNationality] = useState('Indian')
@@ -310,6 +337,22 @@ export default function GuestCheckIn() {
       </div>
 
       <div style={s.body}>
+
+        {/* Link loading / error */}
+        {linkLoading && (
+          <div style={{ textAlign:'center', padding:'40px', color:'#9AA5B4' }}>
+            <div style={{ fontSize:'1.5rem', marginBottom:'8px' }}>⏳</div>
+            Verifying your check-in link…
+          </div>
+        )}
+        {linkError && (
+          <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)',
+            borderRadius:'10px', padding:'16px', color:'#EF4444', textAlign:'center', marginBottom:'16px' }}>
+            ⚠️ {linkError}<br />
+            <span style={{ fontSize:'0.75rem', color:'#9AA5B4' }}>Please contact the villa for a valid link.</span>
+          </div>
+        )}
+        {!linkLoading && !linkError && (<>
 
         {/* Error banner */}
         {error && (
@@ -597,8 +640,11 @@ export default function GuestCheckIn() {
           </Field>
         </>)}
 
+        </> /* end !linkLoading && !linkError */
+        )}
+
         {/* ── SUBMIT ── */}
-        <div style={{ marginTop:'28px' }}>
+        {!linkLoading && !linkError && <div style={{ marginTop:'28px' }}>
           {error && (
             <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)',
               borderRadius:'10px', padding:'12px 16px', color:'#EF4444',
@@ -618,7 +664,7 @@ export default function GuestCheckIn() {
             Your information is collected for hotel registration compliance only
             and is not shared with third parties.
           </p>
-        </div>
+        </div>}
 
       </div>
     </div>

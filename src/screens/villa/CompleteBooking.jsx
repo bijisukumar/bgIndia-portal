@@ -505,25 +505,45 @@ export default function CompleteBooking() {
                   <div style={{color:'var(--gold)',fontWeight:'600',marginBottom:'6px',fontSize:'0.78rem'}}>
                     STAY LIFECYCLE
                   </div>
-                  {[
-                    ['Booked',              'Booking received, not yet confirmed'],
-                    ['Confirmed',           'Booking confirmed with guest'],
-                    ['Docs Uploaded',       'Guest has uploaded ID + registration form'],
-                    ['Ready for Check-in',  '← YOU ARE HERE · Raman can now check in'],
-                    ['Checked In',          'Raman completed check-in, car photos taken'],
-                    ['Ready for Check-out', 'Guest ready to leave'],
-                    ['Checked Out',         'Stay complete, Raman commission auto-created'],
-                    ['Closed',              'Financials settled'],
-                  ].map(([st,desc],i) => (
-                    <div key={i} style={{display:'flex',gap:'10px',
-                      color: s.status===st.toLowerCase().replace(/ /g,'_') ? 'var(--text)':'inherit'}}>
-                      <span style={{
-                        minWidth:'130px',flexShrink:0,
-                        color: s.status===st.toLowerCase().replace(/ /g,'_') ? 'var(--gold)':'inherit',
-                        fontWeight: s.status===st.toLowerCase().replace(/ /g,'_') ? '700':'400',
-                      }}>{st}</span>
-                      <span>{desc}</span>
-                    </div>
+                  {(() => {
+                    const STAGES = [
+                      ['booked',              'Booked',              'Booking received, not yet confirmed'],
+                      ['confirmed',           'Confirmed',           'Booking confirmed with guest'],
+                      ['docs_uploaded',       'Docs Uploaded',       'Guest has uploaded ID + registration form'],
+                      ['pending_review',      'Pending Review',      'Guest submitted check-in form — awaiting owner approval'],
+                      ['ready_for_checkin',   'Ready for Check-in',  'Raman can now check in the guest'],
+                      ['checked_in',          'Checked In',          'Raman completed check-in, car photos taken'],
+                      ['ready_for_checkout',  'Ready for Check-out', 'Guest ready to leave'],
+                      ['checked_out',         'Checked Out',         'Stay complete, Raman commission auto-created'],
+                      ['closed',              'Closed',              'Financials settled'],
+                    ]
+                    const currentIdx = STAGES.findIndex(([key]) => key === s.status)
+                    return STAGES.map(([key, label, desc], i) => {
+                      const isCurrent = i === currentIdx
+                      const isPast    = i < currentIdx
+                      return (
+                        <div key={i} style={{display:'flex',gap:'10px',alignItems:'center',
+                          padding:'3px 8px', borderRadius:'6px',
+                          background: isCurrent ? 'rgba(200,144,58,0.12)' : 'transparent',
+                          border: isCurrent ? '1px solid rgba(200,144,58,0.3)' : '1px solid transparent',
+                        }}>
+                          <span style={{fontSize:'0.75rem', width:'16px', flexShrink:0, textAlign:'center'}}>
+                            {isCurrent ? '▶' : isPast ? '✓' : '○'}
+                          </span>
+                          <span style={{
+                            minWidth:'130px', flexShrink:0,
+                            color: isCurrent ? 'var(--gold)' : isPast ? '#34A853' : 'var(--text-dim)',
+                            fontWeight: isCurrent ? '700' : '400',
+                            textDecoration: isPast ? 'none' : 'none',
+                          }}>{label}</span>
+                          <span style={{
+                            color: isCurrent ? 'var(--text)' : 'var(--text-dim)',
+                            fontWeight: isCurrent ? '600' : '400',
+                          }}>{desc}</span>
+                        </div>
+                      )
+                    })
+                  })()}
                   ))}
                 </div>
               </>

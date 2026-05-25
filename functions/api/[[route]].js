@@ -1756,6 +1756,20 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, status: 'ready_for_checkin' } })
       }
 
+      // CLEANUP EXPIRED DOCUMENTS — deletes guest_documents older than 24hrs
+      // where folder_created=1 (safely stored in Drive)
+      // Called at end of every processPendingCheckInForms run
+      if (action === 'cleanupExpiredDocuments') {
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
+          .toISOString().slice(0, 19).replace('T', ' ')
+        const result = await DB.prepare(
+          `DELETE FROM guest_documents
+           WHERE folder_created = 1
+             AND created_at < ?`
+        ).bind(cutoff).run()
+        return json({ success: true, data: { deleted: result.changes || 0, cutoff } })
+      }
+
       // DELETE GUEST DOCUMENTS — called by Apps Script after uploading to Drive
       // Cleans up base64 image data from D1 once safely stored in Drive
       if (action === 'deleteGuestDocuments') {

@@ -330,6 +330,88 @@ function ManualTriggerBlock() {
   )
 }
 
+
+// ── CHECKIN LINKS BLOCK ──────────────────────────────────────────────────
+// Shows all check-in links with copy button and active/inactive toggle
+function CheckinLinksBlock() {
+  const [links,   setLinks]   = useState(null)
+  const [copied,  setCopied]  = useState(null)
+  const [toggling,setToggling]= useState(null)
+  const BASE = window.location.origin
+
+  useEffect(() => {
+    api.getCheckinLinks().then(data => {
+      if (Array.isArray(data)) setLinks(data)
+    }).catch(() => setLinks([]))
+  }, [])
+
+  async function copyLink(lnk) {
+    const url = `${BASE}/checkin/${lnk.token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(lnk.token)
+      setTimeout(() => setCopied(null), 2000)
+    } catch { }
+  }
+
+  async function toggleLink(lnk) {
+    setToggling(lnk.token)
+    try {
+      await api.toggleCheckinLink({ token: lnk.token })
+      setLinks(prev => prev.map(l =>
+        l.token === lnk.token ? { ...l, is_active: l.is_active ? 0 : 1 } : l
+      ))
+    } finally { setToggling(null) }
+  }
+
+  if (!links) return null
+
+  return (
+    <div style={{ marginBottom:'16px' }}>
+      <div className="card-section-label" style={{ color:'#8B5CF6' }}>
+        🔗 CHECK-IN LINKS
+      </div>
+      <div style={{ background:'rgba(139,92,246,0.05)', border:'1px solid rgba(139,92,246,0.2)',
+        borderRadius:'12px', overflow:'hidden' }}>
+        {links.map((lnk, i) => (
+          <div key={lnk.token} style={{ padding:'11px 14px',
+            borderBottom: i < links.length-1 ? '1px solid rgba(139,92,246,0.1)' : 'none',
+            display:'flex', alignItems:'center', gap:'10px',
+            opacity: lnk.is_active ? 1 : 0.45 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:'0.82rem', fontWeight:'600', color: lnk.is_active ? '#D0D0D0' : '#6B7280' }}>
+                {lnk.label || lnk.partner}
+              </div>
+              <div style={{ fontSize:'0.68rem', color:'#5C7080', marginTop:'2px',
+                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                /checkin/{lnk.token}
+                {lnk.use_count > 0 && <span style={{ marginLeft:'8px', color:'#8B5CF6' }}>
+                  · {lnk.use_count} open{lnk.use_count !== 1 ? 's' : ''}
+                </span>}
+              </div>
+            </div>
+            {/* Copy */}
+            <button onClick={() => copyLink(lnk)}
+              style={{ padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(139,92,246,0.3)',
+                background: copied===lnk.token ? 'rgba(52,168,83,0.15)' : 'rgba(139,92,246,0.1)',
+                color: copied===lnk.token ? '#34A853' : '#8B5CF6',
+                fontSize:'0.72rem', cursor:'pointer', whiteSpace:'nowrap', fontWeight:'600' }}>
+              {copied===lnk.token ? '✅ Copied' : '📋 Copy'}
+            </button>
+            {/* Toggle */}
+            <button onClick={() => toggleLink(lnk)} disabled={toggling===lnk.token}
+              style={{ padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.08)',
+                background:'transparent', color: lnk.is_active ? '#EF4444' : '#34A853',
+                fontSize:'0.72rem', cursor:'pointer', whiteSpace:'nowrap' }}>
+              {toggling===lnk.token ? '…' : lnk.is_active ? 'Deactivate' : 'Activate'}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function OwnerHome() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -354,6 +436,9 @@ export default function OwnerHome() {
 
         {/* Manual Trigger — only visible when sheet guests have no folder */}
         <ManualTriggerBlock />
+
+        {/* Check-in Links — always visible for owner */}
+        <CheckinLinksBlock />
 
         <MenuSection section={HOSPITALITY} />
         <MenuSection section={PEOPLE} />

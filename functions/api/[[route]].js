@@ -1391,13 +1391,32 @@ export async function onRequest(ctx) {
 
       // UPDATE DRIVE FOLDER — called by Apps Script after folder creation
       if (action === 'updateDriveFolder') {
-        const { stayId, driveFolderId, driveFolderUrl } = body
+        const { stayId, driveFolderId, driveFolderUrl, processingNote } = body
         if (!stayId) return err('stayId required')
+        // Set folder_created_at only on first time (when folder didn't exist before)
+        const existing = await DB.prepare(
+          `SELECT folder_created_at, processing_log FROM stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        const folderCreatedAt = existing?.folder_created_at || now()
+        const prevLog = existing?.processing_log ? existing.processing_log + '\n' : ''
+        const logEntry = now() + ' — Drive folder created: ' + (driveFolderUrl || '') +
+          (processingNote ? ' | ' + processingNote : '')
         await DB.prepare(
-          `UPDATE stays SET drive_folder_id = ?, drive_folder_url = ?,
-           updated_by = 'auto', updated_at = ? WHERE stay_id = ?`
-        ).bind(driveFolderId || null, driveFolderUrl || null, now(), stayId).run()
-        return json({ success: true, data: { stayId, driveFolderId } })
+          `UPDATE stays SET
+            drive_folder_id  = ?,
+            drive_folder_url = ?,
+            folder_created_at = ?,
+            processing_log   = ?,
+            updated_by = 'auto', updated_at = datetime('now')
+           WHERE stay_id = ?`
+        ).bind(
+          driveFolderId || null,
+          driveFolderUrl || null,
+          folderCreatedAt,
+          prevLog + logEntry,
+          stayId
+        ).run()
+        return json({ success: true, data: { stayId, driveFolderId, folderCreatedAt } })
       }
 
       // SAVE REVIEW — called by Apps Script when review email arrives

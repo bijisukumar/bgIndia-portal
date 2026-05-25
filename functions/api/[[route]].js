@@ -942,22 +942,50 @@ export async function onRequest(ctx) {
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
+                  adults, children, guest_phone, guest_email,
+                  drive_folder_id, drive_folder_url, status,
+                  purpose_of_visit, mode_of_transport, vehicle_number, eta,
+                  nationality, city, state, country,
+                  request_early_checkin, request_late_checkout,
+                  request_breakfast, breakfast_choice, request_cab,
+                  govt_id_type, govt_id_num
            FROM stays
            WHERE guest_name LIKE ?
              AND status NOT IN ('cancelled','closed','checked_out')
            ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC
            LIMIT 1`
-        ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
+        ).bind(\`%\${firstName}%\`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
           return json({ success: true, data: {
-            stayId:        r.stay_id,
-            guestName:     r.guest_name,
-            checkinDate:   r.checkin_date,
-            driveFolderId: r.drive_folder_id,
-            driveFolderUrl:r.drive_folder_url,
-            status:        r.status,
+            stayId:           r.stay_id,
+            guestName:        r.guest_name,
+            checkinDate:      r.checkin_date,
+            checkoutDate:     r.checkout_date,
+            nights:           r.nights,
+            adults:           r.adults,
+            children:         r.children,
+            phone:            r.guest_phone,
+            email:            r.guest_email,
+            driveFolderId:    r.drive_folder_id,
+            driveFolderUrl:   r.drive_folder_url,
+            status:           r.status,
+            purposeOfVisit:   r.purpose_of_visit,
+            modeOfTransport:  r.mode_of_transport,
+            vehicleNumber:    r.vehicle_number,
+            eta:              r.eta,
+            nationality:      r.nationality,
+            city:             r.city,
+            state:            r.state,
+            country:          r.country,
+            requestEarlyCheckin: r.request_early_checkin,
+            requestLateCheckout: r.request_late_checkout,
+            requestBreakfast:    r.request_breakfast,
+            breakfastChoice:     r.breakfast_choice,
+            requestCab:          r.request_cab,
+            govtIdType:          r.govt_id_type,
+            govtIdNum:           r.govt_id_num,
           }})
         }
         return json({ success: true, data: null })

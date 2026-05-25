@@ -412,6 +412,54 @@ function CheckinLinksBlock() {
   )
 }
 
+
+// ── NEEDS ATTENTION BLOCK ────────────────────────────────────────────────
+function NeedsAttentionBlock() {
+  const [items, setItems] = useState([])
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    api.getPendingReviewStays().then(data => {
+      if (Array.isArray(data) && data.length > 0) {
+        setItems(data)
+      }
+    }).catch(() => {})
+  }, [])
+
+  if (items.length === 0) return null
+
+  return (
+    <div style={{ marginBottom:'16px', background:'rgba(239,68,68,0.06)',
+      border:'1px solid rgba(239,68,68,0.25)', borderRadius:'12px', overflow:'hidden' }}>
+      <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(239,68,68,0.15)',
+        display:'flex', alignItems:'center', gap:'8px' }}>
+        <span>🚨</span>
+        <span style={{ fontSize:'0.68rem', fontWeight:'700', color:'#EF4444', letterSpacing:'1.5px' }}>
+          NEEDS ATTENTION
+        </span>
+        <span style={{ marginLeft:'auto', background:'rgba(239,68,68,0.2)', color:'#EF4444',
+          fontSize:'0.65rem', fontWeight:'700', padding:'2px 8px', borderRadius:'10px' }}>
+          {items.length}
+        </span>
+      </div>
+      {items.map((item, i) => (
+        <div key={i} onClick={() => navigate('/owner/villa')}
+          style={{ padding:'11px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:'10px',
+            borderBottom: i < items.length-1 ? '1px solid rgba(239,68,68,0.1)' : 'none' }}>
+          <span style={{ fontSize:'1.1rem' }}>🔶</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:'0.85rem', fontWeight:'600', color:'#F0F0F0' }}>{item.guestName}</div>
+            <div style={{ fontSize:'0.72rem', color:'#9AA5B4', marginTop:'2px' }}>
+              Check-in: {item.checkIn} · Pending your review
+            </div>
+          </div>
+          <span style={{ color:'#EF4444' }}>›</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function OwnerHome() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -431,7 +479,10 @@ export default function OwnerHome() {
       </div>
 
       <div className="screen-body">
-        {/* Pending Review — only visible when provisional bookings exist */}
+        {/* Needs Attention — urgent items at top of page */}
+        <NeedsAttentionBlock />
+
+        {/* Pending Review */}
         <PendingReviewBlock />
 
         {/* Manual Trigger — only visible when sheet guests have no folder */}

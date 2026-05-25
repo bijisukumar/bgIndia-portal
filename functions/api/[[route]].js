@@ -327,6 +327,21 @@ export async function onRequest(ctx) {
       }
 
 
+
+      // RESOLVE CHECKIN LINK — public endpoint (no auth)
+      if (action === 'resolveCheckinLink') {
+        const { token: linkToken } = body
+        if (!linkToken) return err('token required')
+        const link = await DB.prepare(
+          `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
+        ).bind(linkToken).first()
+        if (!link) return json({ success: false, error: 'Invalid link' }, { status: 404 })
+        if (!link.is_active) return json({ success: false, error: 'Link deactivated' }, { status: 403 })
+        await DB.prepare(`UPDATE checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`).bind(now(), linkToken).run()
+        return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
+      }
+
+
   // ── AUTH GUARD — verify JWT on every other request ─────
   const authHeader = request.headers.get('Authorization') || ''
   const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
@@ -1692,6 +1707,58 @@ export async function onRequest(ctx) {
           driveFolderUrl:r.drive_folder_url,
           createdAt:     r.created_at,
         })) })
+      }
+
+
+      // RESOLVE CHECKIN LINK — handled above auth guard
+      // if (action === 'resolveCheckinLink') {
+        const { token: linkToken } = body
+        if (!linkToken) return err('token required')
+        const link = await DB.prepare(
+          `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
+        ).bind(linkToken).first()
+        if (!link) return err('Invalid or expired link', 404)
+        if (!link.is_active) return err('This check-in link has been deactivated', 403)
+        // Increment use count
+        await DB.prepare(
+          `UPDATE checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`
+        ).bind(now(), linkToken).run()
+        return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
+      }
+
+      // GET ALL CHECKIN LINKS — owner only (auth required below)
+      if (action === 'getCheckinLinks') {
+        const { results } = await DB.prepare(
+          `SELECT token, villa_id, partner, label, is_active, use_count, created_at
+           FROM checkin_links ORDER BY villa_id, partner`
+        ).all()
+        return json({ success: true, data: results })
+      }
+
+      // CREATE CHECKIN LINK
+      if (action === 'createCheckinLink') {
+        const { villaId = 'dwarka', partner: p, label: lbl } = body
+        if (!p) return err('partner required')
+        // Generate short token: villa prefix + random
+        const rand = Math.random().toString(36).slice(2,7)
+        const newToken = `${villaId.slice(0,3)}-${p.slice(0,3)}-${rand}`
+        await DB.prepare(
+          `INSERT INTO checkin_links (token, villa_id, partner, label, created_by, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?)`
+        ).bind(newToken, villaId, p, lbl||p, actor, now(), now()).run()
+        return json({ success: true, data: { token: newToken } })
+      }
+
+      // TOGGLE CHECKIN LINK active/inactive
+      if (action === 'toggleCheckinLink') {
+        const { token: linkToken } = body
+        if (!linkToken) return err('token required')
+        const link = await DB.prepare(`SELECT is_active FROM checkin_links WHERE token = ?`).bind(linkToken).first()
+        if (!link) return err('Link not found', 404)
+        await DB.prepare(
+          `UPDATE checkin_links SET is_active = ?, updated_at = ? WHERE token = ?`
+        ).bind(link.is_active ? 0 : 1, now(), linkToken).run()
+        return json({ success: true, data: { token: linkToken, is_active: !link.is_active } })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

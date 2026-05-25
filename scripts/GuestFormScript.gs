@@ -301,6 +301,170 @@ function onGuestFormSubmit(e) {
 // Creates: Guests/YYYY/MM-MonthName/GuestName-DD-StayID
 // Example: Guests/2026/05-May/Vikram Ramasubramanian-08-DWK-AB123
 
+
+// ── EMAIL CONFIG ────────────────────────────────────────────────────────
+var OWNER_EMAIL = 'kerala.luxuryvillas@gmail.com';
+// Guest email comes from the stay record
+
+// ── PROCESS PENDING CHECK-IN FORMS ─────────────────────────────────────
+// Triggered every 5 minutes (set up in Apps Script triggers)
+// Finds stays in pending_review with no Drive folder and:
+// 1. Creates Drive folder
+// 2. Creates TXT summary file
+// 3. Sends confirmation email to owner and guest
+function processPendingCheckInForms() {
+  Logger.log('=== processPendingCheckInForms START ===');
+
+  var resp = callWorker('GET', 'getPendingReviewStays', {});
+  if (!resp || !resp.success || !resp.data) {
+    Logger.log('No pending review stays or error: ' + JSON.stringify(resp));
+    return;
+  }
+
+  var stays = resp.data;
+  Logger.log('Found ' + stays.length + ' pending_review stays');
+
+  stays.forEach(function(stay) {
+    // Skip if already has a folder
+    if (stay.driveFolderUrl) {
+      Logger.log('Stay ' + stay.stayId + ' already has folder, skipping');
+      return;
+    }
+
+    Logger.log('Processing stay: ' + stay.stayId + ' for ' + stay.guestName);
+
+    try {
+      // Create Drive folder
+      var folder = getOrCreateGuestFolder(stay.guestName, stay.stayId, stay.checkIn);
+      if (!folder) {
+        Logger.log('Failed to create folder for ' + stay.stayId);
+        return;
+      }
+
+      // Fetch full stay details for TXT file
+      var fullStay = callWorker('GET', 'findOpenStay', {
+        guestName: stay.guestName,
+        checkInDate: stay.checkIn
+      });
+
+      var nights = stay.nights || 1;
+      var checkOut = stay.checkOut || '';
+
+      // Build TXT content
+      var lines = [
+        'Villa: Guruvayur Villa (Dwarka)',
+        'Guest: ' + stay.guestName,
+        'Check-in: ' + stay.checkIn,
+        'Check-out: ' + (checkOut || 'TBD'),
+        'Nights: ' + nights,
+        'Phone: ' + (stay.phone || 'Not provided'),
+        'Email: ' + (stay.email || 'Not provided'),
+        'Status: Pending Owner Review',
+        '',
+        'ADDITIONAL REQUESTS:',
+      ];
+
+      // Add requests if available
+      if (fullStay && fullStay.data) {
+        var s = fullStay.data;
+        if (s.request_breakfast) lines.push('  Breakfast: YES' + (s.breakfast_choice ? ' — ' + s.breakfast_choice : ''));
+        if (s.request_cab)       lines.push('  Cab service: YES');
+        if (s.request_early_checkin) lines.push('  Early check-in: REQUESTED');
+        if (s.request_late_checkout) lines.push('  Late check-out: REQUESTED');
+      }
+
+      lines.push('');
+      lines.push('Submitted via: Guest Check-in Form');
+      lines.push('Generated: ' + new Date().toISOString());
+
+      folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('
+'), 'text/plain');
+      Logger.log('TXT file created for ' + stay.stayId);
+
+      // Update D1 with folder URL
+      callWorker('POST', 'updateDriveFolder', {
+        stayId:         stay.stayId,
+        driveFolderId:  folder.getId(),
+        driveFolderUrl: folder.getUrl(),
+      });
+      Logger.log('Drive folder URL saved to D1 for ' + stay.stayId);
+
+      // Send confirmation emails
+      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('
+'));
+
+    } catch(e) {
+      Logger.log('Error processing ' + stay.stayId + ': ' + e.message);
+    }
+  });
+
+  Logger.log('=== processPendingCheckInForms END ===');
+}
+
+// ── SEND CHECK-IN CONFIRMATION EMAILS ───────────────────────────────────
+function sendCheckinConfirmationEmails(stay, folderUrl, txtContent) {
+  var guestName  = stay.guestName  || 'Guest';
+  var guestEmail = stay.email      || '';
+  var checkIn    = stay.checkIn    || '';
+  var checkOut   = stay.checkOut   || '';
+  var nights     = stay.nights     || 1;
+  var stayId     = stay.stayId     || '';
+
+  var subject = 'Your Check-in Registration — Guruvayur Villa (Dwarka)';
+
+  var guestBody =
+    'Dear ' + guestName + ',\n\n' +
+    'Thank you for completing your check-in registration for Guruvayur Villa (Dwarka).\n\n' +
+    'Please verify the following details we have on record:\n\n' +
+    '  Stay ID:      ' + stayId + '\n' +
+    '  Check-in:     ' + checkIn + '\n' +
+    '  Check-out:    ' + checkOut + '\n' +
+    '  Nights:       ' + nights + '\n' +
+    '  Phone:        ' + (stay.phone  || 'Not provided') + '\n' +
+    '  Email:        ' + (stay.email  || 'Not provided') + '\n\n' +
+    txtContent.split('ADDITIONAL REQUESTS:')[1] ? 
+      'Your additional requests:\n' + txtContent.split('ADDITIONAL REQUESTS:')[1].trim() + '\n\n' : '' +
+    'If any of the above is incorrect, please contact us immediately at +91 97287 65101.\n\n' +
+    'Our team will verify your details and confirm your check-in shortly.\n\n' +
+    'Warm regards,\n' +
+    'Guruvayur Villa (Dwarka)\n' +
+    '+91 99950 43283\n' +
+    '+91 97287 65101';
+
+  var ownerBody =
+    '🔶 NEW GUEST CHECK-IN FORM SUBMITTED\n\n' +
+    'Guest: '     + guestName  + '\n' +
+    'Stay ID: '   + stayId     + '\n' +
+    'Check-in: '  + checkIn    + '\n' +
+    'Check-out: ' + checkOut   + '\n' +
+    'Nights: '    + nights     + '\n' +
+    'Phone: '     + (stay.phone  || 'Not provided') + '\n' +
+    'Email: '     + (stay.email  || 'Not provided') + '\n\n' +
+    'Full details:\n' + txtContent + '\n\n' +
+    'Drive folder: ' + folderUrl + '\n\n' +
+    'ACTION REQUIRED: Please review and approve in the Owner Portal.';
+
+  // Send to owner
+  try {
+    MailApp.sendEmail(OWNER_EMAIL, '🔶 Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody);
+    Logger.log('Owner email sent to ' + OWNER_EMAIL);
+  } catch(e) {
+    Logger.log('Owner email error: ' + e.message);
+  }
+
+  // Send to guest
+  if (guestEmail) {
+    try {
+      MailApp.sendEmail(guestEmail, subject, guestBody);
+      Logger.log('Guest email sent to ' + guestEmail);
+    } catch(e) {
+      Logger.log('Guest email error: ' + e.message);
+    }
+  } else {
+    Logger.log('No guest email — skipping guest confirmation');
+  }
+}
+
 function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
   var root = DriveApp.getFolderById(DRIVE_ROOT);
 

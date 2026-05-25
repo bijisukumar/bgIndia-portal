@@ -373,8 +373,7 @@ function processPendingCheckInForms() {
       lines.push('Submitted via: Guest Check-in Form');
       lines.push('Generated: ' + new Date().toISOString());
 
-      folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('
-'), 'text/plain');
+      folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
       Logger.log('TXT file created for ' + stay.stayId);
 
       // Update D1 with folder URL
@@ -386,8 +385,7 @@ function processPendingCheckInForms() {
       Logger.log('Drive folder URL saved to D1 for ' + stay.stayId);
 
       // Send confirmation emails
-      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('
-'));
+      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'));
 
     } catch(e) {
       Logger.log('Error processing ' + stay.stayId + ': ' + e.message);

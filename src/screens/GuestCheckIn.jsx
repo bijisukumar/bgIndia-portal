@@ -323,16 +323,25 @@ export default function GuestCheckIn() {
         {/* ── NATIONALITY TOGGLE ── */}
         <Field label="Nationality" required>
           <div style={{ display:'flex', gap:'8px' }}>
-            {[['Indian','🇮🇳  Indian'],['Foreign','🌍  Foreign National']].map(([val,lbl]) => (
-              <button key={val} onClick={() => setNationality(val)}
-                style={{ flex:1, padding:'11px 8px', borderRadius:'10px', cursor:'pointer',
-                  border: nationality===val ? '1px solid #C8903A' : '1px solid rgba(255,255,255,0.1)',
-                  background: nationality===val ? 'rgba(200,144,58,0.15)' : 'rgba(255,255,255,0.03)',
-                  color: nationality===val ? '#C8903A' : '#9AA5B4',
-                  fontWeight: nationality===val ? '700' : '400', fontSize:'0.83rem' }}>
-                {lbl}
-              </button>
-            ))}
+            <button onClick={() => setNationality('Indian')}
+              style={{ flex:1, padding:'11px 8px', borderRadius:'10px', cursor:'pointer',
+                display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
+                border: nationality==='Indian' ? '1px solid #C8903A' : '1px solid rgba(255,255,255,0.1)',
+                background: nationality==='Indian' ? 'rgba(200,144,58,0.15)' : 'rgba(255,255,255,0.03)',
+                color: nationality==='Indian' ? '#C8903A' : '#9AA5B4',
+                fontWeight: nationality==='Indian' ? '700' : '400', fontSize:'0.83rem' }}>
+              <img src="https://flagcdn.com/w20/in.png" alt="India" style={{ width:'20px', height:'14px', borderRadius:'2px', objectFit:'cover' }} />
+              Indian
+            </button>
+            <button onClick={() => setNationality('Foreign')}
+              style={{ flex:1, padding:'11px 8px', borderRadius:'10px', cursor:'pointer',
+                display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
+                border: nationality==='Foreign' ? '1px solid #C8903A' : '1px solid rgba(255,255,255,0.1)',
+                background: nationality==='Foreign' ? 'rgba(200,144,58,0.15)' : 'rgba(255,255,255,0.03)',
+                color: nationality==='Foreign' ? '#C8903A' : '#9AA5B4',
+                fontWeight: nationality==='Foreign' ? '700' : '400', fontSize:'0.83rem' }}>
+              🌍 Foreign National
+            </button>
           </div>
         </Field>
 

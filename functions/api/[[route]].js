@@ -958,7 +958,7 @@ export async function onRequest(ctx) {
              AND status NOT IN ('cancelled','closed','checked_out')
            ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC
            LIMIT 1`
-        ).bind(\`%\${firstName}%\`, checkInDate || new Date().toISOString().slice(0,10)).all()
+        ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
           return json({ success: true, data: {

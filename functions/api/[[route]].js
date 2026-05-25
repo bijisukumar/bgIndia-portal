@@ -314,14 +314,9 @@ export async function onRequest(ctx) {
           ).run()
         }
 
-        // Store ID file reference in guest_requests if file provided
-        if (idFileB64 && stayId) {
-          const reqId = genId('GF')
-          await DB.prepare(`
-            INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at)
-            VALUES (?,?,'id_document',?,  'uploaded','auto','auto',?,?)
-          `).bind(reqId, stayId, JSON.stringify({ fileName: idFileName, nationality, idType: govtIdType||'passport' }), submittedAt, submittedAt).run()
-        }
+        // Note: ID file uploads (idFileB64, passportFileB64, visaFileB64) are accepted
+        // but not stored in DB — they will be uploaded to Drive folder by Apps Script
+        // when the owner onboards the guest. This avoids Cloudflare 100KB payload limits.
 
         return json({ success: true, data: { stayId, status: 'pending_review' } })
       }

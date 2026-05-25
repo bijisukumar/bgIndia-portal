@@ -105,18 +105,22 @@ function ProtectedRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* /checkin routes are public — handled above ProtectedRoutes */}
-          <Route path="/login" element={<LoginGate />} />
-          {/* Public — no auth required */}
-          <Route path="/checkin" element={<GuestCheckIn />} />
-          <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
-          <Route path="/*" element={<ProtectedRoutes />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <BrowserRouter>
+      <Routes>
+        {/* ── PUBLIC routes — no auth, no AuthProvider needed ── */}
+        <Route path="/checkin" element={<GuestCheckIn />} />
+        <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
+        {/* ── AUTH routes — wrapped in AuthProvider ── */}
+        <Route path="/*" element={
+          <AuthProvider>
+            <Routes>
+              <Route path="/login" element={<LoginGate />} />
+              <Route path="/*" element={<ProtectedRoutes />} />
+            </Routes>
+          </AuthProvider>
+        } />
+      </Routes>
+    </BrowserRouter>
   )
 }
 

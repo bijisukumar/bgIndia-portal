@@ -362,32 +362,56 @@ function processPendingCheckInForms() {
       var nights = stay.nights || 1;
       var checkOut = stay.checkOut || '';
 
-      // Build TXT content
+      // Build TXT content from full stay details
+      var s = (fullStay && fullStay.data) ? fullStay.data : {};
+      var guestCount = (parseInt(s.adults) || 1) + (parseInt(s.children) || 0);
       var lines = [
-        'Villa: Guruvayur Villa (Dwarka)',
-        'Guest: ' + stay.guestName,
-        'Check-in: ' + stay.checkIn,
-        'Check-out: ' + (checkOut || 'TBD'),
-        'Nights: ' + nights,
-        'Phone: ' + (stay.phone || 'Not provided'),
-        'Email: ' + (stay.email || 'Not provided'),
-        'Status: Pending Owner Review',
+        '============================================================',
+        '  GUEST REGISTRATION — ' + CLIENT.villaName,
+        '============================================================',
         '',
-        'ADDITIONAL REQUESTS:',
+        'STAY DETAILS',
+        '  Stay ID:      ' + stay.stayId,
+        '  Check-in:     ' + stay.checkIn,
+        '  Check-out:    ' + (s.checkoutDate || stay.checkOut || 'TBD'),
+        '  Nights:       ' + (s.nights || nights),
+        '',
+        'GUEST DETAILS',
+        '  Name:         ' + stay.guestName,
+        '  Nationality:  ' + (s.nationality || 'Indian'),
+        '  Adults:       ' + (s.adults || 1),
+        '  Children:     ' + (s.children || 0),
+        '  Total guests: ' + guestCount,
+        '  Phone:        ' + (s.phone || stay.phone || 'Not provided'),
+        '  Email:        ' + (s.email || stay.email || 'Not provided'),
+        '  From:         ' + [s.city, s.state, s.country].filter(Boolean).join(', '),
+        '',
+        'TRAVEL',
+        '  Purpose:      ' + (s.purposeOfVisit || 'Not provided'),
+        '  Transport:    ' + (s.modeOfTransport || 'Not provided'),
+        '  Vehicle No:   ' + (s.vehicleNumber || 'N/A'),
+        '  ETA:          ' + (s.eta || 'Not provided'),
+        '',
+        'IDENTITY',
+        '  ID Type:      ' + (s.govtIdType || 'Not provided'),
+        '  ID Number:    ' + (s.govtIdNum || 'Not provided'),
+        '',
+        'ADDITIONAL REQUESTS',
       ];
 
-      // Add requests if available
-      if (fullStay && fullStay.data) {
-        var s = fullStay.data;
-        if (s.request_breakfast) lines.push('  Breakfast: YES' + (s.breakfast_choice ? ' — ' + s.breakfast_choice : ''));
-        if (s.request_cab)       lines.push('  Cab service: YES');
-        if (s.request_early_checkin) lines.push('  Early check-in: REQUESTED');
-        if (s.request_late_checkout) lines.push('  Late check-out: REQUESTED');
+      if (s.requestBreakfast)    lines.push('  ✓ Breakfast — ' + (s.breakfastChoice || 'Idli'));
+      if (s.requestCab)          lines.push('  ✓ Cab service');
+      if (s.requestEarlyCheckin) lines.push('  ✓ Early check-in requested');
+      if (s.requestLateCheckout) lines.push('  ✓ Late check-out requested');
+      if (!s.requestBreakfast && !s.requestCab && !s.requestEarlyCheckin && !s.requestLateCheckout) {
+        lines.push('  None');
       }
 
       lines.push('');
-      lines.push('Submitted via: Guest Check-in Form');
+      lines.push('STATUS: Pending Owner Review');
+      lines.push('Submitted via: Guest Check-in Web Form');
       lines.push('Generated: ' + new Date().toISOString());
+      lines.push('============================================================');
 
       folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
       Logger.log('TXT file created for ' + stay.stayId);

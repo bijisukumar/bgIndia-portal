@@ -337,9 +337,10 @@ function processPendingCheckInForms() {
   Logger.log('Found ' + stays.length + ' pending_review stays');
 
   stays.forEach(function(stay) {
-    // Skip if already has a folder
-    if (stay.driveFolderUrl) {
-      Logger.log('Stay ' + stay.stayId + ' already has folder, skipping');
+    // Skip if folder already created (folder_created=1)
+    // To reprocess: set folder_created=0 in D1 and it will be picked up again
+    if (stay.folderCreated) {
+      Logger.log('Stay ' + stay.stayId + ' folder already created, skipping');
       return;
     }
 
@@ -423,10 +424,13 @@ function processPendingCheckInForms() {
           docsResp.data.forEach(function(doc) {
             if (!doc.file_b64) return;
             try {
-              var decoded  = Utilities.base64Decode(doc.file_b64);
-              var blob     = Utilities.newBlob(decoded, 'image/jpeg', doc.file_name || ('ID-' + stay.stayId + '.jpg'));
+              var decoded   = Utilities.base64Decode(doc.file_b64);
+              var ts        = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
+              var baseName  = (doc.file_name || ('ID-' + stay.stayId)).replace(/\.[^.]+$/, '');
+              var fileName  = baseName + '-' + ts + '.jpg';
+              var blob      = Utilities.newBlob(decoded, 'image/jpeg', fileName);
               folder.createFile(blob);
-              Logger.log('Uploaded doc to Drive: ' + doc.file_name + ' (' + doc.doc_type + ')');
+              Logger.log('Uploaded doc to Drive: ' + fileName + ' (' + doc.doc_type + ')');
             } catch(docErr) {
               Logger.log('Doc upload error (' + doc.doc_type + '): ' + docErr.message);
             }
@@ -438,12 +442,13 @@ function processPendingCheckInForms() {
         Logger.log('getGuestDocuments error: ' + docsErr.message);
       }
 
-      // Update D1 with folder URL and log entry
+      // Update D1 with folder URL, set folder_created=1, log entry
       callWorker('POST', 'updateDriveFolder', {
         stayId:          stay.stayId,
         driveFolderId:   folder.getId(),
         driveFolderUrl:  folder.getUrl(),
-        processingNote:  'Created by processPendingCheckInForms trigger',
+        folderCreated:   1,
+        processingNote:  'Created by processPendingCheckInForms — ' + new Date().toISOString(),
       });
       Logger.log('Drive folder URL saved to D1 for ' + stay.stayId);
 

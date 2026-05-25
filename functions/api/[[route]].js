@@ -304,8 +304,12 @@ export async function onRequest(ctx) {
               checkin_form_submitted, status, created_by, updated_by
             ) VALUES (
               ?,?,?,?,?,?,?,?,?,?,?,0,0,
-              ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
               ?,?,?,?,?,?,?,?,?,?,?,
+              ?,?,?,?,?,
+              ?,?,
+              ?,?,?,?,
+              ?,?,?,?,
+              ?,?,?,
               ?,?,?,?,?,
               1,'pending_review','auto','auto'
             )
@@ -321,8 +325,8 @@ export async function onRequest(ctx) {
             modeOfTransport||null, vehicleNumber||null, eta||null,
             govtIdType||null, govtIdNum||null,
             passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
-            passportExpiry||null, visaNumber||null, visaType||null,
-            visaIssueDate||null, visaIssuePlace||null,
+            passportExpiry||null,
+            visaNumber||null, visaType||null, visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
             reqEarly, reqLate, reqBreakfast, bfChoice, reqCab
           ).run()

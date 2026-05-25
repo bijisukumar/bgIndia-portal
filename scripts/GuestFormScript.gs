@@ -438,11 +438,12 @@ function processPendingCheckInForms() {
         Logger.log('getGuestDocuments error: ' + docsErr.message);
       }
 
-      // Update D1 with folder URL
+      // Update D1 with folder URL and log entry
       callWorker('POST', 'updateDriveFolder', {
-        stayId:         stay.stayId,
-        driveFolderId:  folder.getId(),
-        driveFolderUrl: folder.getUrl(),
+        stayId:          stay.stayId,
+        driveFolderId:   folder.getId(),
+        driveFolderUrl:  folder.getUrl(),
+        processingNote:  'Created by processPendingCheckInForms trigger',
       });
       Logger.log('Drive folder URL saved to D1 for ' + stay.stayId);
 

@@ -311,7 +311,7 @@ function onGuestFormSubmit(e) {
 function processPendingCheckInForms() {
   Logger.log('=== processPendingCheckInForms START ===');
 
-  var resp = callWorker('GET', 'getPendingReviewStays', {});
+  var resp = callWorker('POST', 'getPendingReviewStays', {});
   if (!resp || !resp.success || !resp.data) {
     Logger.log('No pending review stays or error: ' + JSON.stringify(resp));
     return;

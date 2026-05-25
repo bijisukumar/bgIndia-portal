@@ -222,7 +222,10 @@ export async function onRequest(ctx) {
         const reqCab       = requestCab          ? 1 : 0
         const now          = () => new Date().toISOString().slice(0,19).replace('T',' ')
 
-        if (!guestName) return err('guestName is required')
+        // Strip any leading digits/spaces that browser autofill may prepend
+        const cleanName = guestName ? guestName.replace(/^[\d\s]+/, '').trim() : ''
+        if (!cleanName) return err('guestName is required')
+        const safeGuestName = cleanName
         if (!checkInDate) return err('checkInDate is required')
 
         const submittedAt = now()
@@ -315,7 +318,7 @@ export async function onRequest(ctx) {
             )
           `).bind(
             stayId, villaId, partner || 'direct',
-            guestName, phone||null, email||null,
+            safeGuestName, phone||null, email||null,
             checkInDate, checkOutDate||null, n,
             parseInt(adults)||1, parseInt(children)||0,
             dob||null, gender||null, nationality,

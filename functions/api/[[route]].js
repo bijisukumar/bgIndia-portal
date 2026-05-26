@@ -339,6 +339,48 @@ export async function onRequest(ctx) {
         // but not stored in DB — they will be uploaded to Drive folder by Apps Script
         // when the owner onboards the guest. This avoids Cloudflare 100KB payload limits.
 
+        // ── Save ID documents to guest_documents table ──────────────────
+        // Images are compressed in browser to ~80KB before encoding
+        // Apps Script reads these and uploads to Drive, then deletes from D1
+        const docId = (type, sid) => `DOC-${sid}-${type}-${Date.now()}`
+        if (idFileB64) {
+          try {
+            await DB.prepare(
+              `INSERT OR REPLACE INTO guest_documents
+               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+            ).bind(
+              docId('id', stayId), stayId, 'govt_id',
+              idFileName || ('ID-' + stayId + '.jpg'), idFileB64
+            ).run()
+            console.log('Saved ID doc to guest_documents for', stayId)
+          } catch(e) { console.warn('ID doc store error:', e.message) }
+        }
+        if (publicBody.passportFileB64) {
+          try {
+            await DB.prepare(
+              `INSERT OR REPLACE INTO guest_documents
+               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+            ).bind(
+              docId('passport', stayId), stayId, 'passport',
+              'passport-' + stayId + '.jpg', publicBody.passportFileB64
+            ).run()
+          } catch(e) { console.warn('Passport doc store error:', e.message) }
+        }
+        if (publicBody.visaFileB64) {
+          try {
+            await DB.prepare(
+              `INSERT OR REPLACE INTO guest_documents
+               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+            ).bind(
+              docId('visa', stayId), stayId, 'visa',
+              'visa-' + stayId + '.jpg', publicBody.visaFileB64
+            ).run()
+          } catch(e) { console.warn('Visa doc store error:', e.message) }
+        }
+
         return json({ success: true, data: { stayId, status: 'pending_review' } })
       }
 

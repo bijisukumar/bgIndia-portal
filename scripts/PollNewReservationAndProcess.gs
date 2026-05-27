@@ -34,7 +34,7 @@
 // ── CONFIG ────────────────────────────────────────────────────────────────
 var WORKER_URL    = 'https://manage.luxuryvillasofguruvayur.com/api';
 var OWNER_EMAIL   = 'bijisukumar@gmail.com';   // where booking alerts are sent
-var DRIVE_ROOT_ID = '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva';
+var DRIVE_ROOT_ID = '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2';  // StayOps folder under kerala.luxuryvillas@gmail.com
 var SPREADSHEET_ID = '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ';
 var STAYS_SHEET   = 'Stays';
 
@@ -422,6 +422,15 @@ function appendToStaysSheet(data) {
 }
 
 // ── HELPERS ────────────────────────────────────────────────────────────────
+function getSystemToken() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN') || '';
+  } catch(e) {
+    Logger.log('getSystemToken error: ' + e.message);
+    return '';
+  }
+}
+
 function callWorker(method, action, payload) {
   try {
     var url  = WORKER_URL + '/' + action;

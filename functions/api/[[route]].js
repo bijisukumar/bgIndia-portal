@@ -1189,7 +1189,7 @@ export async function onRequest(ctx) {
         // ── DOUBLE-BOOKING CHECK ──────────────────────────────────────────
         // Check if any non-cancelled stay overlaps with the requested dates
         const conflict = await DB.prepare(`
-          SELECT stay_id, guest_name, checkin_date, checkout_date, status
+          SELECT stay_id, guest_name, checkin_date, checkout_date, status, source, created_at
           FROM stays
           WHERE villa_id = ?
             AND status NOT IN ('cancelled','closed','checked_out')
@@ -1199,31 +1199,86 @@ export async function onRequest(ctx) {
         `).bind(body.villaId || 'dwarka', body.checkOutDate, body.checkInDate).first()
 
         if (conflict) {
-          // Send email alert to owner about double-booking attempt
+          // ── DOUBLE BOOKING ALERT EMAIL ──────────────────────────────────
+          // Send rich alert email to owner with full details of both bookings
+          const alertSubject = '🚨 URGENT — Double booking detected! ' + (body.checkInDate || '')
+          const alertBody = [
+            '🚨 DOUBLE BOOKING DETECTED — IMMEDIATE ACTION REQUIRED',
+            '='.repeat(60),
+            '',
+            'A new booking was BLOCKED because the villa is already booked',
+            'for overlapping dates. Please contact both guests immediately.',
+            '',
+            'EXISTING BOOKING (already confirmed):',
+            '-'.repeat(40),
+            '  Stay ID  :  ' + conflict.stay_id,
+            '  Guest    :  ' + conflict.guest_name,
+            '  Check-in :  ' + conflict.checkin_date,
+            '  Check-out:  ' + conflict.checkout_date,
+            '  Status   :  ' + conflict.status,
+            '  Source   :  ' + (conflict.source || 'unknown'),
+            '  Booked   :  ' + (conflict.created_at || 'unknown'),
+            '',
+            'NEW BOOKING ATTEMPT (BLOCKED):',
+            '-'.repeat(40),
+            '  Guest    :  ' + (body.guestName || body.bookerName || 'unknown'),
+            '  Check-in :  ' + (body.checkInDate || ''),
+            '  Check-out:  ' + (body.checkOutDate || ''),
+            '  Source   :  ' + (body.source || 'unknown'),
+            '  Airbnb # :  ' + (body.airbnbConf || 'N/A'),
+            '  Attempted:  ' + new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC',
+            '',
+            'OVERLAPPING DATES:',
+            '-'.repeat(40),
+            '  Conflict period: ' + (body.checkInDate || '') + ' → ' + (body.checkOutDate || ''),
+            '',
+            'ACTION REQUIRED:',
+            '-'.repeat(40),
+            '  1. Contact the NEW guest immediately to apologise and cancel',
+            '  2. Check all channel partners and BLOCK the dates',
+            '  3. Review your calendar sync settings on Airbnb/MakeMyTrip/etc.',
+            '  4. Log into portal to verify: manage.luxuryvillasofguruvayur.com',
+            '',
+            '='.repeat(60),
+            'This is an automated alert from bgIndia Portal.',
+            'Stay ID of existing booking: ' + conflict.stay_id,
+          ].join('\n')
+
+          // Send via MailChannels (free on Cloudflare Workers)
           try {
-            const subject = '[bgIndia] ⚠️ Double-booking attempt blocked'
-            const emailBody = [
-              'A new booking was BLOCKED due to a date conflict.',
-              '',
-              'Attempted booking:',
-              `  Guest: ${body.guestName || body.bookerName}`,
-              `  Dates: ${body.checkInDate} → ${body.checkOutDate}`,
-              '',
-              'Conflicts with existing stay:',
-              `  Stay ID: ${conflict.stay_id}`,
-              `  Guest:   ${conflict.guest_name}`,
-              `  Dates:   ${conflict.checkin_date} → ${conflict.checkout_date}`,
-              `  Status:  ${conflict.status}`,
-            ].join('\n')
-            // Log to console — email via Apps Script not available in Worker
-            console.warn('DOUBLE BOOKING BLOCKED:', conflict)
-          } catch(_) {}
+            await fetch('https://api.mailchannels.net/tx/v1/send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                personalizations: [{
+                  to: [{ email: env.OWNER_EMAIL || 'kerala.luxuryvillas@gmail.com' }],
+                  cc: [{ email: 'bijisukumar@gmail.com' }],
+                }],
+                from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Portal — URGENT' },
+                subject: alertSubject,
+                content: [{ type: 'text/plain', value: alertBody }],
+              }),
+            })
+          } catch(emailErr) {
+            console.error('Double booking alert email failed:', emailErr.message)
+          }
+
+          console.warn('DOUBLE BOOKING BLOCKED:', conflict.stay_id,
+            'conflicts with new booking for', body.guestName, body.checkInDate)
+
           return json({
             success: false,
-            error: `Date conflict: ${conflict.guest_name} is already booked from ${conflict.checkin_date} to ${conflict.checkout_date} (${conflict.stay_id})`,
-            conflict: { stayId: conflict.stay_id, guestName: conflict.guest_name,
-                        checkIn: conflict.checkin_date, checkOut: conflict.checkout_date,
-                        status: conflict.status }
+            error: `Double booking detected: ${conflict.guest_name} is already booked ` +
+                   `${conflict.checkin_date} → ${conflict.checkout_date} (${conflict.stay_id}). ` +
+                   `Owner has been alerted by email.`,
+            conflict: {
+              stayId:    conflict.stay_id,
+              guestName: conflict.guest_name,
+              checkIn:   conflict.checkin_date,
+              checkOut:  conflict.checkout_date,
+              status:    conflict.status,
+              source:    conflict.source,
+            }
           }, 409)
         }
         // ── END DOUBLE-BOOKING CHECK ──────────────────────────────────────

@@ -1090,6 +1090,17 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // GET GUEST DOCUMENTS — for Apps Script to fetch and upload to Drive
+      if (action === 'getGuestDocuments') {
+        const stayId = url.searchParams.get('stayId') || ''
+        if (!stayId) return err('stayId required')
+        const { results } = await DB.prepare(
+          `SELECT doc_id, stay_id, doc_type, file_name, file_b64
+           FROM guest_documents WHERE stay_id = ?`
+        ).bind(stayId).all()
+        return json({ success: true, data: results })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 

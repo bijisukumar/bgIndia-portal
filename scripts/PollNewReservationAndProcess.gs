@@ -264,15 +264,27 @@ function parseAirbnbConfirmation(body, subject) {
   var confCode  = confMatch ? confMatch[1] : ('AB-' + Date.now());
 
   // Guest name from subject or body
-  var nameMatch = subject.match(/^([A-Za-z\s\-\.]+?)\s+(?:has reserved|left a)/i) ||
+  // Handles: "Varsha Das arrives Jun 6", "John has reserved", "New reservation from John"
+  var nameMatch = subject.match(/^Reservation confirmed\s*[-–]\s*([A-Za-z\s]+?)\s+arrives/i) ||
+                  subject.match(/^([A-Za-z\s\-\.]+?)\s+(?:has reserved|left a)/i) ||
                   body.match(/Guest name[:\s]+(.+)/i) ||
                   subject.match(/from\s+([A-Za-z\s]+)/i);
   var guestName = nameMatch ? nameMatch[1].trim() : 'Airbnb Guest';
 
-  // Dates
-  var checkIn  = extractDate(body, 'Check-in');
-  var checkOut = extractDate(body, 'Check-out') || extractDate(body, 'Checkout');
-  if (!checkIn) return null; // can't create booking without date
+  // Dates — try body first, then subject line (e.g. "arrives Jun 6")
+  var checkIn  = extractDate(body, 'Check-in') || extractDate(body, 'Check-in date');
+  var checkOut = extractDate(body, 'Check-out') || extractDate(body, 'Checkout') ||
+                 extractDate(body, 'Check-out date');
+
+  // Fallback: extract from subject "Reservation confirmed - Varsha Das arrives Jun 6"
+  if (!checkIn) {
+    checkIn = extractDateFromSubject(subject);
+    Logger.log('Used subject date fallback: ' + checkIn);
+  }
+  if (!checkIn) {
+    Logger.log('Could not find check-in date — logging body for debug:\n' + body.substring(0, 500));
+    return null; // can't create booking without date
+  }
 
   // Nights
   var nightsMatch = body.match(/(\d+)\s+night/i);
@@ -327,6 +339,20 @@ function extractDate(body, label) {
   if (!m) return null;
   try {
     var d = new Date(m[1].replace(/(\d+)(st|nd|rd|th)/gi,'$1'));
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  } catch(e) { return null; }
+}
+
+// Extract date from subject line e.g. "arrives Jun 6" or "arrives Jun 6-10"
+function extractDateFromSubject(subject) {
+  // "arrives Jun 6" — single date, assume current/next year
+  var m = subject.match(/arrives\s+([A-Za-z]+)\s+(\d{1,2})(?:-\d+)?/i);
+  if (!m) return null;
+  try {
+    var year = new Date().getFullYear();
+    var d    = new Date(m[1] + ' ' + m[2] + ' ' + year);
+    // If date is in the past, use next year
+    if (d < new Date()) d.setFullYear(year + 1);
     return isNaN(d) ? null : d.toISOString().slice(0, 10);
   } catch(e) { return null; }
 }

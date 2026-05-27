@@ -1195,8 +1195,8 @@ export async function onRequest(ctx) {
             home_address, city, state, country, from_city,
             night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total,
             airbnb_conf,
-            created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            created_by, updated_by)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           stayId, body.villaId || 'dwarka', body.source || (body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : 'direct'),
           body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null,
@@ -1209,7 +1209,7 @@ export async function onRequest(ctx) {
           body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0,
           body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0,
           body.airbnbConf || null,
-          actor, actor, now(), now()
+          actor, actor
         ).run()
         // Raman commission is created at check-OUT (not here) to avoid
         // creating commission records for cancelled bookings

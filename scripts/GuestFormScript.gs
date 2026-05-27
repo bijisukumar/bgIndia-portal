@@ -331,6 +331,11 @@ function processPendingCheckInForms() {
   var resp = callWorker('POST', 'getPendingReviewStays', {});
   if (!resp || !resp.success || !resp.data) {
     Logger.log('No pending review stays or error: ' + JSON.stringify(resp));
+    // Send error email if worker call fails
+    try {
+      GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ processPendingCheckInForms — worker call failed',
+        'getPendingReviewStays returned: ' + JSON.stringify(resp) + '\n\nCheck worker logs.');
+    } catch(e) {}
     return;
   }
 
@@ -338,21 +343,51 @@ function processPendingCheckInForms() {
   Logger.log('Found ' + stays.length + ' pending_review stays');
 
   stays.forEach(function(stay) {
-    // Skip if folder already created (folder_created=1)
-    // To reprocess: set folder_created=0 in D1 and it will be picked up again
-    if (stay.folderCreated) {
-      Logger.log('Stay ' + stay.stayId + ' folder already created, skipping');
+    // Check if there are pending documents even if folder already exists
+    var docsResp = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
+    var hasPendingDocs = docsResp && docsResp.success &&
+                         docsResp.data && docsResp.data.length > 0;
+
+    // Skip only if folder created AND no pending docs
+    if (stay.folderCreated && !hasPendingDocs) {
+      Logger.log('Stay ' + stay.stayId + ' fully processed, skipping');
       return;
     }
 
-    Logger.log('Processing stay: ' + stay.stayId + ' for ' + stay.guestName);
+    Logger.log('Processing stay: ' + stay.stayId +
+      ' | folder_created: ' + stay.folderCreated +
+      ' | pending docs: ' + (hasPendingDocs ? docsResp.data.length : 0));
+
+    Logger.log('Processing: ' + stay.stayId + ' for ' + stay.guestName);
 
     try {
-      // Create Drive folder
-      var folder = getOrCreateGuestFolder(stay.guestName, stay.stayId, stay.checkIn);
+      // Get or create Drive folder
+      var folder = null;
+      if (stay.driveFolderUrl && stay.folderCreated) {
+        // Folder already exists — get it by ID from D1
+        try {
+          var existingResp = callWorker('POST', 'getPendingReviewStays', {});
+          // Get folder directly from Drive URL
+          var folderIdMatch = stay.driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
+          if (folderIdMatch) {
+            folder = DriveApp.getFolderById(folderIdMatch[1]);
+            Logger.log('Using existing folder: ' + folderIdMatch[1]);
+          }
+        } catch(fe) {
+          Logger.log('Could not get existing folder: ' + fe.message + ' — will recreate');
+        }
+      }
+
       if (!folder) {
-        Logger.log('Failed to create folder for ' + stay.stayId);
-        return;
+        folder = getOrCreateGuestFolder(stay.guestName, stay.stayId, stay.checkIn);
+        if (!folder) {
+          Logger.log('Failed to create folder for ' + stay.stayId);
+          GmailApp.sendEmail(OWNER_EMAIL,
+            '[GVR Portal] ⚠️ Folder creation failed — ' + stay.stayId,
+            'Could not create Drive folder for ' + stay.guestName +
+            '\nStay: ' + stay.stayId + '\nCheck-in: ' + stay.checkIn);
+          return;
+        }
       }
 
       // Fetch full stay details for TXT file

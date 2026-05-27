@@ -1196,7 +1196,7 @@ export async function onRequest(ctx) {
             night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total,
             airbnb_conf,
             created_by, updated_by)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           stayId, body.villaId || 'dwarka', body.source || (body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : 'direct'),
           body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null,

@@ -1102,6 +1102,41 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // DUPLICATE BOOKINGS — audit log for channel sync analysis
+      if (action === 'getDuplicateBookings') {
+        const months = parseInt(url.searchParams.get('months') || '2')
+        const cutoff = new Date()
+        cutoff.setMonth(cutoff.getMonth() - months)
+        const cutoffStr = cutoff.toISOString().slice(0,10)
+        const { results } = await DB.prepare(
+          `SELECT * FROM duplicate_bookings
+           WHERE detected_at >= ?
+           ORDER BY detected_at DESC`
+        ).bind(cutoffStr).all()
+        // Group by channel for summary
+        const byChannel = {}
+        results.forEach(r => {
+          const ch = r.new_source || 'unknown'
+          if (!byChannel[ch]) byChannel[ch] = { channel: ch, count: 0, incidents: [] }
+          byChannel[ch].count++
+          byChannel[ch].incidents.push({
+            dupId:         r.dup_id,
+            detectedAt:    r.detected_at,
+            existingGuest: r.existing_guest,
+            existingDates: r.existing_checkin + ' → ' + r.existing_checkout,
+            newGuest:      r.new_guest,
+            newDates:      r.new_checkin + ' → ' + r.new_checkout,
+            overlapNights: r.overlap_nights,
+          })
+        })
+        return json({ success: true, data: {
+          total: results.length,
+          months,
+          byChannel: Object.values(byChannel).sort((a,b) => b.count - a.count),
+          all: results,
+        }})
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -1261,6 +1296,38 @@ export async function onRequest(ctx) {
             })
           } catch(emailErr) {
             console.error('Double booking alert email failed:', emailErr.message)
+          }
+
+          // Log to duplicate_bookings table for audit and channel sync analysis
+          try {
+            const dupId = `DUP-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
+            const overlapNights = body.checkInDate && body.checkOutDate
+              ? Math.max(0, Math.round(
+                  (Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) -
+                   Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000
+                ))
+              : 0
+            await DB.prepare(`
+              INSERT INTO duplicate_bookings (
+                dup_id, villa_id, detected_at,
+                existing_stay_id, existing_guest, existing_checkin, existing_checkout,
+                existing_source, existing_booked_at,
+                new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf,
+                overlap_nights
+              ) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)
+            `).bind(
+              dupId, body.villaId || 'dwarka',
+              conflict.stay_id, conflict.guest_name,
+              conflict.checkin_date, conflict.checkout_date,
+              conflict.source || 'unknown', conflict.created_at || null,
+              body.guestName || body.bookerName || 'unknown',
+              body.checkInDate, body.checkOutDate,
+              body.source || 'unknown', body.airbnbConf || null,
+              overlapNights
+            ).run()
+            console.log('Duplicate booking logged:', dupId)
+          } catch(logErr) {
+            console.error('Failed to log duplicate:', logErr.message)
           }
 
           console.warn('DOUBLE BOOKING BLOCKED:', conflict.stay_id,

@@ -1824,6 +1824,16 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { deleted: result.changes || 0, cutoff } })
       }
 
+      // MARK DOCUMENT UPLOADED — sets folder_created=1 on doc after Drive upload
+      if (action === 'markDocumentUploaded') {
+        const { docId } = body
+        if (!docId) return err('docId required')
+        await DB.prepare(
+          `UPDATE guest_documents SET folder_created = 1 WHERE doc_id = ?`
+        ).bind(docId).run()
+        return json({ success: true, data: { docId, marked: true } })
+      }
+
       // DELETE GUEST DOCUMENTS — called by Apps Script after uploading to Drive
       // Cleans up base64 image data from D1 once safely stored in Drive
       if (action === 'deleteGuestDocuments') {

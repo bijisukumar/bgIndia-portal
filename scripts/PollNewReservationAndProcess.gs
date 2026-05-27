@@ -188,28 +188,14 @@ function pollAirbnbBookings() {
         // Non-fatal — booking still created, folder can be made manually
       }
 
-      // ── Backup to Sheets ───────────────────────────────────────────────
+      // ── Backup to Sheets — DISABLED (D1 is source of truth) ────────────
+      // Sheets backup removed — all data lives in D1 portal
+      // Uncomment appendToStaysSheet call below if you need Sheets backup restored
+      /*
       try {
-        appendToStaysSheet({
-          stayId:    stayId,
-          villaId:   'dwarka',
-          guestName: booking.guestName,
-          checkIn:   booking.checkIn,
-          checkOut:  booking.checkOut,
-          nights:    booking.nights,
-          channel:   'Airbnb',
-          gross:     (booking.nightFee || 0) + (booking.cleaningFee || 0),
-          commPct:   3,
-          commAmt:   booking.hostServiceFee || 0,
-          net:       booking.youEarn || 0,
-          status:    'confirmed',
-          source:    booking.confirmationCode,
-          driveFolder: folderUrl,
-        });
-      } catch(se) {
-        Logger.log('Sheets backup error: ' + se.message);
-        // Non-fatal
-      }
+        appendToStaysSheet({ stayId, guestName: booking.guestName, ... });
+      } catch(se) { Logger.log('Sheets backup error: ' + se.message); }
+      */
 
       // ── Mark email as read ─────────────────────────────────────────────
       msg.markRead();
@@ -378,19 +364,14 @@ function alreadyImported(confCode) {
     }
   } catch(e) { Logger.log('D1 dup check error: ' + e.message); }
 
-  // Fallback: check Sheets
+  // Sheets fallback check DISABLED — D1 is source of truth
+  return false;
+  /*
   try {
-    var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = ss.getSheetByName(STAYS_SHEET);
-    if (!sheet) return false;
-    var data    = sheet.getDataRange().getValues();
-    var headers = data[0];
-    var srcIdx  = headers.indexOf('source');
-    if (srcIdx < 0) return false;
-    return data.slice(1).some(function(row) {
-      return String(row[srcIdx] || '').trim() === confCode;
-    });
-  } catch(e) { Logger.log('Sheets dup check error: ' + e.message); return false; }
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    ...
+  } catch(e) { return false; }
+  */
 }
 
 // ── DRIVE FOLDER ───────────────────────────────────────────────────────────

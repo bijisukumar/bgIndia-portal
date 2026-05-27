@@ -461,11 +461,14 @@ function processPendingCheckInForms() {
             try {
               var decoded   = Utilities.base64Decode(doc.file_b64);
               var ts        = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
-              var baseName  = (doc.file_name || ('ID-' + stay.stayId)).replace(/\.[^.]+$/, '');
-              var fileName  = baseName + '-' + ts + '.jpg';
+              var typeLabel = doc.doc_type === 'govt_id' ? 'ID' :
+                              doc.doc_type === 'passport' ? 'Passport' : 'Visa';
+              var fileName  = typeLabel + '-' + stay.stayId + '-' + ts + '.jpg';
               var blob      = Utilities.newBlob(decoded, 'image/jpeg', fileName);
               folder.createFile(blob);
-              Logger.log('Uploaded doc to Drive: ' + fileName + ' (' + doc.doc_type + ')');
+              Logger.log('Uploaded doc to Drive: ' + fileName);
+              // Mark doc as uploaded — prevents re-upload on next trigger run
+              callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
             } catch(docErr) {
               Logger.log('Doc upload error (' + doc.doc_type + '): ' + docErr.message);
             }

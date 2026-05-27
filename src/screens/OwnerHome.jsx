@@ -460,6 +460,80 @@ function NeedsAttentionBlock() {
   )
 }
 
+
+// ── DUPLICATE BOOKINGS BLOCK ─────────────────────────────────────────────
+// Shows last 2 months of double-booking attempts grouped by channel
+// Ideal: 0 entries. Any entries = channel calendar sync issue.
+function DuplicateBookingsBlock() {
+  const [data, setData] = useState(null)
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    api.getDuplicateBookings({ months: 2 }).then(d => {
+      if (d && d.total !== undefined) setData(d)
+    }).catch(() => {})
+  }, [])
+
+  if (!data || data.total === 0) return (
+    <div style={{ marginBottom:'16px', background:'rgba(52,168,83,0.06)',
+      border:'1px solid rgba(52,168,83,0.2)', borderRadius:'12px',
+      padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px' }}>
+      <span>✅</span>
+      <span style={{ fontSize:'0.8rem', color:'#34A853' }}>
+        No duplicate bookings in the last 2 months — calendar sync is healthy
+      </span>
+    </div>
+  )
+
+  return (
+    <div style={{ marginBottom:'16px', background:'rgba(239,68,68,0.06)',
+      border:'1px solid rgba(239,68,68,0.25)', borderRadius:'12px', overflow:'hidden' }}>
+      <div onClick={() => setExpanded(!expanded)}
+        style={{ padding:'10px 14px', cursor:'pointer',
+          display:'flex', alignItems:'center', gap:'8px' }}>
+        <span>⚠️</span>
+        <span style={{ fontSize:'0.68rem', fontWeight:'700', color:'#EF4444', letterSpacing:'1.5px' }}>
+          DUPLICATE BOOKINGS — LAST 2 MONTHS
+        </span>
+        <span style={{ marginLeft:'auto', background:'rgba(239,68,68,0.2)', color:'#EF4444',
+          fontSize:'0.65rem', fontWeight:'700', padding:'2px 8px', borderRadius:'10px' }}>
+          {data.total}
+        </span>
+        <span style={{ color:'#EF4444', fontSize:'0.8rem' }}>{expanded ? '▼' : '▶'}</span>
+      </div>
+      {expanded && (
+        <div style={{ padding:'0 14px 14px' }}>
+          <div style={{ fontSize:'0.72rem', color:'#9AA5B4', marginBottom:'10px' }}>
+            These channels had booking conflicts — calendar may not be syncing:
+          </div>
+          {data.byChannel.map((ch, i) => (
+            <div key={i} style={{ marginBottom:'8px', padding:'10px 12px',
+              background:'rgba(239,68,68,0.04)', borderRadius:'8px',
+              border:'1px solid rgba(239,68,68,0.1)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'6px' }}>
+                <span style={{ fontSize:'0.82rem', fontWeight:'700', color:'#F0F0F0',
+                  textTransform:'capitalize' }}>{ch.channel}</span>
+                <span style={{ fontSize:'0.75rem', color:'#EF4444', fontWeight:'600' }}>
+                  {ch.count} incident{ch.count > 1 ? 's' : ''}
+                </span>
+              </div>
+              {ch.incidents.map((inc, j) => (
+                <div key={j} style={{ fontSize:'0.7rem', color:'#6B7280',
+                  borderTop:'1px solid rgba(255,255,255,0.05)', paddingTop:'4px', marginTop:'4px' }}>
+                  <div>{inc.detectedAt?.slice(0,10)} — {inc.newGuest} tried to book {inc.newDates}</div>
+                  <div style={{ color:'#4B5563' }}>
+                    Conflicted with: {inc.existingGuest} ({inc.existingDates}) — {inc.overlapNights} night overlap
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function OwnerHome() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -481,6 +555,9 @@ export default function OwnerHome() {
       <div className="screen-body">
         {/* Needs Attention — urgent items at top of page */}
         <NeedsAttentionBlock />
+
+        {/* Duplicate Bookings — channel sync health check */}
+        <DuplicateBookingsBlock />
 
         {/* Pending Review */}
         <PendingReviewBlock />

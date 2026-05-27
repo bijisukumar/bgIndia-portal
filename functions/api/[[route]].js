@@ -1094,9 +1094,10 @@ export async function onRequest(ctx) {
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
+        // Only return docs not yet uploaded to Drive (folder_created=0)
         const { results } = await DB.prepare(
           `SELECT doc_id, stay_id, doc_type, file_name, file_b64
-           FROM guest_documents WHERE stay_id = ?`
+           FROM guest_documents WHERE stay_id = ? AND folder_created = 0`
         ).bind(stayId).all()
         return json({ success: true, data: results })
       }
@@ -1839,9 +1840,10 @@ export async function onRequest(ctx) {
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
+        // Only return docs not yet uploaded to Drive (folder_created=0)
         const { results } = await DB.prepare(
           `SELECT doc_id, stay_id, doc_type, file_name, file_b64
-           FROM guest_documents WHERE stay_id = ?`
+           FROM guest_documents WHERE stay_id = ? AND folder_created = 0`
         ).bind(stayId).all()
         return json({ success: true, data: results })
       }

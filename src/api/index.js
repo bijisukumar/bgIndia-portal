@@ -77,6 +77,7 @@ export const api = {
 
   // ── PROVISIONAL / PENDING REVIEW ───────────────────────────
   getPendingReviewStays:    ()       => get('getPendingReviewStays'),
+  getDuplicateBookings:     (p)      => get('getDuplicateBookings', p),
   createProvisionalBooking: (data)   => post('createProvisionalBooking', data),
   approvePendingBooking:    (data)   => post('approvePendingBooking', data),
 

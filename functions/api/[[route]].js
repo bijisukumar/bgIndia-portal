@@ -214,12 +214,15 @@ export async function onRequest(ctx) {
           idFileB64, idFileName,
           requestEarlyCheckIn, requestLateCheckOut,
           requestBreakfast, breakfastChoice, requestCab,
+          requestExtraBeds, extraBedsCount,
         } = publicBody
         const reqEarly     = requestEarlyCheckIn ? 1 : 0
         const reqLate      = requestLateCheckOut ? 1 : 0
         const reqBreakfast = requestBreakfast    ? 1 : 0
         const bfChoice     = breakfastChoice     || null
         const reqCab       = requestCab          ? 1 : 0
+        const reqBeds      = requestExtraBeds    ? 1 : 0
+        const bedsCount    = reqBeds ? (parseInt(extraBedsCount) || 1) : 0
         const now          = () => new Date().toISOString().slice(0,19).replace('T',' ')
 
         // Strip any leading digits/spaces that browser autofill may prepend

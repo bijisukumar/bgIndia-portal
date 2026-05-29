@@ -436,13 +436,14 @@ function processPendingCheckInForms() {
       }
 
       // Additional requests — only if any selected
-      var hasRequests = s.requestBreakfast || s.requestCab || s.requestEarlyCheckin || s.requestLateCheckout;
+      var hasRequests = s.requestBreakfast || s.requestCab || s.requestEarlyCheckin || s.requestLateCheckout || s.requestExtraBeds;
       lines.push('ADDITIONAL REQUESTS');
       if (hasRequests) {
         if (s.requestBreakfast)    lines.push('  ✓  Breakfast — ' + (s.breakfastChoice || 'Idli'));
         if (s.requestCab)          lines.push('  ✓  Cab service');
         if (s.requestEarlyCheckin) lines.push('  ✓  Early check-in');
         if (s.requestLateCheckout) lines.push('  ✓  Late check-out');
+        if (s.requestExtraBeds)    lines.push('  ✓  Extra floor beds — ' + (s.extraBedsCount || 1) + ' bed(s) × ₹1,000/night');
       } else {
         lines.push('  None requested');
       }
@@ -555,6 +556,7 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
     if (stayDetails.requestCab)          reqLines.push('  ✓ Cab service');
     if (stayDetails.requestEarlyCheckin) reqLines.push('  ✓ Early check-in');
     if (stayDetails.requestLateCheckout) reqLines.push('  ✓ Late check-out');
+    if (stayDetails.requestExtraBeds)    reqLines.push('  ✓ Extra floor beds — ' + (stayDetails.extraBedsCount || 1) + ' bed(s) × ₹1,000/night');
   }
   var reqSection = reqLines.length > 0
     ? 'ADDITIONAL REQUESTS:\n' + reqLines.join('\n') + '\n\n'

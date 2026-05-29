@@ -318,6 +318,7 @@ export async function onRequest(ctx) {
               ?,?,?,?,
               ?,?,?,
               ?,?,?,?,?,
+              ?,?,
               1,'pending_review','auto','auto'
             )
           `).bind(

@@ -285,7 +285,7 @@ export async function onRequest(ctx) {
             passportExpiry||null, visaNumber||null, visaType||null,
             visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
+            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
             submittedAt, submittedAt, stayId
           ).run()
         } else {
@@ -307,6 +307,7 @@ export async function onRequest(ctx) {
               arrival_date_india, port_of_arrival, next_destination,
               request_early_checkin, request_late_checkout,
               request_breakfast, breakfast_choice, request_cab,
+              request_extra_beds, extra_beds_count,
               checkin_form_submitted, status, created_by, updated_by
             ) VALUES (
               ?,?,?,?,?,?,?,?,?,?,?,0,0,

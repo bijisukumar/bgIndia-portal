@@ -1069,6 +1069,59 @@ export async function onRequest(ctx) {
         return json({ success: true, data: null })
       }
 
+      // RAMAN TODO — two lists for Raman's home screen
+      // 1. Overdue: guests whose checkout_date has passed but stay is still open (checked_in / ready_for_checkout)
+      // 2. Upcoming: guests checking in within next 7 days (confirmed / booked / ready_for_checkin)
+      if (action === 'getRamanTodo') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+
+        // Overdue — past checkout date, still open
+        const { results: overdueRows } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status
+           FROM stays
+           WHERE villa_id = ?
+             AND status IN ('checked_in','ready_for_checkout')
+             AND checkout_date < date('now')
+           ORDER BY checkout_date ASC`
+        ).bind(villaId).all()
+
+        // Upcoming check-ins — next 7 days, not yet checked in
+        const { results: upcomingRows } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status
+           FROM stays
+           WHERE villa_id = ?
+             AND status IN ('confirmed','booked','ready_for_checkin','pending_review')
+             AND checkin_date >= date('now')
+             AND checkin_date <= date('now', '+7 days')
+           ORDER BY checkin_date ASC`
+        ).bind(villaId).all()
+
+        return json({ success: true, data: {
+          overdue:  overdueRows.map(r => ({
+            stayId:       r.stay_id,
+            guestName:    r.guest_name,
+            checkInDate:  r.checkin_date,
+            checkOutDate: r.checkout_date,
+            nights:       r.nights,
+            adults:       r.adults,
+            source:       r.source,
+            status:       r.status,
+            daysOver:     Math.floor((new Date() - new Date(r.checkout_date)) / 86400000),
+          })),
+          upcoming: upcomingRows.map(r => ({
+            stayId:       r.stay_id,
+            guestName:    r.guest_name,
+            checkInDate:  r.checkin_date,
+            checkOutDate: r.checkout_date,
+            nights:       r.nights,
+            adults:       r.adults,
+            source:       r.source,
+            status:       r.status,
+            daysUntil:    Math.floor((new Date(r.checkin_date) - new Date()) / 86400000) + 1,
+          })),
+        }})
+      }
+
       // UPCOMING STAYS — for Complete Booking screen
       // Returns stays checking in within next 30 days OR checked in within last 2 days
       // Excludes closed and cancelled

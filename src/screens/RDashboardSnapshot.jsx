@@ -290,13 +290,7 @@ function RDashboardSnapshotInner() {
           </div>
         </div>
 
-        {/* Link to full dashboard */}
-        <button onClick={()=>navigate('/raman/rdashboard')}
-          style={{width:'100%',padding:'12px',borderRadius:'10px',
-            border:'1px solid rgba(200,144,58,0.3)',background:'transparent',
-            color:'var(--gold)',fontWeight:'600',fontSize:'0.85rem',cursor:'pointer'}}>
-          View full commission tracker →
-        </button>
+
 
       </div>
     </div>

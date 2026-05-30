@@ -1242,20 +1242,21 @@ export async function onRequest(ctx) {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
 
-        // ── PROVISIONAL BOOKING MERGE ────────────────────────────────────
-        // If guest already filled check-in form before Airbnb email arrived,
-        // a provisional stay exists. Merge financials into it instead of creating duplicate.
+        // ── EXISTING STAY MERGE ──────────────────────────────────────────
+        // If a stay already exists for this guest+date (from a previous poller run,
+        // guest form, or manual entry), update it with Airbnb financials rather
+        // than creating a duplicate or triggering a double-booking alert.
         const firstName = (body.guestName || body.bookerName || '').split(' ')[0]
         const provisional = await DB.prepare(
-          `SELECT stay_id FROM stays
+          `SELECT stay_id, status FROM stays
            WHERE guest_name LIKE ? AND checkin_date = ?
-             AND status = 'pending_review'
-             AND source = 'guest_form'
+             AND villa_id = ?
+             AND status NOT IN ('cancelled','closed','checked_out')
            LIMIT 1`
-        ).bind(`%${firstName}%`, body.checkInDate).first()
+        ).bind(`%${firstName}%`, body.checkInDate, body.villaId || 'dwarka').first()
 
         if (provisional) {
-          // Update the provisional stay with Airbnb financials
+          // Update the existing stay with Airbnb financials
           await DB.prepare(`
             UPDATE stays SET
               source = 'airbnb',
@@ -1263,10 +1264,9 @@ export async function onRequest(ctx) {
               gross = ?, commission_pct = ?, commission_amt = ?, net = ?,
               night_fee = ?, cleaning_fee = ?, host_service_fee = ?,
               you_earn = ?, guest_service_fee = ?, guest_paid_total = ?,
-              checkout_date = COALESCE(checkout_date, ?),
+              checkout_date = COALESCE(NULLIF(checkout_date,''), ?),
               nights = COALESCE(NULLIF(nights,0), ?),
               adults = COALESCE(NULLIF(adults,0), ?),
-              status = 'pending_review',
               updated_by = ?, updated_at = datetime('now')
             WHERE stay_id = ?
           `).bind(
@@ -1278,8 +1278,8 @@ export async function onRequest(ctx) {
             body.adults || 1,
             actor, provisional.stay_id
           ).run()
-          console.log('Merged Airbnb financials into provisional stay:', provisional.stay_id)
-          return json({ success: true, data: { stayId: provisional.stay_id, merged: true } })
+          console.log('Merged Airbnb financials into existing stay:', provisional.stay_id, '(was:', provisional.status, ')')
+          return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
 
         // ── DOUBLE-BOOKING CHECK ──────────────────────────────────────────

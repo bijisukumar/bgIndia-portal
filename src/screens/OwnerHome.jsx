@@ -34,6 +34,12 @@ const PEOPLE = {
       path: '/owner/guests',
     },
     {
+      id: 'dbadmin', icon: '🗄️', bg: 'rgba(92,112,128,0.08)', arrow: '#5C7080',
+      title: 'DB Admin',
+      sub: 'Saved queries · SQL editor · Live D1',
+      path: '/infra/d1',
+    },
+    {
       id: 'rdashboard', icon: '📊', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'R-Dashboard',
       sub: 'RamananKutty commission · Unpaid · History',

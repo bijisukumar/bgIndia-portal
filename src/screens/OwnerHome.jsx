@@ -414,6 +414,205 @@ function CheckinLinksBlock() {
 
 
 // ── NEEDS ATTENTION BLOCK ────────────────────────────────────────────────
+// ── REVIEW CHASE BLOCK ───────────────────────────────────────────────────
+// Stays past checkout with no review yet
+// - WhatsApp nudge button per guest
+// - Manual star rating + close
+// - Auto-close button when 20+ days without review
+function ReviewChaseBlock() {
+  const [items, setItems]       = useState([])
+  const [expanded, setExpanded] = useState({})
+  const [saving, setSaving]     = useState({})
+  const [ratings, setRatings]   = useState({})
+  const [toast, setToast]       = useState(null)
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type }); setTimeout(() => setToast(null), 4500)
+  }
+
+  const load = () => {
+    api.getReviewChaseList().then(data => {
+      if (Array.isArray(data)) setItems(data)
+    }).catch(() => {})
+  }
+
+  useEffect(() => { load() }, [])
+
+  if (items.length === 0) return null
+
+  function fmtDate(d) {
+    if (!d) return '—'
+    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
+    catch { return d }
+  }
+
+  function waLink(phone, guestName) {
+    const clean = (phone || '').replace(/\D/g, '')
+    const num   = clean.startsWith('91') ? clean : `91${clean}`
+    const msg   = encodeURIComponent(
+      `Hi ${(guestName || '').split(' ')[0]}, thank you for staying with us at Luxury Villas of Guruvayur! 🙏 We hope you had a wonderful experience. If you have a moment, we'd really appreciate a review on Airbnb — it means a lot to us and helps future guests. Thank you!`
+    )
+    return `https://wa.me/${num}?text=${msg}`
+  }
+
+  const autoCloseable = items.filter(i => i.autoCloseReady)
+
+  async function handleChased(stayId) {
+    setSaving(p => ({ ...p, [stayId + '_wa']: true }))
+    try {
+      await api.markReviewChased({ stayId })
+      showToast('✅ WhatsApp logged — chase recorded')
+      load()
+    } catch { showToast('Failed to log chase', 'error') }
+    finally { setSaving(p => ({ ...p, [stayId + '_wa']: false })) }
+  }
+
+  async function handleClose(stayId, rating, reason) {
+    setSaving(p => ({ ...p, [stayId + '_close']: true }))
+    try {
+      await api.closeStayWithReview({ stayId, rating: rating || 0, closedReason: reason || 'manual' })
+      showToast(rating ? `✅ Closed with ${rating}★` : '✅ Closed — no review')
+      setExpanded(p => ({ ...p, [stayId]: false }))
+      load()
+    } catch { showToast('Failed to close stay', 'error') }
+    finally { setSaving(p => ({ ...p, [stayId + '_close']: false })) }
+  }
+
+  async function handleAutoCloseAll() {
+    for (const item of autoCloseable) {
+      await handleClose(item.stayId, 0, 'no_review')
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: '8px' }}>
+        <div className="card-section-label" style={{ color: '#F59E0B', marginBottom: 0 }}>
+          ⭐ REVIEW CHASE ({items.length})
+        </div>
+        {autoCloseable.length > 0 && (
+          <button onClick={handleAutoCloseAll}
+            style={{ fontSize: '0.68rem', padding: '4px 10px', borderRadius: '8px',
+              border: '1px solid rgba(92,112,128,0.3)', background: 'transparent',
+              color: 'var(--text-dim)', cursor: 'pointer' }}>
+            Auto-close {autoCloseable.length} old →
+          </button>
+        )}
+      </div>
+
+      <div style={{ background: 'var(--dark-card)', border: '1px solid var(--border-dim)',
+        borderRadius: '12px', overflow: 'hidden' }}>
+        {items.map((item, i) => {
+          const isOpen    = expanded[item.stayId]
+          const starRating = ratings[item.stayId] || 0
+
+          return (
+            <div key={item.stayId}
+              style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border-dim)' : 'none' }}>
+
+              {/* Row */}
+              <div onClick={() => setExpanded(p => ({ ...p, [item.stayId]: !p[item.stayId] }))}
+                style={{ padding: '12px 14px', cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '1.1rem' }}>
+                  {item.source?.toLowerCase().includes('airbnb') ? '🏡' : '🏠'}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.guestName}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+                    Out {fmtDate(item.checkOut)} · {item.daysOut}d ago
+                    {item.chaseCount > 0 && (
+                      <span style={{ marginLeft: '6px', color: '#F59E0B' }}>
+                        · chased {item.chaseCount}×
+                        {item.daysSinceChase !== null && ` (${item.daysSinceChase}d ago)`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {item.autoCloseReady && (
+                  <span style={{ fontSize: '0.62rem', fontWeight: '700', padding: '2px 7px',
+                    borderRadius: '8px', background: 'rgba(92,112,128,0.2)', color: 'var(--text-dim)',
+                    flexShrink: 0 }}>
+                    20d+
+                  </span>
+                )}
+                <span style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>
+                  {isOpen ? '∨' : '›'}
+                </span>
+              </div>
+
+              {/* Expanded actions */}
+              {isOpen && (
+                <div style={{ padding: '0 14px 14px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+
+                  {/* WhatsApp nudge */}
+                  {item.phone && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                      <a href={waLink(item.phone, item.guestName)} target="_blank" rel="noreferrer"
+                        onClick={() => handleChased(item.stayId)}
+                        style={{ flex: 1, padding: '10px', borderRadius: '10px', textAlign: 'center',
+                          background: 'rgba(37,211,102,0.12)', border: '1px solid rgba(37,211,102,0.3)',
+                          color: '#25D366', fontSize: '0.82rem', fontWeight: '700',
+                          textDecoration: 'none', display: 'block' }}>
+                        💬 Send WhatsApp review request
+                      </a>
+                    </div>
+                  )}
+
+                  {/* Manual star rating */}
+                  <div style={{ marginTop: '12px' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)',
+                      letterSpacing: '0.8px', marginBottom: '8px' }}>
+                      CLOSE WITH RATING
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                      {[1,2,3,4,5].map(n => (
+                        <button key={n} onClick={() => setRatings(p => ({ ...p, [item.stayId]: n }))}
+                          style={{ flex: 1, padding: '10px 4px', borderRadius: '8px',
+                            border: `1px solid ${starRating >= n ? 'rgba(200,144,58,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                            background: starRating >= n ? 'rgba(200,144,58,0.15)' : 'transparent',
+                            color: starRating >= n ? 'var(--gold)' : 'var(--text-dim)',
+                            fontSize: '1rem', cursor: 'pointer', transition: 'all 0.1s' }}>
+                          ★
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={() => handleClose(item.stayId, starRating, 'manual')}
+                        disabled={saving[item.stayId + '_close'] || starRating === 0}
+                        style={{ flex: 2, padding: '10px', borderRadius: '9px',
+                          border: '1px solid rgba(52,168,83,0.4)',
+                          background: starRating > 0 ? 'rgba(52,168,83,0.12)' : 'transparent',
+                          color: starRating > 0 ? '#34A853' : 'var(--text-dim)',
+                          fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer',
+                          opacity: starRating === 0 ? 0.4 : 1 }}>
+                        {saving[item.stayId + '_close'] ? '…' : `✅ Close ${starRating ? `with ${starRating}★` : '(select stars)'}`}
+                      </button>
+                      <button onClick={() => handleClose(item.stayId, 0, 'no_review')}
+                        disabled={saving[item.stayId + '_close']}
+                        style={{ flex: 1, padding: '10px', borderRadius: '9px',
+                          border: '1px solid rgba(92,112,128,0.25)', background: 'transparent',
+                          color: 'var(--text-dim)', fontSize: '0.78rem', cursor: 'pointer' }}>
+                        No review
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+    </div>
+  )
+}
+
 function NeedsAttentionBlock() {
   const [items, setItems] = useState([])
   const navigate = useNavigate()
@@ -559,8 +758,11 @@ export default function OwnerHome() {
         {/* Duplicate Bookings — channel sync health check */}
         <DuplicateBookingsBlock />
 
-        {/* Pending Review */}
+        {/* Pending Review — provisional bookings awaiting approval */}
         <PendingReviewBlock />
+
+        {/* Review Chase — past-checkout stays with no review yet */}
+        <ReviewChaseBlock />
 
         {/* Manual Trigger — only visible when sheet guests have no folder */}
         <ManualTriggerBlock />

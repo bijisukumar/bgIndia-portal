@@ -2081,13 +2081,17 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
-      // GET PENDING REVIEW STAYS — for owner portal block
+      // GET PENDING REVIEW STAYS — for owner portal block (pre-checkin pending)
+      // These are stays awaiting owner approval before check-in
       if (action === 'getPendingReviewStays') {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, created_at,
                   folder_created, folder_created_at
-           FROM stays WHERE status = 'pending_review' ORDER BY checkin_date ASC`
+           FROM stays
+           WHERE status = 'pending_review'
+             AND (checkout_date IS NULL OR checkout_date >= date('now'))
+           ORDER BY checkin_date ASC`
         ).all()
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
@@ -2102,6 +2106,86 @@ export async function onRequest(ctx) {
           folderCreated:   r.folder_created || 0,
           folderCreatedAt: r.folder_created_at || null,
         })) })
+      }
+
+      // GET REVIEW CHASE LIST — stays past checkout awaiting a review
+      // Includes: checked_out + pending_review past checkout_date, no review yet
+      // Auto-close candidates: review_chased_at > 20 days ago (or never chased > 20 days post-checkout)
+      if (action === 'getReviewChaseList') {
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
+                  source, guest_phone, review_rating, review_date,
+                  review_chased_at, review_chase_count
+           FROM stays
+           WHERE status IN ('checked_out','pending_review')
+             AND checkout_date < date('now')
+             AND (review_rating IS NULL OR review_rating = 0)
+           ORDER BY checkout_date DESC`
+        ).all()
+
+        const today = new Date()
+        return json({ success: true, data: results.map(r => {
+          const checkout    = new Date(r.checkout_date)
+          const daysOut     = Math.floor((today - checkout) / 86400000)
+          const lastChased  = r.review_chased_at ? new Date(r.review_chased_at) : null
+          const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
+          const autoCloseReady = daysOut >= 20
+          return {
+            stayId:          r.stay_id,
+            guestName:       r.guest_name,
+            checkIn:         r.checkin_date,
+            checkOut:        r.checkout_date,
+            nights:          r.nights,
+            adults:          r.adults,
+            source:          r.source,
+            phone:           r.guest_phone,
+            reviewRating:    r.review_rating || 0,
+            reviewDate:      r.review_date || null,
+            chasedAt:        r.review_chased_at || null,
+            chaseCount:      r.review_chase_count || 0,
+            daysSinceChase,
+            daysOut,
+            autoCloseReady,  // true when 20+ days past checkout with no review
+          }
+        }) })
+      }
+
+      // MARK REVIEW CHASED — record that WhatsApp was sent
+      if (action === 'markReviewChased') {
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `UPDATE stays
+           SET review_chased_at   = ?,
+               review_chase_count = COALESCE(review_chase_count, 0) + 1,
+               updated_by = ?, updated_at = ?
+           WHERE stay_id = ?`
+        ).bind(now(), actor, now(), stayId).run()
+        return json({ success: true, data: { stayId, chasedAt: now() } })
+      }
+
+      // CLOSE STAY WITH REVIEW — owner manually sets star rating and closes
+      // Also used for auto-close (rating = 0, closedReason = 'no_review')
+      if (action === 'closeStayWithReview') {
+        const { stayId, rating, closedReason } = body
+        if (!stayId) return err('stayId required')
+
+        await DB.prepare(
+          `UPDATE stays
+           SET status         = 'closed',
+               review_rating  = ?,
+               review_source  = ?,
+               review_date    = ?,
+               updated_by = ?, updated_at = ?
+           WHERE stay_id = ?`
+        ).bind(
+          rating || 0,
+          closedReason === 'no_review' ? 'none' : 'manual',
+          rating ? now().substring(0,10) : null,
+          actor, now(), stayId
+        ).run()
+
+        return json({ success: true, data: { stayId, status: 'closed', rating: rating || 0 } })
       }
 
 

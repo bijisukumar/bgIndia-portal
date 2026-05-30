@@ -134,6 +134,11 @@ export const api = {
   getRamanHistory:      ()       => get('getRamanHistory'),
   markRamanPaid:        (data)   => post('markRamanPaid', data),
 
+  // ── REVIEW CHASE ─────────────────────────────────────────
+  getReviewChaseList:   ()       => get('getReviewChaseList'),
+  markReviewChased:     (data)   => post('markReviewChased', data),
+  closeStayWithReview:  (data)   => post('closeStayWithReview', data),
+
   // ── INVENTORY ────────────────────────────────────────────
   saveInventoryPrices:  (data)   => post('saveInventoryPrices', data),
   getInventoryPrices:   (vId)    => get('getInventoryPrices', { villaId: vId }),

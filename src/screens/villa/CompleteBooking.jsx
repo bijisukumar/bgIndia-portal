@@ -215,7 +215,7 @@ export default function CompleteBooking() {
 
   // What action buttons to show based on current status
   const canMarkDocsUploaded   = s && ['booked','confirmed'].includes(s.status)
-  const canMarkReadyForCheckin = s && ['booked','confirmed','docs_uploaded'].includes(s.status)
+  const canMarkReadyForCheckin = s && ['booked','confirmed','docs_uploaded','pending_review'].includes(s.status)
   const canCancel             = s && !['closed','cancelled','checked_out'].includes(s.status)
 
   return (
@@ -567,7 +567,6 @@ export default function CompleteBooking() {
                       )
                     })
                   })()}
-                  ))}
                 </div>
               </>
             )}

@@ -2068,7 +2068,7 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         const stay = await DB.prepare(`SELECT status FROM stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
-        if (stay.status !== 'pending_review') {
+        if (!['booked','confirmed','docs_uploaded','pending_review'].includes(stay.status)) {
           return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status } })
         }
         await DB.prepare(

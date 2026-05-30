@@ -103,16 +103,22 @@ export default function CompleteBooking() {
     const ch = stay.source
       ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
       : 'Direct'
+
+    const nightFee = stay.night_fee || stay.nightFee || 0
+    const isAirbnb = ch === 'Airbnb'
+
     setForm({
       channel:        ch,
-      tariffPerNight: stay.tariff_per_night || stay.tariffPerNight || '',
+      // For Airbnb: default tariff to night fee (editable override), else existing value or ''
+      tariffPerNight: stay.tariff_per_night || stay.tariffPerNight ||
+                      (isAirbnb && nightFee ? String(nightFee) : '0'),
       extraCharges:   stay.extra_charges    || stay.extraCharges   || '0',
       notes:          stay.notes            || '',
     })
     // Pre-fill Airbnb breakdown if data exists
-    if (ch === 'Airbnb') {
+    if (isAirbnb) {
       setAirbnb({
-        nightFee:        String(stay.night_fee         || stay.nightFee        || ''),
+        nightFee:        String(nightFee || ''),
         cleaningFee:     String(stay.cleaning_fee      || stay.cleaningFee     || '1000'),
         hostServiceFee:  String(stay.host_service_fee  || stay.hostServiceFee  || ''),
         youEarn:         String(stay.you_earn          || stay.youEarn         || stay.tariff_per_night || stay.tariffPerNight || ''),
@@ -151,7 +157,9 @@ export default function CompleteBooking() {
   // Save financial details (updates stay record)
   async function handleSaveFinancials() {
     if (!selected) return
-    if (form.tariffPerNight === '') { showToast('Enter the tariff (0 is valid)', 'error'); return }
+    if (form.tariffPerNight === '' || form.tariffPerNight === null || form.tariffPerNight === undefined) {
+      set('tariffPerNight', '0')
+    }
     setSaving(true)
     try {
       await api.saveVillaRentalIncome({

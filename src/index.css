@@ -53,23 +53,26 @@ h3 { font-size: 1.2rem; }
   background: var(--dark);
 }
 
+@media (min-width: 768px) {
+  .screen {
+    max-width: 640px;
+  }
+}
+
 .screen-body {
   flex: 1;
   padding: 16px 16px 100px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200,144,58,0.4) transparent;
 }
 
 /* ── DESKTOP SCROLLBARS ─────────────────── */
 @media (min-width: 768px) {
   .screen-body::-webkit-scrollbar         { width: 6px; }
   .screen-body::-webkit-scrollbar-track   { background: transparent; }
-  .screen-body::-webkit-scrollbar-thumb   { background: rgba(200,144,58,0.3); border-radius: 3px; }
-  .screen-body::-webkit-scrollbar-thumb:hover { background: rgba(200,144,58,0.6); }
-
-  /* Also show on horizontal scroll containers */
-  .screen-body *::-webkit-scrollbar         { height: 4px; }
-  .screen-body *::-webkit-scrollbar-track   { background: transparent; }
-  .screen-body *::-webkit-scrollbar-thumb   { background: rgba(255,255,255,0.15); border-radius: 2px; }
+  .screen-body::-webkit-scrollbar-thumb   { background: rgba(200,144,58,0.4); border-radius: 3px; }
+  .screen-body::-webkit-scrollbar-thumb:hover { background: rgba(200,144,58,0.7); }
 }
 
 /* ── TOP BAR ────────────────────────────── */

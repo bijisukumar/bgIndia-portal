@@ -1083,7 +1083,7 @@ export async function onRequest(ctx) {
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status
            FROM stays
            WHERE villa_id = ?
-             AND status IN ('checked_in','ready_for_checkout')
+             AND status IN ('checked_in','ready_for_checkout','pending_review')
              AND checkout_date < date('now')
            ORDER BY checkout_date ASC`
         ).bind(villaId).all()

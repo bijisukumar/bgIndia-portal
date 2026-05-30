@@ -1541,6 +1541,50 @@ export async function onRequest(ctx) {
 
       // VILLA RENTAL INCOME (saves as a stay record)
       if (action === 'saveVillaRentalIncome') {
+        // If stayId provided → UPDATE existing stay financials (CompleteBooking flow)
+        // Otherwise → INSERT new closed stay (legacy VillaRentalIncome manual entry)
+        if (body.stayId) {
+          await DB.prepare(`
+            UPDATE stays SET
+              source             = COALESCE(NULLIF(?, ''), source),
+              tariff_per_night   = ?,
+              extra_charges      = ?,
+              extra_lines        = ?,
+              gross              = ?,
+              commission_pct     = ?,
+              commission_amt     = ?,
+              net                = ?,
+              night_fee          = COALESCE(NULLIF(?,0), night_fee),
+              cleaning_fee       = COALESCE(NULLIF(?,0), cleaning_fee),
+              host_service_fee   = COALESCE(NULLIF(?,0), host_service_fee),
+              you_earn           = COALESCE(NULLIF(?,0), you_earn),
+              guest_service_fee  = COALESCE(NULLIF(?,0), guest_service_fee),
+              guest_paid_total   = COALESCE(NULLIF(?,0), guest_paid_total),
+              updated_by = ?, updated_at = ?
+            WHERE stay_id = ?
+          `).bind(
+            body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null,
+            body.tariffPerNight || 0,
+            body.extraCharges   || 0,
+            body.extraLines     || null,
+            body.gross          || 0,
+            body.commPct        || 0,
+            body.commAmt        || 0,
+            body.net            || 0,
+            // Airbnb fee fields — only overwrite if provided
+            body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee        || 0 : 0,
+            body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee     || 0 : 0,
+            body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee  || 0 : 0,
+            body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn         || 0 : 0,
+            body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0,
+            body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid       || 0 : 0,
+            actor, now(),
+            body.stayId
+          ).run()
+          return json({ success: true, data: { stayId: body.stayId, updated: true } })
+        }
+
+        // Legacy: INSERT new closed stay (manual income entry from VillaRentalIncome screen)
         const stayId = genStayId(body.villaId || 'dwarka')
         await DB.prepare(`
           INSERT INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date,

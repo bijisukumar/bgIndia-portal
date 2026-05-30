@@ -115,6 +115,21 @@ export default function CompleteBooking() {
       extraCharges:   stay.extra_charges    || stay.extraCharges   || '0',
       notes:          stay.notes            || '',
     })
+    // Restore saved extra charge lines if they exist
+    try {
+      const saved = stay.extra_lines || stay.extraLines
+      if (saved) {
+        const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setExtraLines(parsed)
+        } else {
+          setExtraLines([])
+        }
+      } else {
+        setExtraLines([])
+      }
+    } catch { setExtraLines([]) }
+
     // Pre-fill Airbnb breakdown if data exists
     if (isAirbnb) {
       setAirbnb({

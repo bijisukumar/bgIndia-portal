@@ -482,9 +482,12 @@ export async function onRequest(ctx) {
         // Expose both snake_case and camelCase for compatibility
         return json({ success: true, data: {
           ...stay,
-          stayId:    stay.stay_id,
-          guestName: stay.guest_name,
-          villaId:   stay.villa_id,
+          stayId:       stay.stay_id,
+          guestName:    stay.guest_name,
+          villaId:      stay.villa_id,
+          checkInDate:  stay.checkin_date,
+          checkOutDate: stay.checkout_date,
+          guestCount:   stay.adults,
         }})
       }
 

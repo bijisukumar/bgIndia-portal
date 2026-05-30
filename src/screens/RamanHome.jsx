@@ -176,8 +176,13 @@ export default function RamanHome() {
     }).catch(() => setLoadingStay(false))
   }, [])
 
+  // Defensive helpers — API may return snake_case or camelCase
+  const guestName   = activeStay ? (activeStay.guestName   || activeStay.guest_name   || 'Guest') : null
+  const checkInDate = activeStay ? (activeStay.checkInDate  || activeStay.checkin_date  || '')     : null
+  const adultCount  = activeStay ? (activeStay.guestCount   || activeStay.adults        || '')     : null
+
   const activeLabel = activeStay
-    ? `Linked to ${activeStay.guestName || activeStay.guest_name}`
+    ? `Linked to ${guestName}`
     : readyCount > 0
       ? `${readyCount} guest${readyCount > 1 ? 's' : ''} ready — complete check-in first`
       : 'Unlocks after guest checks in'
@@ -189,7 +194,7 @@ export default function RamanHome() {
       sub: readyCount > 0
         ? `${readyCount} guest${readyCount > 1 ? 's' : ''} ready for check-in`
         : activeStay
-          ? `Active: ${activeStay.guestName || activeStay.guest_name}`
+          ? `Active: ${guestName}`
           : 'No guests ready yet',
       path: '/raman/checkin',
       disabled: false,
@@ -207,7 +212,7 @@ export default function RamanHome() {
       icon: '🍳', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Breakfast',
       sub: activeStay
-        ? `${activeStay.guestCount || activeStay.adults || ''} guests · ₹${CONFIG.breakfastRate}/person`
+        ? `${adultCount} guests · ₹${CONFIG.breakfastRate}/person`
         : activeLabel,
       path: '/raman/breakfast',
       disabled: !activeStay,
@@ -216,7 +221,7 @@ export default function RamanHome() {
     {
       icon: '🚗', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Car rental',
-      sub: activeStay ? `Linked to ${activeStay.guestName || activeStay.guest_name}` : activeLabel,
+      sub: activeStay ? `Linked to ${guestName}` : activeLabel,
       path: '/raman/carrental',
       disabled: !activeStay,
       lockReason: 'Guest must be checked in to record car rental',
@@ -256,11 +261,9 @@ export default function RamanHome() {
             <div className="active-stay-banner" onClick={() => navigate('/raman/checkin')}>
               <div className="active-stay-icon">🏠</div>
               <div style={{ flex: 1 }}>
-                <div className="active-stay-name">
-                  Active: {activeStay.guestName || activeStay.guest_name}
-                </div>
+                <div className="active-stay-name">Active: {guestName}</div>
                 <div className="active-stay-sub">
-                  Check-in {activeStay.checkInDate || activeStay.checkin_date || ''} · {activeStay.adults || ''} guests
+                  Check-in {checkInDate} · {adultCount} guests
                 </div>
               </div>
               <span style={{ color: 'var(--gold)', fontSize: '1.1rem' }}>›</span>

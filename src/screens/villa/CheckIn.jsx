@@ -281,18 +281,18 @@ export default function CheckIn() {
                                 <span style={{fontSize:'0.85rem',fontWeight:'600'}}>
                                   {i+1}. {ex.label||ex.item||ex.type||ex.name}
                                 </span>
-                                {(ex.amount||ex.price) > 0 && (
+                                {/*(ex.amount||ex.price) > 0 && (
                                   <span style={{color:'var(--gold)',fontWeight:'700'}}>
                                     {'₹'}{Number(ex.amount||ex.price).toLocaleString('en-IN')}
                                   </span>
-                                )}
+                                )*/}
                               </div>
                             )) : (
                               <div style={{display:'flex',justifyContent:'space-between'}}>
                                 <span style={{fontSize:'0.85rem'}}>Extra charges</span>
-                                <span style={{color:'var(--gold)',fontWeight:'700'}}>
+                                {/*<span style={{color:'var(--gold)',fontWeight:'700'}}>
                                   {'₹'}{Number(selected.extra_charges).toLocaleString('en-IN')}
-                                </span>
+                                </span>*/}
                               </div>
                             )}
                           </div>

@@ -213,9 +213,15 @@ export default function D1Explorer() {
     const q = (queryStr || sql).trim()
     if (!q) return
     setRunning(true); setQueryError(null); setResults(null)
+    const isWrite = /^(DELETE|UPDATE|INSERT|ALTER|CREATE|DROP)/i.test(q)
     try {
-      const rows = await api.runSQL(q)
-      setResults(rows)
+      if (isWrite) {
+        const result = await api.runSQLWrite(q)
+        setResults([{ '✅ rows affected': result?.changes ?? 0, duration_ms: result?.duration ?? 0 }])
+      } else {
+        const rows = await api.runSQL(q)
+        setResults(rows)
+      }
     } catch (e) { setQueryError(e.message) }
     finally { setRunning(false) }
   }

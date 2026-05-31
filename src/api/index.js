@@ -156,6 +156,22 @@ export const api = {
     return body.data
   },
 
+  runSQLWrite: async (sql) => {
+    const res = await fetch(`${BASE}/runSQLWrite`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql }),
+    })
+    if (res.status === 401) { handle401(); return }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body?.error || `HTTP ${res.status}`)
+    }
+    const body = await res.json()
+    if (body?.success === false) throw new Error(body.error || 'Query failed')
+    return body.data
+  },
+
   runQuery: async (key) => {
     const qs  = new URLSearchParams({ key }).toString()
     const res = await fetch(`${BASE}/runQuery?${qs}`, { headers: authHeaders() })

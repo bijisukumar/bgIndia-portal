@@ -837,6 +837,26 @@ export async function onRequest(ctx) {
         }
       }
 
+      // WRITE SQL — owner only, allows DELETE/UPDATE/INSERT/ALTER
+      if (action === 'runSQLWrite') {
+        const sql = (body && body.sql) ? body.sql.trim() : ''
+        if (!sql) return err('sql required')
+        const upper = sql.toUpperCase()
+        const blocked = ['DROP TABLE','TRUNCATE','DROP DATABASE','ATTACH','DETACH']
+        if (blocked.some(b => upper.includes(b))) {
+          return err('Operation not permitted — DROP TABLE and TRUNCATE are blocked')
+        }
+        try {
+          const result = await DB.prepare(sql).run()
+          return json({ success: true, data: {
+            changes:  result.meta?.changes  ?? 0,
+            duration: result.meta?.duration ?? 0,
+          }})
+        } catch (e) {
+          return json({ success: false, error: e.message }, 400)
+        }
+      }
+
       // AD-HOC QUERY (owner only — runs preset queries by key)
       if (action === 'runQuery') {
         const key = url.searchParams.get('key')

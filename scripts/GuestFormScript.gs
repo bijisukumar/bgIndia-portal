@@ -571,8 +571,8 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
     'Thank you for completing your check-in registration. ' +
     'Please verify the details we have on record:\n\n' +
     'STAY DETAILS\n' +
-    '  Check-in :  ' + checkIn  + '\n' +
-    '  Check-out:  ' + checkOut + '\n' +
+    '  Check-in :  ' + checkIn  + ' (after 4:00 PM)\n' +
+    '  Check-out:  ' + checkOut + ' (by 11:00 AM)\n' +
     '  Nights   :  ' + nights   + '\n' +
     (eta        ? '  ETA      :  ' + eta        + '\n' : '') +
     '\n' +

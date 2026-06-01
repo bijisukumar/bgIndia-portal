@@ -206,6 +206,7 @@ export async function onRequest(ctx) {
       // SUBMIT GUEST CHECK-IN FORM — public endpoint (no auth required for guests)
       // Creates or updates stay, stores all Form C fields, sets status to pending_review
       if (action === 'submitGuestCheckIn') {
+        try {
         const publicBody = await request.json().catch(() => ({}))
         const {
           villaId = 'dwarka', partner = 'direct', stayId: existingStayId,
@@ -396,6 +397,10 @@ export async function onRequest(ctx) {
         }
 
         return json({ success: true, data: { stayId, status: 'pending_review' } })
+        } catch(submitErr) {
+          console.error('submitGuestCheckIn crash:', submitErr.message, submitErr.stack)
+          return json({ success: false, error: 'Check-in submission failed: ' + submitErr.message }, 500)
+        }
       }
 
 

@@ -1,12 +1,12 @@
 name = "bgindia-portal"
 compatibility_date = "2024-01-01"
+pages_build_output_dir = "dist"
 
 [[d1_databases]]
-binding = "bgindia_db"
+binding = "DB"
 database_name = "bgindia-db"
 database_id = "6047aa03-9893-4fd9-8ba2-b3d7f5264ed1"
 
-# v2.0 — Estates DB (coconut, rubber, estate ledger — owner + pradosh only)
 [[d1_databases]]
 binding = "DB_ESTATES"
 database_name = "bgindiadb-estates"

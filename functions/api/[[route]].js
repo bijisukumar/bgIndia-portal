@@ -277,6 +277,7 @@ export async function onRequest(ctx) {
               arrival_date_india = ?, port_of_arrival = ?, next_destination = ?,
               request_early_checkin = ?, request_late_checkout = ?,
               request_breakfast = ?, breakfast_choice = ?, request_cab = ?,
+              request_extra_beds = ?, extra_beds_count = ?,
               checkin_form_submitted = 1, checkin_form_submitted_at = ?,
               status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
               updated_by = 'auto', updated_at = ?
@@ -399,6 +400,17 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, status: 'pending_review' } })
         } catch(submitErr) {
           console.error('submitGuestCheckIn crash:', submitErr.message, submitErr.stack)
+          // Log to processing_log for audit trail
+          try {
+            await DB.prepare(
+              `INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
+               VALUES (?, 'error', ?, ?, datetime('now'))`
+            ).bind(
+              'ERR-' + Date.now(),
+              'unknown',
+              'submitGuestCheckIn failed: ' + submitErr.message
+            ).run()
+          } catch(logErr) { console.error('Failed to log error:', logErr.message) }
           return json({ success: false, error: 'Check-in submission failed: ' + submitErr.message }, 500)
         }
       }

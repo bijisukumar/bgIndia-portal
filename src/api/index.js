@@ -126,6 +126,9 @@ export const api = {
   getStays:             (vId, y) => get('getStays', { villaId: vId, year: y }),
   getGuests:            ()       => get('getGuests'),
 
+  // ── TENANT CONFIG ─────────────────────────────────────────
+  getTenantConfig:      (tenantId) => get('getTenantConfig', { tenantId: tenantId || 'dwarka' }),
+
   // ── RAMAN ────────────────────────────────────────────────
   getRamanTodo:         (villaId)=> get('getRamanTodo', { villaId: villaId || 'dwarka' }),
   getRamanUnpaid:       ()       => get('getRamanUnpaid'),

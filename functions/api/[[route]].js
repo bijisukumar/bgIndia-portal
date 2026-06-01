@@ -434,6 +434,34 @@ export async function onRequest(ctx) {
     // ── GET ROUTES ──────────────────────────────────────
     if (method === 'GET') {
 
+      // TENANT CONFIG — returns config for the current tenant from DB
+      // Used by frontend on login to get villa name, phone, checkin times etc.
+      // Replaces hardcoded CONFIG values in config.js
+      if (action === 'getTenantConfig') {
+        const tenantId = url.searchParams.get('tenantId') || villaId || 'dwarka'
+        const tenant = await DB.prepare(
+          `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
+                  address, checkin_time, checkout_time,
+                  breakfast_rate, raman_comm_pct, logo_url, plan
+           FROM tenants WHERE tenant_id = ? AND active = 1`
+        ).bind(tenantId).first()
+        if (!tenant) return err('Tenant not found', 404)
+        return json({ success: true, data: {
+          tenantId:      tenant.tenant_id,
+          villaName:     tenant.villa_name,
+          phone1:        tenant.phone1,
+          phone2:        tenant.phone2,
+          guestContact:  tenant.guest_contact,
+          address:       tenant.address,
+          checkinTime:   tenant.checkin_time  || '16:00',
+          checkoutTime:  tenant.checkout_time || '11:00',
+          breakfastRate: tenant.breakfast_rate || 275,
+          ramanCommPct:  tenant.raman_comm_pct || 10,
+          logoUrl:       tenant.logo_url || null,
+          plan:          tenant.plan || 'starter',
+        }})
+      }
+
       // STAYS
       if (action === 'getStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'

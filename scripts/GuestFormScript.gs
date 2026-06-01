@@ -1,47 +1,76 @@
 // ============================================================
-// GUEST CHECK-IN FORM — BOUND SCRIPT
+// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.1
 // ============================================================
-// Paste this into the Apps Script editor of:
+// Paste into Apps Script editor of:
 //   "GVR Registration-Check-In form (Responses)"
-//   https://docs.google.com/spreadsheets/d/1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0
 //
-// Replace ALL existing code in that editor with this file.
-//
-// Setup (one time):
-//   1. Paste this file into the script editor
-//   2. Save (Ctrl+S)
-//   3. Triggers → Add Trigger:
-//        Function:     onGuestFormSubmit
-//        Deployment:   Head
-//        Event source: From spreadsheet
-//        Event type:   On form submit
-//   4. Authorise when prompted
+// v2.1 change: CLIENT config now loaded from D1 tenants table
+// via getTenantConfig API call. No more hardcoded values.
+// Only WORKER_URL and TENANT_ID need to be set here.
 // ============================================================
 
-// ── CLIENT CONFIG — update this block when onboarding a new property ──────
-var CLIENT = {
-  name:               'Guruvayur Estates',
-  villaName:          'Guruvayur Villa (Dwarka)',
-  villaId:            'dwarka',
-  phone1:             '+91 99950 43283',   // Villa landline / main
-  phone2:             '+91 97287 65101',   // Owner mobile (operations)
-  guestContactPhone:  '+91 97287 65101',   // Number shown to guests for queries
-  ownerEmail:         'kerala.luxuryvillas@gmail.com',
-  ownerEmailCC:       'bijisukumar@gmail.com',
-  driveRootId:        '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2',
-  workerUrl:          'https://manage.luxuryvillasofguruvayur.com/api',
-  spreadsheetId:      '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
-  address:            'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101',
-};
+// ── ONLY THESE TWO VALUES CHANGE PER CLIENT ───────────────
+var WORKER_URL = 'https://manage.luxuryvillasofguruvayur.com/api';
+var TENANT_ID  = 'dwarka';  // matches tenants.tenant_id in D1
+// ─────────────────────────────────────────────────────────
 
-// ── Convenience aliases (used throughout script) ───────────────────────────
-var WORKER_URL  = CLIENT.workerUrl;
-var OWNER_EMAIL = CLIENT.ownerEmail;
-var DRIVE_ROOT  = CLIENT.driveRootId;
+// CLIENT config loaded dynamically from D1 on first use
+var _CLIENT = null;
+
+function getClient() {
+  if (_CLIENT) return _CLIENT;
+  try {
+    var resp = callWorker('GET', 'getTenantConfig', { tenantId: TENANT_ID });
+    if (resp && resp.success && resp.data) {
+      _CLIENT = {
+        villaName:        resp.data.villaName,
+        villaId:          resp.data.tenantId,
+        phone1:           resp.data.phone1,
+        phone2:           resp.data.phone2,
+        guestContactPhone: resp.data.guestContact,
+        ownerEmail:       resp.data.ownerEmail  || 'kerala.luxuryvillas@gmail.com',
+        ownerEmailCC:     resp.data.ownerEmailCC || 'bijisukumar@gmail.com',
+        driveRootId:      resp.data.driveRootId  || '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2',
+        address:          resp.data.address,
+        checkinTime:      resp.data.checkinTime  || '16:00',
+        checkoutTime:     resp.data.checkoutTime || '11:00',
+        breakfastRate:    resp.data.breakfastRate || 275,
+      };
+      Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
+      return _CLIENT;
+    }
+  } catch(e) {
+    Logger.log('getTenantConfig error: ' + e.message + ' — using fallback');
+  }
+  // Fallback to hardcoded values if API call fails
+  _CLIENT = {
+    villaName:         'Guruvayur Villa (Dwarka)',
+    villaId:           'dwarka',
+    phone1:            '+91 99950 43283',
+    phone2:            '+91 97287 65101',
+    guestContactPhone: '+91 97287 65101',
+    ownerEmail:        'kerala.luxuryvillas@gmail.com',
+    ownerEmailCC:      'bijisukumar@gmail.com',
+    driveRootId:       '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2',
+    address:           'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101',
+    checkinTime:       '16:00',
+    checkoutTime:      '11:00',
+    breakfastRate:     275,
+  };
+  return _CLIENT;
+}
+
+// Convenience aliases
+var OWNER_EMAIL = 'kerala.luxuryvillas@gmail.com';
+var DRIVE_ROOT  = '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2';
 
 // ── MAIN TRIGGER — fires on every form submission ─────────────────────────
 function onGuestFormSubmit(e) {
   try {
+    var CLIENT = getClient();
+    OWNER_EMAIL = CLIENT.ownerEmail;
+    DRIVE_ROOT  = CLIENT.driveRootId;
+
     var sheet   = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
     var data    = sheet.getDataRange().getValues();
     var headers = data[0];
@@ -68,21 +97,16 @@ function onGuestFormSubmit(e) {
     var guestList    = get('list all guest') || get('guest names');
     var homeAddress  = get('full home address') || get('address');
 
-    // Try structured fields first (new form layout)
-    // If form has separate City/State/Country/Pincode fields, use them directly
     var city     = get('city')    || '';
     var state    = get('state')   || '';
     var country  = get('country') || '';
     var pincode  = get('pincode') || get('pin code') || get('postal code') || '';
     var fromCity = city;
 
-    // Fallback: parse from full home address if structured fields not filled
     if (!city && homeAddress) {
       var parts = homeAddress.split(',').map(function(p) { return p.trim(); });
-      // Extract pincode
       var pinMatch = homeAddress.match(/\b(\d{6})\b/);
       if (pinMatch && !pincode) pincode = pinMatch[1];
-
       if (parts.length >= 3) {
         var last       = parts[parts.length - 1].replace(/\d+/g, '').trim();
         var secondLast = parts[parts.length - 2].trim();
@@ -115,12 +139,10 @@ function onGuestFormSubmit(e) {
     if (!bookerName) {
       sendAlert('⚠️ Form submitted — booker name missing',
         'Could not find booker name in the latest form response.\n' +
-        'Please check the response sheet manually.\n' +
         'Headers: ' + headers.join(' | '));
       return;
     }
 
-    // ── Match to an open stay in D1 ──────────────────────────────────────
     var matchResp = callWorker('GET', 'findOpenStay', {
       guestName:   bookerName,
       checkInDate: checkInDate,
@@ -132,7 +154,6 @@ function onGuestFormSubmit(e) {
     if (matchResp && matchResp.success && matchResp.data && matchResp.data.stayId) {
       stayId = matchResp.data.stayId;
       Logger.log('Matched stay: ' + stayId);
-
       if (matchResp.data.driveFolderId) {
         try { guestFolder = DriveApp.getFolderById(matchResp.data.driveFolderId); }
         catch(ex) { Logger.log('Could not open folder by ID: ' + ex.message); }
@@ -141,127 +162,85 @@ function onGuestFormSubmit(e) {
         guestFolder = getOrCreateGuestFolder(bookerName, stayId, checkInDate);
       }
     } else {
-      // ── FALLBACK: no matching booking — auto-create provisional ──────────
       Logger.log('No open stay found for: ' + bookerName + ' — creating provisional booking');
-
       var provResp = callWorker('POST', 'createProvisionalBooking', {
-        guestName:   bookerName,
-        checkInDate: checkInDate,
+        guestName:    bookerName,
+        checkInDate:  checkInDate,
         checkOutDate: checkOutDate,
-        guestEmail:  email,
-        guestPhone:  phone,
-        villaId:     'dwarka',
-        source:      'guest_form',
+        guestEmail:   email,
+        guestPhone:   phone,
+        villaId:      TENANT_ID,
+        source:       'guest_form',
       });
-
       if (!provResp || !provResp.success) {
         sendAlert('🚨 Failed to auto-create provisional booking',
-          'Guest: ' + bookerName +
-          '\nCheck-in: ' + checkInDate +
+          'Guest: ' + bookerName + '\nCheck-in: ' + checkInDate +
           '\nError: ' + JSON.stringify(provResp));
         return;
       }
-
       stayId = provResp.data.stayId;
       Logger.log('Provisional booking created: ' + stayId);
-
-      // Create Drive folder for provisional booking
       guestFolder = getOrCreateGuestFolder(bookerName, stayId, checkInDate);
-
-      // Create provisional info TXT in folder
       try {
         var nights = checkInDate && checkOutDate
           ? Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / 86400000))
           : 1;
-        var txtLines = [
-          'Villa: Guruvayur Villa (Dwarka)',
+        guestFolder.createFile('Provisional-' + stayId + '.txt', [
+          'Villa: ' + CLIENT.villaName,
           'Guest: ' + bookerName,
           'Check-in: ' + checkInDate,
           'Phone: ' + phone,
           'Email: ' + email,
           'Nights: ' + nights,
           'Status: Provisional — pending owner review',
-        ];
-        guestFolder.createFile('Provisional-' + stayId + '.txt', txtLines.join('\n'), 'text/plain');
+        ].join('\n'), 'text/plain');
       } catch(txtErr) { Logger.log('TXT create error: ' + txtErr.message); }
-
-      // Notify owner — provisional booking created, needs review
       sendAlert('🔶 Provisional booking auto-created — pending review',
-        'Guest submitted check-in form but NO matching booking was found.' +
-        '\n\nA provisional booking has been auto-created:' +
-        '\n  Stay ID:   ' + stayId +
-        '\n  Guest:     ' + bookerName +
-        '\n  Check-in:  ' + checkInDate +
-        '\n  Check-out: ' + checkOutDate +
-        '\n  Email:     ' + email +
-        '\n  Phone:     ' + phone +
+        'Guest submitted check-in form but NO matching booking was found.\n\n' +
+        'A provisional booking has been auto-created:\n' +
+        '  Stay ID:   ' + stayId + '\n  Guest:     ' + bookerName +
+        '\n  Check-in:  ' + checkInDate + '\n  Check-out: ' + checkOutDate +
+        '\n  Email:     ' + email + '\n  Phone:     ' + phone +
         '\n\nDrive folder: ' + guestFolder.getUrl() +
         '\n\n👉 Open the portal → Owner Home → approve or edit before Raman can check in.');
     }
 
-    // ── Rename and move uploaded files ───────────────────────────────────
-    // Google Forms saves file uploads to Drive automatically.
-    // Each upload appears as a Drive URL in the response row.
     var moved = { checkin: 0, id: 0 };
-
     lastRow.forEach(function(cell, i) {
       var val = String(cell || '');
       if (val.indexOf('drive.google.com') < 0) return;
-
       var fileIdMatch = val.match(/id=([a-zA-Z0-9_-]+)/) ||
                         val.match(/\/d\/([a-zA-Z0-9_-]+)\//);
       if (!fileIdMatch) return;
-
       try {
-        var file    = DriveApp.getFileById(fileIdMatch[1]);
-        var col     = String(headers[i] || '').toLowerCase();
-        var ext     = getExtension(file.getName());
-        var newName;
-
+        var file   = DriveApp.getFileById(fileIdMatch[1]);
+        var col    = String(headers[i] || '').toLowerCase();
+        var ext    = getExtension(file.getName());
         var isIdDoc = col.indexOf('aadhaar') >= 0 || col.indexOf('adhar') >= 0 ||
                       col.indexOf('passport') >= 0 || col.indexOf('govt') >= 0 ||
                       col.indexOf('foreign id') >= 0 ||
                       (col.indexOf('upload') >= 0 && col.indexOf('id') >= 0);
-
-        if (isIdDoc) {
-          newName = 'ID-' + stayId + '-' + firstName(bookerName) + ext;
-          moved.id++;
-        } else {
-          newName = 'OnlineCheckIn-' + stayId + '-' + firstName(bookerName) + ext;
-          moved.checkin++;
-        }
-
+        var newName = isIdDoc
+          ? 'ID-' + stayId + '-' + firstName(bookerName) + ext
+          : 'OnlineCheckIn-' + stayId + '-' + firstName(bookerName) + ext;
+        if (isIdDoc) moved.id++; else moved.checkin++;
         file.setName(newName);
-
         var parents = file.getParents();
-        while (parents.hasNext()) {
-          try { parents.next().removeFile(file); } catch(ex) {}
-        }
+        while (parents.hasNext()) { try { parents.next().removeFile(file); } catch(ex) {} }
         guestFolder.addFile(file);
-        Logger.log('Moved: ' + newName + ' → ' + guestFolder.getName());
-      } catch(ex) {
-        Logger.log('File move error col ' + i + ': ' + ex.message);
-      }
+        Logger.log('Moved: ' + newName);
+      } catch(ex) { Logger.log('File move error col ' + i + ': ' + ex.message); }
     });
 
-    // ── Set status to docs_uploaded in D1 ────────────────────────────────
-    // Also update location fields on the stay
     callWorker('POST', 'updateStayLocation', {
-      stayId:      stayId,
-      homeAddress: homeAddress,
-      city:        city,
-      state:       state,
-      country:     country,
-      fromCity:    fromCity,
-      pincode:     pincode,
-      phone:       phone,
-      email:       email,
+      stayId: stayId, homeAddress: homeAddress, city: city,
+      state: state, country: country, fromCity: fromCity,
+      pincode: pincode, phone: phone, email: email,
     });
 
-    // Create OnlineCheckIn marker file so Drive watcher triggers ready_for_checkin
     try {
       var markerName = 'OnlineCheckIn-' + stayId + '-' + firstName(bookerName) + '.txt';
-      var lines = [
+      guestFolder.createFile(markerName, [
         'Guest Registration Form Submitted',
         'Stay ID:     ' + stayId,
         'Guest:       ' + bookerName,
@@ -275,67 +254,41 @@ function onGuestFormSubmit(e) {
         'Pincode:     ' + pincode,
         'Email:       ' + email,
         'Phone:       ' + phone,
-      ];
-      guestFolder.createFile(markerName, lines.join('\n'), 'text/plain');
+      ].join('\n'), 'text/plain');
       Logger.log('Created: ' + markerName);
     } catch(me) { Logger.log('Marker error: ' + me.message); }
 
-    callWorker('POST', 'updateStayStatus', {
-      stayId:    stayId,
-      status:    'docs_uploaded',
-      createdBy: 'auto',
-    });
+    callWorker('POST', 'updateStayStatus', { stayId: stayId, status: 'docs_uploaded', createdBy: 'auto' });
 
-    // ── Notify owner ─────────────────────────────────────────────────────
-    sendAlert(
-      '📋 Check-in form received: ' + bookerName,
-      'Stay ID: '      + stayId +
-      '\nCheck-in: '   + checkInDate + ' → ' + checkOutDate +
-      '\nEmail: '      + email +
-      '\nPhone: '      + phone +
-      '\nAdults: '     + adults + (children ? ' · Children: ' + children : '') +
-      '\nCitizenship: '+ citizenship +
-      '\nETA: '        + eta +
-      '\nPurpose: '    + purpose +
-      '\nGuests: '     + guestList +
-      '\n\nFiles moved to guest folder:' +
-      '\n  OnlineCheckIn : ' + moved.checkin +
-      '\n  ID documents  : ' + moved.id +
+    sendAlert('📋 Check-in form received: ' + bookerName,
+      'Stay ID: ' + stayId + '\nCheck-in: ' + checkInDate + ' → ' + checkOutDate +
+      '\nEmail: ' + email + '\nPhone: ' + phone +
+      '\nAdults: ' + adults + (children ? ' · Children: ' + children : '') +
+      '\nCitizenship: ' + citizenship + '\nETA: ' + eta +
+      '\nPurpose: ' + purpose + '\nGuests: ' + guestList +
+      '\n\nFiles moved:\n  OnlineCheckIn: ' + moved.checkin + '\n  ID documents: ' + moved.id +
       '\nDrive folder: ' + guestFolder.getUrl() +
-      '\n\nStatus set to: docs_uploaded' +
-      '\nNext: verify docs in Drive, then open Complete Booking → Mark ready for check-in.'
-    );
+      '\n\nStatus: docs_uploaded → verify docs → Complete Booking → Mark ready for check-in.');
 
     Logger.log('onGuestFormSubmit complete: ' + stayId);
-
   } catch(err) {
     Logger.log('onGuestFormSubmit ERROR: ' + err.message + '\n' + (err.stack || ''));
     sendAlert('🚨 Form submit script error', err.message + '\n' + (err.stack || ''));
   }
 }
 
-// ── DRIVE FOLDER HELPER ───────────────────────────────────────────────────
-// Creates: Guests/YYYY/MM-MonthName/GuestName-DD-StayID
-// Example: Guests/2026/05-May/Vikram Ramasubramanian-08-DWK-AB123
-
-
-// ── PROCESS PENDING CHECK-IN FORMS ─────────────────────────────────────
-// Triggered every 5 minutes (set up in Apps Script triggers)
-// Finds stays in pending_review with no Drive folder and:
-// 1. Creates Drive folder
-// 2. Creates TXT summary file
-// 3. Sends confirmation email to owner and guest
+// ── PROCESS PENDING CHECK-IN FORMS ────────────────────────
 function processPendingCheckInForms() {
   Logger.log('=== processPendingCheckInForms START ===');
+  var CLIENT = getClient();
+  OWNER_EMAIL = CLIENT.ownerEmail;
+  DRIVE_ROOT  = CLIENT.driveRootId;
 
   var resp = callWorker('POST', 'getPendingReviewStays', {});
   if (!resp || !resp.success || !resp.data) {
     Logger.log('No pending review stays or error: ' + JSON.stringify(resp));
-    // Send error email if worker call fails
-    try {
-      GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ processPendingCheckInForms — worker call failed',
-        'getPendingReviewStays returned: ' + JSON.stringify(resp) + '\n\nCheck worker logs.');
-    } catch(e) {}
+    try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ processPendingCheckInForms — worker call failed',
+      'getPendingReviewStays returned: ' + JSON.stringify(resp)); } catch(e) {}
     return;
   }
 
@@ -343,63 +296,29 @@ function processPendingCheckInForms() {
   Logger.log('Found ' + stays.length + ' pending_review stays');
 
   stays.forEach(function(stay) {
-    // Check if there are pending documents even if folder already exists
     var docsResp = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
-    var hasPendingDocs = docsResp && docsResp.success &&
-                         docsResp.data && docsResp.data.length > 0;
-
-    // Skip only if folder created AND no pending docs
+    var hasPendingDocs = docsResp && docsResp.success && docsResp.data && docsResp.data.length > 0;
     if (stay.folderCreated && !hasPendingDocs) {
-      Logger.log('Stay ' + stay.stayId + ' fully processed, skipping');
-      return;
+      Logger.log('Stay ' + stay.stayId + ' fully processed, skipping'); return;
     }
-
-    Logger.log('Processing stay: ' + stay.stayId +
-      ' | folder_created: ' + stay.folderCreated +
-      ' | pending docs: ' + (hasPendingDocs ? docsResp.data.length : 0));
-
     Logger.log('Processing: ' + stay.stayId + ' for ' + stay.guestName);
-
     try {
-      // Get or create Drive folder
       var folder = null;
       if (stay.driveFolderUrl && stay.folderCreated) {
-        // Folder already exists — get it by ID from D1
         try {
-          var existingResp = callWorker('POST', 'getPendingReviewStays', {});
-          // Get folder directly from Drive URL
           var folderIdMatch = stay.driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
-          if (folderIdMatch) {
-            folder = DriveApp.getFolderById(folderIdMatch[1]);
-            Logger.log('Using existing folder: ' + folderIdMatch[1]);
-          }
-        } catch(fe) {
-          Logger.log('Could not get existing folder: ' + fe.message + ' — will recreate');
-        }
+          if (folderIdMatch) folder = DriveApp.getFolderById(folderIdMatch[1]);
+        } catch(fe) { Logger.log('Could not get existing folder: ' + fe.message); }
       }
-
       if (!folder) {
         folder = getOrCreateGuestFolder(stay.guestName, stay.stayId, stay.checkIn);
         if (!folder) {
-          Logger.log('Failed to create folder for ' + stay.stayId);
-          GmailApp.sendEmail(OWNER_EMAIL,
-            '[GVR Portal] ⚠️ Folder creation failed — ' + stay.stayId,
-            'Could not create Drive folder for ' + stay.guestName +
-            '\nStay: ' + stay.stayId + '\nCheck-in: ' + stay.checkIn);
+          GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ Folder creation failed — ' + stay.stayId,
+            'Could not create Drive folder for ' + stay.guestName);
           return;
         }
       }
-
-      // Fetch full stay details for TXT file
-      var fullStay = callWorker('GET', 'findOpenStay', {
-        guestName: stay.guestName,
-        checkInDate: stay.checkIn
-      });
-
-      var nights = stay.nights || 1;
-      var checkOut = stay.checkOut || '';
-
-      // Build TXT content — only show fields that have data
+      var fullStay = callWorker('GET', 'findOpenStay', { guestName: stay.guestName, checkInDate: stay.checkIn });
       var s = (fullStay && fullStay.data) ? fullStay.data : {};
       var adults   = parseInt(s.adults)   || 1;
       var children = parseInt(s.children) || 0;
@@ -409,9 +328,9 @@ function processPendingCheckInForms() {
         '============================================================',
         '',
         'STAY DETAILS',
-        '  Check-in :  ' + stay.checkIn,
-        '  Check-out:  ' + (s.checkoutDate || stay.checkOut || 'TBD'),
-        '  Nights   :  ' + (s.nights || nights),
+        '  Check-in :  ' + stay.checkIn + ' (after ' + CLIENT.checkinTime + ')',
+        '  Check-out:  ' + (s.checkoutDate || stay.checkOut || 'TBD') + ' (by ' + CLIENT.checkoutTime + ')',
+        '  Nights   :  ' + (s.nights || stay.nights || 1),
         '',
         'GUEST DETAILS',
         '  Name     :  ' + stay.guestName,
@@ -423,8 +342,6 @@ function processPendingCheckInForms() {
       if (s.phone || stay.phone) lines.push('  Phone    :  ' + (s.phone || stay.phone));
       if (s.email || stay.email) lines.push('  Email    :  ' + (s.email || stay.email));
       lines.push('');
-
-      // Travel — only if data exists
       var hasTravel = s.purposeOfVisit || s.modeOfTransport || s.eta;
       if (hasTravel) {
         lines.push('TRAVEL');
@@ -434,8 +351,6 @@ function processPendingCheckInForms() {
         if (s.eta)             lines.push('  ETA      :  ' + s.eta);
         lines.push('');
       }
-
-      // Additional requests — only if any selected
       var hasRequests = s.requestBreakfast || s.requestCab || s.requestEarlyCheckin || s.requestLateCheckout || s.requestExtraBeds;
       lines.push('ADDITIONAL REQUESTS');
       if (hasRequests) {
@@ -443,149 +358,102 @@ function processPendingCheckInForms() {
         if (s.requestCab)          lines.push('  ✓  Cab service');
         if (s.requestEarlyCheckin) lines.push('  ✓  Early check-in');
         if (s.requestLateCheckout) lines.push('  ✓  Late check-out');
-        if (s.requestExtraBeds)    lines.push('  ✓  Extra floor beds — ' + (s.extraBedsCount || 1) + ' bed(s) × ₹1,000/night');
-      } else {
-        lines.push('  None requested');
-      }
+        if (s.requestExtraBeds)    lines.push('  ✓  Extra floor beds — ' + (s.extraBedsCount || 1) + ' bed(s)');
+      } else { lines.push('  None requested'); }
       lines.push('');
       lines.push('============================================================');
 
       folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
-      Logger.log('TXT file created for ' + stay.stayId);
 
-      // Upload ID documents from D1 to Drive folder
+      // Upload ID docs from D1
       try {
-        var docsResp = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
-        if (docsResp && docsResp.success && docsResp.data && docsResp.data.length > 0) {
-          docsResp.data.forEach(function(doc) {
+        var dr = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
+        if (dr && dr.success && dr.data && dr.data.length > 0) {
+          dr.data.forEach(function(doc) {
             if (!doc.file_b64) return;
             try {
               var decoded   = Utilities.base64Decode(doc.file_b64);
               var ts        = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
-              var typeLabel = doc.doc_type === 'govt_id' ? 'ID' :
-                              doc.doc_type === 'passport' ? 'Passport' : 'Visa';
-              var fileName  = typeLabel + '-' + stay.stayId + '-' + ts + '.jpg';
-              var blob      = Utilities.newBlob(decoded, 'image/jpeg', fileName);
-              folder.createFile(blob);
-              Logger.log('Uploaded doc to Drive: ' + fileName);
-              // Mark doc as uploaded — prevents re-upload on next trigger run
+              var typeLabel = doc.doc_type === 'govt_id' ? 'ID' : doc.doc_type === 'passport' ? 'Passport' : 'Visa';
+              folder.createFile(Utilities.newBlob(decoded, 'image/jpeg', typeLabel + '-' + stay.stayId + '-' + ts + '.jpg'));
               callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
-            } catch(docErr) {
-              Logger.log('Doc upload error (' + doc.doc_type + '): ' + docErr.message);
-            }
+            } catch(docErr) { Logger.log('Doc upload error: ' + docErr.message); }
           });
-        } else {
-          Logger.log('No documents found in D1 for ' + stay.stayId);
         }
-      } catch(docsErr) {
-        Logger.log('getGuestDocuments error: ' + docsErr.message);
-      }
+      } catch(docsErr) { Logger.log('getGuestDocuments error: ' + docsErr.message); }
 
-      // Update D1 with folder URL, set folder_created=1, log entry
       callWorker('POST', 'updateDriveFolder', {
-        stayId:          stay.stayId,
-        driveFolderId:   folder.getId(),
-        driveFolderUrl:  folder.getUrl(),
-        folderCreated:   1,
-        processingNote:  'Created by processPendingCheckInForms — ' + new Date().toISOString(),
+        stayId: stay.stayId, driveFolderId: folder.getId(),
+        driveFolderUrl: folder.getUrl(), folderCreated: 1,
+        processingNote: 'processPendingCheckInForms — ' + new Date().toISOString(),
       });
-      Logger.log('Drive folder URL saved to D1 for ' + stay.stayId);
-
-      // Clean up base64 images from D1 — they are now safely in Drive
-      // This keeps the guest_documents table lean
-      try {
-        callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId });
-        Logger.log('Cleaned guest_documents from D1 for ' + stay.stayId);
-      } catch(cleanErr) {
-        Logger.log('Cleanup warning (non-fatal): ' + cleanErr.message);
-      }
-
-      // Send confirmation emails — pass full stay details for requests section
-      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'), s);
+      try { callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId }); } catch(e) {}
+      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'), s, CLIENT);
 
     } catch(e) {
-      var errMsg = 'Error processing ' + stay.stayId + ': ' + e.message;
-      Logger.log(errMsg);
-      // Email owner immediately on processing error
-      try {
-        GmailApp.sendEmail(
-          OWNER_EMAIL,
-          '[GVR Portal] ⚠️ Processing error — ' + stay.stayId,
-          'An error occurred while processing check-in for ' + stay.guestName + '\n\n' +
-          'Stay ID  : ' + stay.stayId + '\n' +
-          'Check-in : ' + stay.checkIn + '\n' +
-          'Error    : ' + e.message + '\n\n' +
-          'The record is still in D1 and will be retried on next trigger run.\n' +
-          'If this error persists, set folder_created=0 and check the execution logs.'
-        );
-      } catch(mailErr) {
-        Logger.log('Error email failed: ' + mailErr.message);
-      }
+      Logger.log('Error processing ' + stay.stayId + ': ' + e.message);
+      try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ Processing error — ' + stay.stayId,
+        'Error: ' + e.message + '\nStay: ' + stay.stayId); } catch(me) {}
     }
   });
 
-  // ── CLEANUP: delete guest_documents older than 24hrs where folder is created ──
   try {
     var cleanResp = callWorker('POST', 'cleanupExpiredDocuments', {});
-    if (cleanResp && cleanResp.success) {
-      Logger.log('Cleanup: deleted ' + (cleanResp.data.deleted || 0) + ' expired document(s)');
-    }
-  } catch(cleanupErr) {
-    Logger.log('Cleanup error (non-fatal): ' + cleanupErr.message);
-  }
+    if (cleanResp && cleanResp.success) Logger.log('Cleanup: deleted ' + (cleanResp.data.deleted || 0) + ' doc(s)');
+  } catch(e) { Logger.log('Cleanup error: ' + e.message); }
 
   Logger.log('=== processPendingCheckInForms END ===');
 }
 
-// ── SEND CHECK-IN CONFIRMATION EMAILS ───────────────────────────────────
-function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails) {
+// ── SEND CHECK-IN CONFIRMATION EMAILS ────────────────────
+function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails, CLIENT) {
+  if (!CLIENT) CLIENT = getClient();
   var guestName  = stay.guestName || 'Guest';
   var guestEmail = (stayDetails && stayDetails.email) || stay.email || '';
-  var checkIn    = stay.checkIn   || '';
+  var checkIn    = stay.checkIn  || '';
   var checkOut   = (stayDetails && stayDetails.checkoutDate) || stay.checkOut || '';
   var nights     = (stayDetails && stayDetails.nights) || stay.nights || 1;
-  var stayId     = stay.stayId    || '';
   var adults     = (stayDetails && stayDetails.adults)   || 1;
   var children   = (stayDetails && stayDetails.children) || 0;
   var phone      = (stayDetails && stayDetails.phone)    || stay.phone || '';
+  var eta        = (stayDetails && stayDetails.eta) ? stayDetails.eta : '';
 
-  // Build additional requests section
   var reqLines = [];
   if (stayDetails) {
     if (stayDetails.requestBreakfast)    reqLines.push('  ✓ Breakfast — ' + (stayDetails.breakfastChoice || 'Idli'));
     if (stayDetails.requestCab)          reqLines.push('  ✓ Cab service');
     if (stayDetails.requestEarlyCheckin) reqLines.push('  ✓ Early check-in');
     if (stayDetails.requestLateCheckout) reqLines.push('  ✓ Late check-out');
-    if (stayDetails.requestExtraBeds)    reqLines.push('  ✓ Extra floor beds — ' + (stayDetails.extraBedsCount || 1) + ' bed(s) × ₹1,000/night');
+    if (stayDetails.requestExtraBeds)    reqLines.push('  ✓ Extra floor beds — ' + (stayDetails.extraBedsCount || 1) + ' bed(s)');
   }
   var reqSection = reqLines.length > 0
     ? 'ADDITIONAL REQUESTS:\n' + reqLines.join('\n') + '\n\n'
     : 'ADDITIONAL REQUESTS: None\n\n';
 
-  var subject = 'Your Check-in Registration — ' + CLIENT.villaName;
-
-  var eta = (stayDetails && stayDetails.eta) ? stayDetails.eta : '';
+  // Format times as "4:00 PM" from "16:00"
+  function fmt(t) {
+    if (!t) return '';
+    var parts = t.split(':'); var h = parseInt(parts[0]); var m = parts[1] || '00';
+    return (h > 12 ? h-12 : h) + ':' + m + ' ' + (h >= 12 ? 'PM' : 'AM');
+  }
 
   var guestBody =
     'Dear ' + guestName + ',\n\n' +
     'Thank you for completing your check-in registration. ' +
     'Please verify the details we have on record:\n\n' +
     'STAY DETAILS\n' +
-    '  Check-in :  ' + checkIn  + ' (after 4:00 PM)\n' +
-    '  Check-out:  ' + checkOut + ' (by 11:00 AM)\n' +
-    '  Nights   :  ' + nights   + '\n' +
-    (eta        ? '  ETA      :  ' + eta        + '\n' : '') +
-    '\n' +
+    '  Check-in :  ' + checkIn  + ' (after ' + fmt(CLIENT.checkinTime)  + ')\n' +
+    '  Check-out:  ' + checkOut + ' (by '    + fmt(CLIENT.checkoutTime) + ')\n' +
+    '  Nights   :  ' + nights + '\n' +
+    (eta ? '  ETA      :  ' + eta + '\n' : '') + '\n' +
     'GUEST DETAILS\n' +
-    '  Adults   :  ' + adults   + (children > 0 ? '\n  Children :  ' + children : '') + '\n' +
+    '  Adults   :  ' + adults + (children > 0 ? '\n  Children :  ' + children : '') + '\n' +
     (phone      ? '  Phone    :  ' + phone      + '\n' : '') +
     (guestEmail ? '  Email    :  ' + guestEmail + '\n' : '') +
     '\n' + reqSection +
-    'If anything looks incorrect, please contact us immediately at ' +
-    CLIENT.guestContactPhone + '.\n\n' +
+    'If anything looks incorrect, please contact us at ' + CLIENT.guestContactPhone + '.\n\n' +
     'We look forward to welcoming you to ' + CLIENT.villaName + '!\n\n' +
-    'Warm regards,\n' +
-    CLIENT.villaName + '\n' +
+    'Warm regards,\n' + CLIENT.villaName + '\n' +
     CLIENT.phone1 + '  |  ' + CLIENT.guestContactPhone;
 
   var ownerBody =
@@ -595,7 +463,7 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
     'Check-in :  ' + checkIn    + '\n' +
     'Check-out:  ' + checkOut   + '\n' +
     'Nights   :  ' + nights     + '\n' +
-    'Adults   :  ' + adults     + (children > 0 ? '  |  Children: ' + children : '') + '\n' +
+    'Adults   :  ' + adults + (children > 0 ? '  |  Children: ' + children : '') + '\n' +
     (phone      ? 'Phone    :  ' + phone      + '\n' : '') +
     (guestEmail ? 'Email    :  ' + guestEmail + '\n' : '') +
     '\n' + reqSection +
@@ -605,152 +473,83 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails)
     'Drive folder: ' + folderUrl + '\n\n' +
     '>> ACTION REQUIRED: Review and approve in the Owner Portal <<';
 
-  // Send to owner
-  try {
-    GmailApp.sendEmail(OWNER_EMAIL, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody);
-    Logger.log('Owner email sent to ' + OWNER_EMAIL);
-  } catch(e) {
-    Logger.log('Owner email error: ' + e.message);
-  }
-
-  // CC to owner personal email
-  try {
-    GmailApp.sendEmail(CLIENT.ownerEmailCC, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody);
-    Logger.log('CC email sent to ' + CLIENT.ownerEmailCC);
-  } catch(e) {
-    Logger.log('CC email error: ' + e.message);
-  }
-
-  // Send to guest — use GmailApp which supports external domains (Hotmail, Yahoo etc)
+  try { GmailApp.sendEmail(CLIENT.ownerEmail, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody); } catch(e) { Logger.log('Owner email error: ' + e.message); }
+  try { GmailApp.sendEmail(CLIENT.ownerEmailCC, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody); } catch(e) { Logger.log('CC email error: ' + e.message); }
   if (guestEmail) {
-    try {
-      GmailApp.sendEmail(guestEmail, subject, guestBody);
-      Logger.log('Guest email sent to ' + guestEmail);
-    } catch(e) {
-      Logger.log('Guest email error: ' + e.message);
-    }
-  } else {
-    Logger.log('No guest email on record — skipping guest confirmation');
+    try { GmailApp.sendEmail(guestEmail, 'Your Check-in Registration — ' + CLIENT.villaName, guestBody); Logger.log('Guest email sent to ' + guestEmail); }
+    catch(e) { Logger.log('Guest email error: ' + e.message); }
   }
 }
 
+// ── DRIVE FOLDER ──────────────────────────────────────────
 function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
   var root = DriveApp.getFolderById(DRIVE_ROOT);
-
   var gf = root.getFoldersByName('Guests');
   var guestsFolder = gf.hasNext() ? gf.next() : root.createFolder('Guests');
-
   var d = checkInDate ? new Date(checkInDate) : new Date();
   if (isNaN(d)) d = new Date();
-
-  var year       = String(d.getFullYear());
-  var month      = d.getMonth();
-  var monthNames = ['Jan','Feb','Mar','Apr','May','Jun',
-                    'Jul','Aug','Sep','Oct','Nov','Dec'];
+  var year = String(d.getFullYear());
+  var month = d.getMonth();
+  var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var monthLabel = String(month + 1).padStart(2, '0') + '-' + monthNames[month];
-  var day        = String(d.getDate()).padStart(2, '0');
-
+  var day = String(d.getDate()).padStart(2, '0');
   var yf = guestsFolder.getFoldersByName(year);
   var yearFolder = yf.hasNext() ? yf.next() : guestsFolder.createFolder(year);
-
   var mf = yearFolder.getFoldersByName(monthLabel);
   var monthFolder = mf.hasNext() ? mf.next() : yearFolder.createFolder(monthLabel);
-
   var folderName = (guestName || 'Guest') + '-' + day + '-' + stayId;
   var ef = monthFolder.getFoldersByName(folderName);
   if (ef.hasNext()) return ef.next();
-
   var newFolder = monthFolder.createFolder(folderName);
-
-  // Tell Worker the folder ID so it can link it to the stay in D1
-  // folderCreated:1 marks that folder has been successfully created
   callWorker('POST', 'updateDriveFolder', {
-    stayId:         stayId,
-    driveFolderId:  newFolder.getId(),
-    driveFolderUrl: newFolder.getUrl(),
-    folderCreated:  1,
+    stayId: stayId, driveFolderId: newFolder.getId(),
+    driveFolderUrl: newFolder.getUrl(), folderCreated: 1,
     processingNote: 'Created by getOrCreateGuestFolder — ' + new Date().toISOString(),
   });
-
   Logger.log('Created folder: ' + folderName);
   return newFolder;
 }
 
-// ── HELPERS ───────────────────────────────────────────────────────────────
-
-function firstName(fullName) {
-  return String(fullName || '').split(' ')[0] || 'Guest';
-}
-
-function getExtension(filename) {
-  var parts = String(filename || '').split('.');
-  return parts.length > 1 ? '.' + parts[parts.length - 1].toLowerCase() : '';
-}
-
-// Normalise various date formats → YYYY-MM-DD
+// ── HELPERS ───────────────────────────────────────────────
+function firstName(n) { return String(n || '').split(' ')[0] || 'Guest'; }
+function getExtension(f) { var p = String(f||'').split('.'); return p.length > 1 ? '.'+p[p.length-1].toLowerCase() : ''; }
 function normaliseDate(str) {
   if (!str) return '';
   try {
-    // Already ISO
     if (/^\d{4}-\d{2}-\d{2}$/.test(str.trim())) return str.trim();
-    // Google Sheets date serial or locale string
     var d = new Date(str);
     if (!isNaN(d)) return d.toISOString().slice(0, 10);
   } catch(e) {}
   return str;
 }
-
-
-// ── SYSTEM TOKEN — reads from Script Properties ──────────────────────────
 function getSystemToken() {
-  try {
-    return PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN') || '';
-  } catch(e) {
-    Logger.log('getSystemToken error: ' + e.message);
-    return '';
-  }
+  try { return PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN') || ''; }
+  catch(e) { return ''; }
 }
-
 function callWorker(method, action, payload) {
   try {
     var url  = WORKER_URL + '/' + action;
     var opts = {
-      method:             method.toLowerCase(),
+      method: method.toLowerCase(),
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getSystemToken() },
       muteHttpExceptions: true,
     };
     if (method === 'GET' && payload && Object.keys(payload).length > 0) {
       url += '?' + Object.keys(payload).map(function(k) {
-        return encodeURIComponent(k) + '=' + encodeURIComponent(String(payload[k] || ''));
+        return encodeURIComponent(k) + '=' + encodeURIComponent(String(payload[k]||''));
       }).join('&');
     }
-    if (method === 'POST') {
-      opts.payload = JSON.stringify(payload || {});
-    }
-    var resp = UrlFetchApp.fetch(url, opts);
-    return JSON.parse(resp.getContentText());
-  } catch(e) {
-    Logger.log('callWorker (' + action + '): ' + e.message);
-    return null;
-  }
+    if (method === 'POST') opts.payload = JSON.stringify(payload || {});
+    return JSON.parse(UrlFetchApp.fetch(url, opts).getContentText());
+  } catch(e) { Logger.log('callWorker (' + action + '): ' + e.message); return null; }
 }
-
 function sendAlert(subject, body) {
-  try {
-    GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ' + subject, body);
-  } catch(e) {
-    Logger.log('sendAlert failed: ' + e.message);
-  }
+  try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ' + subject, body); }
+  catch(e) { Logger.log('sendAlert failed: ' + e.message); }
 }
-
-// ── TEST FUNCTION — run manually to verify setup ──────────────────────────
-// Run this from the script editor to confirm the Worker connection works.
 function testConnection() {
-  var resp = callWorker('GET', 'getOpenStays', {});
-  Logger.log('Worker response: ' + JSON.stringify(resp));
-  if (resp && resp.success) {
-    Logger.log('✅ Connected. Open stays: ' + (resp.data ? resp.data.length : 0));
-  } else {
-    Logger.log('❌ Connection failed or no data returned');
-  }
+  var resp = callWorker('GET', 'getTenantConfig', { tenantId: TENANT_ID });
+  Logger.log('Tenant config: ' + JSON.stringify(resp));
+  if (resp && resp.success) Logger.log('✅ Connected: ' + resp.data.villaName);
+  else Logger.log('❌ Connection failed');
 }

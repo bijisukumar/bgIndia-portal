@@ -107,6 +107,15 @@ export async function onRequest(ctx) {
   const DB         = env.DB || env.bgindia_db
   const DB_ESTATES = env.DB_ESTATES
 
+  // Safety check — if DB binding is missing, return clean error instead of crashing
+  if (!DB) {
+    console.error('DB binding missing — env keys:', Object.keys(env).join(', '))
+    return new Response(JSON.stringify({ success: false, error: 'Database binding not configured' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json', ...CORS }
+    })
+  }
+
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest',
     'getRubberHarvests',  'saveRubberHarvest',

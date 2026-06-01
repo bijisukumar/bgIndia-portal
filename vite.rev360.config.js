@@ -8,7 +8,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   root: 'src/apps/rev360',
-  publicDir: '../../public',
+  publicDir: '../../../public',
   build: {
     outDir: '../../../dist/rev360',
     emptyOutDir: true,

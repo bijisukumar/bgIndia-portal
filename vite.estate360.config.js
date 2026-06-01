@@ -8,7 +8,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   root: 'src/apps/estate360',
-  publicDir: '../../public',
+  publicDir: '../../../public',
   build: {
     outDir: '../../../dist/estate360',
     emptyOutDir: true,

@@ -9,7 +9,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   root: 'src/apps/stayvibe',
-  publicDir: '../../public',   // shared icons/assets
+  publicDir: '../../../public',
   build: {
     outDir: '../../../dist/stayvibe',
     emptyOutDir: true,

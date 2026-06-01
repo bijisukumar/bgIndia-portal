@@ -104,7 +104,7 @@ function genId(prefix) {
 // ── ROUTER ────────────────────────────────────────────────
 export async function onRequest(ctx) {
   const { request, env } = ctx
-  const DB         = env.bgindia_db
+  const DB         = env.DB || env.bgindia_db
   const DB_ESTATES = env.DB_ESTATES
 
   const ESTATE_ACTIONS = new Set([

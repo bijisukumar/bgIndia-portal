@@ -347,7 +347,8 @@ export async function onRequest(ctx) {
             passportExpiry||null,
             visaNumber||null, visaType||null, visaIssueDate||null, visaIssuePlace||null,
             arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab
+            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
+            reqBeds, bedsCount
           ).run()
         }
 

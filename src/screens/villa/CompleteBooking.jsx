@@ -494,13 +494,23 @@ export default function CompleteBooking() {
                   {saving ? 'Saving…' : '💾 Save financial details'}
                 </button>
 
-                {/* WhatsApp host intro */}
-                {selected?.guest_phone && (() => {
-                  const raw   = String(selected.guest_phone).replace(/\D/g,'')
-                  const num   = raw.startsWith('91') ? raw : `91${raw}`
-                  const name  = (selected.guest_name||'').split(' ')[0]
-                  const ci    = selected.checkin_date || ''
-                  const msg   = encodeURIComponent(
+                {/* WhatsApp host intro — show for all pre-checkin states */}
+                {s && !['checked_in','checked_out','closed','cancelled'].includes(s.status) && (() => {
+                  const phone = selected?.guest_phone || selected?.phone
+                  const name  = (selected?.guest_name || '').split(' ')[0]
+                  const ci    = selected?.checkin_date || ''
+                  if (!phone) return (
+                    <div style={{
+                      padding:'10px 14px', borderRadius:'10px', marginBottom:'14px',
+                      background:'rgba(37,211,102,0.05)', border:'1px dashed rgba(37,211,102,0.2)',
+                      color:'rgba(37,211,102,0.45)', fontSize:'0.78rem', textAlign:'center',
+                    }}>
+                      💬 WhatsApp intro available once guest phone is captured
+                    </div>
+                  )
+                  const raw = String(phone).replace(/\D/g,'')
+                  const num = raw.startsWith('91') ? raw : `91${raw}`
+                  const msg = encodeURIComponent(
                     `Hi ${name}! 🙏\n\n` +
                     `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${new Date(ci).toLocaleDateString('en-IN',{day:'numeric',month:'long'})}.\n\n` +
                     `At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.\n\n` +

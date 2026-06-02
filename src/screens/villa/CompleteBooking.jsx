@@ -494,6 +494,31 @@ export default function CompleteBooking() {
                   {saving ? 'Saving…' : '💾 Save financial details'}
                 </button>
 
+                {/* WhatsApp host intro */}
+                {selected?.guest_phone && (() => {
+                  const raw   = String(selected.guest_phone).replace(/\D/g,'')
+                  const num   = raw.startsWith('91') ? raw : `91${raw}`
+                  const name  = (selected.guest_name||'').split(' ')[0]
+                  const ci    = selected.checkin_date || ''
+                  const msg   = encodeURIComponent(
+                    `Hi ${name}! 🙏 This is Biji from Guruvayur Villa (Dwarka). ` +
+                    `I'm reaching out personally to welcome you ahead of your stay on ${ci}. ` +
+                    `I'd love to connect briefly to understand your travel plans and ensure we make your visit truly memorable. ` +
+                    `Please feel free to reach me anytime on this number. Looking forward to hosting you! 🏡`
+                  )
+                  return (
+                    <a href={`https://wa.me/${num}?text=${msg}`} target="_blank" rel="noreferrer"
+                      style={{
+                        display:'block', padding:'12px', borderRadius:'10px', textAlign:'center',
+                        background:'rgba(37,211,102,0.1)', border:'1px solid rgba(37,211,102,0.3)',
+                        color:'#25D366', fontWeight:'700', fontSize:'0.85rem',
+                        textDecoration:'none', marginBottom:'14px',
+                      }}>
+                      💬 Send WhatsApp intro to {name}
+                    </a>
+                  )
+                })()}
+
                 {/* Status action buttons */}
                 <div className="card-section-label">MOVE LIFECYCLE FORWARD</div>
                 <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'14px'}}>

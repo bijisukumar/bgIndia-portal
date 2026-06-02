@@ -501,10 +501,11 @@ export default function CompleteBooking() {
                   const name  = (selected.guest_name||'').split(' ')[0]
                   const ci    = selected.checkin_date || ''
                   const msg   = encodeURIComponent(
-                    `Hi ${name}! 🙏 This is Biji from Guruvayur Villa (Dwarka). ` +
-                    `I'm reaching out personally to welcome you ahead of your stay on ${ci}. ` +
-                    `I'd love to connect briefly to understand your travel plans and ensure we make your visit truly memorable. ` +
-                    `Please feel free to reach me anytime on this number. Looking forward to hosting you! 🏡`
+                    `Hi ${name}! 🙏\n\n` +
+                    `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${new Date(ci).toLocaleDateString('en-IN',{day:'numeric',month:'long'})}.\n\n` +
+                    `At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.\n\n` +
+                    `Please let me know a convenient time to connect. We're looking forward to hosting you and your family. 🏡\n\n` +
+                    `Warm regards,\nBiji | ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}`
                   )
                   return (
                     <a href={`https://wa.me/${num}?text=${msg}`} target="_blank" rel="noreferrer"

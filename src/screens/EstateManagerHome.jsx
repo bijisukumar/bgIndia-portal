@@ -9,7 +9,7 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-export default function PradoshHome() {
+export default function EstateManagerHome() {
   const { logout }    = useAuth()
   const navigate      = useNavigate()
   const [info, setInfo]       = useState(null)

@@ -9,7 +9,7 @@ import '../../index.css'
 
 import Login           from '../../screens/Login'
 import OwnerHome       from '../../screens/OwnerHome'
-import PradoshHome     from '../../screens/PradoshHome'
+import EstateManagerHome from '../../screens/EstateManagerHome'
 import PollachiHub     from '../../screens/estates/PollachiHub'
 import CoconutTracker  from '../../screens/estates/CoconutTracker'
 import CoconutDashboard from '../../screens/estates/CoconutDashboard'
@@ -38,7 +38,7 @@ function ProtectedRoutes() {
       </>}
 
       {role === 'estate_manager' && <>
-        <Route path="/"                       element={<PradoshHome />} />
+        <Route path="/"                       element={<EstateManagerHome />} />
         <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
         <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
         <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />

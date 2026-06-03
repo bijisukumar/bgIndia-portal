@@ -5,7 +5,7 @@ import './index.css'
 // Root screens
 import Login          from '../../screens/Login'
 import OwnerHome      from '../../screens/OwnerHome'
-import PradoshHome    from '../../screens/PradoshHome'
+import EstateManagerHome from '../../screens/EstateManagerHome'
 import RamanHome      from '../../screens/RamanHome'
 import RDashboard         from '../../screens/RDashboard'
 import RDashboardSnapshot from '../../screens/RDashboardSnapshot'
@@ -77,7 +77,7 @@ function ProtectedRoutes() {
 
       {/* ── PRADOSH (estate manager) ───────────────── */}
       {role === 'estate_manager' && <>
-        <Route path="/"                       element={<PradoshHome />} />
+        <Route path="/"                       element={<EstateManagerHome />} />
         <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
         <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
         <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />

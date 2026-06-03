@@ -1373,11 +1373,18 @@ export async function onRequest(ctx) {
         const today = new Date().toISOString().slice(0, 10)
 
         if (estateType === 'coconut') {
-          const harvest = await ActiveDB.prepare(
+          // Try with estate_id filter first, fall back to no filter
+          let harvest = await ActiveDB.prepare(
             `SELECT harvest_date, price_per_kg, scheduled_harvest_date
              FROM coconut_harvests WHERE estate_id = ?
              ORDER BY harvest_date DESC LIMIT 1`
           ).bind(estateId).first()
+          if (!harvest) {
+            harvest = await ActiveDB.prepare(
+              `SELECT harvest_date, price_per_kg, scheduled_harvest_date
+               FROM coconut_harvests ORDER BY harvest_date DESC LIMIT 1`
+            ).first()
+          }
           const irrigation = await ActiveDB.prepare(
             `SELECT logged_date FROM irrigation_logs
              WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`

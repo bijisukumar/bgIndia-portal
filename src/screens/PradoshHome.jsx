@@ -16,7 +16,7 @@ export default function PradoshHome() {
   const [loggingIrr, setLoggingIrr] = useState(false)
 
   useEffect(() => {
-    api.getPradoshQuickInfo()
+    api.getManagerQuickInfo()
       .then(d => setInfo(d))
       .catch(() => setInfo(null))
   }, [])
@@ -29,7 +29,7 @@ export default function PradoshHome() {
       setLoggingIrr(true)
       await api.logIrrigation({ date: new Date().toISOString().slice(0, 10) })
       // Refresh quick info so alert clears
-      const d = await api.getPradoshQuickInfo()
+      const d = await api.getManagerQuickInfo()
       setInfo(d)
     } catch (_) {}
     finally { setLoggingIrr(false) }

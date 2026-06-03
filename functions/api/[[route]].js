@@ -121,7 +121,7 @@ export async function onRequest(ctx) {
     'getRubberHarvests',  'saveRubberHarvest',
     'getEstateTransactions', 'saveEstateTransaction',
     'getEstateDashboard',
-    'getPradoshQuickInfo',   // quick info for PradoshHome
+    'getManagerQuickInfo',   // quick info for estate manager home (config-driven)
     'logIrrigation',         // record irrigation log tap
   ])
 
@@ -1359,34 +1359,60 @@ export async function onRequest(ctx) {
     }
 
       // PRADOSH HOME — quick info (next harvest, last price, irrigation alert)
-      if (action === 'getPradoshQuickInfo') {
+      if (action === 'getManagerQuickInfo') {
+        // estate is derived from the JWT actor — maps actor->estate via estate_managers table
+        // actor is set at login time from PIN_PRADOSH -> 'pradosh', PIN_RAMAN -> 'raman' etc.
+        // estate_managers table maps actor -> estate_id and estate_type
+        const mgr = await DB.prepare(
+          `SELECT estate_id, estate_type, manager_name FROM estate_managers WHERE actor = ? AND active = 1 LIMIT 1`
+        ).bind(actor).first()
+        // fallback: if no table yet, derive from actor name directly
+        const estateId   = mgr?.estate_id   || (actor === 'pradosh' ? 'pollachi' : actor)
+        const estateType = mgr?.estate_type || 'coconut'
+        const managerName = mgr?.manager_name || actor
+
+        const today = new Date().toISOString().slice(0, 10)
+
+        if (estateType === 'coconut') {
+          const harvest = await ActiveDB.prepare(
+            `SELECT harvest_date, price_per_kg, scheduled_harvest_date
+             FROM coconut_harvests WHERE estate_id = ?
+             ORDER BY harvest_date DESC LIMIT 1`
+          ).bind(estateId).first()
+          const irrigation = await ActiveDB.prepare(
+            `SELECT logged_date FROM irrigation_logs
+             WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
+          ).bind(estateId).first()
+          const lastPrice      = harvest?.price_per_kg           || null
+          const nextHarvest    = harvest?.scheduled_harvest_date || null
+          const lastIrrigation = irrigation?.logged_date         || null
+          const irrigationDays = lastIrrigation
+            ? Math.round((new Date(today) - new Date(lastIrrigation)) / 86400000)
+            : null
+          const harvestDays = nextHarvest
+            ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000)
+            : null
+          return json({ success: true, data: {
+            managerName, estateId, estateType,
+            nextHarvestDate:    nextHarvest,
+            harvestDaysAway:    harvestDays,
+            lastPricePerKg:     lastPrice,
+            lastIrrigationDate: lastIrrigation,
+            irrigationDaysAgo:  irrigationDays,
+            irrigationAlert:    irrigationDays === null || irrigationDays > 14,
+          }})
+        }
+
+        // rubber estate — no irrigation, just last harvest
         const harvest = await ActiveDB.prepare(
-          `SELECT harvest_date, price_per_kg, scheduled_harvest_date
-           FROM coconut_harvests WHERE estate_id = 'pollachi'
-           ORDER BY harvest_date DESC LIMIT 1`
-        ).first()
-        const irrigation = await ActiveDB.prepare(
-          `SELECT logged_date FROM irrigation_logs
-           WHERE estate = 'pollachi'
-           ORDER BY logged_date DESC LIMIT 1`
-        ).first()
-        const today          = new Date().toISOString().slice(0, 10)
-        const lastPrice      = harvest?.price_per_kg           || null
-        const nextHarvest    = harvest?.scheduled_harvest_date || null
-        const lastIrrigation = irrigation?.logged_date         || null
-        const irrigationDays = lastIrrigation
-          ? Math.round((new Date(today) - new Date(lastIrrigation)) / 86400000)
-          : null
-        const harvestDays = nextHarvest
-          ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000)
-          : null
+          `SELECT harvest_date, price_per_kg FROM rubber_harvests
+           WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
+        ).bind(estateId).first()
         return json({ success: true, data: {
-          nextHarvestDate:    nextHarvest,
-          harvestDaysAway:    harvestDays,
-          lastPricePerKg:     lastPrice,
-          lastIrrigationDate: lastIrrigation,
-          irrigationDaysAgo:  irrigationDays,
-          irrigationAlert:    irrigationDays === null || irrigationDays > 14,
+          managerName, estateId, estateType,
+          lastPricePerKg:  harvest?.price_per_kg || null,
+          lastHarvestDate: harvest?.harvest_date || null,
+          irrigationAlert: false,
         }})
       }
 

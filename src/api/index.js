@@ -132,7 +132,7 @@ export const api = {
   saveTaxEntry:         (data)   => post('saveTaxEntry', data),
   deleteTaxEntry:       (data)   => post('deleteTaxEntry', data),
 
-  getPradoshQuickInfo:  ()       => get('getPradoshQuickInfo'),
+  getManagerQuickInfo:  ()       => get('getManagerQuickInfo'),
   logIrrigation:        (data)   => post('logIrrigation', data),
 
   // ── COCONUT ──────────────────────────────────────────────

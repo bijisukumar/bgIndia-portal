@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import PropertyDocs from './PropertyDocs'
 import { CONFIG } from '../../config'
 
 const toCamel = s => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
@@ -564,6 +565,10 @@ export default function PropertyDetails() {
           {/* History sections */}
           <HoaSection propId={selectedProp} currency={currency}/>
           <TaxSection propId={selectedProp} currency={currency}/>
+
+          {/* Document registry */}
+          <div style={{height:'8px'}}/>
+          <PropertyDocs propId={selectedProp} propName={prop?.name||selectedProp}/>
 
           <button className="btn btn-gold" onClick={handleSave} disabled={saving} style={{marginTop:'8px'}}>
             {saving?'Saving…':`💾 Save — ${prop?.name}`}

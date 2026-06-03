@@ -1256,6 +1256,16 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // PROPERTY DOCUMENTS — list all docs for a property
+      if (action === 'getPropertyDocs') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(
+          `SELECT * FROM property_documents WHERE prop_id = ? ORDER BY category, created_at DESC`
+        ).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
       // LEASE LOSSES — get all claims for a property
       if (action === 'getLeaseLosses') {
         const propId = url.searchParams.get('propId') || ''
@@ -2554,6 +2564,28 @@ export async function onRequest(ctx) {
         if (!id) return err('id required')
         await DB.prepare(`DELETE FROM tax_history WHERE id = ?`).bind(id).run()
         return json({ success: true, data: { id, deleted: true } })
+      }
+
+      // SAVE PROPERTY DOCUMENT
+      if (action === 'savePropertyDoc') {
+        const { docId, propId, category, docName, driveUrl, driveFolderUrl, fileType, docDate, notes } = body
+        if (!propId || !docName) return err('propId and docName required')
+        const id = docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6))
+        await DB.prepare(
+          `INSERT OR REPLACE INTO property_documents
+           (doc_id, prop_id, category, doc_name, drive_url, drive_folder_url, file_type, doc_date, notes, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM property_documents WHERE doc_id=?),?))`
+        ).bind(id, propId, category||'Other', docName.trim(), driveUrl||null, driveFolderUrl||null,
+               fileType||null, docDate||null, notes||null, id, now()).run()
+        return json({ success: true, data: { docId: id } })
+      }
+
+      // DELETE PROPERTY DOCUMENT
+      if (action === 'deletePropertyDoc') {
+        const { docId } = body
+        if (!docId) return err('docId required')
+        await DB.prepare(`DELETE FROM property_documents WHERE doc_id = ?`).bind(docId).run()
+        return json({ success: true, data: { docId, deleted: true } })
       }
 
       // SAVE LEASE LOSS (create or update)

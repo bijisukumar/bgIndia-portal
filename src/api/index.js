@@ -119,6 +119,14 @@ export const api = {
   getPropertyDetails:   (propId) => get('getPropertyDetails', { propId }),
   savePropertyDetails:  (data)   => post('savePropertyDetails', data),
 
+  // -- HOA & TAX HISTORY --
+  getHoaHistory:        (propId) => get('getHoaHistory', { propId }),
+  saveHoaEntry:         (data)   => post('saveHoaEntry', data),
+  deleteHoaEntry:       (data)   => post('deleteHoaEntry', data),
+  getTaxHistory:        (propId) => get('getTaxHistory', { propId }),
+  saveTaxEntry:         (data)   => post('saveTaxEntry', data),
+  deleteTaxEntry:       (data)   => post('deleteTaxEntry', data),
+
   getPradoshQuickInfo:  ()       => get('getPradoshQuickInfo'),
   logIrrigation:        (data)   => post('logIrrigation', data),
 

@@ -1236,6 +1236,26 @@ export async function onRequest(ctx) {
         return json({ success: true, data: row || null })
       }
 
+      // HOA HISTORY — get all HOA rate records for a property
+      if (action === 'getHoaHistory') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(
+          `SELECT * FROM hoa_history WHERE prop_id = ? ORDER BY effective_date DESC`
+        ).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      // TAX HISTORY — get all tax year records for a property
+      if (action === 'getTaxHistory') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(
+          `SELECT * FROM tax_history WHERE prop_id = ? ORDER BY tax_year DESC`
+        ).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
       // LEASE LOSSES — get all claims for a property
       if (action === 'getLeaseLosses') {
         const propId = url.searchParams.get('propId') || ''
@@ -2490,6 +2510,50 @@ export async function onRequest(ctx) {
           ).bind(d.propId, ...vals, now(), now()).run()
         }
         return json({ success: true, data: { propId: d.propId } })
+      }
+
+      // SAVE HOA HISTORY ENTRY (insert or update by prop+date)
+      if (action === 'saveHoaEntry') {
+        const { id, propId, effectiveDate, monthlyAmount, currency, notes } = body
+        if (!propId || !effectiveDate || monthlyAmount === undefined) return err('propId, effectiveDate, monthlyAmount required')
+        const entryId = id || ('hoa_' + Date.now() + '_' + Math.random().toString(36).slice(2,6))
+        await DB.prepare(
+          `INSERT OR REPLACE INTO hoa_history (id, prop_id, effective_date, monthly_amount, currency, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM hoa_history WHERE id=?), ?))`
+        ).bind(entryId, propId, effectiveDate, parseFloat(monthlyAmount)||0, currency||'INR', notes||null, entryId, now()).run()
+        return json({ success: true, data: { id: entryId } })
+      }
+
+      // DELETE HOA HISTORY ENTRY
+      if (action === 'deleteHoaEntry') {
+        const { id } = body
+        if (!id) return err('id required')
+        await DB.prepare(`DELETE FROM hoa_history WHERE id = ?`).bind(id).run()
+        return json({ success: true, data: { id, deleted: true } })
+      }
+
+      // SAVE TAX HISTORY ENTRY (insert or update by prop+year)
+      if (action === 'saveTaxEntry') {
+        const { id, propId, taxYear, annualAmount, currency, parcelId, taxAuthority, dueDate, paidDate, paidAmount, receiptRef, notes } = body
+        if (!propId || !taxYear || annualAmount === undefined) return err('propId, taxYear, annualAmount required')
+        const entryId = id || ('tax_' + propId + '_' + taxYear)
+        await DB.prepare(
+          `INSERT OR REPLACE INTO tax_history
+           (id, prop_id, tax_year, annual_amount, currency, parcel_id, tax_authority,
+            due_date, paid_date, paid_amount, receipt_ref, notes, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM tax_history WHERE id=?),?))`
+        ).bind(entryId, propId, parseInt(taxYear), parseFloat(annualAmount)||0, currency||'INR',
+               parcelId||null, taxAuthority||null, dueDate||null, paidDate||null,
+               parseFloat(paidAmount)||0, receiptRef||null, notes||null, entryId, now()).run()
+        return json({ success: true, data: { id: entryId } })
+      }
+
+      // DELETE TAX HISTORY ENTRY
+      if (action === 'deleteTaxEntry') {
+        const { id } = body
+        if (!id) return err('id required')
+        await DB.prepare(`DELETE FROM tax_history WHERE id = ?`).bind(id).run()
+        return json({ success: true, data: { id, deleted: true } })
       }
 
       // SAVE LEASE LOSS (create or update)

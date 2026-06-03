@@ -12,6 +12,7 @@ import RentalProperties from '../../screens/rental/RentalProperties'
 import RentalAgreement  from '../../screens/rental/RentalAgreement'
 import ClaimsLedger     from '../../screens/rental/ClaimsLedger'
 import ClaimsReport     from '../../screens/rental/ClaimsReport'
+import PropertyDetails  from '../../screens/rental/PropertyDetails'
 import D1Explorer       from '../../screens/infra/D1Explorer'
 
 function ProtectedRoutes() {
@@ -26,6 +27,7 @@ function ProtectedRoutes() {
       <Route path="/owner/rental/claims"           element={<ClaimsLedger />} />
       <Route path="/owner/rental/claims/report"    element={<ClaimsReport />} />
       <Route path="/owner/rental/dashboard"        element={<RentalProperties />} />
+      <Route path="/owner/rental/property"         element={<PropertyDetails />} />
       <Route path="/infra/d1"                      element={<D1Explorer />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

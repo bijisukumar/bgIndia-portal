@@ -115,6 +115,10 @@ export const api = {
   // ── PORTFOLIO DASHBOARD ──────────────────────────────────
   getRev360Dashboard:   ()       => get('getRev360Dashboard'),
 
+  // -- PROPERTY DETAILS --
+  getPropertyDetails:   (propId) => get('getPropertyDetails', { propId }),
+  savePropertyDetails:  (data)   => post('savePropertyDetails', data),
+
   getPradoshQuickInfo:  ()       => get('getPradoshQuickInfo'),
   logIrrigation:        (data)   => post('logIrrigation', data),
 

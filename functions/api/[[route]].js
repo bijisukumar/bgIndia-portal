@@ -1226,6 +1226,16 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // PROPERTY DETAILS — get utility/loan/address data for a property
+      if (action === 'getPropertyDetails') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const row = await DB.prepare(
+          `SELECT * FROM property_details WHERE prop_id = ?`
+        ).bind(propId).first()
+        return json({ success: true, data: row || null })
+      }
+
       // LEASE LOSSES — get all claims for a property
       if (action === 'getLeaseLosses') {
         const propId = url.searchParams.get('propId') || ''
@@ -2430,6 +2440,56 @@ export async function onRequest(ctx) {
           `UPDATE rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`
         ).bind(status, actor, now(), propId).run()
         return json({ success: true, data: { propId, status } })
+      }
+
+      // SAVE PROPERTY DETAILS
+      if (action === 'savePropertyDetails') {
+        const d = body
+        if (!d.propId) return err('propId required')
+        const existing = await DB.prepare(
+          `SELECT prop_id FROM property_details WHERE prop_id = ?`
+        ).bind(d.propId).first()
+        
+        const fields = [
+          'address_line1','address_line2','city','state_province','postal_code','country',
+          'elec_provider','elec_consumer_id','elec_account_number','elec_portal_url','elec_monthly_avg',
+          'water_provider','water_consumer_id','water_account_number','water_portal_url','water_monthly_avg',
+          'gas_provider','gas_consumer_id','gas_account_number','gas_portal_url','gas_monthly_avg',
+          'internet_provider','internet_account','internet_monthly',
+          'hoa_name','hoa_account','hoa_monthly',
+          'other_utility_name','other_utility_id','other_utility_monthly',
+          'tax_parcel_id','tax_authority','tax_annual','tax_portal_url',
+          'loan_lender','loan_account','loan_original','loan_outstanding','loan_monthly_emi',
+          'loan_interest_rate','loan_start_date','loan_end_date','loan_portal_url',
+          'purchase_price','purchase_date','estimated_value','estimated_value_date','currency',
+          'insurance_provider','insurance_policy_no','insurance_annual','insurance_expiry','notes'
+        ]
+        
+        const camelToSnake = s => s.replace(/[A-Z]/g, c => '_' + c.toLowerCase())
+        
+        if (existing) {
+          const sets = fields.map(f => `${f} = ?`).join(', ')
+          const vals = fields.map(f => {
+            const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+            const v = d[camel] !== undefined ? d[camel] : d[f]
+            return (typeof v === 'number' ? v : (v || null))
+          })
+          await DB.prepare(
+            `UPDATE property_details SET ${sets}, updated_at = ? WHERE prop_id = ?`
+          ).bind(...vals, now(), d.propId).run()
+        } else {
+          const cols = ['prop_id', ...fields, 'created_at', 'updated_at'].join(', ')
+          const placeholders = ['?', ...fields.map(() => '?'), '?', '?'].join(', ')
+          const vals = fields.map(f => {
+            const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+            const v = d[camel] !== undefined ? d[camel] : d[f]
+            return (typeof v === 'number' ? v : (v || null))
+          })
+          await DB.prepare(
+            `INSERT INTO property_details (${cols}) VALUES (${placeholders})`
+          ).bind(d.propId, ...vals, now(), now()).run()
+        }
+        return json({ success: true, data: { propId: d.propId } })
       }
 
       // SAVE LEASE LOSS (create or update)

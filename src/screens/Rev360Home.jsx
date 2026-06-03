@@ -128,6 +128,7 @@ export default function Rev360Home() {
             { icon: '📄', title: 'Agreements', sub: 'Tenant & lease details', path: '/owner/rental/agreement', arrow: '#185FA5' },
             { icon: '⚖️', title: 'Claims ledger', sub: 'Damage & loss tracking', path: '/owner/rental/claims', arrow: '#E24B4A' },
             { icon: '📊', title: 'Portfolio dashboard', sub: 'Annual NOI & analytics', path: '/owner/rental/dashboard', arrow: '#8B5CF6' },
+            { icon: '🏠', title: 'Property details', sub: 'Utilities, loan, tax, insurance', path: '/owner/rental/property', arrow: '#34A853' },
           ].map((item, i, arr) => (
             <div key={item.path} className="menu-row"
               onClick={() => navigate(item.path)}

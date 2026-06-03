@@ -27,6 +27,7 @@ const QUICK_SQL = [
   { label: 'unpaid commissions', sql: `SELECT guest_name, checkin_date, nights, commission FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC` },
   { label: 'revenue by year',    sql: `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as stays, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stays WHERE status != 'cancelled' GROUP BY year ORDER BY year DESC` },
   { label: 'stays by source',    sql: `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stays WHERE status != 'cancelled' GROUP BY source ORDER BY total_net DESC` },
+  { label: 'recent reviews',     sql: `SELECT stay_id, guest_name, checkin_date, review_rating, review_date, review_text, review_highlights FROM stays WHERE review_rating > 0 ORDER BY review_date DESC LIMIT 5` },
   { label: 'coconut harvests',   sql: `SELECT * FROM coconut_harvests ORDER BY harvest_date DESC` },
   { label: 'rental income',      sql: `SELECT * FROM rental_income ORDER BY year DESC, month DESC LIMIT 30` },
 ]
@@ -447,11 +448,11 @@ export default function D1Explorer() {
         {tab === 'sql' && (
           <>
             <div className="card-section-label">QUICK LOAD</div>
-            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px', marginBottom: '10px', scrollbarWidth: 'none' }}>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
               {QUICK_SQL.map((q, i) => (
                 <button key={i} onClick={() => { setSql(q.sql); setResults(null); setQueryError(null) }}
                   style={{
-                    flexShrink: 0, padding: '5px 11px', borderRadius: '16px', cursor: 'pointer',
+                    padding: '5px 11px', borderRadius: '16px', cursor: 'pointer',
                     fontSize: '0.72rem', fontWeight: '600', border: '1px solid rgba(255,255,255,0.1)',
                     background: sql === q.sql ? 'rgba(200,144,58,0.15)' : 'transparent',
                     color: sql === q.sql ? '#C8903A' : '#8A9BAE', whiteSpace: 'nowrap',

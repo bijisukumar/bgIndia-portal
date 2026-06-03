@@ -8,7 +8,7 @@ import { AuthProvider, useAuth } from '../../hooks/useAuth'
 import '../../index.css'
 
 import Login            from '../../screens/Login'
-import OwnerHome        from '../../screens/OwnerHome'
+import Rev360Home       from '../../screens/Rev360Home'
 import RentalProperties from '../../screens/rental/RentalProperties'
 import RentalAgreement  from '../../screens/rental/RentalAgreement'
 import D1Explorer       from '../../screens/infra/D1Explorer'
@@ -21,7 +21,7 @@ function ProtectedRoutes() {
   return (
     <Routes>
       {role === 'owner' && <>
-        <Route path="/"                       element={<OwnerHome />} />
+        <Route path="/"                       element={<Rev360Home />} />
         <Route path="/owner/rental"           element={<RentalProperties />} />
         <Route path="/owner/rental/agreement" element={<RentalAgreement />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />

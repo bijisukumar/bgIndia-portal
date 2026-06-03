@@ -4,7 +4,7 @@ import { api } from '../../api'
 
 const TODAY=new Date().toISOString().split('T')[0]
 const INCOME_CATS=['Mango Harvest Income','Lease income','Govt subsidy','Other income']
-const EXPENSE_CATS=['Labour wages','Fertilizer','Pesticide','Equipment','Irrigation','Land tax','Transport','Maintenance','Other expense']
+const EXPENSE_CATS=['Labour wages','Salary','Fertilizer','Pesticide','Tractor / Land tiling','Irrigation','Land tax','Transport','Maintenance','Other expense']
 function fmt(n){return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}`}
 
 export default function EstateLedger({ estate }) {

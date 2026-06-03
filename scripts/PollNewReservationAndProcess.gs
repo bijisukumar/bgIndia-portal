@@ -63,7 +63,130 @@ function pollNewReservations() {
     Logger.log('pollAirbnbBookings ERROR: ' + e.message);
     sendAlert('🚨 Poller error', e.message + '\n' + (e.stack||''));
   }
+  try {
+    pollAirbnbReviews();
+  } catch(e) {
+    Logger.log('pollAirbnbReviews ERROR: ' + e.message);
+  }
   Logger.log('=== pollNewReservations END ===');
+}
+
+// ── AIRBNB REVIEW POLLER ──────────────────────────────────────────────────
+function pollAirbnbReviews() {
+  var threads = GmailApp.search(
+    'from:automated@airbnb.com subject:"left a" subject:"review" is:unread',
+    0, 20
+  );
+  Logger.log('Unread Airbnb review threads: ' + threads.length);
+  if (threads.length === 0) return;
+
+  threads.forEach(function(thread) {
+    var msg     = thread.getMessages()[0];
+    var subject = msg.getSubject();
+    var body    = msg.getPlainBody();
+    Logger.log('Processing review: ' + subject);
+
+    try {
+      // Parse star rating from subject: "Sreeram left a 5-star review!"
+      var ratingMatch = subject.match(/(\d+)-star/i);
+      var rating      = ratingMatch ? parseInt(ratingMatch[1]) : 5;
+
+      // Parse guest name from subject: "Sreeram left a 5-star review!"
+      var nameMatch   = subject.match(/^([A-Za-z\s]+?)\s+left a/i);
+      var guestName   = nameMatch ? nameMatch[1].trim() : '';
+
+      // Parse review text — look for "Feedback from their stay" section
+      var reviewText  = '';
+      var feedbackMatch = body.match(/Feedback from their stay[\s\S]*?\n\n([\s\S]{20,500}?)(?:\n\n|\n[A-Z])/i);
+      if (feedbackMatch) reviewText = feedbackMatch[1].trim().replace(/\n/g, ' ');
+
+      // Parse review date — use email date
+      var reviewDate  = new Date(msg.getDate()).toISOString().slice(0, 10);
+
+      Logger.log('Review parsed: ' + guestName + ' | ' + rating + '★ | ' + reviewDate);
+
+      if (!guestName) {
+        Logger.log('Could not parse guest name from: ' + subject);
+        msg.markRead();
+        return;
+      }
+
+      // Find matching stay in D1 by guest name
+      var currentYear = new Date().getFullYear();
+      var matchedStay = null;
+
+      for (var y = 0; y <= 1; y++) {
+        var resp = callWorker('GET', 'getStays', { villaId: 'dwarka', year: String(currentYear - y) });
+        if (resp && resp.success && Array.isArray(resp.data)) {
+          // Match by first name (Airbnb only shows first name in review emails)
+          var firstName = guestName.split(' ')[0].toLowerCase();
+          var candidates = resp.data.filter(function(s) {
+            return (s.guest_name || '').toLowerCase().startsWith(firstName) &&
+                   !['cancelled'].includes(s.status);
+          });
+          // Pick most recent if multiple
+          if (candidates.length > 0) {
+            candidates.sort(function(a, b) {
+              return new Date(b.checkout_date||b.checkin_date) - new Date(a.checkout_date||a.checkin_date);
+            });
+            matchedStay = candidates[0];
+            break;
+          }
+        }
+      }
+
+      if (!matchedStay) {
+        Logger.log('No matching stay found for reviewer: ' + guestName);
+        sendAlert('⭐ Review received — no stay match: ' + guestName,
+          'Guest: ' + guestName + '\nRating: ' + rating + '★\nDate: ' + reviewDate +
+          '\nReview: ' + reviewText +
+          '\n\nPlease manually update the stay rating in the portal.');
+        msg.markRead();
+        return;
+      }
+
+      Logger.log('Matched stay: ' + matchedStay.stay_id + ' for ' + matchedStay.guest_name);
+
+      // Save review to D1
+      var saveResp = callWorker('POST', 'saveReview', {
+        stayId:     matchedStay.stay_id,
+        rating:     rating,
+        source:     'airbnb',
+        reviewDate: reviewDate,
+        reviewText: reviewText,
+        guestName:  matchedStay.guest_name,
+      });
+
+      if (saveResp && saveResp.success) {
+        Logger.log('✅ Review saved: ' + matchedStay.stay_id + ' — ' + rating + '★');
+
+        // Close the stay if still open
+        if (!['closed','cancelled'].includes(matchedStay.status)) {
+          callWorker('POST', 'closeStayWithReview', {
+            stayId:       matchedStay.stay_id,
+            rating:       rating,
+            closedReason: 'airbnb_review',
+          });
+          Logger.log('Stay closed: ' + matchedStay.stay_id);
+        }
+
+        sendAlert('⭐ ' + rating + '-star review from ' + matchedStay.guest_name,
+          'Guest:    ' + matchedStay.guest_name +
+          '\nStay:     ' + matchedStay.stay_id +
+          '\nRating:   ' + rating + '★' +
+          '\nDate:     ' + reviewDate +
+          (reviewText ? '\nReview:   ' + reviewText : '') +
+          '\n\nStay has been closed automatically.');
+      } else {
+        Logger.log('saveReview failed: ' + JSON.stringify(saveResp));
+      }
+
+      msg.markRead();
+
+    } catch(e) {
+      Logger.log('Error processing review "' + subject + '": ' + e.message);
+    }
+  });
 }
 
 // Run once to install 5-min trigger

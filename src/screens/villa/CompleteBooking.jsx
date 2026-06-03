@@ -511,11 +511,11 @@ export default function CompleteBooking() {
                   const raw = String(phone).replace(/\D/g,'')
                   const num = raw.startsWith('91') ? raw : `91${raw}`
                   const msg = encodeURIComponent(
-                    `Hi ${name}! 🙏\n\n` +
-                    `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${new Date(ci).toLocaleDateString('en-IN',{day:'numeric',month:'long'})}.\n\n` +
+                    `Namaskaram ${name}! 🙏\n\n` +
+                    `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${new Date(ci).toLocaleDateString('en-IN',{month:'long',day:'numeric'})}.\n\n` +
                     `At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.\n\n` +
-                    `Please let me know a convenient time to connect. We're looking forward to hosting you and your family. 🏡\n\n` +
-                    `Warm regards,\nBiji | ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}`
+                    `Please let me know a convenient time to connect. We're looking forward to hosting you and your family.\n\n` +
+                    `Snehapoorvam (സ്നേഹപൂർവ്വം),\nBiji | ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}`
                   )
                   return (
                     <a href={`https://wa.me/${num}?text=${msg}`} target="_blank" rel="noreferrer"

@@ -1,50 +1,62 @@
-# v2.0 — Estate DB Split Migration Guide
+# Estate DB Migration — bgindia-db → bgindiadb-estates
 
-## Overview
-Moves coconut_harvests, rubber_harvests, estate_transactions from
-bgindia-db (villa DB) to bgindiadb-estates (new DB).
+## The problem
+coconut_harvests, rubber_harvests, estate_transactions, irrigation_logs
+exist in bgindia-db (main) but should live in bgindiadb-estates.
+Data is in bgindia-db. bgindiadb-estates tables were just created (empty).
 
-## Step 1 — Schema already created in dashboard
-DB created as: bgindiadb-estates (id: 6e23cb84-d341-4b2e-8062-e8244844309d)
+## Commands — run from bgIndia-portal folder on your machine
 
-## Step 2 — Create the schema in the new DB
+### STEP 1: Export data from bgindia-db and import to bgindiadb-estates
+
 ```bash
-npx wrangler d1 execute bgindiadb-estates --file=schema-estates.sql --remote
+# Export each table from bgindia-db
+npx wrangler d1 export bgindia-db --remote --table=coconut_harvests --output=scripts/export-coconut.sql
+npx wrangler d1 export bgindia-db --remote --table=rubber_harvests --output=scripts/export-rubber.sql
+npx wrangler d1 export bgindia-db --remote --table=estate_transactions --output=scripts/export-estate-txn.sql
+npx wrangler d1 export bgindia-db --remote --table=irrigation_logs --output=scripts/export-irrigation.sql
+
+# Import into bgindiadb-estates
+npx wrangler d1 execute bgindiadb-estates --remote --file=scripts/export-coconut.sql
+npx wrangler d1 execute bgindiadb-estates --remote --file=scripts/export-rubber.sql
+npx wrangler d1 execute bgindiadb-estates --remote --file=scripts/export-estate-txn.sql
+npx wrangler d1 execute bgindiadb-estates --remote --file=scripts/export-irrigation.sql
 ```
 
-## Step 3 — Export existing estate data from old DB
-Run in D1Explorer (Ad-hoc query) on bgindia-db:
-```sql
-SELECT 'coconut_harvests' as tbl, COUNT(*) as rows FROM coconut_harvests
-UNION ALL
-SELECT 'rubber_harvests', COUNT(*) FROM rubber_harvests
-UNION ALL
-SELECT 'estate_transactions', COUNT(*) FROM estate_transactions;
-```
+### STEP 2: Verify row counts match in both DBs
 
-If rows exist, export via:
 ```bash
-npx wrangler d1 export bgindia-db --remote --output=estate-data-backup.sql \
-  --table=coconut_harvests --table=rubber_harvests --table=estate_transactions
+npx wrangler d1 execute bgindia-db --remote --command="SELECT 'coconut' as t, COUNT(*) as n FROM coconut_harvests UNION ALL SELECT 'rubber', COUNT(*) FROM rubber_harvests UNION ALL SELECT 'txn', COUNT(*) FROM estate_transactions UNION ALL SELECT 'irrigation', COUNT(*) FROM irrigation_logs"
+
+npx wrangler d1 execute bgindiadb-estates --remote --command="SELECT 'coconut' as t, COUNT(*) as n FROM coconut_harvests UNION ALL SELECT 'rubber', COUNT(*) FROM rubber_harvests UNION ALL SELECT 'txn', COUNT(*) FROM estate_transactions UNION ALL SELECT 'irrigation', COUNT(*) FROM irrigation_logs"
 ```
 
-## Step 4 — Import data into new DB
+Both outputs must match before proceeding.
+
+### STEP 3: Rename originals to _old in bgindia-db (safe fallback)
+
 ```bash
-npx wrangler d1 execute bgindiadb-estates --file=estate-data-backup.sql --remote
+npx wrangler d1 execute bgindia-db --remote --file=scripts/rename-estate-tables-to-old.sql
 ```
 
-## Step 5 — Verify
-Log in as Pradosh → check coconut/rubber data still shows.
-Log in as Owner → check estates screens still work.
+### STEP 4: Smoke test estate360
+- Log in as Pradosh
+- Check coconut dashboard still shows 6 harvests
+- Enter a test irrigation log
+- Confirm quick info updates
 
-## Step 6 — Clean up old tables (ONLY after confirming Step 5)
-Run in D1Explorer on bgindia-db:
-```sql
-DROP TABLE IF EXISTS coconut_harvests;
-DROP TABLE IF EXISTS rubber_harvests;
-DROP TABLE IF EXISTS estate_transactions;
+### STEP 5: Retire _old tables (when confident — weeks later is fine)
+
+```bash
+npx wrangler d1 execute bgindia-db --remote --file=scripts/retire-estate-tables-from-bgindia-db.sql
 ```
+(retire script drops _old tables — edit it to say coconut_harvests_old etc. first)
 
 ## Rollback
-git checkout v1.5-baseline to go fully back.
-No data deleted from bgindia-db until Step 6.
+If anything breaks after step 3:
+```bash
+npx wrangler d1 execute bgindia-db --remote --command="ALTER TABLE coconut_harvests_old RENAME TO coconut_harvests"
+npx wrangler d1 execute bgindia-db --remote --command="ALTER TABLE rubber_harvests_old RENAME TO rubber_harvests"
+npx wrangler d1 execute bgindia-db --remote --command="ALTER TABLE estate_transactions_old RENAME TO estate_transactions"
+npx wrangler d1 execute bgindia-db --remote --command="ALTER TABLE irrigation_logs_old RENAME TO irrigation_logs"
+```

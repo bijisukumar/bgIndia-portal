@@ -104,6 +104,16 @@ export const api = {
   getRentalDashboard:   (year)   => get('getRentalDashboard', { year }),
   getRentalAgreements:  ()       => get('getRentalAgreements'),
   saveRentalAgreement:  (data)   => post('saveRentalAgreement', data),
+  updateTenantStatus:   (data)   => post('updateTenantStatus', data),
+
+  // ── LEASE LOSSES / CLAIMS ────────────────────────────────
+  getLeaseLosses:       (propId) => get('getLeaseLosses', { propId }),
+  saveLeaseLoss:        (data)   => post('saveLeaseLoss', data),
+  deleteLeaseLoss:      (data)   => post('deleteLeaseLoss', data),
+  updateLeaseLossStatus:(data)   => post('updateLeaseLossStatus', data),
+
+  // ── PORTFOLIO DASHBOARD ──────────────────────────────────
+  getRev360Dashboard:   ()       => get('getRev360Dashboard'),
 
   getPradoshQuickInfo:  ()       => get('getPradoshQuickInfo'),
   logIrrigation:        (data)   => post('logIrrigation', data),

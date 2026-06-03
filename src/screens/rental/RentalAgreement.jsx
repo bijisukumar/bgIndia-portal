@@ -1,87 +1,55 @@
-/**
- * RentalAgreement.jsx
- * Capture and manage tenant agreement details for each rental property.
- * Saved to D1 → rental_props table.
- *
- * Fields: tenant name, security deposit, agreed rent, maintenance fee,
- *         lease start, lease end, notes.
- *
- * Expiry alerts:
- *   Red   — lease already expired
- *   Orange — expires within 30 days
- *   Yellow — expires within 60 days
- *   Gold   — more than 60 days remaining
- *
- * Route: /owner/rental/agreement  (Owner only)
- */
-
+// ============================================================
+//  RentalAgreement.jsx — v2 with status, drive folder, US support
+// ============================================================
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 
-function fmt(n) {
-  if (!n && n !== 0) return '—'
-  return `₹${Number(n).toLocaleString('en-IN')}`
+const STATUSES = ['Active','Notice Given','Delinquent','Evicted','Runaway','Completed']
+const STATUS_COLOR = {
+  'Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
+  'Evicted':'#EF4444','Runaway':'#EF4444','Completed':'#5C7080',
 }
+const DRIVE_FOLDER_TEMPLATE = (tenantName, propName) =>
+  `RentalManagement/${propName}/${tenantName}`
 
+function fmt(n, currency='INR') {
+  if (!n && n !== 0) return '—'
+  return currency === 'USD' ? `$${Number(n).toLocaleString()}` : `₹${Number(n).toLocaleString('en-IN')}`
+}
 function daysUntil(dateStr) {
   if (!dateStr) return null
   const today = new Date(); today.setHours(0,0,0,0)
   return Math.round((new Date(dateStr) - today) / (1000*60*60*24))
 }
-
 function leaseDurationMonths(start, end) {
   if (!start || !end) return null
-  const months = Math.round((new Date(end) - new Date(start)) / (1000*60*60*24*30.44))
-  return months > 0 ? months : null
+  const m = Math.round((new Date(end) - new Date(start)) / (1000*60*60*24*30.44))
+  return m > 0 ? m : null
 }
 
 const EMPTY_FORM = {
-  tenantName: '', deposit: '', agreedRent: '', maintenance: '',
-  leaseStart: '', leaseEnd: '', notes: '',
+  tenantName:'', tenantEmail:'', tenantPhone:'', deposit:'', agreedRent:'',
+  maintenance:'', leaseStart:'', leaseEnd:'', notes:'',
+  country:'IN', currency:'INR', driveFolderUrl:'', status:'Active',
 }
 
 export default function RentalAgreement() {
   const navigate = useNavigate()
   const [selectedProp, setSelectedProp] = useState(CONFIG.rentalProperties[0]?.id || 'rental_1')
   const [form, setForm]       = useState(EMPTY_FORM)
-  const [agreements, setAgreements] = useState({}) // keyed by prop_id
+  const [agreements, setAgreements] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
-  const [saved, setSaved]     = useState(false)
   const [error, setError]     = useState('')
   const [toast, setToast]     = useState(null)
-
   const [showAddProp, setShowAddProp] = useState(false)
-  const [newProp, setNewProp]         = useState({ name: '', location: '' })
-  const [addingProp, setAddingProp]   = useState(false)
+  const [newProp, setNewProp] = useState({ name:'', location:'', country:'IN', currency:'INR' })
+  const [addingProp, setAddingProp] = useState(false)
 
-  async function handleAddProperty() {
-    if (!newProp.name.trim()) return
-    setAddingProp(true)
-    try {
-      const id = 'rental_' + Date.now()
-      await api.saveRentalAgreement({
-        propId:     id,
-        propName:   newProp.name.trim(),
-        location:   newProp.location.trim(),
-        tenantName: '', deposit: 0, agreedRent: 0,
-        maintenance: 0, leaseStart: '', leaseEnd: '', notes: '',
-      })
-      // Add to local config list for this session
-      CONFIG.rentalProperties.push({ id, name: newProp.name.trim(), location: newProp.location.trim(), tenantName: '', leaseEnd: '' })
-      setSelectedProp(id)
-      setForm(EMPTY_FORM)
-      setNewProp({ name: '', location: '' })
-      setShowAddProp(false)
-      showToast(`${newProp.name} added`)
-    } catch (e) {
-      showToast('Could not add property: ' + e.message, 'error')
-    } finally {
-      setAddingProp(false)
-    }
-  }
+  const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
+  const setField = (key, val) => setForm(f => ({...f, [key]: val}))
 
   useEffect(() => { loadAgreements() }, [])
 
@@ -92,265 +60,319 @@ export default function RentalAgreement() {
       const map = {}
       ;(Array.isArray(data) ? data : []).forEach(a => { map[a.prop_id] = a })
       setAgreements(map)
-      // Pre-fill for first property
       if (map[selectedProp]) prefill(map[selectedProp])
-    } catch (e) {
-      console.warn('Could not load agreements:', e.message)
-    } finally {
-      setLoading(false)
-    }
+    } catch(e) { console.warn(e) }
+    finally { setLoading(false) }
   }
 
-  function prefill(agreement) {
+  function prefill(a) {
     setForm({
-      tenantName:  agreement.tenant_name   || '',
-      deposit:     agreement.deposit        || '',
-      agreedRent:  agreement.agreed_rent    || '',
-      maintenance: agreement.maintenance_fee|| '',
-      leaseStart:  agreement.lease_start    || '',
-      leaseEnd:    agreement.lease_end      || '',
-      notes:       agreement.notes          || '',
+      tenantName:    a.tenant_name    || '',
+      tenantEmail:   a.tenant_email   || '',
+      tenantPhone:   a.tenant_phone   || '',
+      deposit:       a.deposit        || '',
+      agreedRent:    a.agreed_rent    || '',
+      maintenance:   a.maintenance_fee|| '',
+      leaseStart:    a.lease_start    || '',
+      leaseEnd:      a.lease_end      || '',
+      notes:         a.notes          || '',
+      country:       a.country        || 'IN',
+      currency:      a.currency       || 'INR',
+      driveFolderUrl:a.drive_folder_url || '',
+      status:        a.status         || 'Active',
     })
   }
 
   function handlePropChange(propId) {
     setSelectedProp(propId)
-    setSaved(false)
     setError('')
     if (agreements[propId]) prefill(agreements[propId])
     else setForm(EMPTY_FORM)
   }
 
-  function setField(key, val) {
-    setForm(f => ({ ...f, [key]: val }))
-    setSaved(false)
+  // Auto-fill drive folder when tenant name is entered
+  function handleTenantNameChange(val) {
+    setField('tenantName', val)
+    const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+    if (val && prop && !form.driveFolderUrl) {
+      setField('driveFolderUrl', DRIVE_FOLDER_TEMPLATE(val.replace(/\s+/g,'-'), prop.name))
+    }
+  }
+
+  async function handleStatusChange(newStatus) {
+    setField('status', newStatus)
+    if (agreements[selectedProp]) {
+      try {
+        await api.updateTenantStatus({ propId: selectedProp, status: newStatus })
+        setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], status: newStatus}}))
+        showToast(`Status updated to ${newStatus}`)
+      } catch(e) { showToast('Status update failed', 'error') }
+    }
   }
 
   async function handleSave() {
     setError('')
     if (!form.tenantName.trim()) { setError('Tenant name is required'); return }
-    if (!form.leaseStart)        { setError('Lease start date is required'); return }
-    if (!form.leaseEnd)          { setError('Lease end date is required'); return }
-    if (new Date(form.leaseEnd) <= new Date(form.leaseStart)) {
-      setError('Lease end must be after lease start'); return
-    }
+    if (!form.leaseStart) { setError('Lease start is required'); return }
+    if (!form.leaseEnd)   { setError('Lease end is required'); return }
+    if (new Date(form.leaseEnd) <= new Date(form.leaseStart)) { setError('Lease end must be after start'); return }
     setSaving(true)
     try {
+      const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
       await api.saveRentalAgreement({
-        propId:      selectedProp,
-        tenantName:  form.tenantName.trim(),
-        deposit:     parseFloat(form.deposit)     || 0,
-        agreedRent:  parseFloat(form.agreedRent)  || 0,
-        maintenance: parseFloat(form.maintenance) || 0,
-        leaseStart:  form.leaseStart,
-        leaseEnd:    form.leaseEnd,
-        notes:       form.notes.trim(),
+        propId:       selectedProp,
+        propName:     prop?.name || selectedProp,
+        location:     prop?.location || '',
+        country:      form.country,
+        currency:     form.currency,
+        tenantName:   form.tenantName.trim(),
+        tenantEmail:  form.tenantEmail.trim(),
+        tenantPhone:  form.tenantPhone.trim(),
+        deposit:      parseFloat(form.deposit) || 0,
+        agreedRent:   parseFloat(form.agreedRent) || 0,
+        maintenance:  parseFloat(form.maintenance) || 0,
+        leaseStart:   form.leaseStart,
+        leaseEnd:     form.leaseEnd,
+        notes:        form.notes.trim(),
+        driveFolderUrl: form.driveFolderUrl.trim(),
       })
-      // Update local cache
-      setAgreements(prev => ({
-        ...prev,
-        [selectedProp]: {
-          prop_id: selectedProp,
-          tenant_name:    form.tenantName,
-          deposit:        parseFloat(form.deposit)||0,
-          agreed_rent:    parseFloat(form.agreedRent)||0,
-          maintenance_fee: parseFloat(form.maintenance)||0,
-          lease_start:    form.leaseStart,
-          lease_end:      form.leaseEnd,
-          notes:          form.notes,
-        }
-      }))
-      setSaved(true)
+      setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp],
+        prop_id:selectedProp, tenant_name:form.tenantName, tenant_email:form.tenantEmail,
+        deposit:parseFloat(form.deposit)||0, agreed_rent:parseFloat(form.agreedRent)||0,
+        lease_start:form.leaseStart, lease_end:form.leaseEnd,
+        country:form.country, currency:form.currency, drive_folder_url:form.driveFolderUrl, status:form.status,
+      }}))
       showToast(`✅ Agreement saved for ${prop?.name}`)
-    } catch (e) {
-      setError(`Save failed: ${e.message}`)
-    } finally {
-      setSaving(false)
-    }
+    } catch(e) { setError(`Save failed: ${e.message}`) }
+    finally { setSaving(false) }
   }
 
-  const prop      = CONFIG.rentalProperties.find(p => p.id === selectedProp)
-  const days      = daysUntil(form.leaseEnd)
-  const duration  = leaseDurationMonths(form.leaseStart, form.leaseEnd)
+  async function handleAddProperty() {
+    if (!newProp.name.trim()) return
+    setAddingProp(true)
+    try {
+      const id = 'rental_' + Date.now()
+      await api.saveRentalAgreement({
+        propId:id, propName:newProp.name.trim(), location:newProp.location.trim(),
+        country:newProp.country, currency:newProp.currency,
+        tenantName:'', deposit:0, agreedRent:0, maintenance:0,
+        leaseStart:'', leaseEnd:'', notes:'',
+      })
+      CONFIG.rentalProperties.push({ id, name:newProp.name.trim(), location:newProp.location.trim() })
+      setSelectedProp(id); setForm({...EMPTY_FORM, country:newProp.country, currency:newProp.currency})
+      setNewProp({name:'',location:'',country:'IN',currency:'INR'}); setShowAddProp(false)
+      showToast(`${newProp.name} added`)
+    } catch(e) { showToast('Could not add: ' + e.message, 'error') }
+    finally { setAddingProp(false) }
+  }
+
+  const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+  const days = daysUntil(form.leaseEnd)
+  const duration = leaseDurationMonths(form.leaseStart, form.leaseEnd)
   const totalMonthly = (parseFloat(form.agreedRent)||0) + (parseFloat(form.maintenance)||0)
+  const expiryColor = days===null?'#34A853':days<0?'#c62828':days<=30?'#e67e22':days<=60?'#f1c40f':'#34A853'
+  const expiryMsg = days===null?null:days<0?`⚠️ Lease EXPIRED ${Math.abs(days)} days ago`:
+    days===0?'⚠️ Expires TODAY':days<=60?`📅 Expires in ${days} days (${form.leaseEnd})`:`✓ Active — ${days} days remaining`
+  const curSymbol = form.currency === 'USD' ? '$' : '₹'
 
-  const expiryColor =
-    days === null ? 'var(--gold)' :
-    days < 0      ? '#c62828' :
-    days <= 30    ? '#e67e22' :
-    days <= 60    ? '#f1c40f' :
-                    '#34A853'
-
-  const expiryMsg =
-    days === null ? null :
-    days < 0      ? `⚠️ Lease EXPIRED ${Math.abs(days)} day${Math.abs(days)!==1?'s':''} ago — renew immediately` :
-    days === 0    ? '⚠️ Lease expires TODAY' :
-    days <= 30    ? `⏰ Lease expires in ${days} days (${form.leaseEnd})` :
-    days <= 60    ? `📅 Lease expires in ${days} days — renew soon (${form.leaseEnd})` :
-                    `✓ Active — expires ${form.leaseEnd} (${days} days remaining)`
-
-  const F = { label: { display:'block', fontSize:'0.7rem', color:'var(--text-dim)', letterSpacing:'1px', marginBottom:'4px', marginTop:'12px' },
-              input: { width:'100%', padding:'9px 12px', borderRadius:'8px', boxSizing:'border-box', background:'var(--dark-input)', border:'1px solid var(--border-dim)', color:'var(--text)', fontSize:'0.9rem' } }
+  const F = {
+    label: {display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px',marginTop:'12px'},
+    input: {width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'},
+  }
 
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Tenant agreements</div>
           <div className="topbar-sub">RENTAL PROPERTIES · LEASE DETAILS</div>
         </div>
-        <div style={{ width: 34 }} />
+        <div style={{width:34}}/>
       </div>
 
       <div className="screen-body">
-
-        {/* Property tabs + Add button */}
-        <div style={{ display:'flex', gap:'8px', marginBottom:'16px', alignItems:'stretch' }}>
+        {/* Property tabs */}
+        <div style={{display:'flex',gap:'8px',marginBottom:'16px',alignItems:'stretch'}}>
           {CONFIG.rentalProperties.map(p => {
             const a = agreements[p.id]
             const d = a?.lease_end ? daysUntil(a.lease_end) : null
-            const dot = d === null ? null : d < 0 ? '#c62828' : d <= 60 ? '#e67e22' : '#34A853'
+            const dot = d===null?null:d<0?'#c62828':d<=60?'#e67e22':'#34A853'
+            const statusCol = a?.status ? STATUS_COLOR[a.status] : null
             return (
-              <button key={p.id} onClick={() => handlePropChange(p.id)} style={{
-                flex:1, padding:'10px 6px', borderRadius:'10px', cursor:'pointer', textAlign:'center',
-                border: selectedProp===p.id ? '2px solid var(--gold)' : '1px solid var(--border-dim)',
-                background: selectedProp===p.id ? 'rgba(200,144,58,0.12)' : 'var(--dark-card)',
-                color:'var(--text)',
+              <button key={p.id} onClick={()=>handlePropChange(p.id)} style={{
+                flex:1,padding:'10px 6px',borderRadius:'10px',cursor:'pointer',textAlign:'center',
+                border:selectedProp===p.id?'2px solid #185FA5':'1px solid var(--border-dim)',
+                background:selectedProp===p.id?'rgba(24,95,165,0.12)':'var(--dark-card)',color:'var(--text)',
               }}>
-                <div style={{ fontWeight:'700', fontSize:'0.85rem' }}>{p.name}</div>
-                <div style={{ fontSize:'0.7rem', color:'var(--text-dim)', marginTop:'2px' }}>{p.location}</div>
-                {dot && <div style={{ width:6, height:6, borderRadius:'50%', background:dot, margin:'4px auto 0' }} />}
-                {agreements[p.id] && !dot && <div style={{ fontSize:'0.65rem', color:'var(--gold)', marginTop:'4px' }}>✓ saved</div>}
+                <div style={{fontWeight:'700',fontSize:'0.85rem'}}>{p.name}</div>
+                <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'2px'}}>{p.location}</div>
+                {statusCol && <div style={{fontSize:'0.62rem',color:statusCol,marginTop:'3px',fontWeight:'600'}}>{a.status}</div>}
+                {dot && <div style={{width:6,height:6,borderRadius:'50%',background:dot,margin:'4px auto 0'}}/>}
               </button>
             )
           })}
-          {/* Add new property */}
-          <button onClick={() => setShowAddProp(true)} style={{
-            width:40, flexShrink:0, borderRadius:'10px', cursor:'pointer',
-            border:'1px dashed rgba(200,144,58,0.4)',
-            background:'rgba(200,144,58,0.06)', color:'var(--gold)',
-            fontSize:'1.4rem', display:'flex', alignItems:'center', justifyContent:'center',
-          }} title="Add new property">+</button>
+          <button onClick={()=>setShowAddProp(true)} style={{
+            width:40,flexShrink:0,borderRadius:'10px',cursor:'pointer',
+            border:'1px dashed rgba(24,95,165,0.4)',background:'rgba(24,95,165,0.06)',
+            color:'#185FA5',fontSize:'1.4rem',display:'flex',alignItems:'center',justifyContent:'center',
+          }}>+</button>
         </div>
 
-        {/* Add Property modal */}
+        {/* Add property modal */}
         {showAddProp && (
-          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
-            <div style={{ background:'var(--dark-card)', borderRadius:'16px', padding:'24px', width:'100%', maxWidth:'360px', border:'1px solid rgba(200,144,58,0.2)' }}>
-              <div style={{ color:'var(--gold)', fontWeight:'700', fontSize:'1rem', marginBottom:'16px' }}>Add New Property</div>
-              <div style={{ marginBottom:'12px' }}>
-                <div style={{ fontSize:'0.72rem', color:'var(--text-dim)', marginBottom:'6px', letterSpacing:'1px' }}>PROPERTY NAME</div>
-                <input value={newProp.name} onChange={e => setNewProp(p => ({...p, name: e.target.value}))}
-                  placeholder="e.g. Pinnacle 2" autoFocus
-                  style={{ width:'100%', background:'var(--dark)', border:'1px solid var(--border-dim)', borderRadius:'8px', padding:'10px 12px', color:'var(--text)', fontSize:'0.9rem', boxSizing:'border-box' }} />
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+            <div style={{background:'var(--dark-card)',borderRadius:'16px',padding:'24px',width:'100%',maxWidth:'360px',border:'1px solid rgba(24,95,165,0.2)'}}>
+              <div style={{color:'#85B7EB',fontWeight:'700',fontSize:'1rem',marginBottom:'16px'}}>Add New Property</div>
+              {[{key:'name',ph:'e.g. Tritvam 2'},{key:'location',ph:'e.g. Kochi, KL'}].map(f=>(
+                <div key={f.key} style={{marginBottom:'12px'}}>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'6px',letterSpacing:'1px'}}>{f.key.toUpperCase()}</div>
+                  <input value={newProp[f.key]} onChange={e=>setNewProp(p=>({...p,[f.key]:e.target.value}))}
+                    placeholder={f.ph} style={{width:'100%',background:'var(--dark)',border:'1px solid var(--border-dim)',borderRadius:'8px',padding:'10px 12px',color:'var(--text)',fontSize:'0.9rem',boxSizing:'border-box'}}/>
+                </div>
+              ))}
+              <div className="grid-2" style={{marginBottom:'16px'}}>
+                <div>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'6px',letterSpacing:'1px'}}>COUNTRY</div>
+                  <select value={newProp.country} onChange={e=>setNewProp(p=>({...p,country:e.target.value,currency:e.target.value==='US'?'USD':'INR'}))}
+                    style={{width:'100%',background:'var(--dark)',border:'1px solid var(--border-dim)',borderRadius:'8px',padding:'10px 12px',color:'var(--text)',fontSize:'0.9rem',boxSizing:'border-box'}}>
+                    <option value="IN">India (₹)</option>
+                    <option value="US">USA ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'6px',letterSpacing:'1px'}}>CURRENCY</div>
+                  <select value={newProp.currency} onChange={e=>setNewProp(p=>({...p,currency:e.target.value}))}
+                    style={{width:'100%',background:'var(--dark)',border:'1px solid var(--border-dim)',borderRadius:'8px',padding:'10px 12px',color:'var(--text)',fontSize:'0.9rem',boxSizing:'border-box'}}>
+                    <option value="INR">INR ₹</option>
+                    <option value="USD">USD $</option>
+                  </select>
+                </div>
               </div>
-              <div style={{ marginBottom:'20px' }}>
-                <div style={{ fontSize:'0.72rem', color:'var(--text-dim)', marginBottom:'6px', letterSpacing:'1px' }}>LOCATION</div>
-                <input value={newProp.location} onChange={e => setNewProp(p => ({...p, location: e.target.value}))}
-                  placeholder="e.g. Kochi, KL"
-                  style={{ width:'100%', background:'var(--dark)', border:'1px solid var(--border-dim)', borderRadius:'8px', padding:'10px 12px', color:'var(--text)', fontSize:'0.9rem', boxSizing:'border-box' }} />
-              </div>
-              <div style={{ display:'flex', gap:'10px' }}>
-                <button onClick={() => { setShowAddProp(false); setNewProp({ name:'', location:'' }) }}
-                  style={{ flex:1, padding:'10px', borderRadius:'8px', border:'1px solid var(--border-dim)', background:'transparent', color:'var(--text-dim)', cursor:'pointer' }}>
-                  Cancel
-                </button>
-                <button onClick={handleAddProperty} disabled={addingProp || !newProp.name.trim()}
-                  style={{ flex:2, padding:'10px', borderRadius:'8px', border:'none', background:'var(--gold)', color:'#111', fontWeight:'700', cursor:'pointer', opacity: addingProp||!newProp.name.trim() ? 0.6 : 1 }}>
-                  {addingProp ? 'Adding…' : 'Add Property'}
+              <div style={{display:'flex',gap:'10px'}}>
+                <button onClick={()=>{setShowAddProp(false);setNewProp({name:'',location:'',country:'IN',currency:'INR'})}}
+                  style={{flex:1,padding:'10px',borderRadius:'8px',border:'1px solid var(--border-dim)',background:'transparent',color:'var(--text-dim)',cursor:'pointer'}}>Cancel</button>
+                <button onClick={handleAddProperty} disabled={addingProp||!newProp.name.trim()}
+                  style={{flex:2,padding:'10px',borderRadius:'8px',border:'none',background:'#185FA5',color:'#fff',fontWeight:'700',cursor:'pointer',opacity:addingProp||!newProp.name.trim()?0.6:1}}>
+                  {addingProp?'Adding…':'Add Property'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {loading && (
-          <div style={{ textAlign:'center', color:'var(--text-dim)', padding:'24px' }}>Loading agreements…</div>
-        )}
+        {loading && <div style={{textAlign:'center',color:'var(--text-dim)',padding:'24px'}}>Loading…</div>}
 
         {!loading && (
           <>
-            {/* Expiry banner */}
+            {/* Status bar */}
+            <div style={{display:'flex',gap:'6px',marginBottom:'12px',flexWrap:'wrap'}}>
+              {STATUSES.map(s => (
+                <button key={s} onClick={()=>handleStatusChange(s)} style={{
+                  padding:'5px 12px',borderRadius:'20px',cursor:'pointer',fontSize:'0.72rem',fontWeight:'600',
+                  border:`1px solid ${form.status===s?STATUS_COLOR[s]:'rgba(255,255,255,0.1)'}`,
+                  background:form.status===s?`${STATUS_COLOR[s]}22`:'transparent',
+                  color:form.status===s?STATUS_COLOR[s]:'#5C7080',
+                }}>{s}</button>
+              ))}
+            </div>
+
             {expiryMsg && (
-              <div style={{ background:`${expiryColor}18`, border:`1px solid ${expiryColor}55`, borderRadius:'10px', padding:'10px 14px', marginBottom:'12px', color:expiryColor, fontSize:'0.85rem', fontWeight:'600' }}>
+              <div style={{background:`${expiryColor}18`,border:`1px solid ${expiryColor}55`,borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',color:expiryColor,fontSize:'0.85rem',fontWeight:'600'}}>
                 {expiryMsg}
               </div>
             )}
 
-            {/* Form */}
             <div className="card-section-label">{prop?.name?.toUpperCase()} · {prop?.location}</div>
             <div className="card">
+              {/* Country + Currency */}
+              <div className="grid-2">
+                <div>
+                  <label style={F.label}>COUNTRY</label>
+                  <select value={form.country} onChange={e=>setField('country',e.target.value)} style={F.input}>
+                    <option value="IN">India</option>
+                    <option value="US">USA</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={F.label}>CURRENCY</label>
+                  <select value={form.currency} onChange={e=>setField('currency',e.target.value)} style={F.input}>
+                    <option value="INR">INR ₹</option>
+                    <option value="USD">USD $</option>
+                  </select>
+                </div>
+              </div>
 
               <label style={F.label}>TENANT NAME *</label>
-              <input value={form.tenantName} onChange={e => setField('tenantName', e.target.value)}
-                placeholder="Full name of tenant" style={F.input} />
+              <input value={form.tenantName} onChange={e=>handleTenantNameChange(e.target.value)}
+                placeholder="Full legal name" style={F.input}/>
 
               <div className="grid-2">
                 <div>
-                  <label style={F.label}>SECURITY DEPOSIT (₹)</label>
-                  <input type="number" min="0" value={form.deposit}
-                    onChange={e => setField('deposit', e.target.value)}
-                    placeholder="0" style={F.input} />
+                  <label style={F.label}>EMAIL</label>
+                  <input type="email" value={form.tenantEmail} onChange={e=>setField('tenantEmail',e.target.value)}
+                    placeholder="tenant@email.com" style={F.input}/>
                 </div>
                 <div>
-                  <label style={F.label}>AGREED RENT / MONTH (₹)</label>
-                  <input type="number" min="0" value={form.agreedRent}
-                    onChange={e => setField('agreedRent', e.target.value)}
-                    placeholder="0" style={{ ...F.input, color:'#34A853' }} />
+                  <label style={F.label}>PHONE</label>
+                  <input type="tel" value={form.tenantPhone} onChange={e=>setField('tenantPhone',e.target.value)}
+                    placeholder="+91 …" style={F.input}/>
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div>
+                  <label style={F.label}>SECURITY DEPOSIT ({curSymbol})</label>
+                  <input type="number" min="0" value={form.deposit} onChange={e=>setField('deposit',e.target.value)}
+                    placeholder="0" style={F.input}/>
                 </div>
                 <div>
-                  <label style={F.label}>MAINTENANCE / MONTH (₹)</label>
-                  <input type="number" min="0" value={form.maintenance}
-                    onChange={e => setField('maintenance', e.target.value)}
-                    placeholder="0" style={F.input} />
+                  <label style={F.label}>RENT / MONTH ({curSymbol})</label>
+                  <input type="number" min="0" value={form.agreedRent} onChange={e=>setField('agreedRent',e.target.value)}
+                    placeholder="0" style={{...F.input,color:'#34A853'}}/>
                 </div>
                 <div>
-                  <label style={F.label}>TOTAL MONTHLY (₹)</label>
-                  <div style={{ ...F.input, color:'var(--gold)', fontWeight:'700', display:'flex', alignItems:'center' }}>
-                    {totalMonthly > 0 ? fmt(totalMonthly) : '—'}
+                  <label style={F.label}>MAINTENANCE ({curSymbol})</label>
+                  <input type="number" min="0" value={form.maintenance} onChange={e=>setField('maintenance',e.target.value)}
+                    placeholder="0" style={F.input}/>
+                </div>
+                <div>
+                  <label style={F.label}>TOTAL MONTHLY ({curSymbol})</label>
+                  <div style={{...F.input,color:'#C8903A',fontWeight:'700',display:'flex',alignItems:'center'}}>
+                    {totalMonthly > 0 ? fmt(totalMonthly, form.currency) : '—'}
                   </div>
                 </div>
               </div>
 
-              <div className="grid-2" style={{ marginTop:'4px' }}>
+              <div className="grid-2" style={{marginTop:'4px'}}>
                 <div>
                   <label style={F.label}>LEASE START *</label>
-                  <input type="date" value={form.leaseStart}
-                    onChange={e => setField('leaseStart', e.target.value)} style={F.input} />
+                  <input type="date" value={form.leaseStart} onChange={e=>setField('leaseStart',e.target.value)} style={F.input}/>
                 </div>
                 <div>
                   <label style={F.label}>LEASE END *</label>
-                  <input type="date" value={form.leaseEnd}
-                    onChange={e => setField('leaseEnd', e.target.value)} style={F.input} />
+                  <input type="date" value={form.leaseEnd} onChange={e=>setField('leaseEnd',e.target.value)} style={F.input}/>
                 </div>
               </div>
+              {duration && <div style={{color:'#C8903A',fontSize:'0.75rem',marginTop:'4px',opacity:0.8}}>Duration: {duration} months</div>}
 
-              {duration && (
-                <div style={{ color:'var(--gold)', fontSize:'0.75rem', marginTop:'4px', opacity:0.8 }}>
-                  Duration: {duration} month{duration!==1?'s':''}
-                </div>
-              )}
+              <label style={F.label}>GOOGLE DRIVE FOLDER PATH</label>
+              <input value={form.driveFolderUrl} onChange={e=>setField('driveFolderUrl',e.target.value)}
+                placeholder="RentalManagement/PropertyName/TenantName" style={{...F.input,fontFamily:'monospace',fontSize:'0.8rem'}}/>
+              <div style={{fontSize:'0.68rem',color:'#5C7080',marginTop:'4px'}}>
+                Format: RentalManagement / {prop?.name || 'Property'} / TenantName / [Move-in, Contracts, Move-out, Renewals]
+              </div>
 
-              <label style={F.label}>NOTES (optional)</label>
-              <textarea value={form.notes} onChange={e => setField('notes', e.target.value)}
-                placeholder="Special terms, parking slot, emergency contact, etc."
-                rows={3} style={{ ...F.input, resize:'vertical' }} />
+              <label style={F.label}>NOTES</label>
+              <textarea value={form.notes} onChange={e=>setField('notes',e.target.value)}
+                placeholder="Parking slot, special terms, emergency contact…" rows={3}
+                style={{...F.input,resize:'vertical'}}/>
 
-              {error && (
-                <div style={{ color:'#EF9A9A', fontSize:'0.82rem', marginTop:'10px', background:'rgba(198,40,40,0.1)', padding:'8px 10px', borderRadius:'8px' }}>
-                  ❌ {error}
-                </div>
-              )}
-              {saved && (
-                <div style={{ color:'#81C784', fontSize:'0.82rem', marginTop:'10px', background:'rgba(52,168,83,0.1)', padding:'8px 10px', borderRadius:'8px' }}>
-                  ✅ Agreement saved
-                </div>
-              )}
+              {error && <div style={{color:'#EF9A9A',fontSize:'0.82rem',marginTop:'10px',background:'rgba(198,40,40,0.1)',padding:'8px 10px',borderRadius:'8px'}}>❌ {error}</div>}
             </div>
 
             <button className="btn btn-gold" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : `💾 Save Agreement — ${prop?.name}`}
+              {saving ? 'Saving…' : `💾 Save — ${prop?.name}`}
             </button>
           </>
         )}

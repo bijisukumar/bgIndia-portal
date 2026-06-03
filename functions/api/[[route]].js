@@ -1226,6 +1226,48 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // LEASE LOSSES — get all claims for a property
+      if (action === 'getLeaseLosses') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(
+          `SELECT * FROM lease_losses WHERE prop_id = ? ORDER BY created_at DESC`
+        ).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      // REV360 PORTFOLIO DASHBOARD
+      if (action === 'getRev360Dashboard') {
+        const year = new Date().getFullYear()
+        const props = await DB.prepare(`SELECT * FROM rental_props ORDER BY prop_id`).all()
+        const income = await DB.prepare(
+          `SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax+extra_maintenance) as expense, SUM(net) as net, COUNT(*) as months_entered
+           FROM rental_income WHERE year = ? GROUP BY prop_id`
+        ).bind(year).all()
+        const losses = await DB.prepare(
+          `SELECT prop_id, SUM(amount) as total_claimed,
+           SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off,
+           SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered,
+           COUNT(*) as claim_count
+           FROM lease_losses GROUP BY prop_id`
+        ).all()
+        const renewalAlerts = await DB.prepare(
+          `SELECT prop_id, name, tenant_name, lease_end, status,
+           CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left
+           FROM rental_props
+           WHERE lease_end IS NOT NULL AND lease_end != ''
+           AND julianday(lease_end) - julianday('now') <= 90
+           ORDER BY lease_end ASC`
+        ).all()
+        return json({ success: true, data: {
+          year,
+          properties: props.results,
+          income: income.results,
+          losses: losses.results,
+          renewalAlerts: renewalAlerts.results,
+        }})
+      }
+
       // GET GUEST DOCUMENTS — for Apps Script to fetch and upload to Drive
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
@@ -2101,7 +2143,7 @@ export async function onRequest(ctx) {
 
       // RENTAL AGREEMENTS — save tenant agreement for a rental property
       if (action === 'saveRentalAgreement') {
-        const { propId, propName, location, tenantName, deposit, agreedRent, maintenance, leaseStart, leaseEnd, notes } = body
+        const { propId, propName, location, country, currency, tenantName, tenantEmail, tenantPhone, deposit, agreedRent, maintenance, leaseStart, leaseEnd, notes, driveFolderUrl } = body
         if (!propId) return err('propId is required')
         const existing = await DB.prepare(
           `SELECT prop_id FROM rental_props WHERE prop_id = ?`
@@ -2109,24 +2151,29 @@ export async function onRequest(ctx) {
         if (existing) {
           await DB.prepare(
             `UPDATE rental_props
-             SET tenant_name = ?, deposit = ?, agreed_rent = ?, maintenance_fee = ?,
+             SET tenant_name = ?, tenant_email = ?, tenant_phone = ?,
+                 deposit = ?, agreed_rent = ?, maintenance_fee = ?,
                  lease_start = ?, lease_end = ?, notes = ?,
+                 country = ?, currency = ?, drive_folder_url = ?,
                  updated_by = ?, updated_at = ?
              WHERE prop_id = ?`
-          ).bind(tenantName||'', deposit||0, agreedRent||0, maintenance||0,
+          ).bind(tenantName||'', tenantEmail||null, tenantPhone||null,
+                 deposit||0, agreedRent||0, maintenance||0,
                  leaseStart||null, leaseEnd||null, notes||null,
+                 country||'IN', currency||'INR', driveFolderUrl||null,
                  actor, now(), propId).run()
         } else {
-          // New property — include name and location
           await DB.prepare(
             `INSERT INTO rental_props
-               (prop_id, prop_name, location, tenant_name, deposit, agreed_rent, maintenance_fee,
-                lease_start, lease_end, notes, created_by, updated_by, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-          ).bind(propId, propName||propId, location||'',
-                 tenantName||'', deposit||0, agreedRent||0, maintenance||0,
+               (prop_id, name, location, country, currency, tenant_name, tenant_email, tenant_phone,
+                deposit, agreed_rent, maintenance_fee, lease_start, lease_end, notes,
+                drive_folder_url, status, created_by, updated_by, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          ).bind(propId, propName||propId, location||'', country||'IN', currency||'INR',
+                 tenantName||'', tenantEmail||null, tenantPhone||null,
+                 deposit||0, agreedRent||0, maintenance||0,
                  leaseStart||null, leaseEnd||null, notes||null,
-                 actor, actor, now(), now()).run()
+                 driveFolderUrl||null, 'Active', actor, actor, now(), now()).run()
         }
         return json({ success: true, data: { propId } })
       }
@@ -2371,6 +2418,54 @@ export async function onRequest(ctx) {
           `UPDATE checkin_links SET is_active = ?, updated_at = ? WHERE token = ?`
         ).bind(link.is_active ? 0 : 1, now(), linkToken).run()
         return json({ success: true, data: { token: linkToken, is_active: !link.is_active } })
+      }
+
+      // UPDATE TENANT STATUS
+      if (action === 'updateTenantStatus') {
+        const { propId, status } = body
+        if (!propId || !status) return err('propId and status required')
+        const valid = ['Active','Notice Given','Delinquent','Evicted','Runaway','Completed']
+        if (!valid.includes(status)) return err('Invalid status')
+        await DB.prepare(
+          `UPDATE rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`
+        ).bind(status, actor, now(), propId).run()
+        return json({ success: true, data: { propId, status } })
+      }
+
+      // SAVE LEASE LOSS (create or update)
+      if (action === 'saveLeaseLoss') {
+        const { lossId, propId, leaseSnapshot, itemCategory, description, amount, currency, evidenceFileName, evidenceDriveUrl, evidenceTimestamp, status: lossStatus } = body
+        if (!propId || !description || amount === undefined) return err('propId, description, amount required')
+        const validCats = ['Rent','Damage','Cleaning','Legal','Other']
+        if (!validCats.includes(itemCategory)) return err('Invalid itemCategory')
+        const id = lossId || ('loss_' + Date.now() + '_' + Math.random().toString(36).slice(2,7))
+        await DB.prepare(
+          `INSERT OR REPLACE INTO lease_losses
+           (loss_id, prop_id, lease_snapshot, item_category, description, amount, currency,
+            evidence_file_name, evidence_drive_url, evidence_timestamp, status, created_by, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM lease_losses WHERE loss_id=?),?),?)`
+        ).bind(id, propId, leaseSnapshot||'', itemCategory||'Other', description, parseFloat(amount)||0,
+               currency||'INR', evidenceFileName||null, evidenceDriveUrl||null, evidenceTimestamp||null,
+               lossStatus||'Estimated', actor, id, now(), now()).run()
+        return json({ success: true, data: { lossId: id } })
+      }
+
+      // UPDATE LEASE LOSS STATUS
+      if (action === 'updateLeaseLossStatus') {
+        const { lossId, status: lossStatus } = body
+        if (!lossId || !lossStatus) return err('lossId and status required')
+        await DB.prepare(
+          `UPDATE lease_losses SET status = ?, updated_at = ? WHERE loss_id = ?`
+        ).bind(lossStatus, now(), lossId).run()
+        return json({ success: true, data: { lossId, status: lossStatus } })
+      }
+
+      // DELETE LEASE LOSS
+      if (action === 'deleteLeaseLoss') {
+        const { lossId } = body
+        if (!lossId) return err('lossId required')
+        await DB.prepare(`DELETE FROM lease_losses WHERE loss_id = ?`).bind(lossId).run()
+        return json({ success: true, data: { lossId, deleted: true } })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

@@ -95,32 +95,42 @@ function pollAirbnbReviews() {
       var nameMatch   = subject.match(/^([A-Za-z\s]+?)\s+left a/i);
       var guestName   = nameMatch ? nameMatch[1].trim() : '';
 
-      // Parse review text — public review
+      // Parse review text — public review only, stop at "+ More" or "+N more"
       var reviewText  = '';
-      var reviewNote  = '';
       var specialThanks = [];
 
-      // Public review text
-      var publicMatch = body.match(/Overall rating[\s\S]*?\n\n([\s\S]{10,600}?)(?:\n\nNote from|Special thanks|\n\n[A-Z])/i);
-      if (publicMatch) reviewText = publicMatch[1].trim().replace(/\s+/g,' ');
+      // Public review: text before "Note from" or "+ More" or "+N more"
+      // Look for content after "Overall rating" line or just grab first meaningful paragraph
+      var bodyClean = body.replace(/https?:\/\/\S+/g, '').replace(/\r\n/g, '\n');
 
-      // Note from guest (private note to host)
-      var noteMatch = body.match(/Note from [A-Za-z]+\s*\n+(.+?)(?:\n\n|Special thanks|$)/i);
-      if (noteMatch) reviewNote = noteMatch[1].trim();
+      // Find the review text block — stops at Note from / +More / Special thanks
+      var reviewMatch = bodyClean.match(/Overall rating[\s\S]*?\n\n([\s\S]+?)(?:\n\n(?:Note from|Special thanks|\+\d* ?[Mm]ore|Read full|Write a)|$)/i);
+      if (!reviewMatch) {
+        // Fallback: grab first long paragraph that looks like a review
+        reviewMatch = bodyClean.match(/\n\n((?:[A-Z][^+\n]{30,}[\s\S]*?))(?:\n\nNote from|\n\nSpecial thanks|\n\n\+)/i);
+      }
+      if (reviewMatch) {
+        reviewText = reviewMatch[1]
+          .replace(/\+\s*[Mm]ore.*$/s, '')  // cut at +More
+          .replace(/\+\d+\s*more.*$/si, '') // cut at +12 more
+          .replace(/\n+/g, ' ')
+          .trim();
+      }
 
-      // Special thanks checkboxes
-      var thanksSection = body.match(/Special thanks([\s\S]*?)(?:\n\n[A-Z]|$)/i);
+      // Special thanks checkboxes only — no Note from guest
+      var thanksSection = bodyClean.match(/Special thanks\s*\n([\s\S]*?)(?:\n\n|\+\d+\s*more|Read full|Write a|$)/i);
       if (thanksSection) {
-        var lines = thanksSection[1].split('\n');
-        lines.forEach(function(line) {
-          var t = line.replace(/^[\s✓\-\*•]+/, '').trim();
-          if (t.length > 3) specialThanks.push(t);
+        thanksSection[1].split('\n').forEach(function(line) {
+          var t = line.replace(/^[\s✓✔\-\*•]+/, '').trim();
+          if (t.length > 3 && t.length < 80 && !/^https?/.test(t)) {
+            specialThanks.push(t);
+          }
         });
       }
 
       var fullReviewText = reviewText;
       if (specialThanks.length > 0) {
-        fullReviewText += '\n\nSpecial thanks: ' + specialThanks.join(', ');
+        fullReviewText += (fullReviewText ? '\n\n' : '') + 'Special thanks: ' + specialThanks.join(', ');
       }
 
       // Parse review date — use email date
@@ -176,8 +186,7 @@ function pollAirbnbReviews() {
         rating:      rating,
         source:      'airbnb',
         reviewDate:  reviewDate,
-        reviewText:  fullReviewText,
-        reviewNote:  reviewNote,
+        reviewText:  reviewText,
         highlights:  specialThanks.join(', '),
         guestName:   matchedStay.guest_name,
       });
@@ -200,10 +209,9 @@ function pollAirbnbReviews() {
           '\nStay:     ' + matchedStay.stay_id +
           '\nRating:   ' + rating + '★' +
           '\nDate:     ' + reviewDate +
-          (reviewText     ? '\n\nReview:   ' + reviewText   : '') +
-          (reviewNote     ? '\n\nNote:     ' + reviewNote   : '') +
-          (specialThanks.length ? '\n\nHighlights: ' + specialThanks.join(', ') : '') +
-          '\n\n' + (matchedStay.status === 'closed' ? 'Stay was already closed.' : 'Stay has been closed automatically.')
+          (reviewText           ? '\n\nReview:\n'    + reviewText                    : '') +
+          (specialThanks.length ? '\n\nHighlights: ' + specialThanks.join(', ')      : '') +
+          '\n\n' + (matchedStay.status === 'closed' ? 'Stay was already closed.' : 'Stay closed automatically.')
         );
       } else {
         Logger.log('saveReview failed: ' + JSON.stringify(saveResp));

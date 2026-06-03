@@ -55,13 +55,13 @@ export default function PradoshHome() {
     },
   ]
 
-  const irrigationDays = info?.irrigationDaysAgo
-  const harvestDays    = info?.harvestDaysAway
-  const lastPrice      = info?.lastPricePerKg
+  const irrigationDays = info?.irrigationDaysAgo ?? null
+  const harvestDays    = info?.harvestDaysAway    ?? null
+  const lastPrice      = info?.lastPricePerKg     ?? null
 
   return (
     <div className="screen">
-      <TopBar title="Pradosh" sub="ESTATE MANAGER · POLLACHI" />
+      <TopBar title={info?.managerName || 'Estate Manager'} sub={`ESTATE MANAGER · ${(info?.estateId || 'ESTATE').toUpperCase()}`} />
 
       <div className="screen-body">
 

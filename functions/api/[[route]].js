@@ -1354,10 +1354,7 @@ export async function onRequest(ctx) {
         }})
       }
 
-      return err(`Unknown GET action: ${action}`, 404)
-    }
-
-      // PRADOSH HOME — quick info (next harvest, last price, irrigation alert)
+      // MANAGER HOME — quick info (next harvest, last price, irrigation alert)
       if (action === 'getManagerQuickInfo') {
         // estate is derived from the JWT actor — maps actor->estate via estate_managers table
         // actor is set at login time from PIN_PRADOSH -> 'pradosh', PIN_RAMAN -> 'raman' etc.
@@ -1421,6 +1418,9 @@ export async function onRequest(ctx) {
           irrigationAlert: false,
         }})
       }
+
+      return err(`Unknown GET action: ${action}`, 404)
+    }
 
     // ── POST ROUTES ─────────────────────────────────────
     if (method === 'POST') {

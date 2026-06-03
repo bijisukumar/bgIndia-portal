@@ -1362,7 +1362,7 @@ export async function onRequest(ctx) {
         // estate is derived from the JWT actor — maps actor->estate via estate_managers table
         // actor is set at login time from PIN_PRADOSH -> 'pradosh', PIN_RAMAN -> 'raman' etc.
         // estate_managers table maps actor -> estate_id and estate_type
-        const mgr = await DB.prepare(
+        const mgr = await ActiveDB.prepare(
           `SELECT estate_id, estate_type, manager_name FROM estate_managers WHERE actor = ? AND active = 1 LIMIT 1`
         ).bind(actor).first()
         // fallback: if no table yet, derive from actor name directly

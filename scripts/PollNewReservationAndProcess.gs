@@ -95,10 +95,33 @@ function pollAirbnbReviews() {
       var nameMatch   = subject.match(/^([A-Za-z\s]+?)\s+left a/i);
       var guestName   = nameMatch ? nameMatch[1].trim() : '';
 
-      // Parse review text — look for "Feedback from their stay" section
+      // Parse review text — public review
       var reviewText  = '';
-      var feedbackMatch = body.match(/Feedback from their stay[\s\S]*?\n\n([\s\S]{20,500}?)(?:\n\n|\n[A-Z])/i);
-      if (feedbackMatch) reviewText = feedbackMatch[1].trim().replace(/\n/g, ' ');
+      var reviewNote  = '';
+      var specialThanks = [];
+
+      // Public review text
+      var publicMatch = body.match(/Overall rating[\s\S]*?\n\n([\s\S]{10,600}?)(?:\n\nNote from|Special thanks|\n\n[A-Z])/i);
+      if (publicMatch) reviewText = publicMatch[1].trim().replace(/\s+/g,' ');
+
+      // Note from guest (private note to host)
+      var noteMatch = body.match(/Note from [A-Za-z]+\s*\n+(.+?)(?:\n\n|Special thanks|$)/i);
+      if (noteMatch) reviewNote = noteMatch[1].trim();
+
+      // Special thanks checkboxes
+      var thanksSection = body.match(/Special thanks([\s\S]*?)(?:\n\n[A-Z]|$)/i);
+      if (thanksSection) {
+        var lines = thanksSection[1].split('\n');
+        lines.forEach(function(line) {
+          var t = line.replace(/^[\s✓\-\*•]+/, '').trim();
+          if (t.length > 3) specialThanks.push(t);
+        });
+      }
+
+      var fullReviewText = reviewText;
+      if (specialThanks.length > 0) {
+        fullReviewText += '\n\nSpecial thanks: ' + specialThanks.join(', ');
+      }
 
       // Parse review date — use email date
       var reviewDate  = new Date(msg.getDate()).toISOString().slice(0, 10);
@@ -149,12 +172,14 @@ function pollAirbnbReviews() {
 
       // Save review to D1
       var saveResp = callWorker('POST', 'saveReview', {
-        stayId:     matchedStay.stay_id,
-        rating:     rating,
-        source:     'airbnb',
-        reviewDate: reviewDate,
-        reviewText: reviewText,
-        guestName:  matchedStay.guest_name,
+        stayId:      matchedStay.stay_id,
+        rating:      rating,
+        source:      'airbnb',
+        reviewDate:  reviewDate,
+        reviewText:  fullReviewText,
+        reviewNote:  reviewNote,
+        highlights:  specialThanks.join(', '),
+        guestName:   matchedStay.guest_name,
       });
 
       if (saveResp && saveResp.success) {
@@ -175,8 +200,11 @@ function pollAirbnbReviews() {
           '\nStay:     ' + matchedStay.stay_id +
           '\nRating:   ' + rating + '★' +
           '\nDate:     ' + reviewDate +
-          (reviewText ? '\nReview:   ' + reviewText : '') +
-          '\n\nStay has been closed automatically.');
+          (reviewText     ? '\n\nReview:   ' + reviewText   : '') +
+          (reviewNote     ? '\n\nNote:     ' + reviewNote   : '') +
+          (specialThanks.length ? '\n\nHighlights: ' + specialThanks.join(', ') : '') +
+          '\n\n' + (matchedStay.status === 'closed' ? 'Stay was already closed.' : 'Stay has been closed automatically.')
+        );
       } else {
         Logger.log('saveReview failed: ' + JSON.stringify(saveResp));
       }

@@ -1,3 +1,5 @@
--- Add review_text column to store the actual review content from Airbnb
--- Run: paste into D1 console at dash.cloudflare.com
+-- Add review content columns for showcase page
+-- Run: paste each line separately into D1 console
 ALTER TABLE stays ADD COLUMN review_text TEXT DEFAULT NULL;
+ALTER TABLE stays ADD COLUMN review_note TEXT DEFAULT NULL;
+ALTER TABLE stays ADD COLUMN review_highlights TEXT DEFAULT NULL;

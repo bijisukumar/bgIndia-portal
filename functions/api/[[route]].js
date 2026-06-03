@@ -1820,17 +1820,23 @@ export async function onRequest(ctx) {
 
       // SAVE REVIEW — called by Apps Script when review email arrives
       if (action === 'saveReview') {
-        const { stayId, rating, source, reviewDate, guestName, reviewText } = body
+        const { stayId, rating, source, reviewDate, guestName, reviewText, reviewNote, highlights } = body
         if (!stayId) return err('stayId required')
         await DB.prepare(
           `UPDATE stays
-           SET review_rating = ?, review_source = ?, review_date = ?,
-               review_text = ?,
+           SET review_rating     = ?,
+               review_source     = ?,
+               review_date       = ?,
+               review_text       = ?,
+               review_note       = ?,
+               review_highlights = ?,
                updated_by = ?, updated_at = ?
            WHERE stay_id = ?`
-        ).bind(rating || 0, source || 'airbnb', reviewDate || now(),
-               reviewText || null,
-               'auto', now(), stayId).run()
+        ).bind(
+          rating || 0, source || 'airbnb', reviewDate || now(),
+          reviewText || null, reviewNote || null, highlights || null,
+          'auto', now(), stayId
+        ).run()
         return json({ success: true, data: { stayId, rating, source } })
       }
 

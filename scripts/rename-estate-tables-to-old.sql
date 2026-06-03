@@ -1,8 +1,7 @@
 -- ============================================================
--- Run against bgindia-db AFTER confirming counts match
--- Only coconut_harvests and rubber_harvests exist here.
--- estate_transactions and irrigation_logs were never in bgindia-db.
+-- Run against bgindia-db
+-- Only coconut_harvests exists here — everything else was
+-- already in bgindiadb-estates or never existed in bgindia-db.
 -- ============================================================
 
 ALTER TABLE coconut_harvests RENAME TO coconut_harvests_old;
-ALTER TABLE rubber_harvests  RENAME TO rubber_harvests_old;

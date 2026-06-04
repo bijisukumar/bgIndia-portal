@@ -124,6 +124,9 @@ export async function onRequest(ctx) {
     'getManagerQuickInfo',   // quick info for estate manager home (config-driven)
     'logIrrigation',         // record irrigation log tap
     'getEstateHighlights',    // operational highlights for estate manager home
+    'getIrrigationZoneHealth', // zone-level health dashboard
+    'saveIrrigationZoneLog',   // log irrigation for a specific zone
+    'saveIrrigationZone',      // add/update a zone config
     'saveFertilization',      // log fertilization entry
     'saveMangoHarvest',       // log mango harvest
     'getMangoHarvests',       // get mango harvest history
@@ -1459,6 +1462,108 @@ export async function onRequest(ctx) {
       }
 
       // ESTATE DASHBOARD — 12-month P&L summary with expense drill-down
+
+      // IRRIGATION ZONE HEALTH DASHBOARD
+      if (action === 'getIrrigationZoneHealth') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        const today    = new Date().toISOString().slice(0, 10)
+
+        // Get all active zones
+        const { results: zones } = await ActiveDB.prepare(
+          `SELECT * FROM irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`
+        ).bind(estateId).all()
+
+        if (zones.length === 0) {
+          return json({ success: true, data: { zones: [], lastRun: null } })
+        }
+
+        // For each zone get the last N irrigation logs
+        const zoneHealth = await Promise.all(zones.map(async (z) => {
+          // Get last 5 logs for this zone
+          const { results: logs } = await ActiveDB.prepare(
+            `SELECT logged_date FROM irrigation_logs
+             WHERE estate = ? AND zone_id = ?
+             ORDER BY logged_date DESC LIMIT 5`
+          ).bind(estateId, z.zone_id).all()
+
+          const lastLogged   = logs[0]?.logged_date || null
+          const freq         = z.expected_freq_days || 7
+          const daysSince    = lastLogged
+            ? Math.round((new Date(today) - new Date(lastLogged)) / 86400000)
+            : null
+
+          // Count consecutive missed cycles
+          // A miss = gap between consecutive logs > (freq + 2 day tolerance)
+          let consecutiveMisses = 0
+          if (!lastLogged) {
+            consecutiveMisses = 3 // never logged = treat as critical
+          } else {
+            // Check if current gap exceeds one cycle
+            const missedCycles = daysSince !== null
+              ? Math.floor(daysSince / freq)
+              : 3
+            consecutiveMisses = Math.max(0, missedCycles - 1) // -1 because current cycle may not be due yet
+            // Cap at 3 for status purposes
+            if (daysSince > freq + 2) consecutiveMisses = Math.max(1, consecutiveMisses)
+          }
+
+          const status = !lastLogged              ? 'never'
+            : consecutiveMisses >= 3              ? 'critical'
+            : consecutiveMisses === 2             ? 'alert'
+            : consecutiveMisses === 1             ? 'warn'
+            : daysSince !== null && daysSince > freq + 2 ? 'warn'
+            : 'ok'
+
+          return {
+            zone_id:             z.zone_id,
+            zone_name:           z.zone_name,
+            zone_label:          z.zone_label,
+            expected_freq_days:  freq,
+            last_logged:         lastLogged,
+            days_since:          daysSince,
+            consecutive_misses:  consecutiveMisses,
+            status,
+          }
+        }))
+
+        // Last irrigation run across all zones
+        const lastRun = await ActiveDB.prepare(
+          `SELECT MAX(logged_date) as last FROM irrigation_logs WHERE estate = ?`
+        ).bind(estateId).first()
+
+        return json({ success: true, data: {
+          zones: zoneHealth,
+          lastRun: lastRun?.last || null,
+        }})
+      }
+
+      // SAVE IRRIGATION ZONE LOG — per-zone logging (replaces Google Form)
+      if (action === 'saveIrrigationZoneLog') {
+        const { estate, zoneId, zoneName, loggedDate, durationMins, notes } = body
+        if (!estate || !zoneId || !loggedDate) return err('estate, zoneId, loggedDate required')
+        const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        await ActiveDB.prepare(
+          `INSERT INTO irrigation_logs
+           (log_id, estate, zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)`
+        ).bind(id, estate, zoneId, zoneName||null, loggedDate,
+               parseInt(durationMins)||0, notes||null, actor, now()).run()
+        return json({ success: true, data: { logId: id } })
+      }
+
+      // SAVE IRRIGATION ZONE CONFIG
+      if (action === 'saveIrrigationZone') {
+        const { zoneId, estate, zoneName, zoneLabel, expectedFreqDays, notes, active, sortOrder } = body
+        if (!estate || !zoneName) return err('estate and zoneName required')
+        const id = zoneId || ('zone_' + estate + '_' + Date.now())
+        await ActiveDB.prepare(
+          `INSERT OR REPLACE INTO irrigation_zones
+           (zone_id, estate, zone_name, zone_label, expected_freq_days, active, sort_order, notes, created_at)
+           VALUES (?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM irrigation_zones WHERE zone_id=?),?))`
+        ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7,
+               active !== false ? 1 : 0, parseInt(sortOrder)||0, notes||null, id, now()).run()
+        return json({ success: true, data: { zoneId: id } })
+      }
 
       // ESTATE HIGHLIGHTS — operational summary for estate manager (non-financial)
       if (action === 'getEstateHighlights') {

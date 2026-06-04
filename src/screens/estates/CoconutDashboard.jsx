@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { useAuth } from '../../hooks/useAuth'
-import EstateHighlights from './EstateHighlights'
+import EstateHighlights    from './EstateHighlights'
+import IrrigationDashboard from './IrrigationDashboard'
 
 const CUR_YEAR = new Date().getFullYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
@@ -301,6 +302,14 @@ export default function CoconutDashboard() {
             )}
           </div>
         )}
+
+        {/* ── IRRIGATION ZONE HEALTH — both owner and manager ── */}
+        <div style={{ marginBottom:'4px' }}>
+          <div style={{ fontSize:'0.62rem', color:'#185FA5', letterSpacing:'2px', marginBottom:'8px' }}>
+            💧 IRRIGATION ZONE HEALTH
+          </div>
+          <IrrigationDashboard estate="pollachi" />
+        </div>
 
         {/* Year filter */}
         <div className="month-strip" style={{ marginBottom: '12px' }}>

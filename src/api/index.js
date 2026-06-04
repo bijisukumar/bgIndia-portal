@@ -134,7 +134,10 @@ export const api = {
 
   getManagerQuickInfo:  ()       => get('getManagerQuickInfo'),
   getEstateDashboard:      (estate) => get('getEstateDashboard', { estate }),
-  getEstateHighlights:     (estate) => get('getEstateHighlights', { estate }),
+  getEstateHighlights:        (estate) => get('getEstateHighlights', { estate }),
+  getIrrigationZoneHealth:    (estate) => get('getIrrigationZoneHealth', { estate }),
+  saveIrrigationZoneLog:      (data)   => post('saveIrrigationZoneLog', data),
+  saveIrrigationZone:         (data)   => post('saveIrrigationZone', data),
   saveFertilization:       (data)   => post('saveFertilization', data),
   saveMangoHarvest:        (data)   => post('saveMangoHarvest', data),
   getEstateTransactions:   (estate) => get('getEstateTransactions', { estate }),

@@ -125,7 +125,9 @@ function RateTrendChart({ harvests }) {
 }
 
 export default function CoconutDashboard() {
-  const navigate  = useNavigate()
+  const navigate   = useNavigate()
+  const { user }   = useAuth()
+  const isOwner    = user?.role === 'owner'
   const [year, setYear]         = useState(0)  // 0 = All
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)

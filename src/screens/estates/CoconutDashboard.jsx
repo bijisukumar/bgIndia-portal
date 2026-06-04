@@ -143,14 +143,13 @@ export default function CoconutDashboard() {
   }, [year])
 
   useEffect(() => {
+    // P&L only for owner
     if (user?.role === 'owner') {
       api.getEstateDashboard('pollachi')
         .then(d => setDash(d))
         .catch(() => {})
-    api.getIrrigationZoneHealth('pollachi')
-        .then(d => setZoneHealth(d?.zones || []))
-        .catch(() => {})
     }
+    // Zone health for everyone
     api.getIrrigationZoneHealth('pollachi')
       .then(d => setZoneHealth(d?.zones || []))
       .catch(() => {})

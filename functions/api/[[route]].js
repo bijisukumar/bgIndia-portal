@@ -130,6 +130,8 @@ export async function onRequest(ctx) {
     'saveFertilization',      // log fertilization entry
     'saveMangoHarvest',       // log mango harvest
     'getMangoHarvests',       // get mango harvest history
+    'getIrrigationHistory',   // full irrigation log list
+    'getEstateContacts',      // vendor/contact list
   ])
 
   // OPTIONS preflight
@@ -1569,6 +1571,33 @@ export async function onRequest(ctx) {
         ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7,
                active !== false ? 1 : 0, parseInt(sortOrder)||0, notes||null, id, now()).run()
         return json({ success: true, data: { zoneId: id } })
+      }
+
+      // IRRIGATION HISTORY — full log list
+      if (action === 'getIrrigationHistory') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        const { results } = await ActiveDB.prepare(
+          `SELECT * FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`
+        ).bind(estateId).all()
+        return json({ success: true, data: results })
+      }
+
+      // MANGO HARVESTS — list
+      if (action === 'getMangoHarvests') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        const { results } = await ActiveDB.prepare(
+          `SELECT * FROM mango_harvests WHERE estate = ? ORDER BY harvest_date DESC`
+        ).bind(estateId).all()
+        return json({ success: true, data: results })
+      }
+
+      // ESTATE CONTACTS
+      if (action === 'getEstateContacts') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        const { results } = await ActiveDB.prepare(
+          `SELECT * FROM estate_contacts WHERE estate = ? AND active = 1 ORDER BY category, name`
+        ).bind(estateId).all()
+        return json({ success: true, data: results })
       }
 
       // ESTATE HIGHLIGHTS — operational summary for estate manager (non-financial)

@@ -2,9 +2,10 @@ import { useNavigate } from 'react-router-dom'
 export default function PollachiHub() {
   const navigate=useNavigate()
   const rows=[
-    {icon:'🌴',bg:'rgba(59,109,17,0.08)',arrow:'#3B6D11',title:'Irrigation log',sub:'Daily zone tracking',action:()=>window.open('https://docs.google.com/forms/d/e/1FAIpQLSep04wSbC-NThiPvnREMzm4-ICShVtQ_Po1vE1zf2b5Z98buQ/viewform','_blank')},
+    {icon:'💧',bg:'rgba(24,95,165,0.08)',arrow:'#185FA5',title:'Irrigation log',sub:'Zone tracking · Health dashboard',action:()=>navigate('/pollachi/irrigation')},
     {icon:'🌿',bg:'rgba(59,109,17,0.08)',arrow:'#3B6D11',title:'Income / expense',sub:'Monthly ledger',action:()=>navigate('/pollachi/ledger')},
     {icon:'🥥',bg:'rgba(59,109,17,0.08)',arrow:'#3B6D11',title:'Coconut tracker',sub:'Harvest · count · weight · revenue',action:()=>navigate('/pollachi/coconut')},
+    {icon:'🥭',bg:'rgba(245,158,11,0.08)',arrow:'#F59E0B',title:'Mango harvest',sub:'Box tracking · varieties · season totals',action:()=>navigate('/pollachi/mango')},
     {icon:'📊',bg:'rgba(59,109,17,0.08)',arrow:'#3B6D11',title:'Dashboard',sub:'Harvest history · income · P&L',action:()=>navigate('/pollachi/dashboard')},
   ]
   return (

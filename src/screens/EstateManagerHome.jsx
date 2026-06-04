@@ -13,27 +13,13 @@ export default function EstateManagerHome() {
   const { logout }    = useAuth()
   const navigate      = useNavigate()
   const [info, setInfo]       = useState(null)
-  const [loggingIrr, setLoggingIrr] = useState(false)
-
   useEffect(() => {
     api.getManagerQuickInfo()
       .then(d => setInfo(d))
       .catch(() => setInfo(null))
   }, [])
 
-  const handleIrrigationTap = async () => {
-    // Open the Google Form first
-    window.open('https://docs.google.com/forms/d/e/1FAIpQLSep04wSbC-NThiPvnREMzm4-ICShVtQ_Po1vE1zf2b5Z98buQ/viewform', '_blank')
-    // Then record the tap in D1 so we track last logged date
-    try {
-      setLoggingIrr(true)
-      await api.logIrrigation({ date: new Date().toISOString().slice(0, 10) })
-      // Refresh quick info so alert clears
-      const d = await api.getManagerQuickInfo()
-      setInfo(d)
-    } catch (_) {}
-    finally { setLoggingIrr(false) }
-  }
+  const handleIrrigationTap = () => navigate('/pollachi/irrigation')
 
   const rows = [
     {
@@ -48,6 +34,10 @@ export default function EstateManagerHome() {
     {
       icon: '🥥', title: 'Coconut tracker', sub: 'Harvest · count · weight · revenue',
       action: () => navigate('/pollachi/coconut'),
+    },
+    {
+      icon: '🥭', title: 'Mango harvest', sub: 'Box tracking · varieties · season totals',
+      action: () => navigate('/pollachi/mango'),
     },
     {
       icon: '📊', title: 'Pollachi dashboard', sub: 'Harvest history · income · expenses',

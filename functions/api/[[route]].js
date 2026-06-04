@@ -1419,6 +1419,41 @@ export async function onRequest(ctx) {
         }})
       }
 
+
+      // MARKETING CAMPAIGNS — list all with aggregated analytics
+      if (action === 'getCampaigns') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(`
+          SELECT
+            c.id, c.campaign_name, c.unique_token, c.channel, c.is_active,
+            c.notes, c.created_at,
+            SUM(CASE WHEN a.event_type='click'   THEN 1 ELSE 0 END) as clicks,
+            SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries,
+            SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings
+          FROM marketing_campaigns c
+          LEFT JOIN campaign_analytics a ON a.campaign_id = c.id
+          WHERE c.villa_id = ?
+          GROUP BY c.id
+          ORDER BY c.created_at DESC
+        `).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
+      // CAMPAIGN ANALYTICS DETAIL — breakdown by geo + hour for one campaign
+      if (action === 'getCampaignAnalytics') {
+        const campaignId = url.searchParams.get('campaignId') || ''
+        if (!campaignId) return err('campaignId required')
+        const events = await DB.prepare(
+          `SELECT event_type, country, region, city,
+           strftime('%H', ts) as hour, DATE(ts) as day, COUNT(*) as n
+           FROM campaign_analytics
+           WHERE campaign_id = ?
+           GROUP BY event_type, country, region, city, hour, day
+           ORDER BY day DESC, hour DESC`
+        ).bind(campaignId).all()
+        return json({ success: true, data: events.results })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -2654,6 +2689,87 @@ export async function onRequest(ctx) {
         if (!lossId) return err('lossId required')
         await DB.prepare(`DELETE FROM lease_losses WHERE loss_id = ?`).bind(lossId).run()
         return json({ success: true, data: { lossId, deleted: true } })
+      }
+
+
+      // CREATE MARKETING CAMPAIGN
+      if (action === 'createCampaign') {
+        const { campaignName, channel, villaId, notes } = body
+        if (!campaignName?.trim()) return err('campaignName required')
+        // Generate clean token: CAMPAIGN-NAME-XXXX
+        const slug = campaignName.trim().toUpperCase()
+          .replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
+        const suffix = Math.random().toString(36).slice(2, 6).toUpperCase()
+        const token = `${slug}-${suffix}`
+        const id = 'cmp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        await DB.prepare(
+          `INSERT INTO marketing_campaigns
+           (id, campaign_name, unique_token, channel, villa_id, notes, created_by, created_at)
+           VALUES (?,?,?,?,?,?,?,?)`
+        ).bind(id, campaignName.trim(), token,
+               channel || 'whatsapp', villaId || 'dwarka',
+               notes || null, actor, now()).run()
+        return json({ success: true, data: { id, token, campaignName: campaignName.trim() } })
+      }
+
+      // TOGGLE CAMPAIGN ACTIVE STATUS
+      if (action === 'toggleCampaign') {
+        const { campaignId } = body
+        if (!campaignId) return err('campaignId required')
+        await DB.prepare(
+          `UPDATE marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?`
+        ).bind(campaignId).run()
+        return json({ success: true })
+      }
+
+      // DELETE CAMPAIGN
+      if (action === 'deleteCampaign') {
+        const { campaignId } = body
+        if (!campaignId) return err('campaignId required')
+        await DB.prepare(`DELETE FROM campaign_analytics WHERE campaign_id = ?`).bind(campaignId).run()
+        await DB.prepare(`DELETE FROM marketing_campaigns WHERE id = ?`).bind(campaignId).run()
+        return json({ success: true })
+      }
+
+      // TRACK CLICK — called from landing page when ?ref=TOKEN is detected
+      if (action === 'trackCampaignClick') {
+        const { token, referrer } = body
+        if (!token) return err('token required')
+        const campaign = await DB.prepare(
+          `SELECT id FROM marketing_campaigns WHERE unique_token = ? AND is_active = 1`
+        ).bind(token).first()
+        if (!campaign) return json({ success: false, error: 'Unknown token' })
+        // Extract geo from Cloudflare request properties
+        const cf = request.cf || {}
+        const id = 'evt_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
+        await DB.prepare(
+          `INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer)
+           VALUES (?,?,?,?,?,?,?,?)`
+        ).bind(id, campaign.id, 'click',
+               cf.country || null, cf.region || null, cf.city || null,
+               request.headers.get('user-agent') || null,
+               referrer || null).run()
+        return json({ success: true })
+      }
+
+      // TRACK ACTION (inquiry or booking) — called from landing page on form submit
+      if (action === 'trackCampaignAction') {
+        const { token, eventType } = body
+        if (!token) return err('token required')
+        if (!['inquiry','booking'].includes(eventType)) return err('invalid eventType')
+        const campaign = await DB.prepare(
+          `SELECT id FROM marketing_campaigns WHERE unique_token = ?`
+        ).bind(token).first()
+        if (!campaign) return json({ success: false })
+        const cf = request.cf || {}
+        const id = 'evt_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
+        await DB.prepare(
+          `INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent)
+           VALUES (?,?,?,?,?,?,?)`
+        ).bind(id, campaign.id, eventType,
+               cf.country || null, cf.region || null, cf.city || null,
+               request.headers.get('user-agent') || null).run()
+        return json({ success: true })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

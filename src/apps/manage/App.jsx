@@ -20,7 +20,8 @@ import CheckIn           from '../../screens/villa/CheckIn'
 import KitchenIncidentals from '../../screens/villa/KitchenIncidentals'
 import BreakfastEntry    from '../../screens/villa/BreakfastEntry'
 import CarRentalEntry    from '../../screens/villa/CarRentalEntry'
-import GuestRepository   from '../../screens/villa/GuestRepository'
+import GuestRepository      from '../../screens/villa/GuestRepository'
+import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
 import Inventory         from '../../screens/villa/Inventory'
 
 // Rental screens
@@ -72,6 +73,7 @@ function ProtectedRoutes() {
         {/* Infra */}
         <Route path="/debug"                  element={<DebugPanel />} />
         <Route path="/test"                   element={<TestRunner />} />
+        <Route path="/owner/marketing"            element={<MarketingCampaigns />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
       </>}
 

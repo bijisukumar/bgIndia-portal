@@ -160,6 +160,15 @@ export const api = {
   getRamanTodo:         (villaId)=> get('getRamanTodo', { villaId: villaId || 'dwarka' }),
   getRamanUnpaid:       ()       => get('getRamanUnpaid'),
   getRamanDashboard:    ()       => get('getRamanDashboard'),
+  // -- MARKETING CAMPAIGNS --
+  getCampaigns:         (villaId)  => get('getCampaigns', { villaId }),
+  getCampaignAnalytics: (id)       => get('getCampaignAnalytics', { campaignId: id }),
+  createCampaign:       (data)     => post('createCampaign', data),
+  toggleCampaign:       (data)     => post('toggleCampaign', data),
+  deleteCampaign:       (data)     => post('deleteCampaign', data),
+  trackCampaignClick:   (data)     => post('trackCampaignClick', data),
+  trackCampaignAction:  (data)     => post('trackCampaignAction', data),
+
   getMarketingStats:    (villaId, statYear) => get('getMarketingStats', { villaId: villaId || 'dwarka', ...(statYear ? { statYear: String(statYear) } : {}) }),
   getRamanHistory:      ()       => get('getRamanHistory'),
   markRamanPaid:        (data)   => post('markRamanPaid', data),

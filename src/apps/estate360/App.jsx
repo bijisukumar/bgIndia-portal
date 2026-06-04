@@ -42,10 +42,12 @@ function ProtectedRoutes() {
       </>}
 
       {role === 'estate_manager' && <>
-        <Route path="/"                       element={<EstateManagerHome />} />
-        <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
-        <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
-        <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
+        <Route path="/"                         element={<EstateManagerHome />} />
+        <Route path="/pollachi/coconut"         element={<CoconutTracker />} />
+        <Route path="/pollachi/dashboard"       element={<CoconutDashboard />} />
+        <Route path="/pollachi/ledger"          element={<EstateLedger estate="pollachi" />} />
+        <Route path="/pollachi/irrigation"      element={<IrrigationLog estate="pollachi" />} />
+        <Route path="/pollachi/mango"           element={<MangoHarvest estate="pollachi" />} />
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

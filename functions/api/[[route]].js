@@ -1456,6 +1456,7 @@ export async function onRequest(ctx) {
 
       // ESTATE DASHBOARD — 12-month P&L summary with expense drill-down
       if (action === 'getEstateDashboard') {
+        if (payload.role !== 'owner') return err('Owner access only', 403)
         const estateId = url.searchParams.get('estate') || 'pollachi'
         // Last 12 months of harvests
         const cutoff = new Date()

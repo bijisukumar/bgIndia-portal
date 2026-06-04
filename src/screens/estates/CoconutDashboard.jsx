@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { useAuth } from '../../hooks/useAuth'
 
 const CUR_YEAR = new Date().getFullYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
@@ -138,10 +139,12 @@ export default function CoconutDashboard() {
   }, [year])
 
   useEffect(() => {
-    api.getEstateDashboard('pollachi')
-      .then(d => setDash(d))
-      .catch(() => {})
-  }, [])
+    if (user?.role === 'owner') {
+      api.getEstateDashboard('pollachi')
+        .then(d => setDash(d))
+        .catch(() => {})
+    }
+  }, [user])
 
   const harvests = data?.harvests || []
 
@@ -199,8 +202,8 @@ export default function CoconutDashboard() {
         </div>
 
 
-        {/* ── 12-MONTH P&L SUMMARY ── */}
-        {dash && (
+        {/* ── 12-MONTH P&L SUMMARY — owner only ── */}
+        {isOwner && dash && (
           <div style={{ background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.2)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>
             {/* Header row — always visible */}
             <div onClick={()=>setPlOpen(o=>!o)} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', cursor:'pointer' }}>

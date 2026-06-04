@@ -1468,10 +1468,16 @@ export async function onRequest(ctx) {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         const today    = new Date().toISOString().slice(0, 10)
 
-        // Get all active zones
-        const { results: zones } = await ActiveDB.prepare(
-          `SELECT * FROM irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`
-        ).bind(estateId).all()
+        // Get all active zones — table may not exist yet
+        let zones = []
+        try {
+          const { results } = await ActiveDB.prepare(
+            `SELECT * FROM irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`
+          ).bind(estateId).all()
+          zones = results
+        } catch(e) {
+          return json({ success: true, data: { zones: [], lastRun: null } })
+        }
 
         if (zones.length === 0) {
           return json({ success: true, data: { zones: [], lastRun: null } })
@@ -1619,26 +1625,28 @@ export async function onRequest(ctx) {
            WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
         ).bind(estateId).first()
 
-        // 3. Fertilization — last done + next planned
-        const { results: fertilizations } = await ActiveDB.prepare(
-          `SELECT planned_date, actual_date, fertilizer_type, notes
-           FROM fertilization_log
-           WHERE estate = ?
-           ORDER BY planned_date DESC`
-        ).bind(estateId).all()
-        const lastFert = fertilizations.find(f => f.actual_date)
-        const nextFert = fertilizations.find(f => !f.actual_date)
+        // 3. Fertilization — last done + next planned (table may not exist yet)
+        let lastFert = null, nextFert = null
+        try {
+          const { results: fertilizations } = await ActiveDB.prepare(
+            `SELECT planned_date, actual_date, fertilizer_type, notes
+             FROM fertilization_log WHERE estate = ? ORDER BY planned_date DESC`
+          ).bind(estateId).all()
+          lastFert = fertilizations.find(f => f.actual_date) || null
+          nextFert = fertilizations.find(f => !f.actual_date) || null
+        } catch(e) { /* table not created yet */ }
 
-        // 4. Mango harvests — last 2 years comparison
-        const { results: mangoes } = await ActiveDB.prepare(
-          `SELECT harvest_year, SUM(quantity_tons) as tons,
-           SUM(quantity_units) as units, SUM(total_revenue) as revenue
-           FROM mango_harvests
-           WHERE estate = ?
-           GROUP BY harvest_year
-           ORDER BY harvest_year DESC
-           LIMIT 3`
-        ).bind(estateId).all()
+        // 4. Mango harvests — last 2 years (table may not exist yet)
+        let mangoes = []
+        try {
+          const { results: mangoResults } = await ActiveDB.prepare(
+            `SELECT harvest_year, SUM(quantity_tons) as tons,
+             SUM(quantity_units) as units, SUM(total_revenue) as revenue
+             FROM mango_harvests WHERE estate = ?
+             GROUP BY harvest_year ORDER BY harvest_year DESC LIMIT 3`
+          ).bind(estateId).all()
+          mangoes = mangoResults
+        } catch(e) { /* table not created yet */ }
 
         return json({ success: true, data: {
           coconut: { harvestTimings, nextScheduled, daysToNext, totalHarvests: harvests.length },

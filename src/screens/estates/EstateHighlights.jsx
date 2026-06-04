@@ -47,7 +47,10 @@ export default function EstateHighlights({ estate = 'pollachi' }) {
   )
   if (!data) return null
 
-  const { coconut, irrigation, fertilization, mango } = data
+  const coconut       = data?.coconut       || { harvestTimings:[], nextScheduled:null, daysToNext:null, totalHarvests:0 }
+  const irrigation    = data?.irrigation    || { monthly:[], lastDate:null, daysAgo:null }
+  const fertilization = data?.fertilization || { last:null, next:null }
+  const mango         = data?.mango         || []
 
   // Harvest timing summary
   const onTime   = coconut.harvestTimings.filter(h => h.gap !== null && Math.abs(h.gap) <= 7).length

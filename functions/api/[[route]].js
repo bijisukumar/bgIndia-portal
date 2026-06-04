@@ -123,6 +123,10 @@ export async function onRequest(ctx) {
     'getEstateDashboard',
     'getManagerQuickInfo',   // quick info for estate manager home (config-driven)
     'logIrrigation',         // record irrigation log tap
+    'getEstateHighlights',    // operational highlights for estate manager home
+    'saveFertilization',      // log fertilization entry
+    'saveMangoHarvest',       // log mango harvest
+    'getMangoHarvests',       // get mango harvest history
   ])
 
   // OPTIONS preflight
@@ -1455,6 +1459,99 @@ export async function onRequest(ctx) {
       }
 
       // ESTATE DASHBOARD — 12-month P&L summary with expense drill-down
+
+      // ESTATE HIGHLIGHTS — operational summary for estate manager (non-financial)
+      if (action === 'getEstateHighlights') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        const cutoff   = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
+        const cutoffStr = cutoff.toISOString().slice(0, 10)
+        const today     = new Date().toISOString().slice(0, 10)
+
+        // 1. Coconut harvests — planned vs actual timing
+        const { results: harvests } = await ActiveDB.prepare(
+          `SELECT harvest_date, scheduled_harvest_date, total_nuts, total_weight_kg, harvester_name
+           FROM coconut_harvests
+           WHERE estate_id = ? AND harvest_date >= ?
+           ORDER BY harvest_date DESC`
+        ).bind(estateId, cutoffStr).all()
+
+        const harvestTimings = harvests.map((h, i) => {
+          const prev = harvests[i + 1]
+          const planned = h.scheduled_harvest_date || prev?.scheduled_harvest_date || null
+          const gap = planned
+            ? Math.round((new Date(h.harvest_date) - new Date(planned)) / 86400000)
+            : null
+          return {
+            date:      h.harvest_date,
+            planned:   planned,
+            gap:       gap, // negative = early, positive = late, 0 = on time
+            nuts:      h.total_nuts,
+            weightKg:  h.total_weight_kg,
+          }
+        })
+
+        // Next scheduled harvest
+        const lastHarvest = harvests[0]
+        const nextScheduled = lastHarvest?.scheduled_harvest_date || null
+        const daysToNext = nextScheduled
+          ? Math.round((new Date(nextScheduled) - new Date(today)) / 86400000)
+          : null
+
+        // 2. Irrigation — monthly count for last 12 months
+        const { results: irrigLogs } = await ActiveDB.prepare(
+          `SELECT logged_date,
+           strftime('%Y-%m', logged_date) as ym,
+           COUNT(*) as count
+           FROM irrigation_logs
+           WHERE estate = ? AND logged_date >= ?
+           GROUP BY ym
+           ORDER BY ym DESC`
+        ).bind(estateId, cutoffStr).all()
+
+        // Last irrigation
+        const lastIrrigation = await ActiveDB.prepare(
+          `SELECT logged_date FROM irrigation_logs
+           WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
+        ).bind(estateId).first()
+
+        // 3. Fertilization — last done + next planned
+        const { results: fertilizations } = await ActiveDB.prepare(
+          `SELECT planned_date, actual_date, fertilizer_type, notes
+           FROM fertilization_log
+           WHERE estate = ?
+           ORDER BY planned_date DESC`
+        ).bind(estateId).all()
+        const lastFert = fertilizations.find(f => f.actual_date)
+        const nextFert = fertilizations.find(f => !f.actual_date)
+
+        // 4. Mango harvests — last 2 years comparison
+        const { results: mangoes } = await ActiveDB.prepare(
+          `SELECT harvest_year, SUM(quantity_tons) as tons,
+           SUM(quantity_units) as units, SUM(total_revenue) as revenue
+           FROM mango_harvests
+           WHERE estate = ?
+           GROUP BY harvest_year
+           ORDER BY harvest_year DESC
+           LIMIT 3`
+        ).bind(estateId).all()
+
+        return json({ success: true, data: {
+          coconut: { harvestTimings, nextScheduled, daysToNext, totalHarvests: harvests.length },
+          irrigation: {
+            monthly:       irrigLogs,
+            lastDate:      lastIrrigation?.logged_date || null,
+            daysAgo:       lastIrrigation?.logged_date
+              ? Math.round((new Date(today) - new Date(lastIrrigation.logged_date)) / 86400000)
+              : null,
+          },
+          fertilization: {
+            last: lastFert ? { date: lastFert.actual_date, type: lastFert.fertilizer_type } : null,
+            next: nextFert ? { date: nextFert.planned_date, type: nextFert.fertilizer_type, notes: nextFert.notes } : null,
+          },
+          mango: mangoes,
+        }})
+      }
+
       if (action === 'getEstateDashboard') {
         if (payload.role !== 'owner') return err('Owner access only', 403)
         const estateId = url.searchParams.get('estate') || 'pollachi'

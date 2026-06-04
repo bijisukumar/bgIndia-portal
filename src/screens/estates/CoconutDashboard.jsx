@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { useAuth } from '../../hooks/useAuth'
+import EstateHighlights from './EstateHighlights'
 
 const CUR_YEAR = new Date().getFullYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
@@ -201,6 +202,9 @@ export default function CoconutDashboard() {
           <div style={s.nextNote}>Target interval: 45 days</div>
         </div>
 
+
+        {/* ── OPERATIONAL HIGHLIGHTS — estate manager only ── */}
+        {!isOwner && <EstateHighlights estate="pollachi" />}
 
         {/* ── 12-MONTH P&L SUMMARY — owner only ── */}
         {isOwner && dash && (

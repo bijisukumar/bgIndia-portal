@@ -122,9 +122,12 @@ function RateTrendChart({ harvests }) {
 
 export default function CoconutDashboard() {
   const navigate  = useNavigate()
-  const [year, setYear]       = useState(0)  // 0 = All
-  const [data, setData]       = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [year, setYear]         = useState(0)  // 0 = All
+  const [data, setData]         = useState(null)
+  const [loading, setLoading]   = useState(true)
+  const [dash, setDash]         = useState(null)
+  const [plOpen, setPlOpen]     = useState(false)      // P&L block expanded
+  const [drillMonth, setDrillMonth] = useState(null)   // expanded month in drill-down
 
   useEffect(() => {
     setLoading(true)
@@ -133,6 +136,12 @@ export default function CoconutDashboard() {
       .catch(() => setData(null))
       .finally(() => setLoading(false))
   }, [year])
+
+  useEffect(() => {
+    api.getEstateDashboard('pollachi')
+      .then(d => setDash(d))
+      .catch(() => {})
+  }, [])
 
   const harvests = data?.harvests || []
 
@@ -188,6 +197,103 @@ export default function CoconutDashboard() {
           )}
           <div style={s.nextNote}>Target interval: 45 days</div>
         </div>
+
+
+        {/* ── 12-MONTH P&L SUMMARY ── */}
+        {dash && (
+          <div style={{ background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.2)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>
+            {/* Header row — always visible */}
+            <div onClick={()=>setPlOpen(o=>!o)} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', cursor:'pointer' }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:'0.62rem', color:'#C8903A', letterSpacing:'2px', marginBottom:'6px' }}>LAST 12 MONTHS · P&L</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
+                  {[
+                    { label:'INCOME',  val: dash.totalIncome,  color:'#34A853' },
+                    { label:'EXPENSE', val: dash.totalExpense, color:'#EF4444' },
+                    { label:'NET PROFIT', val: dash.netProfit, color: dash.netProfit >= 0 ? '#C8903A' : '#EF4444' },
+                  ].map(k => (
+                    <div key={k.label}>
+                      <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'3px' }}>{k.label}</div>
+                      <div style={{ fontWeight:'700', color: k.color, fontSize:'1rem' }}>
+                        ₹{Math.abs(k.val) >= 100000 ? (Math.abs(k.val)/100000).toFixed(1)+'L' : Math.abs(k.val) >= 1000 ? (Math.abs(k.val)/1000).toFixed(1)+'K' : Math.abs(k.val).toLocaleString('en-IN')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ color:'#5C7080', fontSize:'1.1rem' }}>{plOpen ? '∧' : '∨'}</div>
+            </div>
+
+            {/* Drill-down — expanded */}
+            {plOpen && (
+              <div style={{ borderTop:'1px solid rgba(200,144,58,0.15)', padding:'12px 16px' }}>
+
+                {/* Expense breakdown */}
+                {Object.keys(dash.expBreakdown || {}).length > 0 && (
+                  <div style={{ marginBottom:'14px' }}>
+                    <div style={{ fontSize:'0.62rem', color:'#EF4444', letterSpacing:'1.5px', marginBottom:'8px' }}>EXPENSE BREAKDOWN</div>
+                    {Object.entries(dash.expBreakdown)
+                      .filter(([,v]) => v > 0)
+                      .sort(([,a],[,b]) => b - a)
+                      .map(([cat, amt]) => {
+                        const pct = Math.round((amt / dash.totalExpense) * 100)
+                        return (
+                          <div key={cat} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
+                            <div style={{ fontSize:'0.72rem', color:'#9AA5B4', width:'120px', flexShrink:0 }}>{cat}</div>
+                            <div style={{ flex:1, height:'4px', background:'rgba(255,255,255,0.06)', borderRadius:'2px' }}>
+                              <div style={{ height:'4px', width:`${pct}%`, background:'#EF4444', borderRadius:'2px' }}/>
+                            </div>
+                            <div style={{ fontSize:'0.72rem', color:'#EF4444', fontWeight:'600', width:'48px', textAlign:'right' }}>
+                              ₹{amt >= 1000 ? (amt/1000).toFixed(1)+'K' : amt}
+                            </div>
+                            <div style={{ fontSize:'0.65rem', color:'#5C7080', width:'30px', textAlign:'right' }}>{pct}%</div>
+                          </div>
+                        )
+                      })
+                    }
+                  </div>
+                )}
+
+                {/* Monthly breakdown */}
+                {(dash.monthly || []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize:'0.62rem', color:'#C8903A', letterSpacing:'1.5px', marginBottom:'8px' }}>MONTHLY BREAKDOWN</div>
+                    {dash.monthly.map(m => {
+                      const isOpen = drillMonth === m.ym
+                      const monthLabel = new Date(m.ym + '-01').toLocaleDateString('en-IN', { month:'short', year:'numeric' })
+                      return (
+                        <div key={m.ym} style={{ marginBottom:'6px', background:'rgba(255,255,255,0.02)', borderRadius:'8px', overflow:'hidden', border:'1px solid rgba(255,255,255,0.05)' }}>
+                          <div onClick={()=>setDrillMonth(isOpen ? null : m.ym)}
+                            style={{ display:'flex', alignItems:'center', padding:'8px 10px', cursor:'pointer', gap:'10px' }}>
+                            <div style={{ fontSize:'0.78rem', color:'#EDF2F7', fontWeight:'600', width:'70px' }}>{monthLabel}</div>
+                            <div style={{ flex:1, display:'flex', gap:'12px' }}>
+                              <span style={{ fontSize:'0.72rem', color:'#34A853' }}>+₹{m.income >= 1000 ? (m.income/1000).toFixed(1)+'K' : m.income}</span>
+                              <span style={{ fontSize:'0.72rem', color:'#EF4444' }}>-₹{m.expense >= 1000 ? (m.expense/1000).toFixed(1)+'K' : m.expense}</span>
+                            </div>
+                            <div style={{ fontSize:'0.78rem', fontWeight:'700', color: m.net >= 0 ? '#C8903A' : '#EF4444' }}>
+                              {m.net >= 0 ? '+' : ''}₹{Math.abs(m.net) >= 1000 ? (Math.abs(m.net)/1000).toFixed(1)+'K' : Math.abs(m.net)}
+                            </div>
+                            <div style={{ fontSize:'0.7rem', color:'#5C7080' }}>{isOpen ? '∧' : '›'}</div>
+                          </div>
+                          {isOpen && (
+                            <div style={{ padding:'8px 10px 10px', borderTop:'1px solid rgba(255,255,255,0.05)' }}>
+                              {m.harvests > 0 && <div style={{ fontSize:'0.7rem', color:'#5C7080', marginBottom:'4px' }}>🥥 {m.harvests} harvest{m.harvests>1?'s':''} this month</div>}
+                              <div style={{ display:'flex', gap:'16px' }}>
+                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>INCOME</div><div style={{ color:'#34A853', fontWeight:'600', fontSize:'0.82rem' }}>₹{m.income.toLocaleString('en-IN')}</div></div>
+                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>EXPENSE</div><div style={{ color:'#EF4444', fontWeight:'600', fontSize:'0.82rem' }}>₹{m.expense.toLocaleString('en-IN')}</div></div>
+                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>NET</div><div style={{ color: m.net>=0?'#C8903A':'#EF4444', fontWeight:'700', fontSize:'0.82rem' }}>₹{m.net.toLocaleString('en-IN')}</div></div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Year filter */}
         <div className="month-strip" style={{ marginBottom: '12px' }}>

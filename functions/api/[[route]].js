@@ -1454,6 +1454,84 @@ export async function onRequest(ctx) {
         return json({ success: true, data: events.results })
       }
 
+      // ESTATE DASHBOARD — 12-month P&L summary with expense drill-down
+      if (action === 'getEstateDashboard') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        // Last 12 months of harvests
+        const cutoff = new Date()
+        cutoff.setMonth(cutoff.getMonth() - 12)
+        const cutoffStr = cutoff.toISOString().slice(0, 10)
+
+        const { results: harvests } = await ActiveDB.prepare(
+          `SELECT harvest_date, total_earnings, total_expense, net_income,
+           harvest_expense, dehusk_expense, tractor_expense, other_expense,
+           price_per_kg, total_nuts, total_weight_kg, harvester_name
+           FROM coconut_harvests
+           WHERE estate_id = ? AND harvest_date >= ?
+           ORDER BY harvest_date DESC`
+        ).bind(estateId, cutoffStr).all()
+
+        const { results: txns } = await ActiveDB.prepare(
+          `SELECT date, type, category, amount
+           FROM estate_transactions
+           WHERE estate = ? AND date >= ?
+           ORDER BY date DESC`
+        ).bind(estateId, cutoffStr).all()
+
+        // Aggregate totals
+        const harvestIncome  = harvests.reduce((s, r) => s + (r.total_earnings || 0), 0)
+        const harvestExpense = harvests.reduce((s, r) => s + (r.total_expense  || 0), 0)
+        const harvestNet     = harvests.reduce((s, r) => s + (r.net_income     || 0), 0)
+
+        const txnIncome  = txns.filter(t => t.type === 'income' ).reduce((s,t) => s+(t.amount||0), 0)
+        const txnExpense = txns.filter(t => t.type === 'expense').reduce((s,t) => s+(t.amount||0), 0)
+
+        const totalIncome  = harvestIncome  + txnIncome
+        const totalExpense = harvestExpense + txnExpense
+        const netProfit    = harvestNet     - txnExpense + txnIncome
+
+        // Expense breakdown by category (harvest sub-categories + txn categories)
+        const expBreakdown = {}
+        harvests.forEach(r => {
+          const add = (k, v) => { expBreakdown[k] = (expBreakdown[k]||0) + (v||0) }
+          add('Harvest labour',    r.harvest_expense)
+          add('Dehusking',         r.dehusk_expense)
+          add('Tractor / tiling',  r.tractor_expense)
+          add('Other (harvest)',   r.other_expense)
+        })
+        txns.filter(t => t.type === 'expense').forEach(t => {
+          expBreakdown[t.category] = (expBreakdown[t.category]||0) + (t.amount||0)
+        })
+
+        // Monthly summary (last 12 months)
+        const monthly = {}
+        harvests.forEach(r => {
+          const ym = r.harvest_date.slice(0, 7) // YYYY-MM
+          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0 }
+          monthly[ym].income  += r.total_earnings || 0
+          monthly[ym].expense += r.total_expense  || 0
+          monthly[ym].net     += r.net_income     || 0
+          monthly[ym].harvests++
+        })
+        txns.forEach(t => {
+          const ym = t.date.slice(0, 7)
+          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0 }
+          if (t.type === 'income')  monthly[ym].income  += t.amount || 0
+          if (t.type === 'expense') monthly[ym].expense += t.amount || 0
+          if (t.type === 'expense') monthly[ym].net     -= t.amount || 0
+          if (t.type === 'income')  monthly[ym].net     += t.amount || 0
+        })
+
+        return json({ success: true, data: {
+          totalIncome, totalExpense, netProfit,
+          harvestCount: harvests.length,
+          expBreakdown,
+          monthly: Object.entries(monthly)
+            .sort((a,b) => b[0].localeCompare(a[0]))
+            .map(([ym, v]) => ({ ym, ...v })),
+        }})
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 

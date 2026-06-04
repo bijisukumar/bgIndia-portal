@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { useAuth } from '../../hooks/useAuth'
 import EstateHighlights    from './EstateHighlights'
 import IrrigationDashboard from './IrrigationDashboard'
+import PollachiEstateMap    from './PollachiEstateMap'
 
 const CUR_YEAR = new Date().getFullYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
@@ -129,6 +130,7 @@ export default function CoconutDashboard() {
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [dash, setDash]         = useState(null)
+  const [zoneHealth, setZoneHealth] = useState([])
   const [plOpen, setPlOpen]     = useState(false)      // P&L block expanded
   const [drillMonth, setDrillMonth] = useState(null)   // expanded month in drill-down
 
@@ -145,7 +147,13 @@ export default function CoconutDashboard() {
       api.getEstateDashboard('pollachi')
         .then(d => setDash(d))
         .catch(() => {})
+    api.getIrrigationZoneHealth('pollachi')
+        .then(d => setZoneHealth(d?.zones || []))
+        .catch(() => {})
     }
+    api.getIrrigationZoneHealth('pollachi')
+      .then(d => setZoneHealth(d?.zones || []))
+      .catch(() => {})
   }, [user])
 
   const harvests = data?.harvests || []
@@ -308,7 +316,10 @@ export default function CoconutDashboard() {
           <div style={{ fontSize:'0.62rem', color:'#185FA5', letterSpacing:'2px', marginBottom:'8px' }}>
             💧 IRRIGATION ZONE HEALTH
           </div>
-          <IrrigationDashboard estate="pollachi" />
+          <PollachiEstateMap zoneHealth={zoneHealth} />
+          <div style={{ marginTop:'8px' }}>
+            <IrrigationDashboard estate="pollachi" />
+          </div>
         </div>
 
         {/* Year filter */}

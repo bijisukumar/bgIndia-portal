@@ -1518,17 +1518,20 @@ export async function onRequest(ctx) {
           if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0 }
           if (t.type === 'income')  monthly[ym].income  += t.amount || 0
           if (t.type === 'expense') monthly[ym].expense += t.amount || 0
-          if (t.type === 'expense') monthly[ym].net     -= t.amount || 0
-          if (t.type === 'income')  monthly[ym].net     += t.amount || 0
+          if (t.type === 'expense') monthly[ym].expense += t.amount || 0
+          if (t.type === 'income')  monthly[ym].income  += t.amount || 0
         })
+
+        // Compute net for each month cleanly
+        const monthlyArr = Object.entries(monthly)
+          .sort((a,b) => b[0].localeCompare(a[0]))
+          .map(([ym, v]) => ({ ym, ...v, net: v.income - v.expense }))
 
         return json({ success: true, data: {
           totalIncome, totalExpense, netProfit,
           harvestCount: harvests.length,
           expBreakdown,
-          monthly: Object.entries(monthly)
-            .sort((a,b) => b[0].localeCompare(a[0]))
-            .map(([ym, v]) => ({ ym, ...v })),
+          monthly: monthlyArr,
         }})
       }
 

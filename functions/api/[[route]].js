@@ -119,7 +119,7 @@ export async function onRequest(ctx) {
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest',
     'getRubberHarvests',  'saveRubberHarvest',
-    'getEstateTransactions', 'saveEstateTransaction',
+    'getEstateTransactions', 'saveEstateTransaction', 'deleteEstateTransaction',
     'getEstateDashboard',
     'getManagerQuickInfo',   // quick info for estate manager home (config-driven)
     'logIrrigation',         // record irrigation log tap
@@ -2217,251 +2217,44 @@ export async function onRequest(ctx) {
 
       // ESTATE LEDGER — income / expense entry (Pollachi & Pavutumuri)
       if (action === 'saveEstateTransaction') {
-        const { estate, type, date, category, amount, paidTo, description } = body
+        const { estate, type, date, category, amount, paidTo, description, txnId } = body
         if (!estate || !type || !date || !category || !amount) {
           return err('Missing required fields: estate, type, date, category, amount', 400)
         }
         try {
-          const id = genId('ET')
-          await ActiveDB.prepare(`
-            INSERT INTO estate_transactions
-              (txn_id, estate, type, date, category, amount, paid_to, description,
-               created_by, updated_by, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-          `).bind(
-            id, estate, type, date, category,
-            parseFloat(amount) || 0,
-            paidTo || null,
-            description || null,
-            actor, actor, now(), now()
-          ).run()
-          return json({ success: true, data: { id } })
-        } catch (dbErr) {
-          console.error('saveEstateTransaction error:', dbErr?.message)
-          return err(`DB error: ${dbErr?.message || 'unknown'}`, 500)
-        }
-      }
-
-      // ESTATE LEDGER — GET transactions
-      if (action === 'getEstateTransactions') {
-        const estate = url.searchParams.get('estate') || body?.estate
-        const year   = url.searchParams.get('year')   || new Date().getFullYear()
-        if (!estate) return err('estate param required', 400)
-        const { results } = await ActiveDB.prepare(`
-          SELECT * FROM estate_transactions
-          WHERE estate = ? AND strftime('%Y', date) = ?
-          ORDER BY date DESC
-        `).bind(estate, String(year)).all()
-        const income  = results.filter(r => r.type === 'income').reduce((s,r)  => s + r.amount, 0)
-        const expense = results.filter(r => r.type === 'expense').reduce((s,r) => s + r.amount, 0)
-        return json({ success: true, data: { transactions: results, income, expense, net: income - expense } })
-      }
-
-      // IRRIGATION LOG — record that Pradosh logged irrigation today
-      if (action === 'logIrrigation') {
-        const date = body?.date || new Date().toISOString().slice(0, 10)
-        const id   = genId('IR')
-        await ActiveDB.prepare(
-          `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at)
-           VALUES (?, 'pollachi', ?, ?, ?, datetime('now'))`
-        ).bind(id, date, body?.notes || null, actor).run()
-        return json({ success: true, data: { logId: id, loggedDate: date } })
-      }
-
-      // Supports three modes:
-      //   commIds: [...] — pay specific selected stays by their comm_id
-      //   quarter: 'Q1 2026' — pay all stays in that quarter
-      //   (neither)  — pay ALL unpaid stays
-      if (action === 'markRamanPaid') {
-        const today = new Date().toISOString().slice(0, 10)
-        const paidDate = body.paidDate || today
-        let result
-
-        if (body.commIds && Array.isArray(body.commIds) && body.commIds.length > 0) {
-          // Pay specific selected stays — run one UPDATE per id (D1 doesn't support IN with bind arrays)
-          for (const commId of body.commIds) {
-            await DB.prepare(
-              `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE comm_id = ? AND is_paid = 0`
-            ).bind(paidDate, actor, now(), commId).run()
+          if (txnId) {
+            // UPDATE existing
+            await ActiveDB.prepare(
+              `UPDATE estate_transactions
+               SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=?
+               WHERE txn_id=?`
+            ).bind(type, date, category, parseFloat(amount)||0, paidTo||null, description||null, actor, now(), txnId).run()
+            return json({ success: true, data: { txnId } })
+          } else {
+            // INSERT new
+            const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
+            await ActiveDB.prepare(
+              `INSERT INTO estate_transactions
+               (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+            ).bind(id, estate, type, date, category, parseFloat(amount)||0,
+                   paidTo||null, description||null, actor, actor, now(), now()).run()
+            return json({ success: true, data: { txnId: id } })
           }
-        } else if (body.quarter) {
-          // Pay all stays in a specific quarter
-          const [q, y] = body.quarter.split(' ')
-          const qNum   = parseInt(q.replace('Q',''))
-          const mStart = String((qNum - 1) * 3 + 1).padStart(2, '0')
-          const mEnd   = String(qNum * 3).padStart(2, '0')
-          await DB.prepare(
-            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
-             WHERE is_paid = 0
-               AND strftime('%Y', checkin_date) = ?
-               AND strftime('%m', checkin_date) BETWEEN ? AND ?`
-          ).bind(paidDate, actor, now(), y, mStart, mEnd).run()
-        } else {
-          // Pay ALL outstanding
-          await DB.prepare(
-            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0`
-          ).bind(paidDate, actor, now()).run()
+        } catch(e) {
+          return err('DB error: ' + (e?.message || e), 500)
         }
-
-        // Return total paid in this batch
-        const { results: totals } = await DB.prepare(
-          `SELECT SUM(commission) as total FROM raman_commissions WHERE paid_date = ? AND is_paid = 1`
-        ).bind(paidDate).all()
-        return json({ success: true, data: { totalPaid: totals[0]?.total || 0 } })
       }
 
-      // INVENTORY PRICES
-      if (action === 'saveInventoryPrices') {
-        const { villaId = 'dwarka', prices } = body
-        for (const [itemId, p] of Object.entries(prices || {})) {
-          await DB.prepare(`UPDATE inventory SET cost_price = ?, sell_price = ?, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
-            .bind(p.costPrice || 0, p.sellPrice || 0, actor, now(), itemId, villaId).run()
-        }
-        return json({ success: true })
-      }
-
-      if (action === 'saveInventoryRestock') {
-        const { villaId = 'dwarka', entries } = body
-        for (const e of (entries || [])) {
-          await DB.prepare(`UPDATE inventory SET qty_in_stock = qty_in_stock + ?, last_restocked = ?, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
-            .bind(parseFloat(e.qty)||0, now(), actor, now(), e.id, villaId).run()
-        }
-        return json({ success: true })
-      }
-
-      // RENTAL AGREEMENTS — save tenant agreement for a rental property
-      if (action === 'saveRentalAgreement') {
-        const { propId, propName, location, country, currency, tenantName, tenantEmail, tenantPhone, deposit, agreedRent, maintenance, leaseStart, leaseEnd, notes, driveFolderUrl } = body
-        if (!propId) return err('propId is required')
-        const existing = await DB.prepare(
-          `SELECT prop_id FROM rental_props WHERE prop_id = ?`
-        ).bind(propId).first()
-        if (existing) {
-          await DB.prepare(
-            `UPDATE rental_props
-             SET tenant_name = ?, tenant_email = ?, tenant_phone = ?,
-                 deposit = ?, agreed_rent = ?, maintenance_fee = ?,
-                 lease_start = ?, lease_end = ?, notes = ?,
-                 country = ?, currency = ?, drive_folder_url = ?,
-                 updated_by = ?, updated_at = ?
-             WHERE prop_id = ?`
-          ).bind(tenantName||'', tenantEmail||null, tenantPhone||null,
-                 deposit||0, agreedRent||0, maintenance||0,
-                 leaseStart||null, leaseEnd||null, notes||null,
-                 country||'IN', currency||'INR', driveFolderUrl||null,
-                 actor, now(), propId).run()
-        } else {
-          await DB.prepare(
-            `INSERT INTO rental_props
-               (prop_id, name, location, country, currency, tenant_name, tenant_email, tenant_phone,
-                deposit, agreed_rent, maintenance_fee, lease_start, lease_end, notes,
-                drive_folder_url, status, created_by, updated_by, created_at, updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-          ).bind(propId, propName||propId, location||'', country||'IN', currency||'INR',
-                 tenantName||'', tenantEmail||null, tenantPhone||null,
-                 deposit||0, agreedRent||0, maintenance||0,
-                 leaseStart||null, leaseEnd||null, notes||null,
-                 driveFolderUrl||null, 'Active', actor, actor, now(), now()).run()
-        }
-        return json({ success: true, data: { propId } })
-      }
-
-
-      // CREATE PROVISIONAL BOOKING — called by GuestFormScript when no match found
-      if (action === 'createProvisionalBooking') {
-        const guestName   = body.guestName || ''
-        const checkInDate = body.checkInDate || ''
-        if (!guestName || !checkInDate) return err('guestName and checkInDate required')
-
-        // Duplicate guard: same villa + guest name + checkin date
-        const existing = await DB.prepare(
-          `SELECT stay_id FROM stays WHERE villa_id = ? AND guest_name = ? AND checkin_date = ? AND status != 'cancelled' LIMIT 1`
-        ).bind(body.villaId || 'dwarka', guestName, checkInDate).first()
-        if (existing) {
-          return json({ success: true, data: { stayId: existing.stay_id, existed: true } })
-        }
-
-        const stayId = genStayId(body.villaId || 'dwarka')
-        const nights = (body.checkInDate && body.checkOutDate)
-          ? Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))
-          : 1
-
-        await DB.prepare(`
-          INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
-            checkin_date, checkout_date, nights, adults, children, gross, net, status,
-            created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,1,0,0,0,'pending_review',?,?,?,?)
-        `).bind(
-          stayId, body.villaId || 'dwarka', body.source || 'guest_form',
-          guestName, body.guestPhone || null, body.guestEmail || null,
-          checkInDate, body.checkOutDate || null, nights,
-          actor, actor, now(), now()
-        ).run()
-        return json({ success: true, data: { stayId, created: true } })
-      }
-
-      // APPROVE PENDING BOOKING — owner approves provisional → ready_for_checkin
-      if (action === 'approvePendingBooking') {
-        const { stayId } = body
-        if (!stayId) return err('stayId required')
-        const stay = await DB.prepare(`SELECT status FROM stays WHERE stay_id = ?`).bind(stayId).first()
-        if (!stay) return err('Stay not found', 404)
-        if (!['booked','confirmed','docs_uploaded','pending_review'].includes(stay.status)) {
-          return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status } })
-        }
-        await DB.prepare(
-          `UPDATE stays SET status = 'ready_for_checkin', updated_by = ?, updated_at = ? WHERE stay_id = ?`
-        ).bind(actor, now(), stayId).run()
-        return json({ success: true, data: { stayId, status: 'ready_for_checkin' } })
-      }
-
-      // CLEANUP EXPIRED DOCUMENTS — deletes guest_documents older than 24hrs
-      // where folder_created=1 (safely stored in Drive)
-      // Called at end of every processPendingCheckInForms run
-      if (action === 'cleanupExpiredDocuments') {
-        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
-          .toISOString().slice(0, 19).replace('T', ' ')
-        const result = await DB.prepare(
-          `DELETE FROM guest_documents
-           WHERE folder_created = 1
-             AND created_at < ?`
-        ).bind(cutoff).run()
-        return json({ success: true, data: { deleted: result.changes || 0, cutoff } })
-      }
-
-      // MARK DOCUMENT UPLOADED — sets folder_created=1 on doc after Drive upload
-      if (action === 'markDocumentUploaded') {
-        const { docId } = body
-        if (!docId) return err('docId required')
-        await DB.prepare(
-          `UPDATE guest_documents SET folder_created = 1 WHERE doc_id = ?`
-        ).bind(docId).run()
-        return json({ success: true, data: { docId, marked: true } })
-      }
-
-      // DELETE GUEST DOCUMENTS — called by Apps Script after uploading to Drive
-      // Cleans up base64 image data from D1 once safely stored in Drive
-      if (action === 'deleteGuestDocuments') {
-        const stayId = url.searchParams.get('stayId') || body?.stayId || ''
-        if (!stayId) return err('stayId required')
-        await DB.prepare(
-          `DELETE FROM guest_documents WHERE stay_id = ?`
-        ).bind(stayId).run()
-        Logger.log && console.log('Cleaned guest_documents for', stayId)
-        return json({ success: true, data: { stayId, cleaned: true } })
-      }
-
-      // GET GUEST DOCUMENTS — for Apps Script to fetch and upload to Drive
-      if (action === 'getGuestDocuments') {
-        const stayId = url.searchParams.get('stayId') || ''
-        if (!stayId) return err('stayId required')
-        // Only return docs not yet uploaded to Drive (folder_created=0)
-        const { results } = await DB.prepare(
-          `SELECT doc_id, stay_id, doc_type, file_name, file_b64
-           FROM guest_documents WHERE stay_id = ? AND folder_created = 0`
-        ).bind(stayId).all()
-        return json({ success: true, data: results })
-      }
+      if (action === 'getEstateTransactions') {
+        const estate = url.searchParams.get('estate') || ''
+        if (!estate) return err('estate param required', 400)
+        const { results } = await ActiveDB.prepare(
+          `SELECT * FROM estate_transactions
+           WHERE estate = ?
+           ORDER BY date DESC`
+        ).bind(estate).all()
+        return json({ success: true, data: results })      }
 
       // GET PENDING REVIEW STAYS — for owner portal block (pre-checkin pending)
       // These are stays awaiting owner approval before check-in

@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS irrigation_zones (
   expected_freq_days INTEGER DEFAULT 7,  -- how often this zone should be irrigated
   active        INTEGER DEFAULT 1,
   sort_order    INTEGER DEFAULT 0,
+  coconut_trees INTEGER DEFAULT 0,   -- currently producing trees
+  new_holes     INTEGER DEFAULT 0,   -- holes dug for new planting this season
+  motor         TEXT,                -- motor serving this zone
+  mango_trees   INTEGER DEFAULT 0,   -- mango trees (manager updates)
   notes         TEXT,
   created_at    TEXT DEFAULT (datetime('now'))
 );
@@ -25,13 +29,16 @@ CREATE INDEX IF NOT EXISTS idx_irrigation_zone ON irrigation_logs(estate, zone_i
 
 -- Seed Pollachi zones from estate map
 -- All zones on 7-day irrigation cycle
-INSERT OR IGNORE INTO irrigation_zones (zone_id, estate, zone_name, zone_label, expected_freq_days, sort_order, notes) VALUES
-  ('pollachi_z1', 'pollachi', 'Zone 1 — Colony NW',  '1', 7, 1, '20 coconut trees · 5HP Box · Colony boundary'),
-  ('pollachi_z2', 'pollachi', 'Zone 2 — West Mid',   '2', 7, 2, '49 coconut trees · 10 holes · 7HP Box'),
-  ('pollachi_z3', 'pollachi', 'Zone 3 — West South', '3', 7, 3, '80 coconut trees · 34 holes'),
-  ('pollachi_z4', 'pollachi', 'Zone 4 — Center N',   '4', 7, 4, '23 coconut trees · 2 holes · 7HP Box'),
-  ('pollachi_z5', 'pollachi', 'Zone 5 — Center Mid', '5', 7, 5, '110 coconut trees · 114 holes'),
-  ('pollachi_z6', 'pollachi', 'Zone 6 — Center S',   '6', 7, 6, '49 coconut trees · 51 holes'),
-  ('pollachi_z7', 'pollachi', 'Zone 7 — Colony NE',  '7', 7, 7, '49 coconut trees · 18 holes · Colony boundary'),
-  ('pollachi_z8', 'pollachi', 'Zone 8 — East Mid',   '8', 7, 8, '200 coconut trees · 149 holes'),
-  ('pollachi_z9', 'pollachi', 'Zone 9 — East South', '9', 7, 9, '214 coconut trees · 81 holes · 7HP Box · 10HP Motor');
+INSERT OR IGNORE INTO irrigation_zones
+  (zone_id, estate, zone_name, zone_label, expected_freq_days, sort_order,
+   coconut_trees, new_holes, motor, notes)
+VALUES
+  ('pollachi_z1','pollachi','Zone 1 — Colony NW', '1',7,1, 20,  0, '5HP',  'Colony NW · 5HP Box · Mango motor area'),
+  ('pollachi_z2','pollachi','Zone 2 — West Mid',  '2',7,2, 49, 10, '7HP',  'West Mid · 7HP Box'),
+  ('pollachi_z3','pollachi','Zone 3 — West South','3',7,3, 80, 34, NULL,   'West South'),
+  ('pollachi_z4','pollachi','Zone 4 — Center N',  '4',7,4, 23,  2, '7HP',  'Center North · 7HP Box'),
+  ('pollachi_z5','pollachi','Zone 5 — Center Mid','5',7,5,110,114, NULL,   'Center Mid · 114 new planting holes'),
+  ('pollachi_z6','pollachi','Zone 6 — Center S',  '6',7,6, 49, 51, NULL,   'Center South · 51 new planting holes'),
+  ('pollachi_z7','pollachi','Zone 7 — Colony NE', '7',7,7, 49, 18, NULL,   'Colony NE · Colony boundary'),
+  ('pollachi_z8','pollachi','Zone 8 — East Mid',  '8',7,8,200,149, NULL,   'East Mid · 149 new planting holes'),
+  ('pollachi_z9','pollachi','Zone 9 — East South','9',7,9,214, 81, '7HP',  'East South · 7HP Box · 10HP Motor');

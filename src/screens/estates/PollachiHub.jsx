@@ -1,3 +1,4 @@
+// v2 — includes irrigation + mango screens
 import { useNavigate } from 'react-router-dom'
 export default function PollachiHub() {
   const navigate=useNavigate()

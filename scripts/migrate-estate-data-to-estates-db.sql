@@ -1,0 +1,7 @@
+-- ============================================================
+-- STEP 1: Run against bgindiadb-estates
+-- Copies all data from nowhere (tables are empty there)
+-- We use INSERT OR IGNORE so re-running is safe
+-- ============================================================
+-- Nothing to run here yet — data export comes from bgindia-db
+-- See the shell commands below

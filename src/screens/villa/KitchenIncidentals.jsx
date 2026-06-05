@@ -85,7 +85,7 @@ No active stay — check in a guest first
               {recentCheckouts.length > 0 && (
                 <div style={{ marginTop: '12px' }}>
                   <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginBottom: '8px', fontWeight: '600' }}>
-                    Recent checkouts (last 24h) — add missed items:
+                    Last 2 checkouts — add missed items:
                   </div>
                   {recentCheckouts.map(s => (
                     <div key={s.stay_id} onClick={() => setStay({ stayId: s.stay_id, guestName: s.guest_name, checkoutDate: s.checkout_date, numGuests: s.num_guests })}

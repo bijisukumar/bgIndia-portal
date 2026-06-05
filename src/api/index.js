@@ -94,6 +94,7 @@ export const api = {
   // ── VILLA INCOME ─────────────────────────────────────────
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),
   saveKitchenEntry:     (data)   => post('saveKitchenEntry', data),
+  getRecentCheckouts:   (villaId) => get('getRecentCheckouts', { villaId }),
   saveBreakfastEntry:   (data)   => post('saveBreakfastEntry', data),
   saveCarRental:        (data)   => post('saveCarRental', data),
   saveVillaExpense:     (data)   => post('saveVillaExpense', data),

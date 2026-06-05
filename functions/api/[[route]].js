@@ -537,6 +537,19 @@ export async function onRequest(ctx) {
         return json({ success: true, data: mapped })
       }
 
+
+      // RECENT CHECKOUTS — stays checked out in last 24h (for late entry of incidentals)
+      if (action === 'getRecentCheckouts') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, status, num_guests
+           FROM stays
+           WHERE villa_id = ? AND status = 'checked_out'
+           AND updated_at >= datetime('now', '-24 hours')
+           ORDER BY updated_at DESC LIMIT 5`
+        ).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
       if (action === 'getActiveStay') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const stay = await DB.prepare(

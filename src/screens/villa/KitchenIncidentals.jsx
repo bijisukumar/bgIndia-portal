@@ -15,7 +15,8 @@ export default function KitchenIncidentals() {
   )
   const [notes, setNotes]   = useState('')
   const [saving, setSaving] = useState(false)
-  const [toast, setToast]   = useState(null)
+  const [toast, setToast]         = useState(null)
+  const [recentCheckouts, setRecentCheckouts] = useState([])
   // Custom / ad-hoc item
   const [custom, setCustom] = useState({ name: '', price: '', qty: 0 })
 
@@ -23,6 +24,7 @@ export default function KitchenIncidentals() {
 
   useEffect(() => {
     api.getActiveStay('dwarka').then(s => { if (s?.stayId) setStay(s) }).catch(() => {})
+    api.getRecentCheckouts('dwarka').then(d => { if (Array.isArray(d) && d.length) setRecentCheckouts(d) }).catch(() => {})
     // Fetch live prices from inventory if available
     api.getInventoryPrices?.('dwarka').then(p => {
       if (p) setPrices(prev => ({ ...prev, ...p }))
@@ -79,7 +81,21 @@ export default function KitchenIncidentals() {
       <div className="screen-body">
         {!stay ? (
           <div className="card" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-dim)' }}>
-            No active stay — check in a guest first
+No active stay — check in a guest first
+              {recentCheckouts.length > 0 && (
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginBottom: '8px', fontWeight: '600' }}>
+                    Recent checkouts (last 24h) — add missed items:
+                  </div>
+                  {recentCheckouts.map(s => (
+                    <div key={s.stay_id} onClick={() => setStay({ stayId: s.stay_id, guestName: s.guest_name, checkoutDate: s.checkout_date, numGuests: s.num_guests })}
+                      style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer', marginBottom: '6px' }}>
+                      <div style={{ fontWeight: '600', fontSize: '0.85rem', color: '#EDF2F7' }}>{s.guest_name}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginTop: '2px' }}>Checked out: {s.checkout_date} · {s.num_guests} guests</div>
+                    </div>
+                  ))}
+                </div>
+              )}
           </div>
         ) : (
           <>

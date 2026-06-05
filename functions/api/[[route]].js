@@ -538,13 +538,14 @@ export async function onRequest(ctx) {
       }
 
 
-      // RECENT CHECKOUTS — last 2 checked-out/closed stays (for late entry of incidentals)
+      // RECENT CHECKOUTS — last 2 past stays regardless of status
       if (action === 'getRecentCheckouts') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, num_guests
            FROM stays
-           WHERE villa_id = ? AND status IN ('checked_out','closed')
+           WHERE villa_id = ?
+           AND status NOT IN ('confirmed','pending_review','checked_in','ready_for_checkout','cancelled')
            ORDER BY updated_at DESC LIMIT 2`
         ).bind(villaId).all()
         return json({ success: true, data: results })

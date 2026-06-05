@@ -42,7 +42,7 @@ export default function Login() {
         {/* Logo */}
         <div style={styles.logoWrap}>
           <img
-            src="/icons/logo-black.png"
+            src="/icons/logo-black.png?v=2"
             alt="Guruvayur Estates"
             style={styles.logo}
             onError={e => { e.target.style.display = 'none' }}

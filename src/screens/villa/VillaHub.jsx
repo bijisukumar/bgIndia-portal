@@ -88,3 +88,4 @@ const styles = {
   propName:   { color: '#E8B86D', fontSize: '1rem', fontWeight: '700', fontFamily: "'Cormorant Garamond',serif" },
   propLoc:    { color: '#5C7080', fontSize: '0.75rem', marginTop: '2px' },
 }
+// cache bust Fri Jun  5 22:29:06 UTC 2026

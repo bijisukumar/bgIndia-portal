@@ -6,3 +6,8 @@
 /pavutumuri/*       /index.html 200
 /guest/*            /index.html 200
 /stayvibe/*         /index.html 200
+/rev360/*           /index.html 200
+/estate360/*        /index.html 200
+/debug              /index.html 200
+/test               /index.html 200
+/*                  /index.html 200

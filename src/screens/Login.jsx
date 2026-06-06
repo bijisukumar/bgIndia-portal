@@ -42,10 +42,16 @@ export default function Login() {
         {/* Logo */}
         <div style={styles.logoWrap}>
           <img
-            src="/icons/logo-black.png?v=2"
+            src="/icons/logo.png?v=3"
             alt="Guruvayur Estates"
             style={styles.logo}
-            onError={e => { e.target.style.display = 'none' }}
+            onError={e => {
+              console.error("Logo failed to load at path:", e.target.src);
+              // Fallback to secondary asset if primary logo.png fails
+              if (!e.target.src.includes('bg-logo.png')) {
+                e.target.src = '/icons/bg-logo.png?v=3';
+              }
+            }}
           />
         </div>
 
@@ -73,6 +79,7 @@ export default function Login() {
           }}
         />
 
+        {/* Error Message Display */}
         {error && <p style={styles.error}>{error}</p>}
 
         <button
@@ -144,6 +151,7 @@ const styles = {
     overflow: 'hidden',
     border: '1px solid rgba(200,144,58,0.3)',
     boxShadow: '0 8px 32px rgba(200,144,58,0.2)',
+    background: '#000000', // Ensures crisp background contrast for the monogram crest
   },
   logo: {
     height: '160px',

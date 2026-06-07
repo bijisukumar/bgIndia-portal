@@ -1278,6 +1278,17 @@ export async function onRequest(ctx) {
         }) })
       }
 
+
+      // DELETE GUEST DOCUMENTS — called by Apps Script after uploading to Drive
+      if (action === 'deleteGuestDocuments') {
+        const stayId = url.searchParams.get('stayId') || ''
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `DELETE FROM guest_documents WHERE stay_id = ? AND folder_created = 1`
+        ).bind(stayId).run()
+        return json({ success: true, data: { stayId, deleted: true } })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -1715,6 +1726,49 @@ export async function onRequest(ctx) {
         const { lossId } = body; if (!lossId) return err('lossId required')
         await DB.prepare(`DELETE FROM lease_losses WHERE loss_id = ?`).bind(lossId).run()
         return json({ success: true, data: { lossId, deleted: true } })
+      }
+
+
+      // CREATE PROVISIONAL BOOKING — called when guest submits form but no booking exists
+      if (action === 'createProvisionalBooking') {
+        const stayId = genStayId(body.villaId || 'dwarka')
+        const nights = body.checkInDate && body.checkOutDate
+          ? Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))
+          : 1
+        await DB.prepare(`
+          INSERT INTO stays (
+            stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+            checkin_date, checkout_date, nights, adults, gross, net,
+            status, created_by, updated_by, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,0,0,'pending_review',?,?,?,?)
+        `).bind(
+          stayId, body.villaId || 'dwarka', body.source || 'guest_form',
+          body.guestName, body.guestPhone || null, body.guestEmail || null,
+          body.checkInDate, body.checkOutDate || null, nights,
+          parseInt(body.adults) || 1,
+          actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { stayId, status: 'pending_review' } })
+      }
+
+      // MARK DOCUMENT UPLOADED — called by Apps Script after uploading to Drive
+      if (action === 'markDocumentUploaded') {
+        const { docId } = body
+        if (!docId) return err('docId required')
+        await DB.prepare(
+          `UPDATE guest_documents SET folder_created = 1, updated_at = ? WHERE doc_id = ?`
+        ).bind(now(), docId).run()
+        return json({ success: true, data: { docId } })
+      }
+
+      // CLEANUP EXPIRED DOCUMENTS — removes base64 docs older than 24hrs where folder is created
+      if (action === 'cleanupExpiredDocuments') {
+        const result = await DB.prepare(
+          `DELETE FROM guest_documents
+           WHERE folder_created = 1
+             AND created_at < datetime('now', '-24 hours')`
+        ).run()
+        return json({ success: true, data: { deleted: result.meta?.changes || 0 } })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

@@ -1,6 +1,6 @@
 // ============================================================
-//  bgIndia Portal — Cloudflare Pages Function (D1 Worker)
-//  v2.0 — JWT authentication (PINs server-side only)
+//   bgIndia Portal — Cloudflare Pages Function (D1 Worker)
+//   v2.0 — JWT authentication (PINs server-side only)
 // ============================================================
 
 const CORS = {
@@ -71,7 +71,6 @@ async function sendAlert(env, subject, lines) {
 }
 
 // ── RATE LIMITER — 5 attempts per IP per 15 min ──────────────
-// In-memory map resets on worker restart; good enough for PIN brute-force protection
 const loginAttempts = new Map()
 function checkRateLimit(ip) {
   const now    = Date.now()
@@ -107,7 +106,6 @@ export async function onRequest(ctx) {
   const DB         = env.DB || env.bgindia_db
   const DB_ESTATES = env.DB_ESTATES
 
-  // Safety check — if DB binding is missing, return clean error instead of crashing
   if (!DB) {
     console.error('DB binding missing — env keys:', Object.keys(env).join(', '))
     return new Response(JSON.stringify({ success: false, error: 'Database binding not configured' }), {
@@ -121,20 +119,19 @@ export async function onRequest(ctx) {
     'getRubberHarvests',  'saveRubberHarvest',
     'getEstateTransactions', 'saveEstateTransaction', 'deleteEstateTransaction',
     'getEstateDashboard',
-    'getManagerQuickInfo',   // quick info for estate manager home (config-driven)
-    'logIrrigation',         // record irrigation log tap
-    'getEstateHighlights',    // operational highlights for estate manager home
-    'getIrrigationZoneHealth', // zone-level health dashboard
-    'saveIrrigationZoneLog',   // log irrigation for a specific zone
-    'saveIrrigationZone',      // add/update a zone config
-    'saveFertilization',      // log fertilization entry
-    'saveMangoHarvest',       // log mango harvest
-    'getMangoHarvests',       // get mango harvest history
-    'getIrrigationHistory',   // full irrigation log list
-    'getEstateContacts',      // vendor/contact list
+    'getManagerQuickInfo',   
+    'logIrrigation',         
+    'getEstateHighlights',    
+    'getIrrigationZoneHealth', 
+    'saveIrrigationZoneLog',   
+    'saveIrrigationZone',      
+    'saveFertilization',      
+    'saveMangoHarvest',        
+    'getMangoHarvests',       
+    'getIrrigationHistory',   
+    'getEstateContacts',      
   ])
 
-  // OPTIONS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: CORS })
   }
@@ -155,7 +152,6 @@ export async function onRequest(ctx) {
 
     const rl = checkRateLimit(ip)
     if (rl.limited) {
-      // Send lockout alert
       await sendAlert(env, '🔒 bgIndia — Login LOCKED (rate limit hit)', [
         'A login has been LOCKED after too many failed attempts.',
         '',
@@ -184,7 +180,6 @@ export async function onRequest(ctx) {
     const found = users[String(pin)]
 
     if (!found) {
-      // Send failed attempt alert (every wrong PIN)
       await sendAlert(env, '⚠️ bgIndia — Failed login attempt', [
         'Someone entered a wrong PIN.',
         '',
@@ -211,243 +206,210 @@ export async function onRequest(ctx) {
     return json({ success: true, token })
   }
 
+  // SUBMIT GUEST CHECK-IN FORM — public endpoint (no auth required for guests)
+  if (action === 'submitGuestCheckIn' && method === 'POST') {
+    try {
+      const publicBody = await request.json().catch(() => ({}))
+      const {
+        villaId = 'dwarka', partner = 'direct', stayId: existingStayId,
+        guestName, dob, gender, nationality = 'Indian',
+        phone, email,
+        homeAddress, city, state, pincode, country = 'India', fromCity,
+        homeCountryAddress,
+        checkInDate, checkOutDate, nights,
+        adults = 1, children = 0, guestList,
+        purposeOfVisit, modeOfTransport, vehicleNumber, eta,
+        govtIdType, govtIdNum,
+        passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
+        visaNumber, visaType, visaIssueDate, visaIssuePlace,
+        arrivalDateIndia, portOfArrival, nextDestination,
+        idFileB64, idFileName,
+        requestEarlyCheckIn, requestLateCheckOut,
+        requestBreakfast, breakfastChoice, requestCab,
+        requestExtraBeds, extraBedsCount,
+      } = publicBody
+      const reqEarly     = requestEarlyCheckIn ? 1 : 0
+      const reqLate      = requestLateCheckOut ? 1 : 0
+      const reqBreakfast = requestBreakfast    ? 1 : 0
+      const bfChoice      = breakfastChoice      || null
+      const reqCab       = requestCab          ? 1 : 0
+      const reqBeds      = requestExtraBeds    ? 1 : 0
+      const bedsCount    = reqBeds ? (parseInt(extraBedsCount) || 1) : 0
+      const now          = () => new Date().toISOString().slice(0,19).replace('T',' ')
 
-      // SUBMIT GUEST CHECK-IN FORM — public endpoint (no auth required for guests)
-      // Creates or updates stay, stores all Form C fields, sets status to pending_review
-      if (action === 'submitGuestCheckIn') {
+      const cleanName = guestName ? guestName.replace(/^[\d\s]+/, '').trim() : ''
+      if (!cleanName) return err('guestName is required')
+      const safeGuestName = cleanName
+      if (!checkInDate) return err('checkInDate is required')
+
+      const submittedAt = now()
+      let stayId = existingStayId
+
+      if (!stayId) {
+        const firstName = guestName.split(' ')[0]
+        const found = await DB.prepare(
+          `SELECT stay_id, status FROM stays
+           WHERE guest_name LIKE ? AND checkin_date = ?
+             AND villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
+           LIMIT 1`
+        ).bind(`%${firstName}%`, checkInDate, villaId).first()
+        if (found) stayId = found.stay_id
+      }
+
+      if (stayId) {
+        await DB.prepare(`
+          UPDATE stays SET
+            guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
+            guest_email = COALESCE(NULLIF(guest_email,''), ?),
+            dob = ?, gender = ?, nationality = ?,
+            home_address = ?, city = ?, state = ?, country = ?, from_city = ?, pincode = ?,
+            home_country_address = ?,
+            checkout_date = COALESCE(checkout_date, ?),
+            nights = COALESCE(NULLIF(nights,0), ?),
+            adults = ?, children = ?,
+            guest_list = ?, purpose_of_visit = ?,
+            mode_of_transport = ?, vehicle_number = ?, eta = ?,
+            govt_id_type = ?, govt_id_num = ?,
+            passport_number = ?, passport_issue_date = ?, passport_issue_place = ?,
+            passport_expiry = ?, visa_number = ?, visa_type = ?,
+            visa_issue_date = ?, visa_issue_place = ?,
+            arrival_date_india = ?, port_of_arrival = ?, next_destination = ?,
+            request_early_checkin = ?, request_late_checkout = ?,
+            request_breakfast = ?, breakfast_choice = ?, request_cab = ?,
+            request_extra_beds = ?, extra_beds_count = ?,
+            checkin_form_submitted = 1, checkin_form_submitted_at = ?,
+            status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
+            updated_by = 'auto', updated_at = ?
+          WHERE stay_id = ?
+        `).bind(
+          phone||null, email||null,
+          dob||null, gender||null, nationality,
+          homeAddress||null, city||null, state||null, country, fromCity||city||null, pincode||null,
+          homeCountryAddress||null,
+          checkOutDate||null, parseInt(nights)||1,
+          parseInt(adults)||1, parseInt(children)||0,
+          guestList||null, purposeOfVisit||null,
+          modeOfTransport||null, vehicleNumber||null, eta||null,
+          govtIdType||null, govtIdNum||null,
+          passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
+          passportExpiry||null, visaNumber||null, visaType||null,
+          visaIssueDate||null, visaIssuePlace||null,
+          arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
+          reqEarly, reqLate, reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
+          submittedAt, submittedAt, stayId
+        ).run()
+      } else {
+        stayId = genStayId(villaId)
+        const n = parseInt(nights) || (checkOutDate
+          ? Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / 86400000))
+          : 1)
+        await DB.prepare(`
+          INSERT INTO stays (
+            stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+            checkin_date, checkout_date, nights, adults, children, gross, net,
+            dob, gender, nationality,
+            home_address, city, state, country, from_city, pincode, home_country_address,
+            guest_list, purpose_of_visit, mode_of_transport, vehicle_number, eta,
+            govt_id_type, govt_id_num,
+            passport_number, passport_issue_date, passport_issue_place, passport_expiry,
+            visa_number, visa_type, visa_issue_date, visa_issue_place,
+            arrival_date_india, port_of_arrival, next_destination,
+            request_early_checkin, request_late_checkout,
+            request_breakfast, breakfast_choice, request_cab,
+            request_extra_beds, extra_beds_count,
+            checkin_form_submitted, status, created_by, updated_by
+          ) VALUES (
+            ?,?,?,?,?,?,?,?,?,?,?,0,0,
+            ?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,
+            ?,?,
+            ?,?,?,?,
+            ?,?,?,?,
+            ?,?,?,
+            ?,?,?,?,?,
+            ?,?,
+            1,'pending_review','auto','auto'
+          )
+        `).bind(
+          stayId, villaId, partner || 'direct',
+          safeGuestName, phone||null, email||null,
+          checkInDate, checkOutDate||null, n,
+          parseInt(adults)||1, parseInt(children)||0,
+          dob||null, gender||null, nationality,
+          homeAddress||null, city||null, state||null, country, fromCity||city||null,
+          pincode||null, homeCountryAddress||null,
+          guestList||null, purposeOfVisit||null,
+          modeOfTransport||null, vehicleNumber||null, eta||null,
+          govtIdType||null, govtIdNum||null,
+          passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
+          passportExpiry||null,
+          visaNumber||null, visaType||null, visaIssueDate||null, visaIssuePlace||null,
+          arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
+          reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
+          reqBeds, bedsCount
+        ).run()
+      }
+
+      const docId = (type, sid) => `DOC-${sid}-${type}-${Date.now()}`
+      if (idFileB64) {
         try {
-        const publicBody = await request.json().catch(() => ({}))
-        const {
-          villaId = 'dwarka', partner = 'direct', stayId: existingStayId,
-          guestName, dob, gender, nationality = 'Indian',
-          phone, email,
-          homeAddress, city, state, pincode, country = 'India', fromCity,
-          homeCountryAddress,
-          checkInDate, checkOutDate, nights,
-          adults = 1, children = 0, guestList,
-          purposeOfVisit, modeOfTransport, vehicleNumber, eta,
-          govtIdType, govtIdNum,
-          passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
-          visaNumber, visaType, visaIssueDate, visaIssuePlace,
-          arrivalDateIndia, portOfArrival, nextDestination,
-          idFileB64, idFileName,
-          requestEarlyCheckIn, requestLateCheckOut,
-          requestBreakfast, breakfastChoice, requestCab,
-          requestExtraBeds, extraBedsCount,
-        } = publicBody
-        const reqEarly     = requestEarlyCheckIn ? 1 : 0
-        const reqLate      = requestLateCheckOut ? 1 : 0
-        const reqBreakfast = requestBreakfast    ? 1 : 0
-        const bfChoice     = breakfastChoice     || null
-        const reqCab       = requestCab          ? 1 : 0
-        const reqBeds      = requestExtraBeds    ? 1 : 0
-        const bedsCount    = reqBeds ? (parseInt(extraBedsCount) || 1) : 0
-        const now          = () => new Date().toISOString().slice(0,19).replace('T',' ')
-
-        // Strip any leading digits/spaces that browser autofill may prepend
-        const cleanName = guestName ? guestName.replace(/^[\d\s]+/, '').trim() : ''
-        if (!cleanName) return err('guestName is required')
-        const safeGuestName = cleanName
-        if (!checkInDate) return err('checkInDate is required')
-
-        const submittedAt = now()
-        let stayId = existingStayId
-
-        // Try to match existing stay first
-        if (!stayId) {
-          const firstName = guestName.split(' ')[0]
-          const found = await DB.prepare(
-            `SELECT stay_id, status FROM stays
-             WHERE guest_name LIKE ? AND checkin_date = ?
-               AND villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
-             LIMIT 1`
-          ).bind(`%${firstName}%`, checkInDate, villaId).first()
-          if (found) stayId = found.stay_id
-        }
-
-        if (stayId) {
-          // Update existing stay with all form fields
-          await DB.prepare(`
-            UPDATE stays SET
-              guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
-              guest_email = COALESCE(NULLIF(guest_email,''), ?),
-              dob = ?, gender = ?, nationality = ?,
-              home_address = ?, city = ?, state = ?, country = ?, from_city = ?, pincode = ?,
-              home_country_address = ?,
-              checkout_date = COALESCE(checkout_date, ?),
-              nights = COALESCE(NULLIF(nights,0), ?),
-              adults = ?, children = ?,
-              guest_list = ?, purpose_of_visit = ?,
-              mode_of_transport = ?, vehicle_number = ?, eta = ?,
-              govt_id_type = ?, govt_id_num = ?,
-              passport_number = ?, passport_issue_date = ?, passport_issue_place = ?,
-              passport_expiry = ?, visa_number = ?, visa_type = ?,
-              visa_issue_date = ?, visa_issue_place = ?,
-              arrival_date_india = ?, port_of_arrival = ?, next_destination = ?,
-              request_early_checkin = ?, request_late_checkout = ?,
-              request_breakfast = ?, breakfast_choice = ?, request_cab = ?,
-              request_extra_beds = ?, extra_beds_count = ?,
-              checkin_form_submitted = 1, checkin_form_submitted_at = ?,
-              status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
-              updated_by = 'auto', updated_at = ?
-            WHERE stay_id = ?
-          `).bind(
-            phone||null, email||null,
-            dob||null, gender||null, nationality,
-            homeAddress||null, city||null, state||null, country, fromCity||city||null, pincode||null,
-            homeCountryAddress||null,
-            checkOutDate||null, parseInt(nights)||1,
-            parseInt(adults)||1, parseInt(children)||0,
-            guestList||null, purposeOfVisit||null,
-            modeOfTransport||null, vehicleNumber||null, eta||null,
-            govtIdType||null, govtIdNum||null,
-            passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
-            passportExpiry||null, visaNumber||null, visaType||null,
-            visaIssueDate||null, visaIssuePlace||null,
-            arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
-            submittedAt, submittedAt, stayId
-          ).run()
-        } else {
-          // Create new provisional stay
-          stayId = genStayId(villaId)
-          const n = parseInt(nights) || (checkOutDate
-            ? Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / 86400000))
-            : 1)
-          await DB.prepare(`
-            INSERT INTO stays (
-              stay_id, villa_id, source, guest_name, guest_phone, guest_email,
-              checkin_date, checkout_date, nights, adults, children, gross, net,
-              dob, gender, nationality,
-              home_address, city, state, country, from_city, pincode, home_country_address,
-              guest_list, purpose_of_visit, mode_of_transport, vehicle_number, eta,
-              govt_id_type, govt_id_num,
-              passport_number, passport_issue_date, passport_issue_place, passport_expiry,
-              visa_number, visa_type, visa_issue_date, visa_issue_place,
-              arrival_date_india, port_of_arrival, next_destination,
-              request_early_checkin, request_late_checkout,
-              request_breakfast, breakfast_choice, request_cab,
-              request_extra_beds, extra_beds_count,
-              checkin_form_submitted, status, created_by, updated_by
-            ) VALUES (
-              ?,?,?,?,?,?,?,?,?,?,?,0,0,
-              ?,?,?,?,?,?,?,?,?,?,
-              ?,?,?,?,?,
-              ?,?,
-              ?,?,?,?,
-              ?,?,?,?,
-              ?,?,?,
-              ?,?,?,?,?,
-              ?,?,
-              1,'pending_review','auto','auto'
-            )
-          `).bind(
-            stayId, villaId, partner || 'direct',
-            safeGuestName, phone||null, email||null,
-            checkInDate, checkOutDate||null, n,
-            parseInt(adults)||1, parseInt(children)||0,
-            dob||null, gender||null, nationality,
-            homeAddress||null, city||null, state||null, country, fromCity||city||null,
-            pincode||null, homeCountryAddress||null,
-            guestList||null, purposeOfVisit||null,
-            modeOfTransport||null, vehicleNumber||null, eta||null,
-            govtIdType||null, govtIdNum||null,
-            passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
-            passportExpiry||null,
-            visaNumber||null, visaType||null, visaIssueDate||null, visaIssuePlace||null,
-            arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-            reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
-            reqBeds, bedsCount
-          ).run()
-        }
-
-        // Note: ID file uploads (idFileB64, passportFileB64, visaFileB64) are accepted
-        // but not stored in DB — they will be uploaded to Drive folder by Apps Script
-        // when the owner onboards the guest. This avoids Cloudflare 100KB payload limits.
-
-        // ── Save ID documents to guest_documents table ──────────────────
-        // Images are compressed in browser to ~80KB before encoding
-        // Apps Script reads these and uploads to Drive, then deletes from D1
-        const docId = (type, sid) => `DOC-${sid}-${type}-${Date.now()}`
-        if (idFileB64) {
-          try {
-            await DB.prepare(
-              `INSERT OR REPLACE INTO guest_documents
-               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-            ).bind(
-              docId('id', stayId), stayId, 'govt_id',
-              idFileName || ('ID-' + stayId + '.jpg'), idFileB64
-            ).run()
-            console.log('Saved ID doc to guest_documents for', stayId)
-          } catch(e) { console.warn('ID doc store error:', e.message) }
-        }
-        if (publicBody.passportFileB64) {
-          try {
-            await DB.prepare(
-              `INSERT OR REPLACE INTO guest_documents
-               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-            ).bind(
-              docId('passport', stayId), stayId, 'passport',
-              'passport-' + stayId + '.jpg', publicBody.passportFileB64
-            ).run()
-          } catch(e) { console.warn('Passport doc store error:', e.message) }
-        }
-        if (publicBody.visaFileB64) {
-          try {
-            await DB.prepare(
-              `INSERT OR REPLACE INTO guest_documents
-               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-            ).bind(
-              docId('visa', stayId), stayId, 'visa',
-              'visa-' + stayId + '.jpg', publicBody.visaFileB64
-            ).run()
-          } catch(e) { console.warn('Visa doc store error:', e.message) }
-        }
-
-        return json({ success: true, data: { stayId, status: 'pending_review' } })
-        } catch(submitErr) {
-          console.error('submitGuestCheckIn crash:', submitErr.message, submitErr.stack)
-          // Log to processing_log for audit trail
-          try {
-            await DB.prepare(
-              `INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
-               VALUES (?, 'error', ?, ?, datetime('now'))`
-            ).bind(
-              'ERR-' + Date.now(),
-              'unknown',
-              'submitGuestCheckIn failed: ' + submitErr.message
-            ).run()
-          } catch(logErr) { console.error('Failed to log error:', logErr.message) }
-          return json({ success: false, error: 'Check-in submission failed: ' + submitErr.message }, 500)
-        }
+          await DB.prepare(
+            `INSERT OR REPLACE INTO guest_documents
+             (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+             VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+          ).bind(docId('id', stayId), stayId, 'govt_id', idFileName || ('ID-' + stayId + '.jpg'), idFileB64).run()
+        } catch(e) { console.warn('ID doc store error:', e.message) }
+      }
+      if (publicBody.passportFileB64) {
+        try {
+          await DB.prepare(
+            `INSERT OR REPLACE INTO guest_documents
+             (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+             VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+          ).bind(docId('passport', stayId), stayId, 'passport', 'passport-' + stayId + '.jpg', publicBody.passportFileB64).run()
+        } catch(e) { console.warn('Passport doc store error:', e.message) }
+      }
+      if (publicBody.visaFileB64) {
+        try {
+          await DB.prepare(
+            `INSERT OR REPLACE INTO guest_documents
+             (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+             VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+          ).bind(docId('visa', stayId), stayId, 'visa', 'visa-' + stayId + '.jpg', publicBody.visaFileB64).run()
+        } catch(e) { console.warn('Visa doc store error:', e.message) }
       }
 
+      return json({ success: true, data: { stayId, status: 'pending_review' } })
+    } catch(submitErr) {
+      console.error('submitGuestCheckIn crash:', submitErr.message)
+      try {
+        await DB.prepare(
+          `INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
+           VALUES (?, 'error', 'unknown', ?, datetime('now'))`
+        ).bind('ERR-' + Date.now(), 'submitGuestCheckIn failed: ' + submitErr.message).run()
+      } catch(logErr) {}
+      return json({ success: false, error: 'Check-in submission failed: ' + submitErr.message }, 500)
+    }
+  }
 
-
-      // RESOLVE CHECKIN LINK — public endpoint (no auth)
-      if (action === 'resolveCheckinLink') {
-        const rlBody = await request.json().catch(() => ({}))
-        const { token: linkToken } = rlBody
-        if (!linkToken) return err('token required')
-        const link = await DB.prepare(
-          `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
-        ).bind(linkToken).first()
-        if (!link) return json({ success: false, error: 'Invalid link' }, { status: 404 })
-        if (!link.is_active) return json({ success: false, error: 'Link deactivated' }, { status: 403 })
-        await DB.prepare(`UPDATE checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`).bind(now(), linkToken).run()
-        return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
-      }
-
+  // RESOLVE CHECKIN LINK — public endpoint (no auth)
+  if (action === 'resolveCheckinLink' && method === 'POST') {
+    const rlBody = await request.json().catch(() => ({}))
+    const { token: linkToken } = rlBody
+    if (!linkToken) return err('token required')
+    const link = await DB.prepare(
+      `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
+    ).bind(linkToken).first()
+    if (!link) return json({ success: false, error: 'Invalid link' }, 404)
+    if (!link.is_active) return json({ success: false, error: 'Link deactivated' }, 403)
+    await DB.prepare(`UPDATE checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`).bind(new Date().toISOString().slice(0, 19).replace('T', ' '), linkToken).run()
+    return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
+  }
 
   // ── AUTH GUARD — verify JWT on every other request ─────
   const authHeader = request.headers.get('Authorization') || ''
   const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
 
-  // System token — long-lived token for Apps Script automation (not a JWT)
-  // Stored in Cloudflare env as SYSTEM_TOKEN
   let payload = null
   if (token && env.SYSTEM_TOKEN && token === env.SYSTEM_TOKEN) {
     payload = { name: 'System', role: 'owner', actor: 'auto' }
@@ -456,11 +418,9 @@ export async function onRequest(ctx) {
   }
   if (!payload) return json({ success: false, error: 'Unauthorized' }, 401)
 
-  // Actor comes from verified JWT — not from any client header
   const actor = payload.actor || 'owner'
   const now   = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
 
-  // Route to correct DB
   const ActiveDB = ESTATE_ACTIONS.has(action) ? DB_ESTATES : DB
   if (ESTATE_ACTIONS.has(action) && !DB_ESTATES) {
     return err('Estates DB not configured', 503)
@@ -470,11 +430,8 @@ export async function onRequest(ctx) {
     // ── GET ROUTES ──────────────────────────────────────
     if (method === 'GET') {
 
-      // TENANT CONFIG — returns config for the current tenant from DB
-      // Used by frontend on login to get villa name, phone, checkin times etc.
-      // Replaces hardcoded CONFIG values in config.js
       if (action === 'getTenantConfig') {
-        const tenantId = url.searchParams.get('tenantId') || villaId || 'dwarka'
+        const tenantId = url.searchParams.get('tenantId') || 'dwarka'
         const tenant = await DB.prepare(
           `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
                   address, checkin_time, checkout_time,
@@ -498,38 +455,35 @@ export async function onRequest(ctx) {
         }})
       }
 
-      // STAYS
       if (action === 'getStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const year    = url.searchParams.get('year') || new Date().getFullYear()
-        // year='all' returns all stays (for trend/comparison/lead-time charts)
         const { results } = year === 'all'
           ? await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? ORDER BY checkin_date DESC`).bind(villaId).all()
           : await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? ORDER BY checkin_date DESC`).bind(villaId, `${year}%`).all()
-        // Map snake_case → camelCase for frontend compatibility
         const mapped = results.map(r => ({
           ...r,
           stayId:          r.stay_id,
           guestName:       r.guest_name,
           bookerName:      r.guest_name,
-          villaId:         r.villa_id,
-          checkIn:         r.checkin_date,
-          checkOut:        r.checkout_date,
-          checkInDate:     r.checkin_date,
-          checkOutDate:    r.checkout_date,
-          bookedDate:      r.booked_date || r.created_at,
-          commPct:         r.commission_pct,
-          commAmt:         r.commission_amt,
-          channel:         r.source,
-          driveFolder:     r.drive_folder_url,
+          villaId:          r.villa_id,
+          checkIn:          r.checkin_date,
+          checkOut:         r.checkout_date,
+          checkInDate:      r.checkin_date,
+          checkOutDate:     r.checkout_date,
+          bookedDate:       r.booked_date || r.created_at,
+          commPct:          r.commission_pct,
+          commAmt:          r.commission_amt,
+          channel:          r.source,
+          driveFolder:      r.drive_folder_url,
           driveFolderUrl:  r.drive_folder_url,
           driveFolderId:   r.drive_folder_id,
           reviewRating:    r.review_rating,
-          fromCity:        r.from_city,
-          nightFee:        r.night_fee         || 0,
-          cleaningFee:     r.cleaning_fee      || 0,
-          hostServiceFee:  r.host_service_fee  || 0,
-          youEarn:         r.you_earn          || 0,
+          fromCity:         r.from_city,
+          nightFee:         r.night_fee          || 0,
+          cleaningFee:     r.cleaning_fee       || 0,
+          hostServiceFee:  r.host_service_fee   || 0,
+          youEarn:         r.you_earn           || 0,
           guestServiceFee: r.guest_service_fee || 0,
           guestPaidTotal:  r.guest_paid_total  || 0,
           airbnbConf:      r.airbnb_conf       || '',
@@ -537,26 +491,23 @@ export async function onRequest(ctx) {
         return json({ success: true, data: mapped })
       }
 
-
-      // RECENT CHECKOUTS — last 2 past stays regardless of status
       if (action === 'getRecentCheckouts') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, num_guests
-           FROM stays
-           WHERE villa_id = ?
+           FROM stays WHERE villa_id = ?
            AND status NOT IN ('confirmed','pending_review','checked_in','ready_for_checkout','cancelled')
            ORDER BY updated_at DESC LIMIT 2`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }
+
       if (action === 'getActiveStay') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const stay = await DB.prepare(
           `SELECT * FROM stays WHERE villa_id = ? AND status = 'checked_in' ORDER BY checkin_date DESC LIMIT 1`
         ).bind(villaId).first()
         if (!stay) return json({ success: true, data: null })
-        // Expose both snake_case and camelCase for compatibility
         return json({ success: true, data: {
           ...stay,
           stayId:       stay.stay_id,
@@ -569,7 +520,6 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getPendingCheckIns') {
-        // Returns stays in 'ready_for_checkin' status for Raman's check-in screen
         const { results } = await DB.prepare(
           `SELECT * FROM stays WHERE status = 'ready_for_checkin' ORDER BY checkin_date ASC`
         ).all()
@@ -578,11 +528,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getGuests') {
         const { results } = await DB.prepare(
-          `SELECT
-            guest_name,
-            guest_phone,
-            guest_email,
-            source,
+          `SELECT guest_name, guest_phone, guest_email, source,
             MAX(checkin_date)   as last_stay,
             MIN(checkin_date)   as first_stay,
             COUNT(*)            as total_stays,
@@ -600,7 +546,6 @@ export async function onRequest(ctx) {
            FROM stays WHERE status != 'cancelled'
            GROUP BY guest_name ORDER BY last_stay DESC`
         ).all()
-        // Map snake_case DB fields → camelCase expected by GuestRepository.jsx
         const guests = results.map(r => ({
           name:             r.guest_name,
           phone:            r.guest_phone,
@@ -624,7 +569,6 @@ export async function onRequest(ctx) {
         return json({ success: true, data: guests })
       }
 
-      // VILLA DASHBOARD
       if (action === 'getVillaDashboard') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const year    = url.searchParams.get('year') || new Date().getFullYear()
@@ -636,26 +580,23 @@ export async function onRequest(ctx) {
         const totalNights    = stays.reduce((s, r) => s + (r.nights || 0), 0)
         const grossRevenue   = stays.reduce((s, r) => s + (r.gross || 0), 0)
         const totalNet       = stays.reduce((s, r) => s + (r.net || 0), 0)
-        const totalComm      = stays.reduce((s, r) => s + (r.commission_amt || r.commAmt || 0), 0)
+        const totalComm      = stays.reduce((s, r) => s + (r.commission_amt || 0), 0)
         const byChannel      = {}
         stays.forEach(s => {
           if (!byChannel[s.source]) byChannel[s.source] = { bookings: 0, net: 0 }
           byChannel[s.source].bookings++
           byChannel[s.source].net += (s.net || 0)
         })
-        // Fetch kitchen revenue from stay_incidentals (uses created_at and total columns)
-        let kitchenByMonth = {}, breakfastByMonth = {}, carByMonth = {}
+
+        let kitchenByMonth = {}
         try {
           const { results: kitchenRows } = await DB.prepare(
             `SELECT strftime('%m', created_at) as month, SUM(total) as total
              FROM stay_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
           ).bind(String(year)).all()
-          kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month),r.total||0]))
+          kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month), r.total||0]))
         } catch(e) {}
-        // guest_requests table does not have amount/total columns yet — will add later
-        // breakfastByMonth and carByMonth remain empty ({}) for now
 
-        // Build months map (1-12)
         const months = {}
         for (let m = 1; m <= 12; m++) {
           const mStays  = stays.filter(s => new Date(s.checkin_date).getMonth() + 1 === m)
@@ -663,31 +604,20 @@ export async function onRequest(ctx) {
           const fees    = mStays.reduce((s, r) => s + (r.commission_amt || 0), 0)
           const net     = mStays.reduce((s, r) => s + (r.net || 0), 0)
           const kitchen   = kitchenByMonth[m]   || 0
-          const breakfast = breakfastByMonth[m] || 0
-          const carRental = carByMonth[m]        || 0
-          const tariff    = gross  // room tariff = gross (before commission)
-          const profit    = net - 0  // net already = gross - commission; no expense data yet
           const direct    = mStays.filter(s => (s.source || '').toLowerCase() === 'direct').length
 
           months[m] = {
             bookings:  mStays.length,
-            revenue:   gross,          // gross revenue from room
+            revenue:   gross,
             gross,
-            fees,                      // commission paid to channels
-            profit:    net,            // net after commission (profit before expenses)
+            fees,
+            profit:    net,
             net,
             direct,
-            breakdown: {
-              tariff,
-              kitchen,
-              breakfast,
-              carRental,
-              events: 0,
-            }
+            breakdown: { tariff: gross, kitchen, breakfast: 0, carRental: 0, events: 0 }
           }
         }
 
-        // Quarterly net
         const quarterly = {
           Q1: [1,2,3].reduce((s,m)  => s + (months[m].net||0), 0),
           Q2: [4,5,6].reduce((s,m)  => s + (months[m].net||0), 0),
@@ -695,10 +625,7 @@ export async function onRequest(ctx) {
           Q4: [10,11,12].reduce((s,m) => s + (months[m].net||0), 0),
         }
 
-        // Direct ratio for full year
         const totalDirect = stays.filter(s => (s.source||'').toLowerCase() === 'direct').length
-
-        // Key insights
         const bestMonthIdx = Object.keys(months).reduce((b,m) => (months[m].gross||0) > (months[b]?.gross||0) ? m : b, 1)
         const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
         const bestMonth = MONTH_NAMES[bestMonthIdx] || '—'
@@ -707,6 +634,7 @@ export async function onRequest(ctx) {
         const topChannel = Object.keys(channelTotals).sort((a,b)=>channelTotals[b]-channelTotals[a])[0] || '—'
         const directSaving = stays.filter(s=>(s.source||'').toLowerCase()!=='direct').reduce((sum,s)=>sum+(s.commission_amt||0),0)
         const avgNights = totalBookings > 0 ? Math.round((totalNights/totalBookings)*10)/10 : 0
+
         return json({ success: true, data: {
           totalBookings, totalNights, grossRevenue, totalNet, totalComm,
           totalDirect, byChannel, stays, months, quarterly,
@@ -714,18 +642,13 @@ export async function onRequest(ctx) {
         }})
       }
 
-      // RAMAN COMMISSION
       if (action === 'getRamanUnpaid') {
         const { results } = await DB.prepare(
-          `SELECT rc.*,
-                  COALESCE(s.review_rating, 0) as review_rating
-           FROM raman_commissions rc
-           LEFT JOIN stays s ON s.stay_id = rc.stay_id
-           WHERE rc.is_paid = 0
-           ORDER BY rc.checkin_date ASC`
+          `SELECT rc.*, COALESCE(s.review_rating, 0) as review_rating
+           FROM raman_commissions rc LEFT JOIN stays s ON s.stay_id = rc.stay_id
+           WHERE rc.is_paid = 0 ORDER BY rc.checkin_date ASC`
         ).all()
         const totalUnpaid = results.reduce((s, r) => s + (r.commission || 0), 0)
-        // Group by quarter
         const quarters = {}
         results.forEach(r => {
           const d = new Date(r.checkin_date)
@@ -743,70 +666,40 @@ export async function onRequest(ctx) {
       if (action === 'getRamanHistory') {
         const { results } = await DB.prepare(
           `SELECT paid_date, COUNT(*) as stays, SUM(commission) as total
-           FROM raman_commissions WHERE is_paid = 1
-           GROUP BY paid_date ORDER BY paid_date DESC`
+           FROM raman_commissions WHERE is_paid = 1 GROUP BY paid_date ORDER BY paid_date DESC`
         ).all()
         return json({ success: true, data: results })
       }
 
-      // RAMAN DASHBOARD SUMMARY — year-by-year + current quarter unpaid detail
       if (action === 'getRamanDashboard') {
-        // Paid totals by year
         const { results: byYear } = await DB.prepare(
-          `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year,
-                  SUM(commission) as total_paid,
-                  COUNT(*) as stays_paid
-           FROM raman_commissions
-           WHERE is_paid = 1
-           GROUP BY year ORDER BY year DESC`
+          `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year, SUM(commission) as total_paid, COUNT(*) as stays_paid
+           FROM raman_commissions WHERE is_paid = 1 GROUP BY year ORDER BY year DESC`
         ).all()
-
-        // Unpaid — all, with quarter breakdown
         const { results: unpaidRows } = await DB.prepare(
-          `SELECT comm_id, guest_name, checkin_date, nights, commission
-           FROM raman_commissions
-           WHERE is_paid = 0
-           ORDER BY checkin_date ASC`
+          `SELECT comm_id, guest_name, checkin_date, nights, commission FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
         ).all()
 
         const totalUnpaid = unpaidRows.reduce((s,r) => s + (r.commission||0), 0)
-
-        // Group unpaid by year+quarter
         const unpaidByQ = {}
         unpaidRows.forEach(r => {
           const d = new Date(r.checkin_date)
           const yr = d.getFullYear()
           const q  = Math.floor(d.getMonth() / 3) + 1
           const key = `${yr}-Q${q}`
-          if (!unpaidByQ[key]) unpaidByQ[key] = { key, year: yr, quarter: q,
-            label: `Q${q} ${yr}`, total: 0, stays: [] }
+          if (!unpaidByQ[key]) unpaidByQ[key] = { key, year: yr, quarter: q, label: `Q${q} ${yr}`, total: 0, stays: [] }
           unpaidByQ[key].total += r.commission || 0
-          unpaidByQ[key].stays.push({
-            commId:    r.comm_id,
-            guestName: r.guest_name,
-            checkIn:   r.checkin_date,
-            nights:    r.nights,
-            commission: r.commission,
-          })
+          unpaidByQ[key].stays.push({ commId: r.comm_id, guestName: r.guest_name, checkIn: r.checkin_date, nights: r.nights, commission: r.commission })
         })
-
-        // All-time total paid
         const allTimePaid = byYear.reduce((s,r) => s + (r.total_paid||0), 0)
 
         return json({ success: true, data: {
-          byYear: byYear.map(r => ({
-            year:       r.year,
-            totalPaid:  r.total_paid,
-            staysPaid:  r.stays_paid,
-          })),
-          unpaidByQ:    Object.values(unpaidByQ).sort((a,b) => b.key.localeCompare(a.key)),
-          totalUnpaid,
-          allTimePaid,
-          grandTotal:   allTimePaid + totalUnpaid,
+          byYear: byYear.map(r => ({ year: r.year, totalPaid: r.total_paid, staysPaid: r.stays_paid })),
+          unpaidByQ: Object.values(unpaidByQ).sort((a,b) => b.key.localeCompare(a.key)),
+          totalUnpaid, allTimePaid, grandTotal: allTimePaid + totalUnpaid
         }})
       }
 
-      // RENTAL INCOME
       if (action === 'getRentalIncome') {
         const propId = url.searchParams.get('propId')
         const year   = url.searchParams.get('year') || new Date().getFullYear()
@@ -823,20 +716,17 @@ export async function onRequest(ctx) {
       if (action === 'getRentalDashboard') {
         const year = url.searchParams.get('year') || new Date().getFullYear()
         const { results } = await DB.prepare(
-          `SELECT prop_id, month,
-            SUM(rent + car_parking) as income,
-            SUM(maintenance + electricity + water + property_tax + land_tax + extra_maintenance) as expense,
-            SUM(net) as net
+          `SELECT prop_id, month, SUM(rent + car_parking) as income,
+            SUM(maintenance + electricity + water + property_tax + land_tax + extra_maintenance) as expense, SUM(net) as net
            FROM rental_income WHERE year = ? GROUP BY prop_id, month ORDER BY prop_id, month`
         ).bind(year).all()
-        // Aggregate totals
         const totalIncome  = results.reduce((s, r) => s + (r.income || 0), 0)
         const totalExpense = results.reduce((s, r) => s + (r.expense || 0), 0)
         const netIncome    = results.reduce((s, r) => s + (r.net || 0), 0)
         return json({ success: true, data: { totalIncome, totalExpense, netIncome, rows: results } })
       }
 
-      // COCONUT
+      // COCONUT HARVESTS — Get History List
       if (action === 'getCoconutHarvests') {
         const year = url.searchParams.get('year')
         let query = `SELECT * FROM coconut_harvests`
@@ -863,15 +753,14 @@ export async function onRequest(ctx) {
           netIncome:         r.net_income        || 0,
           totalExpense:      r.total_expense     || 0,
           balanceDue:        r.balance_due       || 0,
-          scheduledNext:     r.scheduled_harvest_date || null,  // harvest_date + 45 days (auto)
-          actualNext:        r.next_harvest_date || null,       // real date of next harvest
+          scheduledNext:     r.scheduled_harvest_date || null,
+          actualNext:        r.next_harvest_date || null,
         }))
-        // Next harvest = scheduled date of most recent harvest (harvest[0] + 45 days)
         const nextHarvestDate = results[0]?.scheduled_harvest_date || null
         return json({ success: true, data: { totalHarvests, totalCount, grossRevenue, netIncome, totalExpense, harvests, nextHarvestDate } })
       }
 
-      // RUBBER
+      // RUBBER HARVESTS — Get History List
       if (action === 'getRubberHarvests') {
         const year = url.searchParams.get('year') || new Date().getFullYear()
         const { results } = await ActiveDB.prepare(
@@ -880,60 +769,29 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
-      // INVENTORY
       if (action === 'getInventory') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(
-          `SELECT * FROM inventory WHERE villa_id = ? ORDER BY category, name`
-        ).bind(villaId).all()
+        const { results } = await DB.prepare(`SELECT * FROM inventory WHERE villa_id = ? ORDER BY category, name`).bind(villaId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getInventoryPrices') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(
-          `SELECT item_id, cost_price, sell_price FROM inventory WHERE villa_id = ?`
-        ).bind(villaId).all()
+        const { results } = await DB.prepare(`SELECT item_id, cost_price, sell_price FROM inventory WHERE villa_id = ?`).bind(villaId).all()
         const prices = Object.fromEntries(results.map(r => [r.item_id, { costPrice: r.cost_price, sellPrice: r.sell_price }]))
         return json({ success: true, data: prices })
       }
 
-      // FREE-FORM SQL (owner only — any SELECT query)
       if (action === 'runSQL') {
         const sql = url.searchParams.get('sql') || ''
-        const trimmed = sql.trim().toUpperCase()
-        // Safety: only allow SELECT statements
-        if (!trimmed.startsWith('SELECT') && !trimmed.startsWith('PRAGMA')) {
+        if (!sql.trim().toUpperCase().startsWith('SELECT') && !sql.trim().toUpperCase().startsWith('PRAGMA')) {
           return err('Only SELECT and PRAGMA queries allowed')
         }
         try {
           const { results } = await DB.prepare(sql).all()
           return json({ success: true, data: results, rowCount: results.length })
-        } catch (e) {
-          return json({ success: false, error: e.message }, 400)
-        }
+        } catch (e) { return json({ success: false, error: e.message }, 400) }
       }
-
-      // WRITE SQL — owner only, allows DELETE/UPDATE/INSERT/ALTER
-      if (action === 'runSQLWrite') {
-        const sql = (body && body.sql) ? body.sql.trim() : ''
-        if (!sql) return err('sql required')
-        const upper = sql.toUpperCase()
-        const blocked = ['DROP TABLE','TRUNCATE','DROP DATABASE','ATTACH','DETACH']
-        if (blocked.some(b => upper.includes(b))) {
-          return err('Operation not permitted — DROP TABLE and TRUNCATE are blocked')
-        }
-        try {
-          const result = await DB.prepare(sql).run()
-          return json({ success: true, data: {
-            changes:  result.meta?.changes  ?? 0,
-            duration: result.meta?.duration ?? 0,
-          }})
-        } catch (e) {
-          return json({ success: false, error: e.message }, 400)
-        }
-      }
-
 
       if (action === 'runQuery') {
         const key = url.searchParams.get('key')
@@ -957,765 +815,353 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results, sql })
       }
 
-      // MARKETING STATS — city breakdown, purpose, channel vs revenue
       if (action === 'getMarketingStats') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-
         const statYear = url.searchParams.get('statYear') || null
 
-        // City breakdown — optionally filtered by year
         const cityQuery = statYear
-          ? `SELECT
-              COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name,
-              COALESCE(NULLIF(state,''), '') as state_name,
-              COALESCE(NULLIF(country,''), 'India') as country_name,
-              COUNT(DISTINCT guest_name) as guest_count,
-              COUNT(*) as booking_count,
-              ROUND(SUM(COALESCE(net,0)),0) as revenue
-             FROM stays
-             WHERE villa_id = ? AND status NOT IN ('cancelled')
-               AND checkin_date LIKE ?
-             GROUP BY city_name, state_name, country_name
-             ORDER BY guest_count DESC`
-          : `SELECT
-              COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name,
-              COALESCE(NULLIF(state,''), '') as state_name,
-              COALESCE(NULLIF(country,''), 'India') as country_name,
-              COUNT(DISTINCT guest_name) as guest_count,
-              COUNT(*) as booking_count,
-              ROUND(SUM(COALESCE(net,0)),0) as revenue
-             FROM stays
-             WHERE villa_id = ? AND status NOT IN ('cancelled')
-             GROUP BY city_name, state_name, country_name
-             ORDER BY guest_count DESC`
+          ? `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') AND checkin_date LIKE ? GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
+          : `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
         const cityBinds = statYear ? [villaId, `${statYear}%`] : [villaId]
         const { results: cityRows } = await DB.prepare(cityQuery).bind(...cityBinds).all()
 
-        // Purpose/category breakdown
         const { results: purposeRows } = await DB.prepare(
-          `SELECT
-            CASE
-              WHEN LOWER(notes) LIKE '%wedding%'       THEN 'Wedding'
-              WHEN LOWER(notes) LIKE '%temple%'
-                OR LOWER(notes) LIKE '%guruvayur%'     THEN 'Temple / Pilgrimage'
-              WHEN LOWER(notes) LIKE '%tourism%'
-                OR LOWER(notes) LIKE '%holiday%'
-                OR LOWER(notes) LIKE '%vacation%'      THEN 'Tourism'
-              WHEN LOWER(notes) LIKE '%family%'        THEN 'Family Visit'
-              WHEN LOWER(notes) LIKE '%arangettam%'    THEN 'Arangettam'
-              WHEN LOWER(notes) LIKE '%kerala%'        THEN 'Kerala Tour'
-              ELSE 'Other'
-            END as purpose,
-            COUNT(*) as bookings,
-            COUNT(DISTINCT guest_name) as guests,
-            ROUND(SUM(COALESCE(net,0)),0) as revenue
-           FROM stays
-           WHERE villa_id = ? AND status NOT IN ('cancelled')
-           GROUP BY purpose ORDER BY bookings DESC`
+          `SELECT CASE WHEN LOWER(notes) LIKE '%wedding%' THEN 'Wedding' WHEN LOWER(notes) LIKE '%temple%' OR LOWER(notes) LIKE '%guruvayur%' THEN 'Temple / Pilgrimage' WHEN LOWER(notes) LIKE '%tourism%' OR LOWER(notes) LIKE '%holiday%' OR LOWER(notes) LIKE '%vacation%' THEN 'Tourism' WHEN LOWER(notes) LIKE '%family%' THEN 'Family Visit' WHEN LOWER(notes) LIKE '%arangettam%' THEN 'Arangettam' WHEN LOWER(notes) LIKE '%kerala%' THEN 'Kerala Tour' ELSE 'Other' END as purpose, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as guests, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') GROUP BY purpose ORDER BY bookings DESC`
         ).bind(villaId).all()
 
-        // Channel breakdown — bookings + revenue
         const { results: channelRows } = await DB.prepare(
-          `SELECT
-            source as channel,
-            COUNT(*) as bookings,
-            COUNT(DISTINCT guest_name) as unique_guests,
-            ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue,
-            ROUND(SUM(COALESCE(net,0)),0) as net_revenue,
-            ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission
-           FROM stays
-           WHERE villa_id = ? AND status NOT IN ('cancelled')
-           GROUP BY source ORDER BY net_revenue DESC`
+          `SELECT source as channel, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as unique_guests, ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue, ROUND(SUM(COALESCE(net,0)),0) as net_revenue, ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') GROUP BY source ORDER BY net_revenue DESC`
         ).bind(villaId).all()
 
-        // Stale data report
         const { results: staleRows } = await DB.prepare(
-          `SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city,
-            SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state,
-            SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country,
-            SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone,
-            SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email
-           FROM stays WHERE status NOT IN ('cancelled')`
+          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stays WHERE status NOT IN ('cancelled')`
         ).all()
 
-        // Month-wise bookings for trend
         const { results: monthRows } = await DB.prepare(
-          `SELECT
-            strftime('%Y', checkin_date) as year,
-            strftime('%m', checkin_date) as month,
-            COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region,
-            COUNT(DISTINCT guest_name) as guests,
-            COUNT(*) as bookings,
-            ROUND(SUM(COALESCE(net,0)),0) as revenue
-           FROM stays
-           WHERE villa_id = ? AND status NOT IN ('cancelled')
-             AND from_city IS NOT NULL AND from_city != ''
-           GROUP BY year, month, region
-           ORDER BY year DESC, month ASC`
+          `SELECT strftime('%Y', checkin_date) as year, strftime('%m', checkin_date) as month, COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region, COUNT(DISTINCT guest_name) as guests, COUNT(*) as bookings, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') AND from_city IS NOT NULL AND from_city != '' GROUP BY year, month, region ORDER BY year DESC, month ASC`
         ).bind(villaId).all()
 
-        return json({ success: true, data: {
-          cities:   cityRows,
-          purposes: purposeRows,
-          channels: channelRows,
-          stale:    staleRows[0] || {},
-          monthlyByRegion: monthRows,
-          statYear: statYear || 'all',
-        }})
+        return json({ success: true, data: { cities: cityRows, purposes: purposeRows, channels: channelRows, stale: staleRows[0] || {}, monthlyByRegion: monthRows, statYear: statYear || 'all' } })
       }
 
-      // GET OPEN STAYS — for Drive file watcher in Apps Script
-      // Returns stays in booked/confirmed/docs_uploaded status with their folder IDs
       if (action === 'getOpenStays') {
-        const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status
-           FROM stays
-           WHERE status IN ('booked','confirmed','docs_uploaded')
-           ORDER BY checkin_date ASC`
-        ).all()
-        return json({ success: true, data: results.map(r => ({
-          stayId:        r.stay_id,
-          guestName:     r.guest_name,
-          checkinDate:   r.checkin_date,
-          driveFolderId: r.drive_folder_id,
-          driveFolderUrl:r.drive_folder_url,
-          status:        r.status,
-        }))})
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status FROM stays WHERE status IN ('booked','confirmed','docs_uploaded') ORDER BY checkin_date ASC`).all()
+        return json({ success: true, data: results.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status })) })
       }
 
-      // FIND OPEN STAY — match by guest name + check-in date for form submit trigger
       if (action === 'findOpenStay') {
         const guestName   = url.searchParams.get('guestName')   || ''
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
-                  adults, children, guest_phone, guest_email,
-                  drive_folder_id, drive_folder_url, status,
-                  purpose_of_visit, mode_of_transport, vehicle_number, eta,
-                  nationality, city, state, country,
-                  request_early_checkin, request_late_checkout,
-                  request_breakfast, breakfast_choice, request_cab,
-                  govt_id_type, govt_id_num
-           FROM stays
-           WHERE guest_name LIKE ?
-             AND status NOT IN ('cancelled','closed','checked_out')
-           ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC
-           LIMIT 1`
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, request_breakfast, breakfast_choice, request_cab, govt_id_type, govt_id_num FROM stays WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
         ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
-          return json({ success: true, data: {
-            stayId:           r.stay_id,
-            guestName:        r.guest_name,
-            checkinDate:      r.checkin_date,
-            checkoutDate:     r.checkout_date,
-            nights:           r.nights,
-            adults:           r.adults,
-            children:         r.children,
-            phone:            r.guest_phone,
-            email:            r.guest_email,
-            driveFolderId:    r.drive_folder_id,
-            driveFolderUrl:   r.drive_folder_url,
-            status:           r.status,
-            purposeOfVisit:   r.purpose_of_visit,
-            modeOfTransport:  r.mode_of_transport,
-            vehicleNumber:    r.vehicle_number,
-            eta:              r.eta,
-            nationality:      r.nationality,
-            city:             r.city,
-            state:            r.state,
-            country:          r.country,
-            requestEarlyCheckin: r.request_early_checkin,
-            requestLateCheckout: r.request_late_checkout,
-            requestBreakfast:    r.request_breakfast,
-            breakfastChoice:     r.breakfast_choice,
-            requestCab:          r.request_cab,
-            govtIdType:          r.govt_id_type,
-            govtIdNum:           r.govt_id_num,
-          }})
+          return json({ success: true, data: { stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, checkoutDate: r.checkout_date, nights: r.nights, adults: r.adults, children: r.children, phone: r.guest_phone, email: r.guest_email, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status, purposeOfVisit: r.purpose_of_visit, modeOfTransport: r.mode_of_transport, vehicleNumber: r.vehicle_number, eta: r.eta, nationality: r.nationality, city: r.city, state: r.state, country: r.country, requestEarlyCheckin: r.request_early_checkin, requestLateCheckout: r.request_late_checkout, requestBreakfast: r.request_breakfast, breakfastChoice: r.breakfast_choice, requestCab: r.request_cab, govtIdType: r.govt_id_type, govtIdNum: r.govt_id_num } })
         }
         return json({ success: true, data: null })
       }
 
-      // FIND STAY FOR REVIEW MATCHING — called by Apps Script Gmail poller
-      // Matches guest name + checkout within 14 days before reviewDate
       if (action === 'findStayForReview') {
-        const guestName  = url.searchParams.get('guestName') || ''
+        const guestName = url.searchParams.get('guestName') || ''
         const reviewDate = url.searchParams.get('reviewDate') || ''
         if (!guestName || !reviewDate) return err('guestName and reviewDate required')
-
-        const reviewDt = new Date(reviewDate)
-        const windowStart = new Date(reviewDt)
+        const windowStart = new Date(reviewDate)
         windowStart.setDate(windowStart.getDate() - 14)
-
-        const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkout_date FROM stays
-           WHERE guest_name LIKE ?
-             AND checkout_date >= ?
-             AND checkout_date <= ?
-             AND status NOT IN ('cancelled')
-           ORDER BY checkout_date DESC LIMIT 1`
-        ).bind(`%${guestName.split(' ')[0]}%`,
-               windowStart.toISOString().slice(0,10),
-               reviewDate).all()
-
-        if (results.length > 0) {
-          return json({ success: true, data: { stayId: results[0].stay_id, guestName: results[0].guest_name }})
-        }
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled') ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate).all()
+        if (results.length > 0) return json({ success: true, data: { stayId: results[0].stay_id, guestName: results[0].guest_name }})
         return json({ success: true, data: null })
       }
 
-      // RAMAN TODO — two lists for Raman's home screen
-      // 1. Overdue: guests whose checkout_date has passed but stay is still open (checked_in / ready_for_checkout)
-      // 2. Upcoming: guests checking in within next 7 days (confirmed / booked / ready_for_checkin)
       if (action === 'getRamanTodo') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-
-        // Overdue — past checkout date, still open
-        const { results: overdueRows } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status
-           FROM stays
-           WHERE villa_id = ?
-             AND status IN ('checked_in','ready_for_checkout','pending_review')
-             AND checkout_date < date('now')
-           ORDER BY checkout_date ASC`
-        ).bind(villaId).all()
-
-        // Upcoming check-ins — next 7 days, not yet checked in
-        const { results: upcomingRows } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status
-           FROM stays
-           WHERE villa_id = ?
-             AND status IN ('confirmed','booked','ready_for_checkin','pending_review')
-             AND checkin_date >= date('now')
-             AND checkin_date <= date('now', '+7 days')
-           ORDER BY checkin_date ASC`
-        ).bind(villaId).all()
-
+        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
+        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review') AND checkin_date >= date('now') AND checkin_date <= date('now', '+7 days') ORDER BY checkin_date ASC`).bind(villaId).all()
         return json({ success: true, data: {
-          overdue:  overdueRows.map(r => ({
-            stayId:       r.stay_id,
-            guestName:    r.guest_name,
-            checkInDate:  r.checkin_date,
-            checkOutDate: r.checkout_date,
-            nights:       r.nights,
-            adults:       r.adults,
-            source:       r.source,
-            status:       r.status,
-            daysOver:     Math.floor((new Date() - new Date(r.checkout_date)) / 86400000),
-          })),
-          upcoming: upcomingRows.map(r => ({
-            stayId:       r.stay_id,
-            guestName:    r.guest_name,
-            checkInDate:  r.checkin_date,
-            checkOutDate: r.checkout_date,
-            nights:       r.nights,
-            adults:       r.adults,
-            source:       r.source,
-            status:       r.status,
-            daysUntil:    Math.floor((new Date(r.checkin_date) - new Date()) / 86400000) + 1,
-          })),
+          overdue: overdueRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkInDate: r.checkin_date, checkOutDate: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, status: r.status, daysOver: Math.floor((new Date() - new Date(r.checkout_date)) / 86400000) })),
+          upcoming: upcomingRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkInDate: r.checkin_date, checkOutDate: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, status: r.status, daysUntil: Math.floor((new Date(r.checkin_date) - new Date()) / 86400000) + 1 }))
         }})
       }
 
-      // UPCOMING STAYS — for Complete Booking screen
-      // Returns stays checking in within next 30 days OR checked in within last 2 days
-      // Excludes closed and cancelled
       if (action === 'getUpcomingStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(
-          `SELECT * FROM stays
-           WHERE villa_id = ?
-             AND status NOT IN ('closed','cancelled','checked_out')
-             AND (
-               checkin_date >= date('now', '-2 days')
-               OR status IN ('checked_in','ready_for_checkout','ready_for_checkin')
-             )
-           ORDER BY checkin_date ASC`
-        ).bind(villaId).all()
+        const { results } = await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? AND status NOT IN ('closed','cancelled','checked_out') AND (checkin_date >= date('now', '-2 days') OR status IN ('checked_in','ready_for_checkout','ready_for_checkin')) ORDER BY checkin_date ASC`).bind(villaId).all()
         return json({ success: true, data: results })
       }
 
-      // RENTAL AGREEMENTS — get tenant details for all rental properties
       if (action === 'getRentalAgreements') {
-        const { results } = await DB.prepare(
-          `SELECT * FROM rental_props ORDER BY prop_id`
-        ).all()
+        const { results } = await DB.prepare(`SELECT * FROM rental_props ORDER BY prop_id`).all()
         return json({ success: true, data: results })
       }
 
-      // PROPERTY DETAILS — get utility/loan/address data for a property
       if (action === 'getPropertyDetails') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const row = await DB.prepare(
-          `SELECT * FROM property_details WHERE prop_id = ?`
-        ).bind(propId).first()
+        const row = await DB.prepare(`SELECT * FROM property_details WHERE prop_id = ?`).bind(propId).first()
         return json({ success: true, data: row || null })
       }
 
-      // HOA HISTORY — get all HOA rate records for a property
       if (action === 'getHoaHistory') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(
-          `SELECT * FROM hoa_history WHERE prop_id = ? ORDER BY effective_date DESC`
-        ).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM hoa_history WHERE prop_id = ? ORDER BY effective_date DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
-      // TAX HISTORY — get all tax year records for a property
       if (action === 'getTaxHistory') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(
-          `SELECT * FROM tax_history WHERE prop_id = ? ORDER BY tax_year DESC`
-        ).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM tax_history WHERE prop_id = ? ORDER BY tax_year DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
-      // PROPERTY DOCUMENTS — list all docs for a property
       if (action === 'getPropertyDocs') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(
-          `SELECT * FROM property_documents WHERE prop_id = ? ORDER BY category, created_at DESC`
-        ).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM property_documents WHERE prop_id = ? ORDER BY category, created_at DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
-      // LEASE LOSSES — get all claims for a property
       if (action === 'getLeaseLosses') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(
-          `SELECT * FROM lease_losses WHERE prop_id = ? ORDER BY created_at DESC`
-        ).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM lease_losses WHERE prop_id = ? ORDER BY created_at DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
-      // REV360 PORTFOLIO DASHBOARD
       if (action === 'getRev360Dashboard') {
         const year = new Date().getFullYear()
         const props = await DB.prepare(`SELECT * FROM rental_props ORDER BY prop_id`).all()
-        const income = await DB.prepare(
-          `SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax+extra_maintenance) as expense, SUM(net) as net, COUNT(*) as months_entered
-           FROM rental_income WHERE year = ? GROUP BY prop_id`
-        ).bind(year).all()
-        const losses = await DB.prepare(
-          `SELECT prop_id, SUM(amount) as total_claimed,
-           SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off,
-           SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered,
-           COUNT(*) as claim_count
-           FROM lease_losses GROUP BY prop_id`
-        ).all()
-        const renewalAlerts = await DB.prepare(
-          `SELECT prop_id, name, tenant_name, lease_end, status,
-           CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left
-           FROM rental_props
-           WHERE lease_end IS NOT NULL AND lease_end != ''
-           AND julianday(lease_end) - julianday('now') <= 90
-           ORDER BY lease_end ASC`
-        ).all()
-        return json({ success: true, data: {
-          year,
-          properties: props.results,
-          income: income.results,
-          losses: losses.results,
-          renewalAlerts: renewalAlerts.results,
-        }})
+        const income = await DB.prepare(`SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax+extra_maintenance) as expense, SUM(net) as net, COUNT(*) as months_entered FROM rental_income WHERE year = ? GROUP BY prop_id`).bind(year).all()
+        const losses = await DB.prepare(`SELECT prop_id, SUM(amount) as total_claimed, SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off, SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered, COUNT(*) as claim_count FROM lease_losses GROUP BY prop_id`).all()
+        const renewalAlerts = await DB.prepare(`SELECT prop_id, name, tenant_name, lease_end, status, CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left FROM rental_props WHERE lease_end IS NOT NULL AND lease_end != '' AND julianday(lease_end) - julianday('now') <= 90 ORDER BY lease_end ASC`).all()
+        return json({ success: true, data: { year, properties: props.results, income: income.results, losses: losses.results, renewalAlerts: renewalAlerts.results } })
       }
 
-      // GET GUEST DOCUMENTS — for Apps Script to fetch and upload to Drive
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
-        // Only return docs not yet uploaded to Drive (folder_created=0)
-        const { results } = await DB.prepare(
-          `SELECT doc_id, stay_id, doc_type, file_name, file_b64
-           FROM guest_documents WHERE stay_id = ? AND folder_created = 0`
-        ).bind(stayId).all()
+        const { results } = await DB.prepare(`SELECT doc_id, stay_id, doc_type, file_name, file_b64 FROM guest_documents WHERE stay_id = ? AND folder_created = 0`).bind(stayId).all()
         return json({ success: true, data: results })
       }
 
-      // DUPLICATE BOOKINGS — audit log for channel sync analysis
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
-        const cutoff = new Date()
-        cutoff.setMonth(cutoff.getMonth() - months)
-        const cutoffStr = cutoff.toISOString().slice(0,10)
-        const { results } = await DB.prepare(
-          `SELECT * FROM duplicate_bookings
-           WHERE detected_at >= ?
-           ORDER BY detected_at DESC`
-        ).bind(cutoffStr).all()
-        // Group by channel for summary
+        const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)
+        const { results } = await DB.prepare(`SELECT * FROM duplicate_bookings WHERE detected_at >= ? ORDER BY detected_at DESC`).bind(cutoff.toISOString().slice(0,10)).all()
         const byChannel = {}
         results.forEach(r => {
           const ch = r.new_source || 'unknown'
           if (!byChannel[ch]) byChannel[ch] = { channel: ch, count: 0, incidents: [] }
           byChannel[ch].count++
-          byChannel[ch].incidents.push({
-            dupId:         r.dup_id,
-            detectedAt:    r.detected_at,
-            existingGuest: r.existing_guest,
-            existingDates: r.existing_checkin + ' → ' + r.existing_checkout,
-            newGuest:      r.new_guest,
-            newDates:      r.new_checkin + ' → ' + r.new_checkout,
-            overlapNights: r.overlap_nights,
-          })
+          byChannel[ch].incidents.push({ dupId: r.dup_id, detectedAt: r.detected_at, existingGuest: r.existing_guest, existingDates: r.existing_checkin + ' → ' + r.existing_checkout, newGuest: r.new_guest, newDates: r.new_checkin + ' → ' + r.new_checkout, overlapNights: r.overlap_nights })
         })
-        return json({ success: true, data: {
-          total: results.length,
-          months,
-          byChannel: Object.values(byChannel).sort((a,b) => b.count - a.count),
-          all: results,
-        }})
+        return json({ success: true, data: { total: results.length, months, byChannel: Object.values(byChannel).sort((a,b) => b.count - a.count), all: results } })
       }
 
-      // MANAGER HOME — quick info (next harvest, last price, irrigation alert)
+      // MANAGER HOME — Quick Info Stats Block (Aligned to exact Schema Fields)
       if (action === 'getManagerQuickInfo') {
-        // estate is derived from the JWT actor — maps actor->estate via estate_managers table
-        // actor is set at login time from PIN_PRADOSH -> 'pradosh', PIN_RAMAN -> 'raman' etc.
-        // estate_managers table maps actor -> estate_id and estate_type
-        const mgr = await ActiveDB.prepare(
-          `SELECT estate_id, estate_type, manager_name FROM estate_managers WHERE actor = ? AND active = 1 LIMIT 1`
-        ).bind(actor).first()
-        // fallback: if no table yet, derive from actor name directly
-        const estateId   = mgr?.estate_id   || (actor === 'pradosh' ? 'pollachi' : actor)
-        const estateType = mgr?.estate_type || 'coconut'
-        const managerName = mgr?.manager_name || actor
-
-        const today = new Date().toISOString().slice(0, 10)
+        const estateId   = actor === 'pradosh' ? 'pollachi' : (actor === 'raman' ? 'pavutumuri' : 'pollachi')
+        const estateType = actor === 'raman' ? 'rubber' : 'coconut'
+        const today      = new Date().toISOString().slice(0, 10)
 
         if (estateType === 'coconut') {
-          // Try with estate_id filter first, fall back to no filter
-          let harvest = await ActiveDB.prepare(
-            `SELECT harvest_date, price_per_kg, scheduled_harvest_date
-             FROM coconut_harvests WHERE estate_id = ?
-             ORDER BY harvest_date DESC LIMIT 1`
+          const harvest = await ActiveDB.prepare(
+            `SELECT harvest_date, price_per_kg, scheduled_harvest_date FROM coconut_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
           ).bind(estateId).first()
-          if (!harvest) {
-            harvest = await ActiveDB.prepare(
-              `SELECT harvest_date, price_per_kg, scheduled_harvest_date
-               FROM coconut_harvests ORDER BY harvest_date DESC LIMIT 1`
-            ).first()
-          }
+
           const irrigation = await ActiveDB.prepare(
-            `SELECT logged_date FROM irrigation_logs
-             WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
+            `SELECT logged_date FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
           ).bind(estateId).first()
+
           const lastPrice      = harvest?.price_per_kg           || null
           const nextHarvest    = harvest?.scheduled_harvest_date || null
           const lastIrrigation = irrigation?.logged_date         || null
-          const irrigationDays = lastIrrigation
-            ? Math.round((new Date(today) - new Date(lastIrrigation)) / 86400000)
-            : null
-          const harvestDays = nextHarvest
-            ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000)
-            : null
+          const irrigationDays = lastIrrigation ? Math.round((new Date(today) - new Date(lastIrrigation)) / 86400000) : null
+          const harvestDays    = nextHarvest ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000) : null
+
           return json({ success: true, data: {
-            managerName, estateId, estateType,
+            managerName: actor === 'pradosh' ? 'Pradosh' : 'Manager', estateId, estateType,
             nextHarvestDate:    nextHarvest,
             harvestDaysAway:    harvestDays,
-            lastPricePerKg:     lastPrice,
+            lastPricePerKg:      lastPrice,
             lastIrrigationDate: lastIrrigation,
             irrigationDaysAgo:  irrigationDays,
             irrigationAlert:    irrigationDays === null || irrigationDays > 14,
           }})
         }
 
-        // rubber estate — no irrigation, just last harvest
         const harvest = await ActiveDB.prepare(
-          `SELECT harvest_date, price_per_kg FROM rubber_harvests
-           WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
+          `SELECT harvest_date, price_per_kg FROM rubber_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
         ).bind(estateId).first()
         return json({ success: true, data: {
-          managerName, estateId, estateType,
+          managerName: 'RamananKutty', estateId, estateType,
           lastPricePerKg:  harvest?.price_per_kg || null,
           lastHarvestDate: harvest?.harvest_date || null,
           irrigationAlert: false,
         }})
       }
 
-
-      // MARKETING CAMPAIGNS — list all with aggregated analytics
       if (action === 'getCampaigns') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`
-          SELECT
-            c.id, c.campaign_name, c.unique_token, c.channel, c.is_active,
-            c.notes, c.created_at,
-            SUM(CASE WHEN a.event_type='click'   THEN 1 ELSE 0 END) as clicks,
-            SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries,
-            SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings
-          FROM marketing_campaigns c
-          LEFT JOIN campaign_analytics a ON a.campaign_id = c.id
-          WHERE c.villa_id = ?
-          GROUP BY c.id
-          ORDER BY c.created_at DESC
-        `).bind(villaId).all()
+        const { results } = await DB.prepare(`SELECT c.id, c.campaign_name, c.unique_token, c.channel, c.is_active, c.notes, c.created_at, SUM(CASE WHEN a.event_type='click' THEN 1 ELSE 0 END) as clicks, SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries, SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings FROM marketing_campaigns c LEFT JOIN campaign_analytics a ON a.campaign_id = c.id WHERE c.villa_id = ? GROUP BY c.id ORDER BY c.created_at DESC`).bind(villaId).all()
         return json({ success: true, data: results })
       }
 
-      // CAMPAIGN ANALYTICS DETAIL — breakdown by geo + hour for one campaign
       if (action === 'getCampaignAnalytics') {
         const campaignId = url.searchParams.get('campaignId') || ''
         if (!campaignId) return err('campaignId required')
-        const events = await DB.prepare(
-          `SELECT event_type, country, region, city,
-           strftime('%H', ts) as hour, DATE(ts) as day, COUNT(*) as n
-           FROM campaign_analytics
-           WHERE campaign_id = ?
-           GROUP BY event_type, country, region, city, hour, day
-           ORDER BY day DESC, hour DESC`
-        ).bind(campaignId).all()
+        const events = await DB.prepare(`SELECT event_type, country, region, city, strftime('%H', ts) as hour, DATE(ts) as day, COUNT(*) as n FROM campaign_analytics WHERE campaign_id = ? GROUP BY event_type, country, region, city, hour, day ORDER BY day DESC, hour DESC`).bind(campaignId).all()
         return json({ success: true, data: events.results })
       }
 
-      // ESTATE DASHBOARD — 12-month P&L summary with expense drill-down
-
-      // IRRIGATION ZONE HEALTH DASHBOARD
+      // IRRIGATION ZONE HEALTH DASHBOARD (Cleaned to exclude non-existent column fields)
       if (action === 'getIrrigationZoneHealth') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         const today    = new Date().toISOString().slice(0, 10)
 
-        // Get all active zones — table may not exist yet
         let zones = []
         try {
           const { results } = await ActiveDB.prepare(
             `SELECT * FROM irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`
           ).bind(estateId).all()
           zones = results
-        } catch(e) {
-          return json({ success: true, data: { zones: [], lastRun: null } })
-        }
+        } catch(e) { return json({ success: true, data: { zones: [], lastRun: null } }) }
 
-        if (zones.length === 0) {
-          return json({ success: true, data: { zones: [], lastRun: null } })
-        }
+        if (zones.length === 0) return json({ success: true, data: { zones: [], lastRun: null } })
 
-        // For each zone get the last N irrigation logs
         const zoneHealth = await Promise.all(zones.map(async (z) => {
-          // Get last 5 logs for this zone
           const { results: logs } = await ActiveDB.prepare(
-            `SELECT logged_date FROM irrigation_logs
-             WHERE estate = ? AND zone_id = ?
-             ORDER BY logged_date DESC LIMIT 5`
+            `SELECT logged_date FROM irrigation_logs WHERE estate = ? AND zone_id = ? ORDER BY logged_date DESC LIMIT 5`
           ).bind(estateId, z.zone_id).all()
 
           const lastLogged   = logs[0]?.logged_date || null
           const freq         = z.expected_freq_days || 7
-          const daysSince    = lastLogged
-            ? Math.round((new Date(today) - new Date(lastLogged)) / 86400000)
-            : null
+          const daysSince    = lastLogged ? Math.round((new Date(today) - new Date(lastLogged)) / 86400000) : null
 
-          // Count consecutive missed cycles
-          // A miss = gap between consecutive logs > (freq + 2 day tolerance)
           let consecutiveMisses = 0
-          if (!lastLogged) {
-            consecutiveMisses = 3 // never logged = treat as critical
-          } else {
-            // Check if current gap exceeds one cycle
-            const missedCycles = daysSince !== null
-              ? Math.floor(daysSince / freq)
-              : 3
-            consecutiveMisses = Math.max(0, missedCycles - 1) // -1 because current cycle may not be due yet
-            // Cap at 3 for status purposes
+          if (!lastLogged) { consecutiveMisses = 3 }
+          else {
+            const missedCycles = daysSince !== null ? Math.floor(daysSince / freq) : 3
+            consecutiveMisses = Math.max(0, missedCycles - 1)
             if (daysSince > freq + 2) consecutiveMisses = Math.max(1, consecutiveMisses)
           }
 
-          const status = !lastLogged              ? 'never'
-            : consecutiveMisses >= 3              ? 'critical'
-            : consecutiveMisses === 2             ? 'alert'
-            : consecutiveMisses === 1             ? 'warn'
-            : daysSince !== null && daysSince > freq + 2 ? 'warn'
-            : 'ok'
+          const status = !lastLogged ? 'never' : consecutiveMisses >= 3 ? 'critical' : consecutiveMisses === 2 ? 'alert' : consecutiveMisses === 1 ? 'warn' : daysSince !== null && daysSince > freq + 2 ? 'warn' : 'ok'
 
-          return {
-            zone_id:             z.zone_id,
-            zone_name:           z.zone_name,
-            zone_label:          z.zone_label,
-            expected_freq_days:  freq,
-            last_logged:         lastLogged,
-            days_since:          daysSince,
-            consecutive_misses:  consecutiveMisses,
-            status,
-          }
+          return { zone_id: z.zone_id, zone_name: z.zone_name, zone_label: z.zone_label, expected_freq_days: freq, last_logged: lastLogged, days_since: daysSince, consecutive_misses: consecutiveMisses, status }
         }))
 
-        // Last irrigation run across all zones
-        const lastRun = await ActiveDB.prepare(
-          `SELECT MAX(logged_date) as last FROM irrigation_logs WHERE estate = ?`
-        ).bind(estateId).first()
-
-        return json({ success: true, data: {
-          zones: zoneHealth,
-          lastRun: lastRun?.last || null,
-        }})
+        const lastRun = await ActiveDB.prepare(`SELECT MAX(logged_date) as last FROM irrigation_logs WHERE estate = ?`).bind(estateId).first()
+        return json({ success: true, data: { zones: zoneHealth, lastRun: lastRun?.last || null } })
       }
 
       // IRRIGATION HISTORY — full log list
       if (action === 'getIrrigationHistory') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const { results } = await ActiveDB.prepare(
-          `SELECT * FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`
-        ).bind(estateId).all()
+        const { results } = await ActiveDB.prepare(`SELECT * FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
       // MANGO HARVESTS — list
       if (action === 'getMangoHarvests') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const { results } = await ActiveDB.prepare(
-          `SELECT * FROM mango_harvests WHERE estate = ? ORDER BY harvest_date DESC`
-        ).bind(estateId).all()
+        const { results } = await ActiveDB.prepare(`SELECT * FROM mango_harvests WHERE estate = ? ORDER BY harvest_date DESC`).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const { results } = await ActiveDB.prepare(
-          `SELECT * FROM estate_contacts WHERE estate = ? AND active = 1 ORDER BY category, name`
-        ).bind(estateId).all()
+        const { results } = await ActiveDB.prepare(`SELECT * FROM estate_contacts WHERE estate = ? AND active = 1 ORDER BY category, name`).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
-      // ESTATE HIGHLIGHTS — operational summary for estate manager (non-financial)
+      // ESTATE HIGHLIGHTS — Operational Summary Dashboard
       if (action === 'getEstateHighlights') {
-        const estateId = url.searchParams.get('estate') || 'pollachi'
-        const cutoff   = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
+        const estateId  = url.searchParams.get('estate') || 'pollachi'
+        const cutoff    = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
         const cutoffStr = cutoff.toISOString().slice(0, 10)
         const today     = new Date().toISOString().slice(0, 10)
 
-        // 1. Coconut harvests — planned vs actual timing
         const { results: harvests } = await ActiveDB.prepare(
-          `SELECT harvest_date, scheduled_harvest_date, total_nuts, total_weight_kg, harvester_name
-           FROM coconut_harvests
-           WHERE estate_id = ? AND harvest_date >= ?
-           ORDER BY harvest_date DESC`
+          `SELECT harvest_date, scheduled_harvest_date, total_nuts, total_weight_kg, harvester_name FROM coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
         ).bind(estateId, cutoffStr).all()
 
         const harvestTimings = harvests.map((h, i) => {
           const prev = harvests[i + 1]
           const planned = h.scheduled_harvest_date || prev?.scheduled_harvest_date || null
-          const gap = planned
-            ? Math.round((new Date(h.harvest_date) - new Date(planned)) / 86400000)
-            : null
-          return {
-            date:      h.harvest_date,
-            planned:   planned,
-            gap:       gap, // negative = early, positive = late, 0 = on time
-            nuts:      h.total_nuts,
-            weightKg:  h.total_weight_kg,
-          }
+          const gap = planned ? Math.round((new Date(h.harvest_date) - new Date(planned)) / 86400000) : null
+          return { date: h.harvest_date, planned, gap, nuts: h.total_nuts, weightKg: h.total_weight_kg }
         })
 
-        // Next scheduled harvest
         const lastHarvest = harvests[0]
         const nextScheduled = lastHarvest?.scheduled_harvest_date || null
-        const daysToNext = nextScheduled
-          ? Math.round((new Date(nextScheduled) - new Date(today)) / 86400000)
-          : null
+        const daysToNext = nextScheduled ? Math.round((new Date(nextScheduled) - new Date(today)) / 86400000) : null
 
-        // 2. Irrigation — monthly count for last 12 months
         const { results: irrigLogs } = await ActiveDB.prepare(
-          `SELECT logged_date,
-           strftime('%Y-%m', logged_date) as ym,
-           COUNT(*) as count
-           FROM irrigation_logs
-           WHERE estate = ? AND logged_date >= ?
-           GROUP BY ym
-           ORDER BY ym DESC`
+          `SELECT logged_date, strftime('%Y-%m', logged_date) as ym, COUNT(*) as count FROM irrigation_logs WHERE estate = ? AND logged_date >= ? GROUP BY ym ORDER BY ym DESC`
         ).bind(estateId, cutoffStr).all()
 
-        // Last irrigation
-        const lastIrrigation = await ActiveDB.prepare(
-          `SELECT logged_date FROM irrigation_logs
-           WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
-        ).bind(estateId).first()
+        const lastIrrigation = await ActiveDB.prepare(`SELECT logged_date FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`).bind(estateId).first()
 
-        // 3. Fertilization — last done + next planned (table may not exist yet)
         let lastFert = null, nextFert = null
         try {
           const { results: fertilizations } = await ActiveDB.prepare(
-            `SELECT planned_date, actual_date, fertilizer_type, notes
-             FROM fertilization_log WHERE estate = ? ORDER BY planned_date DESC`
+            `SELECT planned_date, actual_date, fertilizer_type, notes FROM fertilization_log WHERE estate = ? ORDER BY planned_date DESC`
           ).bind(estateId).all()
           lastFert = fertilizations.find(f => f.actual_date) || null
           nextFert = fertilizations.find(f => !f.actual_date) || null
-        } catch(e) { /* table not created yet */ }
+        } catch(e) {}
 
-        // 4. Mango harvests — last 2 years (table may not exist yet)
         let mangoes = []
         try {
           const { results: mangoResults } = await ActiveDB.prepare(
-            `SELECT harvest_year, SUM(quantity_tons) as tons,
-             SUM(quantity_units) as units, SUM(total_revenue) as revenue
-             FROM mango_harvests WHERE estate = ?
-             GROUP BY harvest_year ORDER BY harvest_year DESC LIMIT 3`
+            `SELECT strftime('%Y', harvest_date) as harvest_year, SUM(total_boxes) as boxes, SUM(total_revenue) as revenue FROM mango_harvests WHERE estate = ? GROUP BY harvest_year ORDER BY harvest_year DESC LIMIT 3`
           ).bind(estateId).all()
           mangoes = mangoResults
-        } catch(e) { /* table not created yet */ }
+        } catch(e) {}
 
         return json({ success: true, data: {
           coconut: { harvestTimings, nextScheduled, daysToNext, totalHarvests: harvests.length },
-          irrigation: {
-            monthly:       irrigLogs,
-            lastDate:      lastIrrigation?.logged_date || null,
-            daysAgo:       lastIrrigation?.logged_date
-              ? Math.round((new Date(today) - new Date(lastIrrigation.logged_date)) / 86400000)
-              : null,
-          },
-          fertilization: {
-            last: lastFert ? { date: lastFert.actual_date, type: lastFert.fertilizer_type } : null,
-            next: nextFert ? { date: nextFert.planned_date, type: nextFert.fertilizer_type, notes: nextFert.notes } : null,
-          },
+          irrigation: { monthly: irrigLogs, lastDate: lastIrrigation?.logged_date || null, daysAgo: lastIrrigation?.logged_date ? Math.round((new Date(today) - new Date(lastIrrigation.logged_date)) / 86400000) : null },
+          fertilization: { last: lastFert ? { date: lastFert.actual_date, type: lastFert.fertilizer_type } : null, next: nextFert ? { date: nextFert.planned_date, type: nextFert.fertilizer_type, notes: nextFert.notes } : null },
           mango: mangoes,
         }})
       }
 
+      // ESTATE DASHBOARD — Financial 12-Month Master P&L Aggregation
       if (action === 'getEstateDashboard') {
         if (payload.role !== 'owner') return err('Owner access only', 403)
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        // Last 12 months of harvests
-        const cutoff = new Date()
-        cutoff.setMonth(cutoff.getMonth() - 12)
+        const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
         const cutoffStr = cutoff.toISOString().slice(0, 10)
 
         const { results: harvests } = await ActiveDB.prepare(
-          `SELECT harvest_date, total_earnings, total_expense, net_income,
-           harvest_expense, dehusk_expense, tractor_expense, other_expense,
-           price_per_kg, total_nuts, total_weight_kg, harvester_name
-           FROM coconut_harvests
-           WHERE estate_id = ? AND harvest_date >= ?
-           ORDER BY harvest_date DESC`
+          `SELECT harvest_date, total_earnings, total_expense, net_income, harvest_expense, dehusk_expense, tractor_expense, other_expense FROM coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
         ).bind(estateId, cutoffStr).all()
 
         const { results: txns } = await ActiveDB.prepare(
-          `SELECT date, type, category, amount
-           FROM estate_transactions
-           WHERE estate = ? AND date >= ?
-           ORDER BY date DESC`
+          `SELECT date, type, category, amount FROM estate_transactions WHERE estate = ? AND date >= ? ORDER BY date DESC`
         ).bind(estateId, cutoffStr).all()
 
-        // Aggregate totals
+        let mangoRevenue = 0
+        try {
+          const mangoData = await ActiveDB.prepare(`SELECT SUM(total_revenue) as total FROM mango_harvests WHERE estate = ? AND harvest_date >= ?`).bind(estateId, cutoffStr).first()
+          mangoRevenue = mangoData?.total || 0
+        } catch(e) {}
+
         const harvestIncome  = harvests.reduce((s, r) => s + (r.total_earnings || 0), 0)
         const harvestExpense = harvests.reduce((s, r) => s + (r.total_expense  || 0), 0)
-        const harvestNet     = harvests.reduce((s, r) => s + (r.net_income     || 0), 0)
 
         const txnIncome  = txns.filter(t => t.type === 'income' ).reduce((s,t) => s+(t.amount||0), 0)
         const txnExpense = txns.filter(t => t.type === 'expense').reduce((s,t) => s+(t.amount||0), 0)
 
-        const totalIncome  = harvestIncome  + txnIncome
+        const totalIncome  = harvestIncome  + txnIncome + mangoRevenue
         const totalExpense = harvestExpense + txnExpense
-        const netProfit    = harvestNet     - txnExpense + txnIncome
+        const netProfit    = totalIncome - totalExpense
 
-        // Expense breakdown by category (harvest sub-categories + txn categories)
         const expBreakdown = {}
         harvests.forEach(r => {
           const add = (k, v) => { expBreakdown[k] = (expBreakdown[k]||0) + (v||0) }
@@ -1724,40 +1170,47 @@ export async function onRequest(ctx) {
           add('Tractor / tiling',  r.tractor_expense)
           add('Other (harvest)',   r.other_expense)
         })
-        txns.filter(t => t.type === 'expense').forEach(t => {
-          expBreakdown[t.category] = (expBreakdown[t.category]||0) + (t.amount||0)
-        })
+        txns.filter(t => t.type === 'expense').forEach(t => { expBreakdown[t.category] = (expBreakdown[t.category]||0) + (t.amount||0) })
 
-        // Monthly summary (last 12 months)
         const monthly = {}
         harvests.forEach(r => {
-          const ym = r.harvest_date.slice(0, 7) // YYYY-MM
-          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0 }
+          const ym = r.harvest_date.slice(0, 7)
+          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
           monthly[ym].income  += r.total_earnings || 0
           monthly[ym].expense += r.total_expense  || 0
-          monthly[ym].net     += r.net_income     || 0
-          monthly[ym].harvests++
         })
         txns.forEach(t => {
           const ym = t.date.slice(0, 7)
-          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0 }
+          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
           if (t.type === 'income')  monthly[ym].income  += t.amount || 0
           if (t.type === 'expense') monthly[ym].expense += t.amount || 0
-          if (t.type === 'expense') monthly[ym].expense += t.amount || 0
-          if (t.type === 'income')  monthly[ym].income  += t.amount || 0
         })
 
-        // Compute net for each month cleanly
         const monthlyArr = Object.entries(monthly)
           .sort((a,b) => b[0].localeCompare(a[0]))
           .map(([ym, v]) => ({ ym, ...v, net: v.income - v.expense }))
 
-        return json({ success: true, data: {
-          totalIncome, totalExpense, netProfit,
-          harvestCount: harvests.length,
-          expBreakdown,
-          monthly: monthlyArr,
-        }})
+        return json({ success: true, data: { totalIncome, totalExpense, netProfit, harvestCount: harvests.length, expBreakdown, monthly: monthlyArr } })
+      }
+
+      if (action === 'getPendingReviewStays') {
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, guest_phone, guest_email, drive_folder_url, created_at, folder_created, folder_created_at FROM stays WHERE status = 'pending_review' AND (checkout_date IS NULL OR checkout_date >= date('now')) ORDER BY checkin_date ASC`).all()
+        return json({ success: true, data: results.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date, nights: r.nights, phone: r.guest_phone, email: r.guest_email, driveFolderUrl: r.drive_folder_url, createdAt: r.created_at, folderCreated: r.folder_created || 0, folderCreatedAt: r.folder_created_at || null })) })
+      }
+
+      if (action === 'getReviewChaseList') {
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, guest_phone, review_rating, review_date, review_chased_at, review_chase_count FROM stays WHERE status IN ('checked_out','pending_review') AND checkout_date < date('now') AND (review_rating IS NULL OR review_rating = 0) ORDER BY checkout_date DESC`).all()
+        const today = new Date()
+        return json({ success: true, data: results.map(r => {
+          const checkout = new Date(r.checkout_date); const daysOut = Math.floor((today - checkout) / 86400000)
+          const lastChased = r.review_chased_at ? new Date(r.review_chased_at) : null; const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
+          return { stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, phone: r.guest_phone, reviewRating: r.review_rating || 0, reviewDate: r.review_date || null, chasedAt: r.review_chased_at || null, chaseCount: r.review_chase_count || 0, daysSinceChase, daysOut, autoCloseReady: daysOut >= 20 }
+        }) })
+      }
+
+      if (action === 'getCheckinLinks') {
+        const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM checkin_links ORDER BY villa_id, partner`).all()
+        return json({ success: true, data: results })
       }
 
       return err(`Unknown GET action: ${action}`, 404)
@@ -1767,475 +1220,125 @@ export async function onRequest(ctx) {
     if (method === 'POST') {
       const body = await request.json()
 
-      // WRITE SQL — owner only, allows DELETE/UPDATE/INSERT/ALTER
       if (action === 'runSQLWrite') {
-        const sql = (body && body.sql) ? body.sql.trim() : ''
+        const sql = body?.sql ? body.sql.trim() : ''
         if (!sql) return err('sql required')
-        const upper = sql.toUpperCase()
-        const blocked = ['DROP TABLE','TRUNCATE','DROP DATABASE','ATTACH','DETACH']
-        if (blocked.some(b => upper.includes(b))) {
+        if (['DROP TABLE','TRUNCATE','DROP DATABASE','ATTACH','DETACH'].some(b => sql.toUpperCase().includes(b))) {
           return err('Operation not permitted — DROP TABLE and TRUNCATE are blocked')
         }
         try {
           const result = await DB.prepare(sql).run()
-          return json({ success: true, data: {
-            changes:  result.meta?.changes  ?? 0,
-            duration: result.meta?.duration ?? 0,
-          }})
-        } catch (e) {
-          return json({ success: false, error: e.message }, 400)
-        }
+          return json({ success: true, data: { changes: result.meta?.changes ?? 0, duration: result.meta?.duration ?? 0 } })
+        } catch (e) { return json({ success: false, error: e.message }, 400) }
       }
 
-      // BOOKING
       if (action === 'createBooking') {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
 
-        // ── EXISTING STAY MERGE ──────────────────────────────────────────
-        // If a stay already exists for this guest+date (from a previous poller run,
-        // guest form, or manual entry), update it with Airbnb financials rather
-        // than creating a duplicate or triggering a double-booking alert.
         const firstName = (body.guestName || body.bookerName || '').split(' ')[0]
-        const provisional = await DB.prepare(
-          `SELECT stay_id, status FROM stays
-           WHERE guest_name LIKE ? AND checkin_date = ?
-             AND villa_id = ?
-             AND status NOT IN ('cancelled','closed','checked_out')
-           LIMIT 1`
-        ).bind(`%${firstName}%`, body.checkInDate, body.villaId || 'dwarka').first()
+        const provisional = await DB.prepare(`SELECT stay_id, status FROM stays WHERE guest_name LIKE ? AND checkin_date = ? AND villa_id = ? AND status NOT IN ('cancelled','closed','checked_out') LIMIT 1`).bind(`%${firstName}%`, body.checkInDate, body.villaId || 'dwarka').first()
 
         if (provisional) {
-          // Update the existing stay with Airbnb financials
-          await DB.prepare(`
-            UPDATE stays SET
-              source = 'airbnb',
-              airbnb_conf = ?,
-              gross = ?, commission_pct = ?, commission_amt = ?, net = ?,
-              night_fee = ?, cleaning_fee = ?, host_service_fee = ?,
-              you_earn = ?, guest_service_fee = ?, guest_paid_total = ?,
-              checkout_date = COALESCE(NULLIF(checkout_date,''), ?),
-              nights = COALESCE(NULLIF(nights,0), ?),
-              adults = COALESCE(NULLIF(adults,0), ?),
-              updated_by = ?, updated_at = datetime('now')
-            WHERE stay_id = ?
-          `).bind(
-            body.airbnbConf || null,
-            body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0,
-            body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0,
-            body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0,
-            body.checkOutDate || null, parseInt(body.nights) || 1,
-            body.adults || 1,
-            actor, provisional.stay_id
-          ).run()
-          console.log('Merged Airbnb financials into existing stay:', provisional.stay_id, '(was:', provisional.status, ')')
+          await DB.prepare(`UPDATE stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
           return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
 
-        // ── DOUBLE-BOOKING CHECK ──────────────────────────────────────────
-        // Check if any non-cancelled stay overlaps with the requested dates
-        const conflict = await DB.prepare(`
-          SELECT stay_id, guest_name, checkin_date, checkout_date, status, source, created_at
-          FROM stays
-          WHERE villa_id = ?
-            AND status NOT IN ('cancelled','closed','checked_out')
-            AND checkin_date  < ?
-            AND checkout_date > ?
-          LIMIT 1
-        `).bind(body.villaId || 'dwarka', body.checkOutDate, body.checkInDate).first()
+        const conflict = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, status, source, created_at FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out') AND checkin_date < ? AND checkout_date > ? LIMIT 1`).bind(body.villaId || 'dwarka', body.checkOutDate, body.checkInDate).first()
 
         if (conflict) {
-          // ── DOUBLE BOOKING ALERT EMAIL ──────────────────────────────────
-          // Send rich alert email to owner with full details of both bookings
           const alertSubject = '🚨 URGENT — Double booking detected! ' + (body.checkInDate || '')
-          const alertBody = [
-            '🚨 DOUBLE BOOKING DETECTED — IMMEDIATE ACTION REQUIRED',
-            '='.repeat(60),
-            '',
-            'A new booking was BLOCKED because the villa is already booked',
-            'for overlapping dates. Please contact both guests immediately.',
-            '',
-            'EXISTING BOOKING (already confirmed):',
-            '-'.repeat(40),
-            '  Stay ID  :  ' + conflict.stay_id,
-            '  Guest    :  ' + conflict.guest_name,
-            '  Check-in :  ' + conflict.checkin_date,
-            '  Check-out:  ' + conflict.checkout_date,
-            '  Status   :  ' + conflict.status,
-            '  Source   :  ' + (conflict.source || 'unknown'),
-            '  Booked   :  ' + (conflict.created_at || 'unknown'),
-            '',
-            'NEW BOOKING ATTEMPT (BLOCKED):',
-            '-'.repeat(40),
-            '  Guest    :  ' + (body.guestName || body.bookerName || 'unknown'),
-            '  Check-in :  ' + (body.checkInDate || ''),
-            '  Check-out:  ' + (body.checkOutDate || ''),
-            '  Source   :  ' + (body.source || 'unknown'),
-            '  Airbnb # :  ' + (body.airbnbConf || 'N/A'),
-            '  Attempted:  ' + new Date().toISOString().replace('T',' ').slice(0,19) + ' UTC',
-            '',
-            'OVERLAPPING DATES:',
-            '-'.repeat(40),
-            '  Conflict period: ' + (body.checkInDate || '') + ' → ' + (body.checkOutDate || ''),
-            '',
-            'ACTION REQUIRED:',
-            '-'.repeat(40),
-            '  1. Contact the NEW guest immediately to apologise and cancel',
-            '  2. Check all channel partners and BLOCK the dates',
-            '  3. Review your calendar sync settings on Airbnb/MakeMyTrip/etc.',
-            '  4. Log into portal to verify: manage.luxuryvillasofguruvayur.com',
-            '',
-            '='.repeat(60),
-            'This is an automated alert from bgIndia Portal.',
-            'Stay ID of existing booking: ' + conflict.stay_id,
-          ].join('\n')
-
-          // Send via MailChannels (free on Cloudflare Workers)
+          const alertBody = ['🚨 DOUBLE BOOKING DETECTED — IMMEDIATE ACTION REQUIRED', '='.repeat(60), '', 'A new booking was BLOCKED because the villa is already booked overlapping.', '', `EXISTING: ${conflict.stay_id} | ${conflict.guest_name} | ${conflict.checkin_date} -> ${conflict.checkout_date}`, `NEW ATTEMPT: ${body.guestName} | ${body.checkInDate} -> ${body.checkOutDate}`].join('\n')
           try {
-            await fetch('https://api.mailchannels.net/tx/v1/send', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                personalizations: [{
-                  to: [{ email: env.OWNER_EMAIL || 'kerala.luxuryvillas@gmail.com' }],
-                  cc: [{ email: 'bijisukumar@gmail.com' }],
-                }],
-                from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Portal — URGENT' },
-                subject: alertSubject,
-                content: [{ type: 'text/plain', value: alertBody }],
-              }),
-            })
-          } catch(emailErr) {
-            console.error('Double booking alert email failed:', emailErr.message)
-          }
+            await fetch('https://api.mailchannels.net/tx/v1/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personalizations: [{ to: [{ email: env.OWNER_EMAIL || 'kerala.luxuryvillas@gmail.com' }], cc: [{ email: 'bijisukumar@gmail.com' }] }], from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Portal — URGENT' }, subject: alertSubject, content: [{ type: 'text/plain', value: alertBody }] }) })
+          } catch(emailErr) {}
 
-          // Log to duplicate_bookings table for audit and channel sync analysis
           try {
-            const dupId = `DUP-${Date.now()}-${Math.random().toString(36).slice(2,6).toUpperCase()}`
-            const overlapNights = body.checkInDate && body.checkOutDate
-              ? Math.max(0, Math.round(
-                  (Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) -
-                   Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000
-                ))
-              : 0
-            await DB.prepare(`
-              INSERT INTO duplicate_bookings (
-                dup_id, villa_id, detected_at,
-                existing_stay_id, existing_guest, existing_checkin, existing_checkout,
-                existing_source, existing_booked_at,
-                new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf,
-                overlap_nights
-              ) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)
-            `).bind(
-              dupId, body.villaId || 'dwarka',
-              conflict.stay_id, conflict.guest_name,
-              conflict.checkin_date, conflict.checkout_date,
-              conflict.source || 'unknown', conflict.created_at || null,
-              body.guestName || body.bookerName || 'unknown',
-              body.checkInDate, body.checkOutDate,
-              body.source || 'unknown', body.airbnbConf || null,
-              overlapNights
-            ).run()
-            console.log('Duplicate booking logged:', dupId)
-          } catch(logErr) {
-            console.error('Failed to log duplicate:', logErr.message)
-          }
+            const overlapNights = body.checkInDate && body.checkOutDate ? Math.max(0, Math.round((Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) - Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000)) : 0
+            await DB.prepare(`INSERT INTO duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`).bind(`DUP-${Date.now()}`, body.villaId || 'dwarka', conflict.stay_id, conflict.guest_name, conflict.checkin_date, conflict.checkout_date, conflict.source || 'unknown', conflict.created_at || null, body.guestName || 'unknown', body.checkInDate, body.checkOutDate, body.source || 'unknown', body.airbnbConf || null, overlapNights).run()
+          } catch(logErr) {}
 
-          console.warn('DOUBLE BOOKING BLOCKED:', conflict.stay_id,
-            'conflicts with new booking for', body.guestName, body.checkInDate)
-
-          return json({
-            success: false,
-            error: `Double booking detected: ${conflict.guest_name} is already booked ` +
-                   `${conflict.checkin_date} → ${conflict.checkout_date} (${conflict.stay_id}). ` +
-                   `Owner has been alerted by email.`,
-            conflict: {
-              stayId:    conflict.stay_id,
-              guestName: conflict.guest_name,
-              checkIn:   conflict.checkin_date,
-              checkOut:  conflict.checkout_date,
-              status:    conflict.status,
-              source:    conflict.source,
-            }
-          }, 409)
+          return json({ success: false, error: `Double booking detected: ${conflict.guest_name} is already booked`, conflict }, 409)
         }
-        // ── END DOUBLE-BOOKING CHECK ──────────────────────────────────────
 
-        await DB.prepare(`
-          INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
-            checkin_date, checkout_date, nights, adults, children,
-            tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status,
-            home_address, city, state, country, from_city,
-            night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total,
-            airbnb_conf,
-            created_by, updated_by)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).bind(
-          stayId, body.villaId || 'dwarka', body.source || (body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : 'direct'),
-          body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null,
-          body.checkInDate, body.checkOutDate, nights,
-          body.adults || 1, body.children || 0,
-          body.tariffPerNight || 0, body.extraCharges || 0,
-          body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0,
-          body.homeAddress || null, body.city || null, body.state || null,
-          body.country || 'India', body.fromCity || body.city || null,
-          body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0,
-          body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0,
-          body.airbnbConf || null,
-          actor, actor
-        ).run()
-        // Raman commission is created at check-OUT (not here) to avoid
-        // creating commission records for cancelled bookings
+        await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'confirmed',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', body.source || 'direct', body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, body.tariffPerNight || 0, body.extraCharges || 0, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
         return json({ success: true, data: { stayId } })
       }
 
       if (action === 'confirmCheckIn') {
-        // If stayId provided, update that stay directly
-        // Otherwise find the most recent confirmed stay for this guest (used by CheckIn screen)
         let stayId = body.stayId
         if (!stayId) {
-          const found = await DB.prepare(
-            `SELECT stay_id FROM stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`
-          ).bind(body.guestName || body.bookerName).first()
+          const found = await DB.prepare(`SELECT stay_id FROM stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName).first()
           stayId = found?.stay_id
         }
-        // If still no stay, create one on the fly (CheckIn screen flow)
         if (!stayId) {
           stayId = genStayId(body.villaId || 'dwarka')
-          await DB.prepare(`
-            INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email,
-              checkin_date, checkout_date, nights, adults, children, gross, net, status,
-              created_by, updated_by, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)
-          `).bind(
-            stayId, body.villaId || 'dwarka', 'direct',
-            body.guestName || body.bookerName,
-            body.phone || null, body.email || null,
-            body.checkInDate, body.checkOutDate,
-            Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)),
-            body.adultsCount || 1, body.childrenCount || 0,
-            actor, actor, now(), now()
-          ).run()
+          await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', 'direct', body.guestName || body.bookerName, body.phone || null, body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, now(), now()).run()
         } else {
-          await DB.prepare(
-            `UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`
-          ).bind(actor, now(), stayId).run()
+          await DB.prepare(`UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
         }
         return json({ success: true, data: { stayId } })
       }
 
-      // CHECK-OUT: complete the stay lifecycle + create Raman commission
       if (action === 'checkOut') {
         const { stayId } = body
-
-        // Mark stay as checked_out
-        await DB.prepare(
-          `UPDATE stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`
-        ).bind(actor, now(), stayId).run()
-
-        // Fetch stay details to calculate commission
-        const stay = await DB.prepare(
-          `SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`
-        ).bind(stayId).first()
-
+        await DB.prepare(`UPDATE stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+        const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`).bind(stayId).first()
         if (stay) {
-          // Only create commission if one doesn't already exist for this stay
-          const existing = await DB.prepare(
-            `SELECT comm_id FROM raman_commissions WHERE stay_id = ?`
-          ).bind(stayId).first()
-
+          const existing = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
-            const nights    = parseInt(stay.nights) || 1
-            const ramanComm = nights > 1 ? 2000 : 1000
-            await DB.prepare(
-              `INSERT INTO raman_commissions
-                 (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid,
-                  created_by, updated_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`
-            ).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
+            const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
+            await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
             return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
           }
         }
         return json({ success: true, data: { stayId, commissionCreated: false } })
       }
 
-      // CANCEL STAY: mark cancelled, never creates a commission
       if (action === 'cancelStay') {
-        await DB.prepare(
-          `UPDATE stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`
-        ).bind(actor, now(), body.stayId).run()
-        // Also remove any erroneously created commission for this stay
-        await DB.prepare(
-          `DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`
-        ).bind(body.stayId).run()
+        await DB.prepare(`UPDATE stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), body.stayId).run()
+        await DB.prepare(`DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`).bind(body.stayId).run()
         return json({ success: true })
       }
 
-      // KITCHEN INCIDENTALS
       if (action === 'saveKitchenEntry') {
         const items = body.items || []
         for (const item of items) {
-          await DB.prepare(`
-            INSERT INTO stay_incidentals
-              (item_id, stay_id, inv_item_id, name, qty, price_per_unit, total,
-               created_by, updated_by, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
-          `).bind(genId('INC'), body.stayId, item.itemId || item.inv_item_id || null,
-                  item.name, item.qty || 1,
-                  item.pricePerUnit || item.price || 0,
-                  item.subtotal || item.total || 0,
-                  actor, actor, now(), now()).run()
+          await DB.prepare(`INSERT INTO stay_incidentals (item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(genId('INC'), body.stayId, item.itemId || item.inv_item_id || null, item.name, item.qty || 1, item.pricePerUnit || item.price || 0, item.subtotal || item.total || 0, actor, actor, now(), now()).run()
         }
         return json({ success: true })
       }
 
-      // VILLA RENTAL INCOME (saves as a stay record)
       if (action === 'saveVillaRentalIncome') {
-        // If stayId provided → UPDATE existing stay financials (CompleteBooking flow)
-        // Otherwise → INSERT new closed stay (legacy VillaRentalIncome manual entry)
         if (body.stayId) {
-          await DB.prepare(`
-            UPDATE stays SET
-              source             = COALESCE(NULLIF(?, ''), source),
-              tariff_per_night   = ?,
-              extra_charges      = ?,
-              extra_lines        = ?,
-              gross              = ?,
-              commission_pct     = ?,
-              commission_amt     = ?,
-              net                = ?,
-              night_fee          = COALESCE(NULLIF(?,0), night_fee),
-              cleaning_fee       = COALESCE(NULLIF(?,0), cleaning_fee),
-              host_service_fee   = COALESCE(NULLIF(?,0), host_service_fee),
-              you_earn           = COALESCE(NULLIF(?,0), you_earn),
-              guest_service_fee  = COALESCE(NULLIF(?,0), guest_service_fee),
-              guest_paid_total   = COALESCE(NULLIF(?,0), guest_paid_total),
-              updated_by = ?, updated_at = ?
-            WHERE stay_id = ?
-          `).bind(
-            body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null,
-            body.tariffPerNight || 0,
-            body.extraCharges   || 0,
-            body.extraLines     || null,
-            body.gross          || 0,
-            body.commPct        || 0,
-            body.commAmt        || 0,
-            body.net            || 0,
-            // Airbnb fee fields — only overwrite if provided
-            body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee        || 0 : 0,
-            body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee     || 0 : 0,
-            body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee  || 0 : 0,
-            body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn         || 0 : 0,
-            body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0,
-            body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid       || 0 : 0,
-            actor, now(),
-            body.stayId
-          ).run()
+          await DB.prepare(`UPDATE stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, body.extraLines || null, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
           return json({ success: true, data: { stayId: body.stayId, updated: true } })
         }
-
-        // Legacy: INSERT new closed stay (manual income entry from VillaRentalIncome screen)
         const stayId = genStayId(body.villaId || 'dwarka')
-        await DB.prepare(`
-          INSERT INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date,
-            nights, gross, commission_pct, commission_amt, net, status,
-            created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)
-        `).bind(
-          stayId, body.villaId || 'dwarka', (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'),
-          body.guestName, body.checkInDate, body.checkOutDate,
-          body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0,
-          actor, actor, now(), now()
-        ).run()
+        await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'), body.guestName, body.checkInDate, body.checkOutDate, body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, actor, actor, now(), now()).run()
         return json({ success: true, data: { stayId } })
       }
 
-      // RENTAL INCOME — supports multi-month range
       if (action === 'saveRentalIncome') {
         const { year, monthFrom, monthTo, properties } = body
-        // monthFrom/monthTo = 0-indexed. If single month, monthTo = monthFrom
-        const from = parseInt(monthFrom ?? body.month ?? 0)
-        const to   = parseInt(monthTo   ?? body.month ?? from)
+        const from = parseInt(monthFrom ?? body.month ?? 0); const to = parseInt(monthTo ?? body.month ?? from)
         for (let m = from; m <= to; m++) {
           for (let pi = 0; pi < properties.length; pi++) {
-            const prop = properties[pi]
-            const propId = `rental_${pi + 1}`
+            const prop = properties[pi]; const propId = `rental_${pi + 1}`
             const income = (parseFloat(prop.rent) || 0) + (parseFloat(prop.carParking) || 0)
-            const expense = (parseFloat(prop.maintenance)||0) + (parseFloat(prop.electricity)||0) +
-                            (parseFloat(prop.water)||0) + (parseFloat(prop.propertyTax)||0) +
-                            (parseFloat(prop.landTax)||0) + (parseFloat(prop.extraMaintenance)||0)
-            const net = income - expense
-            const recId = `RI-${propId}-${year}-${String(m+1).padStart(2,'0')}`
-            await DB.prepare(`
-              INSERT OR REPLACE INTO rental_income
-                (record_id, prop_id, month, year, rent, car_parking, maintenance, electricity,
-                 water, property_tax, land_tax, extra_maintenance, net,
-                 created_by, updated_by, created_at, updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            `).bind(
-              recId, propId, m + 1, year,
-              parseFloat(prop.rent)||0, parseFloat(prop.carParking)||0,
-              parseFloat(prop.maintenance)||0, parseFloat(prop.electricity)||0,
-              parseFloat(prop.water)||0, parseFloat(prop.propertyTax)||0,
-              parseFloat(prop.landTax)||0, parseFloat(prop.extraMaintenance)||0, net,
-              actor, actor, now(), now()
-            ).run()
+            const expense = (parseFloat(prop.maintenance)||0) + (parseFloat(prop.electricity)||0) + (parseFloat(prop.water)||0) + (parseFloat(prop.propertyTax)||0) + (parseFloat(prop.landTax)||0) + (parseFloat(prop.extraMaintenance)||0)
+            const net = income - expense; const recId = `RI-${propId}-${year}-${String(m+1).padStart(2,'0')}`
+            await DB.prepare(`INSERT OR REPLACE INTO rental_income (record_id, prop_id, month, year, rent, car_parking, maintenance, electricity, water, property_tax, land_tax, extra_maintenance, net, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(recId, propId, m + 1, year, parseFloat(prop.rent)||0, parseFloat(prop.carParking)||0, parseFloat(prop.maintenance)||0, parseFloat(prop.electricity)||0, parseFloat(prop.water)||0, parseFloat(prop.propertyTax)||0, parseFloat(prop.landTax)||0, parseFloat(prop.extraMaintenance)||0, net, actor, actor, now(), now()).run()
           }
         }
         return json({ success: true })
       }
 
-      // COCONUT HARVEST
-
-// MANGO HARVEST — save
-      if (action === 'saveMangoHarvest') {
-        const { estate, harvestDate, boxType, buyer, pricePerBox,
-                totalRevenue, totalBoxes, notes,
-                alphonsa=0, neelam=0, malgova=0, banganapally=0,
-                kilimooku=0, sindooram=0, mix=0 } = body
-                
-        if (!harvestDate || !estate) return json({ success:false, error:'estate and harvestDate required' }, 400)
-        
-        const id = `MH-${Date.now()}`
-        
-        // 💻 Column names arranged exactly matching indices 0 to 17 from your PRAGMA table info
-        await ActiveDB.prepare(`
-          INSERT INTO mango_harvests (
-            harvest_id, estate, harvest_date, box_type, 
-            alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix, 
-            total_boxes, buyer, price_per_box, total_revenue, notes, 
-            created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        `).bind(
-          id, 
-          estate, 
-          harvestDate, 
-          boxType || 'Normal',
-          parseInt(alphonsa) || 0, 
-          parseInt(neelam) || 0, 
-          parseInt(malgova) || 0, 
-          parseInt(banganapally) || 0, 
-          parseInt(kilimooku) || 0, 
-          parseInt(sindooram) || 0, 
-          parseInt(mix) || 0,
-          parseInt(totalBoxes) || 0, 
-          buyer || null, 
-          parseFloat(pricePerBox) || 0, 
-          parseFloat(totalRevenue) || 0, 
-          notes || null,
-          actor
-        ).run()
-        
-        return json({ success:true, data:{ harvestId:id } })
-      }
-
+      // COCONUT HARVEST — Record entries (Mapped cleanly to exact layout)
       if (action === 'saveCoconutHarvest') {
         const id = genId('CH')
-        // Auto-calculate scheduled next harvest = harvest_date + 45 days
         const harvestDate = body.harvestDate
-        const scheduledNext = harvestDate
-          ? new Date(new Date(harvestDate).getTime() + 45 * 86400000).toISOString().slice(0, 10)
-          : null
+        const scheduledNext = harvestDate ? new Date(new Date(harvestDate).getTime() + 45 * 86400000).toISOString().slice(0, 10) : null
         await ActiveDB.prepare(`
           INSERT INTO coconut_harvests
             (harvest_id, estate_id, harvester_name, harvest_date, final_payment_date,
@@ -2247,8 +1350,7 @@ export async function onRequest(ctx) {
              dehusk_nuts, dehusk_cost_nut, dehusk_expense,
              tractor_expense, other_expense, total_expense, net_income,
              advance_payment, advance_date, second_payment, final_settlement, balance_due,
-             next_harvest_date, scheduled_harvest_date, notes,
-             created_by, updated_by, created_at, updated_at)
+             next_harvest_date, scheduled_harvest_date, notes, created_by, updated_by, created_at, updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           id, body.estate || 'pollachi', body.harvesterName, body.harvestDate, body.finalPaymentDate || null,
@@ -2262,723 +1364,292 @@ export async function onRequest(ctx) {
           parseFloat(body.tractorExpense)||0, parseFloat(body.otherExpense)||0, parseFloat(body.totalExpense)||0, parseFloat(body.netIncome)||0,
           parseFloat(body.advancePayment)||0, body.advancePaymentDate||null,
           parseFloat(body.secondPayment)||0, parseFloat(body.finalSettlement)||0, parseFloat(body.balanceDue)||0,
-          body.nextHarvestDate||null, scheduledNext,
-          body.notes||null,
-          actor, actor, now(), now()
+          body.nextHarvestDate||null, scheduledNext, body.notes||null, actor, actor, now(), now()
         ).run()
         return json({ success: true, data: { harvestId: id, scheduledNextHarvest: scheduledNext } })
       }
 
-      // RUBBER HARVEST
+      // RUBBER HARVEST — Record entries (Mapped cleanly to exact layout)
       if (action === 'saveRubberHarvest') {
         const id = genId('RH')
         const gross = (parseFloat(body.weightKg)||0) * (parseFloat(body.pricePerKg)||0)
         const net   = gross - (parseFloat(body.expense)||0)
         await ActiveDB.prepare(`
           INSERT INTO rubber_harvests
-            (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes,
-             created_by, updated_by, created_at, updated_at)
+            (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes, created_by, created_at, updated_by, updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).bind(id, 'pavutumuri', body.harvestDate, parseFloat(body.weightKg)||0,
-                parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null,
-                actor, actor, now(), now()).run()
+        `).bind(id, body.estateId || 'pavutumuri', body.harvestDate, parseFloat(body.weightKg)||0, parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null, actor, now(), actor, now()).run()
         return json({ success: true, data: { harvestId: id } })
       }
 
-      // UPDATE STAY LOCATION — called by GuestFormScript after form submission
+      // MANGO HARVEST — Mirroring exact production db layout indices 0 to 17
+      if (action === 'saveMangoHarvest') {
+        const { estate, harvestDate, boxType, buyer, pricePerBox, totalRevenue, totalBoxes, notes, alphonsa=0, neelam=0, malgova=0, banganapally=0, kilimooku=0, sindooram=0, mix=0 } = body
+        if (!harvestDate || !estate) return json({ success:false, error:'estate and harvestDate required' }, 400)
+        const id = `MH-${Date.now()}`
+        await ActiveDB.prepare(`
+          INSERT INTO mango_harvests (
+            harvest_id, estate, harvest_date, box_type, 
+            alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix, 
+            total_boxes, buyer, price_per_box, total_revenue, notes, created_by, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).bind(id, estate, harvestDate, boxType || 'Normal', parseInt(alphonsa) || 0, parseInt(neelam) || 0, parseInt(malgova) || 0, parseInt(banganapally) || 0, parseInt(kilimooku) || 0, parseInt(sindooram) || 0, parseInt(mix) || 0, parseInt(totalBoxes) || 0, buyer || null, parseFloat(pricePerBox) || 0, parseFloat(totalRevenue) || 0, notes || null, actor).run()
+        return json({ success:true, data:{ harvestId:id } })
+      }
+
       if (action === 'updateStayLocation') {
         const { stayId, homeAddress, city, state, country, fromCity, phone, email } = body
         if (!stayId) return err('stayId required')
-        await DB.prepare(
-          `UPDATE stays
-           SET home_address = ?, city = ?, state = ?, country = ?, from_city = ?,
-               guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
-               guest_email = COALESCE(NULLIF(guest_email,''), ?),
-               updated_by = 'auto', updated_at = ?
-           WHERE stay_id = ?`
-        ).bind(
-          homeAddress||null, city||null, state||null, country||'India', fromCity||null,
-          phone||null, email||null, now(), stayId
-        ).run()
+        await DB.prepare(`UPDATE stays SET home_address = ?, city = ?, state = ?, country = ?, from_city = ?, guest_phone = COALESCE(NULLIF(guest_phone,''), ?), guest_email = COALESCE(NULLIF(guest_email,''), ?), updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(homeAddress||null, city||null, state||null, country||'India', fromCity||null, phone||null, email||null, now(), stayId).run()
         return json({ success: true, data: { stayId, city, state, country } })
       }
 
-      // UPDATE DRIVE FOLDER — called by Apps Script after folder creation
       if (action === 'updateDriveFolder') {
         const { stayId, driveFolderId, driveFolderUrl, processingNote } = body
         if (!stayId) return err('stayId required')
-        // Set folder_created_at only on first time (when folder didn't exist before)
-        const existing = await DB.prepare(
-          `SELECT folder_created_at, processing_log FROM stays WHERE stay_id = ?`
-        ).bind(stayId).first()
+        const existing = await DB.prepare(`SELECT folder_created_at, processing_log, folder_created FROM stays WHERE stay_id = ?`).bind(stayId).first()
         const folderCreatedAt = existing?.folder_created_at || now()
         const prevLog = existing?.processing_log ? existing.processing_log + '\n' : ''
-        const logEntry = now() + ' — Drive folder created: ' + (driveFolderUrl || '') +
-          (processingNote ? ' | ' + processingNote : '')
+        const logEntry = now() + ' — Drive folder created: ' + (driveFolderUrl || '') + (processingNote ? ' | ' + processingNote : '')
         const setFolderCreated = body.folderCreated !== undefined ? (body.folderCreated ? 1 : 0) : (existing?.folder_created || 0)
-        await DB.prepare(
-          `UPDATE stays SET
-            drive_folder_id   = ?,
-            drive_folder_url  = ?,
-            folder_created    = ?,
-            folder_created_at = ?,
-            processing_log    = ?,
-            updated_by = 'auto', updated_at = datetime('now')
-           WHERE stay_id = ?`
-        ).bind(
-          driveFolderId || null,
-          driveFolderUrl || null,
-          setFolderCreated,
-          folderCreatedAt,
-          prevLog + logEntry,
-          stayId
-        ).run()
+        await DB.prepare(`UPDATE stays SET drive_folder_id = ?, drive_folder_url = ?, folder_created = ?, folder_created_at = ?, processing_log = ?, updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(driveFolderId || null, driveFolderUrl || null, setFolderCreated, folderCreatedAt, prevLog + logEntry, stayId).run()
         return json({ success: true, data: { stayId, driveFolderId, folderCreatedAt } })
       }
 
-      // SAVE REVIEW — called by Apps Script when review email arrives
       if (action === 'saveReview') {
-        const { stayId, rating, source, reviewDate, guestName, reviewText, reviewNote, highlights } = body
+        const { stayId, rating, source, reviewDate, reviewText, reviewNote, highlights } = body
         if (!stayId) return err('stayId required')
-        await DB.prepare(
-          `UPDATE stays
-           SET review_rating     = ?,
-               review_source     = ?,
-               review_date       = ?,
-               review_text       = ?,
-               review_note       = ?,
-               review_highlights = ?,
-               updated_by = ?, updated_at = ?
-           WHERE stay_id = ?`
-        ).bind(
-          rating || 0, source || 'airbnb', reviewDate || now(),
-          reviewText || null, reviewNote || null, highlights || null,
-          'auto', now(), stayId
-        ).run()
+        await DB.prepare(`UPDATE stays SET review_rating = ?, review_source = ?, review_date = ?, review_text = ?, review_note = ?, review_highlights = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(rating || 0, source || 'airbnb', reviewDate || now(), reviewText || null, reviewNote || null, highlights || null, 'auto', now(), stayId).run()
         return json({ success: true, data: { stayId, rating, source } })
       }
 
-      // SET READY FOR CHECK-IN — called by Drive file watcher when both docs detected
       if (action === 'setReadyForCheckIn') {
-        const { stayId } = body
-        if (!stayId) return err('stayId required')
-        // Only transition if currently in booked/confirmed/docs_uploaded
-        const stay = await DB.prepare(
-          `SELECT status FROM stays WHERE stay_id = ?`
-        ).bind(stayId).first()
+        const { stayId } = body; if (!stayId) return err('stayId required')
+        const stay = await DB.prepare(`SELECT status FROM stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return json({ success: true, data: { changed: false, reason: 'stay not found' }})
-        if (!['booked','confirmed','docs_uploaded'].includes(stay.status)) {
-          return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status }})
-        }
-        await DB.prepare(
-          `UPDATE stays SET status = 'ready_for_checkin', updated_by = 'auto', updated_at = ? WHERE stay_id = ?`
-        ).bind(now(), stayId).run()
+        if (!['booked','confirmed','docs_uploaded'].includes(stay.status)) return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status }})
+        await DB.prepare(`UPDATE stays SET status = 'ready_for_checkin', updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(now(), stayId).run()
         return json({ success: true, data: { changed: true, stayId, status: 'ready_for_checkin' }})
       }
 
-      // UPDATE STAY STATUS — used by Complete Booking and CheckIn screens
-      // Allowed transitions enforced here for safety
       if (action === 'updateStayStatus') {
         const { stayId, status } = body
-        const allowed = ['booked','confirmed','docs_uploaded','ready_for_checkin',
-                         'checked_in','ready_for_checkout','checked_out','closed','cancelled']
         if (!stayId) return err('stayId required')
-        if (!allowed.includes(status)) return err(`Invalid status: ${status}`)
-
-        await DB.prepare(
-          `UPDATE stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
-        ).bind(status, actor, now(), stayId).run()
-
-        // Auto-create Raman commission when moving to checked_out
+        if (!['booked','confirmed','docs_uploaded','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed','cancelled'].includes(status)) return err(`Invalid status: ${status}`)
+        await DB.prepare(`UPDATE stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
         if (status === 'checked_out') {
-          const stay = await DB.prepare(
-            `SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`
-          ).bind(stayId).first()
+          const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`).bind(stayId).first()
           if (stay) {
-            const existing = await DB.prepare(
-              `SELECT comm_id FROM raman_commissions WHERE stay_id = ?`
-            ).bind(stayId).first()
+            const existing = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ?`).bind(stayId).first()
             if (!existing) {
-              const nights = parseInt(stay.nights) || 1
-              const ramanComm = nights > 1 ? 2000 : 1000
-              await DB.prepare(
-                `INSERT INTO raman_commissions
-                   (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid,
-                    created_by, updated_by, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,0,'system','system',?,?)`
-              ).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date,
-                     nights, ramanComm, now(), now()).run()
+              const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
+              await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
             }
           }
         }
-
         return json({ success: true, data: { stayId, status } })
       }
 
-      // BREAKFAST ENTRY
       if (action === 'saveBreakfastEntry') {
         const id = genId('BF')
-        await DB.prepare(`
-          INSERT INTO guest_requests
-            (req_id, stay_id, type, detail, status,
-             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?)
-        `).bind(
-          id, body.stayId, 'breakfast',
-          JSON.stringify({
-            date:        body.date,
-            guestCount:  body.guestCount  || 1,
-            ratePerPerson: body.ratePerPerson || 0,
-            total:       body.total       || 0,
-            notes:       body.notes       || '',
-          }),
-          'done', actor, actor, now(), now()
-        ).run()
+        await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
-      // CAR RENTAL ENTRY
       if (action === 'saveCarRental') {
         const id = genId('CR')
-        await DB.prepare(`
-          INSERT INTO guest_requests
-            (req_id, stay_id, type, detail, status,
-             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?)
-        `).bind(
-          id, body.stayId, 'car_rental',
-          JSON.stringify({
-            date:        body.date,
-            destination: body.destination || '',
-            amount:      body.amount      || 0,
-            commission:  body.commission  || 0,
-            net:         body.net         || 0,
-            notes:       body.notes       || '',
-          }),
-          'done', actor, actor, now(), now()
-        ).run()
+        await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'car_rental', JSON.stringify({ date: body.date, destination: body.destination || '', amount: body.amount || 0, commission: body.commission || 0, net: body.net || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
-      // VILLA EXPENSE
       if (action === 'saveVillaExpense') {
         const id = genId('VE')
-        await DB.prepare(`
-          INSERT INTO guest_requests
-            (req_id, stay_id, type, detail, status,
-             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?)
-        `).bind(
-          id, body.stayId || null, 'villa_expense',
-          JSON.stringify({
-            villaId:     body.villaId    || 'dwarka',
-            date:        body.date,
-            category:    body.category   || '',
-            amount:      body.amount     || 0,
-            paidTo:      body.paidTo     || '',
-            description: body.description|| '',
-          }),
-          'done', actor, actor, now(), now()
-        ).run()
+        await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId || null, 'villa_expense', JSON.stringify({ villaId: body.villaId || 'dwarka', date: body.date, category: body.category || '', amount: body.amount || 0, paidTo: body.paidTo || '', description: body.description|| '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
-      // ESTATE LEDGER — income / expense entry (Pollachi & Pavutumuri)
+      // LEDGER TRANSACTIONS — Create/Update entries
       if (action === 'saveEstateTransaction') {
         const { estate, type, date, category, amount, paidTo, description, txnId } = body
-        if (!estate || !type || !date || !category || !amount) {
-          return err('Missing required fields: estate, type, date, category, amount', 400)
-        }
-        try {
-          if (txnId) {
-            // UPDATE existing
-            await ActiveDB.prepare(
-              `UPDATE estate_transactions
-               SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=?
-               WHERE txn_id=?`
-            ).bind(type, date, category, parseFloat(amount)||0, paidTo||null, description||null, actor, now(), txnId).run()
-            return json({ success: true, data: { txnId } })
-          } else {
-            // INSERT new
-            const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
-            await ActiveDB.prepare(
-              `INSERT INTO estate_transactions
-               (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-            ).bind(id, estate, type, date, category, parseFloat(amount)||0,
-                   paidTo||null, description||null, actor, actor, now(), now()).run()
-            return json({ success: true, data: { txnId: id } })
-          }
-        } catch(e) {
-          return err('DB error: ' + (e?.message || e), 500)
-        }
-      }
-
-      if (action === 'getEstateTransactions') {
-        const estate = url.searchParams.get('estate') || ''
-        if (!estate) return err('estate param required', 400)
-        const { results } = await ActiveDB.prepare(
-          `SELECT * FROM estate_transactions
-           WHERE estate = ?
-           ORDER BY date DESC`
-        ).bind(estate).all()
-        return json({ success: true, data: results })      }
-
-      // GET PENDING REVIEW STAYS — for owner portal block (pre-checkin pending)
-      // These are stays awaiting owner approval before check-in
-      if (action === 'getPendingReviewStays') {
-        const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
-                  guest_phone, guest_email, drive_folder_url, created_at,
-                  folder_created, folder_created_at
-           FROM stays
-           WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date >= date('now'))
-           ORDER BY checkin_date ASC`
-        ).all()
-        return json({ success: true, data: results.map(r => ({
-          stayId:          r.stay_id,
-          guestName:       r.guest_name,
-          checkIn:         r.checkin_date,
-          checkOut:        r.checkout_date,
-          nights:          r.nights,
-          phone:           r.guest_phone,
-          email:           r.guest_email,
-          driveFolderUrl:  r.drive_folder_url,
-          createdAt:       r.created_at,
-          folderCreated:   r.folder_created || 0,
-          folderCreatedAt: r.folder_created_at || null,
-        })) })
-      }
-
-      // GET REVIEW CHASE LIST — stays past checkout awaiting a review
-      // Includes: checked_out + pending_review past checkout_date, no review yet
-      // Auto-close candidates: review_chased_at > 20 days ago (or never chased > 20 days post-checkout)
-      if (action === 'getReviewChaseList') {
-        const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
-                  source, guest_phone, review_rating, review_date,
-                  review_chased_at, review_chase_count
-           FROM stays
-           WHERE status IN ('checked_out','pending_review')
-             AND checkout_date < date('now')
-             AND (review_rating IS NULL OR review_rating = 0)
-           ORDER BY checkout_date DESC`
-        ).all()
-
-        const today = new Date()
-        return json({ success: true, data: results.map(r => {
-          const checkout    = new Date(r.checkout_date)
-          const daysOut     = Math.floor((today - checkout) / 86400000)
-          const lastChased  = r.review_chased_at ? new Date(r.review_chased_at) : null
-          const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
-          const autoCloseReady = daysOut >= 20
-          return {
-            stayId:          r.stay_id,
-            guestName:       r.guest_name,
-            checkIn:         r.checkin_date,
-            checkOut:        r.checkout_date,
-            nights:          r.nights,
-            adults:          r.adults,
-            source:          r.source,
-            phone:           r.guest_phone,
-            reviewRating:    r.review_rating || 0,
-            reviewDate:      r.review_date || null,
-            chasedAt:        r.review_chased_at || null,
-            chaseCount:      r.review_chase_count || 0,
-            daysSinceChase,
-            daysOut,
-            autoCloseReady,  // true when 20+ days past checkout with no review
-          }
-        }) })
-      }
-
-      // MARK REVIEW CHASED — record that WhatsApp was sent
-      if (action === 'markReviewChased') {
-        const { stayId } = body
-        if (!stayId) return err('stayId required')
-        await DB.prepare(
-          `UPDATE stays
-           SET review_chased_at   = ?,
-               review_chase_count = COALESCE(review_chase_count, 0) + 1,
-               updated_by = ?, updated_at = ?
-           WHERE stay_id = ?`
-        ).bind(now(), actor, now(), stayId).run()
-        return json({ success: true, data: { stayId, chasedAt: now() } })
-      }
-
-      // CLOSE STAY WITH REVIEW — owner manually sets star rating and closes
-      // Also used for auto-close (rating = 0, closedReason = 'no_review')
-      if (action === 'closeStayWithReview') {
-        const { stayId, rating, closedReason } = body
-        if (!stayId) return err('stayId required')
-
-        await DB.prepare(
-          `UPDATE stays
-           SET status         = 'closed',
-               review_rating  = ?,
-               review_source  = ?,
-               review_date    = ?,
-               updated_by = ?, updated_at = ?
-           WHERE stay_id = ?`
-        ).bind(
-          rating || 0,
-          closedReason === 'no_review' ? 'none' : 'manual',
-          rating ? now().substring(0,10) : null,
-          actor, now(), stayId
-        ).run()
-
-        return json({ success: true, data: { stayId, status: 'closed', rating: rating || 0 } })
-      }
-
-
-      // RESOLVE CHECKIN LINK — handled in public section above auth guard
-
-      // GET ALL CHECKIN LINKS — owner only (auth required below)
-      if (action === 'getCheckinLinks') {
-        const { results } = await DB.prepare(
-          `SELECT token, villa_id, partner, label, is_active, use_count, created_at
-           FROM checkin_links ORDER BY villa_id, partner`
-        ).all()
-        return json({ success: true, data: results })
-      }
-
-      // CREATE CHECKIN LINK
-      if (action === 'createCheckinLink') {
-        const { villaId = 'dwarka', partner: p, label: lbl } = body
-        if (!p) return err('partner required')
-        // Generate short token: villa prefix + random
-        const rand = Math.random().toString(36).slice(2,7)
-        const newToken = `${villaId.slice(0,3)}-${p.slice(0,3)}-${rand}`
-        await DB.prepare(
-          `INSERT INTO checkin_links (token, villa_id, partner, label, created_by, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?)`
-        ).bind(newToken, villaId, p, lbl||p, actor, now(), now()).run()
-        return json({ success: true, data: { token: newToken } })
-      }
-
-      // TOGGLE CHECKIN LINK active/inactive
-      if (action === 'toggleCheckinLink') {
-        const { token: linkToken } = body
-        if (!linkToken) return err('token required')
-        const link = await DB.prepare(`SELECT is_active FROM checkin_links WHERE token = ?`).bind(linkToken).first()
-        if (!link) return err('Link not found', 404)
-        await DB.prepare(
-          `UPDATE checkin_links SET is_active = ?, updated_at = ? WHERE token = ?`
-        ).bind(link.is_active ? 0 : 1, now(), linkToken).run()
-        return json({ success: true, data: { token: linkToken, is_active: !link.is_active } })
-      }
-
-      // UPDATE TENANT STATUS
-      if (action === 'updateTenantStatus') {
-        const { propId, status } = body
-        if (!propId || !status) return err('propId and status required')
-        const valid = ['Active','Notice Given','Delinquent','Evicted','Runaway','Completed']
-        if (!valid.includes(status)) return err('Invalid status')
-        await DB.prepare(
-          `UPDATE rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`
-        ).bind(status, actor, now(), propId).run()
-        return json({ success: true, data: { propId, status } })
-      }
-
-      // SAVE PROPERTY DETAILS
-      if (action === 'savePropertyDetails') {
-        const d = body
-        if (!d.propId) return err('propId required')
-        const existing = await DB.prepare(
-          `SELECT prop_id FROM property_details WHERE prop_id = ?`
-        ).bind(d.propId).first()
-        
-        const fields = [
-          'address_line1','address_line2','city','state_province','postal_code','country',
-          'elec_provider','elec_consumer_id','elec_account_number','elec_portal_url','elec_monthly_avg',
-          'water_provider','water_consumer_id','water_account_number','water_portal_url','water_monthly_avg',
-          'gas_provider','gas_consumer_id','gas_account_number','gas_portal_url','gas_monthly_avg',
-          'internet_provider','internet_account','internet_monthly',
-          'hoa_name','hoa_account','hoa_monthly',
-          'other_utility_name','other_utility_id','other_utility_monthly',
-          'tax_parcel_id','tax_authority','tax_annual','tax_portal_url',
-          'loan_lender','loan_account','loan_original','loan_outstanding','loan_monthly_emi',
-          'loan_interest_rate','loan_start_date','loan_end_date','loan_portal_url',
-          'purchase_price','purchase_date','estimated_value','estimated_value_date','currency',
-          'insurance_provider','insurance_policy_no','insurance_annual','insurance_expiry','notes'
-        ]
-        
-        const camelToSnake = s => s.replace(/[A-Z]/g, c => '_' + c.toLowerCase())
-        
-        if (existing) {
-          const sets = fields.map(f => `${f} = ?`).join(', ')
-          const vals = fields.map(f => {
-            const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-            const v = d[camel] !== undefined ? d[camel] : d[f]
-            return (typeof v === 'number' ? v : (v || null))
-          })
-          await DB.prepare(
-            `UPDATE property_details SET ${sets}, updated_at = ? WHERE prop_id = ?`
-          ).bind(...vals, now(), d.propId).run()
+        if (!estate || !type || !date || !category || !amount) return err('Missing required fields', 400)
+        if (txnId) {
+          await ActiveDB.prepare(`UPDATE estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, parseFloat(amount)||0, paidTo||null, description||null, actor, now(), txnId).run()
+          return json({ success: true, data: { txnId } })
         } else {
-          const cols = ['prop_id', ...fields, 'created_at', 'updated_at'].join(', ')
-          const placeholders = ['?', ...fields.map(() => '?'), '?', '?'].join(', ')
-          const vals = fields.map(f => {
-            const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-            const v = d[camel] !== undefined ? d[camel] : d[f]
-            return (typeof v === 'number' ? v : (v || null))
-          })
-          await DB.prepare(
-            `INSERT INTO property_details (${cols}) VALUES (${placeholders})`
-          ).bind(d.propId, ...vals, now(), now()).run()
+          const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
+          await ActiveDB.prepare(`INSERT INTO estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, parseFloat(amount)||0, paidTo||null, description||null, actor, actor, now(), now()).run()
+          return json({ success: true, data: { txnId: id } })
         }
-        return json({ success: true, data: { propId: d.propId } })
       }
 
-      // SAVE HOA HISTORY ENTRY (insert or update by prop+date)
-      if (action === 'saveHoaEntry') {
-        const { id, propId, effectiveDate, monthlyAmount, currency, notes } = body
-        if (!propId || !effectiveDate || monthlyAmount === undefined) return err('propId, effectiveDate, monthlyAmount required')
-        const entryId = id || ('hoa_' + Date.now() + '_' + Math.random().toString(36).slice(2,6))
-        await DB.prepare(
-          `INSERT OR REPLACE INTO hoa_history (id, prop_id, effective_date, monthly_amount, currency, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM hoa_history WHERE id=?), ?))`
-        ).bind(entryId, propId, effectiveDate, parseFloat(monthlyAmount)||0, currency||'INR', notes||null, entryId, now()).run()
-        return json({ success: true, data: { id: entryId } })
-      }
-
-      // DELETE HOA HISTORY ENTRY
-      if (action === 'deleteHoaEntry') {
-        const { id } = body
-        if (!id) return err('id required')
-        await DB.prepare(`DELETE FROM hoa_history WHERE id = ?`).bind(id).run()
-        return json({ success: true, data: { id, deleted: true } })
-      }
-
-      // SAVE TAX HISTORY ENTRY (insert or update by prop+year)
-      if (action === 'saveTaxEntry') {
-        const { id, propId, taxYear, annualAmount, currency, parcelId, taxAuthority, dueDate, paidDate, paidAmount, receiptRef, notes } = body
-        if (!propId || !taxYear || annualAmount === undefined) return err('propId, taxYear, annualAmount required')
-        const entryId = id || ('tax_' + propId + '_' + taxYear)
-        await DB.prepare(
-          `INSERT OR REPLACE INTO tax_history
-           (id, prop_id, tax_year, annual_amount, currency, parcel_id, tax_authority,
-            due_date, paid_date, paid_amount, receipt_ref, notes, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM tax_history WHERE id=?),?))`
-        ).bind(entryId, propId, parseInt(taxYear), parseFloat(annualAmount)||0, currency||'INR',
-               parcelId||null, taxAuthority||null, dueDate||null, paidDate||null,
-               parseFloat(paidAmount)||0, receiptRef||null, notes||null, entryId, now()).run()
-        return json({ success: true, data: { id: entryId } })
-      }
-
-      // DELETE TAX HISTORY ENTRY
-      if (action === 'deleteTaxEntry') {
-        const { id } = body
-        if (!id) return err('id required')
-        await DB.prepare(`DELETE FROM tax_history WHERE id = ?`).bind(id).run()
-        return json({ success: true, data: { id, deleted: true } })
-      }
-
-      // SAVE PROPERTY DOCUMENT
-      if (action === 'savePropertyDoc') {
-        const { docId, propId, category, docName, driveUrl, driveFolderUrl, fileType, docDate, notes } = body
-        if (!propId || !docName) return err('propId and docName required')
-        const id = docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6))
-        await DB.prepare(
-          `INSERT OR REPLACE INTO property_documents
-           (doc_id, prop_id, category, doc_name, drive_url, drive_folder_url, file_type, doc_date, notes, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM property_documents WHERE doc_id=?),?))`
-        ).bind(id, propId, category||'Other', docName.trim(), driveUrl||null, driveFolderUrl||null,
-               fileType||null, docDate||null, notes||null, id, now()).run()
-        return json({ success: true, data: { docId: id } })
-      }
-
-      // DELETE PROPERTY DOCUMENT
-      if (action === 'deletePropertyDoc') {
-        const { docId } = body
-        if (!docId) return err('docId required')
-        await DB.prepare(`DELETE FROM property_documents WHERE doc_id = ?`).bind(docId).run()
-        return json({ success: true, data: { docId, deleted: true } })
-      }
-
-      // SAVE LEASE LOSS (create or update)
-      if (action === 'saveLeaseLoss') {
-        const { lossId, propId, leaseSnapshot, itemCategory, description, amount, currency, evidenceFileName, evidenceDriveUrl, evidenceTimestamp, status: lossStatus } = body
-        if (!propId || !description || amount === undefined) return err('propId, description, amount required')
-        const validCats = ['Rent','Damage','Cleaning','Legal','Other']
-        if (!validCats.includes(itemCategory)) return err('Invalid itemCategory')
-        const id = lossId || ('loss_' + Date.now() + '_' + Math.random().toString(36).slice(2,7))
-        await DB.prepare(
-          `INSERT OR REPLACE INTO lease_losses
-           (loss_id, prop_id, lease_snapshot, item_category, description, amount, currency,
-            evidence_file_name, evidence_drive_url, evidence_timestamp, status, created_by, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM lease_losses WHERE loss_id=?),?),?)`
-        ).bind(id, propId, leaseSnapshot||'', itemCategory||'Other', description, parseFloat(amount)||0,
-               currency||'INR', evidenceFileName||null, evidenceDriveUrl||null, evidenceTimestamp||null,
-               lossStatus||'Estimated', actor, id, now(), now()).run()
-        return json({ success: true, data: { lossId: id } })
-      }
-
-      // UPDATE LEASE LOSS STATUS
-      if (action === 'updateLeaseLossStatus') {
-        const { lossId, status: lossStatus } = body
-        if (!lossId || !lossStatus) return err('lossId and status required')
-        await DB.prepare(
-          `UPDATE lease_losses SET status = ?, updated_at = ? WHERE loss_id = ?`
-        ).bind(lossStatus, now(), lossId).run()
-        return json({ success: true, data: { lossId, status: lossStatus } })
-      }
-
-      // DELETE LEASE LOSS
-      if (action === 'deleteLeaseLoss') {
-        const { lossId } = body
-        if (!lossId) return err('lossId required')
-        await DB.prepare(`DELETE FROM lease_losses WHERE loss_id = ?`).bind(lossId).run()
-        return json({ success: true, data: { lossId, deleted: true } })
-      }
-
-
-      // CREATE MARKETING CAMPAIGN
       if (action === 'createCampaign') {
-        const { campaignName, channel, villaId, notes } = body
-        if (!campaignName?.trim()) return err('campaignName required')
-        // Generate clean token: CAMPAIGN-NAME-XXXX
-        const slug = campaignName.trim().toUpperCase()
-          .replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
-        const suffix = Math.random().toString(36).slice(2, 6).toUpperCase()
-        const token = `${slug}-${suffix}`
-        const id = 'cmp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-        await DB.prepare(
-          `INSERT INTO marketing_campaigns
-           (id, campaign_name, unique_token, channel, villa_id, notes, created_by, created_at)
-           VALUES (?,?,?,?,?,?,?,?)`
-        ).bind(id, campaignName.trim(), token,
-               channel || 'whatsapp', villaId || 'dwarka',
-               notes || null, actor, now()).run()
+        const { campaignName, channel, villaId, notes } = body; if (!campaignName?.trim()) return err('campaignName required')
+        const slug = campaignName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
+        const token = `${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`; const id = 'cmp_' + Date.now()
+        await DB.prepare(`INSERT INTO marketing_campaigns (id, campaign_name, unique_token, channel, villa_id, notes, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaignName.trim(), token, channel || 'whatsapp', villaId || 'dwarka', notes || null, actor, now()).run()
         return json({ success: true, data: { id, token, campaignName: campaignName.trim() } })
       }
 
-      // TOGGLE CAMPAIGN ACTIVE STATUS
       if (action === 'toggleCampaign') {
-        const { campaignId } = body
-        if (!campaignId) return err('campaignId required')
-        await DB.prepare(
-          `UPDATE marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?`
-        ).bind(campaignId).run()
+        const { campaignId } = body; if (!campaignId) return err('campaignId required')
+        await DB.prepare(`UPDATE marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?`).bind(campaignId).run()
         return json({ success: true })
       }
 
-      // DELETE CAMPAIGN
       if (action === 'deleteCampaign') {
-        const { campaignId } = body
-        if (!campaignId) return err('campaignId required')
+        const { campaignId } = body; if (!campaignId) return err('campaignId required')
         await DB.prepare(`DELETE FROM campaign_analytics WHERE campaign_id = ?`).bind(campaignId).run()
         await DB.prepare(`DELETE FROM marketing_campaigns WHERE id = ?`).bind(campaignId).run()
         return json({ success: true })
       }
 
-      // TRACK CLICK — called from landing page when ?ref=TOKEN is detected
       if (action === 'trackCampaignClick') {
-        const { token, referrer } = body
-        if (!token) return err('token required')
-        const campaign = await DB.prepare(
-          `SELECT id FROM marketing_campaigns WHERE unique_token = ? AND is_active = 1`
-        ).bind(token).first()
+        const { token, referrer } = body; if (!token) return err('token required')
+        const campaign = await DB.prepare(`SELECT id FROM marketing_campaigns WHERE unique_token = ? AND is_active = 1`).bind(token).first()
         if (!campaign) return json({ success: false, error: 'Unknown token' })
-        // Extract geo from Cloudflare request properties
-        const cf = request.cf || {}
-        const id = 'evt_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
-        await DB.prepare(
-          `INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer)
-           VALUES (?,?,?,?,?,?,?,?)`
-        ).bind(id, campaign.id, 'click',
-               cf.country || null, cf.region || null, cf.city || null,
-               request.headers.get('user-agent') || null,
-               referrer || null).run()
+        const cf = request.cf || {}; const id = 'evt_' + Date.now()
+        await DB.prepare(`INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaign.id, 'click', cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null, referrer || null).run()
         return json({ success: true })
       }
 
-      // TRACK ACTION (inquiry or booking) — called from landing page on form submit
       if (action === 'trackCampaignAction') {
-        const { token, eventType } = body
-        if (!token) return err('token required')
-        if (!['inquiry','booking'].includes(eventType)) return err('invalid eventType')
-        const campaign = await DB.prepare(
-          `SELECT id FROM marketing_campaigns WHERE unique_token = ?`
-        ).bind(token).first()
+        const { token, eventType } = body; if (!token) return err('token required')
+        const campaign = await DB.prepare(`SELECT id FROM marketing_campaigns WHERE unique_token = ?`).bind(token).first()
         if (!campaign) return json({ success: false })
-        const cf = request.cf || {}
-        const id = 'evt_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
-        await DB.prepare(
-          `INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent)
-           VALUES (?,?,?,?,?,?,?)`
-        ).bind(id, campaign.id, eventType,
-               cf.country || null, cf.region || null, cf.city || null,
-               request.headers.get('user-agent') || null).run()
+        const cf = request.cf || {}; const id = 'evt_' + Date.now()
+        await DB.prepare(`INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent) VALUES (?,?,?,?,?,?,?)`).bind(id, campaign.id, eventType, cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null).run()
         return json({ success: true })
       }
 
-
-      // IRRIGATION ZONE LOG — save (moved from GET block)
-      if (action === 'saveIrrigationZoneLog') {
-        const { estate, zoneId, zoneName, loggedDate, durationMins, notes } = body
-        if (!estate || !zoneId || !loggedDate) return err('estate, zoneId, loggedDate required')
-        const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-        await ActiveDB.prepare(
-          `INSERT INTO irrigation_logs
-           (log_id, estate, zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`
-        ).bind(id, estate, zoneId, zoneName||null, loggedDate,
-               parseInt(durationMins)||0, notes||null, actor, now()).run()
-        return json({ success: true, data: { logId: id } })
-      }
-
-      // IRRIGATION ZONE CONFIG — save (moved from GET block)
-      if (action === 'saveIrrigationZone') {
-        const { zoneId, estate, zoneName, zoneLabel, expectedFreqDays, notes, active, sortOrder } = body
-        if (!estate || !zoneName) return err('estate and zoneName required')
-        const id = zoneId || ('zone_' + estate + '_' + Date.now())
-        await ActiveDB.prepare(
-          `INSERT OR REPLACE INTO irrigation_zones
-           (zone_id, estate, zone_name, zone_label, expected_freq_days, active, sort_order, notes, created_at)
-           VALUES (?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM irrigation_zones WHERE zone_id=?),?))`
-        ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7,
-               active !== false ? 1 : 0, parseInt(sortOrder)||0, notes||null, id, now()).run()
-        return json({ success: true, data: { zoneId: id } })
-      }
-
-      // DELETE ESTATE TRANSACTION
-      if (action === 'deleteEstateTransaction') {
-        const { txnId } = body
-        if (!txnId) return err('txnId required')
-        await ActiveDB.prepare(
-          `DELETE FROM estate_transactions WHERE txn_id = ?`
-        ).bind(txnId).run()
-        return json({ success: true, data: { txnId, deleted: true } })
-      }
-
-      // LOG IRRIGATION — simple tap log (no zone required)
+      // LOG IRRIGATION — Simple tap log (No zone info specified)
       if (action === 'logIrrigation') {
         const { estate, loggedDate, notes, durationMins } = body
         if (!estate || !loggedDate) return err('estate and loggedDate required')
         const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
         await ActiveDB.prepare(
-          `INSERT INTO irrigation_logs
-           (log_id, estate, zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at)
-           VALUES (?,?,NULL,NULL,?,?,?,?,?)`
-        ).bind(id, estate, loggedDate, parseInt(durationMins)||0, notes||null, actor, now()).run()
+          `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
+           VALUES (?,?,?,?,?,?, NULL, NULL, ?)`
+        ).bind(id, estate, loggedDate, notes||null, actor, now(), parseInt(durationMins)||0).run()
         return json({ success: true, data: { logId: id } })
       }
 
-      // SAVE FERTILIZATION — log a fertilization entry
+      // IRRIGATION ZONE LOG — Save targeted run
+      if (action === 'saveIrrigationZoneLog') {
+        const { estate, zoneId, zoneName, loggedDate, durationMins, notes } = body
+        if (!estate || !zoneId || !loggedDate) return err('estate, zoneId, loggedDate required')
+        const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        await ActiveDB.prepare(
+          `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
+           VALUES (?,?,?,?,?,?,?,?,?)`
+        ).bind(id, estate, loggedDate, notes||null, actor, now(), zoneId, zoneName||null, parseInt(durationMins)||0).run()
+        return json({ success: true, data: { logId: id } })
+      }
+
+      // IRRIGATION ZONE CONFIG — Cleaned to completely isolate non-existent 'notes' column
+      if (action === 'saveIrrigationZone') {
+        const { zoneId, estate, zoneName, zoneLabel, expectedFreqDays, active, sortOrder, coconutTrees=0, mangoTrees=0, motor=null, newHoles=0 } = body
+        if (!estate || !zoneName) return err('estate and zoneName required')
+        const id = zoneId || ('zone_' + estate + '_' + Date.now())
+        await ActiveDB.prepare(
+          `INSERT OR REPLACE INTO irrigation_zones (zone_id, estate, zone_name, zone_label, expected_freq_days, coconut_trees, new_holes, motor, mango_trees, active, sort_order, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM irrigation_zones WHERE zone_id=?), ?))`
+        ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7, parseInt(coconutTrees)||0, parseInt(newHoles)||0, motor||null, parseInt(mangoTrees)||0, active !== false ? 1 : 0, parseInt(sortOrder)||0, id, now()).run()
+        return json({ success: true, data: { zoneId: id } })
+      }
+
+      // SAVE FERTILIZATION — Completely Rewritten to align with structural layout columns (log_id, quantity_kg, cost)
       if (action === 'saveFertilization') {
-        const { estate, plannedDate, actualDate, fertilizerType, quantity, unit, notes } = body
+        const { estate, plannedDate, actualDate, fertilizerType, quantityKg, cost, doneBy, notes } = body
         if (!estate || !plannedDate) return err('estate and plannedDate required')
         const id = 'fert_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
         await ActiveDB.prepare(
-          `INSERT INTO fertilization_log
-           (id, estate, planned_date, actual_date, fertilizer_type, quantity, unit, notes,
-            created_by, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`
-        ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null,
-               parseFloat(quantity)||0, unit||null, notes||null, actor, now()).run()
+          `INSERT INTO fertilization_log (log_id, estate, planned_date, actual_date, fertilizer_type, quantity_kg, cost, done_by, notes, created_by, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+        ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null, parseFloat(quantityKg)||0, parseFloat(cost)||0, doneBy||null, notes||null, actor, now()).run()
         return json({ success: true, data: { id } })
+      }
+
+      if (action === 'deleteEstateTransaction') {
+        const { txnId } = body; if (!txnId) return err('txnId required')
+        await ActiveDB.prepare(`DELETE FROM estate_transactions WHERE txn_id = ?`).bind(txnId).run()
+        return json({ success: true, data: { txnId, deleted: true } })
+      }
+
+      if (action === 'updateTenantStatus') {
+        const { propId, status } = body; if (!propId || !status) return err('propId and status required')
+        if (!['Active','Notice Given','Delinquent','Evicted','Runaway','Completed'].includes(status)) return err('Invalid status')
+        await DB.prepare(`UPDATE rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`).bind(status, actor, now(), propId).run()
+        return json({ success: true, data: { propId, status } })
+      }
+
+      if (action === 'savePropertyDetails') {
+        const d = body; if (!d.propId) return err('propId required')
+        const existing = await DB.prepare(`SELECT prop_id FROM property_details WHERE prop_id = ?`).bind(d.propId).first()
+        const fields = ['address_line1','address_line2','city','state_province','postal_code','country','elec_provider','elec_consumer_id','elec_account_number','elec_portal_url','elec_monthly_avg','water_provider','water_consumer_id','water_account_number','water_portal_url','water_monthly_avg','gas_provider','gas_consumer_id','gas_account_number','gas_portal_url','gas_monthly_avg','internet_provider','internet_account','internet_monthly','hoa_name','hoa_account','hoa_monthly','other_utility_name','other_utility_id','other_utility_monthly','tax_parcel_id','tax_authority','tax_annual','tax_portal_url','loan_lender','loan_account','loan_original','loan_outstanding','loan_monthly_emi','loan_interest_rate','loan_start_date','loan_end_date','loan_portal_url','purchase_price','purchase_date','estimated_value','estimated_value_date','currency','insurance_provider','insurance_policy_no','insurance_annual','insurance_expiry','notes']
+        const vals = fields.map(f => { const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase()); const v = d[camel] !== undefined ? d[camel] : d[f]; return (typeof v === 'number' ? v : (v || null)) })
+        if (existing) {
+          const sets = fields.map(f => f + ' = ?').join(', ')
+          await DB.prepare(`UPDATE property_details SET ${sets}, updated_at = ? WHERE prop_id = ?`).bind(...vals, now(), d.propId).run()
+        } else {
+          const cols = ['prop_id', ...fields, 'created_at', 'updated_at'].join(', '); const placeholders = ['?', ...fields.map(() => '?'), '?', '?'].join(', ')
+          await DB.prepare(`INSERT INTO property_details (${cols}) VALUES (${placeholders})`).bind(d.propId, ...vals, now(), now()).run()
+        }
+        return json({ success: true, data: { propId: d.propId } })
+      }
+
+      if (action === 'saveHoaEntry') {
+        const { id, propId, effectiveDate, monthlyAmount, currency, notes } = body; if (!propId || !effectiveDate || monthlyAmount === undefined) return err('propId, effectiveDate, monthlyAmount required')
+        const entryId = id || ('hoa_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO hoa_history (id, prop_id, effective_date, monthly_amount, currency, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM hoa_history WHERE id=?), ?))`).bind(entryId, propId, effectiveDate, parseFloat(monthlyAmount)||0, currency||'INR', notes||null, entryId, now()).run()
+        return json({ success: true, data: { id: entryId } })
+      }
+
+      if (action === 'deleteHoaEntry') {
+        const { id } = body; if (!id) return err('id required')
+        await DB.prepare(`DELETE FROM hoa_history WHERE id = ?`).bind(id).run()
+        return json({ success: true, data: { id, deleted: true } })
+      }
+
+      if (action === 'saveTaxEntry') {
+        const { id, propId, taxYear, annualAmount, currency, parcelId, taxAuthority, dueDate, paidDate, paidAmount, receiptRef, notes } = body; if (!propId || !taxYear || annualAmount === undefined) return err('propId, taxYear, annualAmount required')
+        const entryId = id || ('tax_' + propId + '_' + taxYear); await DB.prepare(`INSERT OR REPLACE INTO tax_history (id, prop_id, tax_year, annual_amount, currency, parcel_id, tax_authority, due_date, paid_date, paid_amount, receipt_ref, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM tax_history WHERE id=?),?))`).bind(entryId, propId, parseInt(taxYear), parseFloat(annualAmount)||0, currency||'INR', parcelId||null, taxAuthority||null, dueDate||null, paidDate||null, parseFloat(paidAmount)||0, receiptRef||null, notes||null, entryId, now()).run()
+        return json({ success: true, data: { id: entryId } })
+      }
+
+      if (action === 'deleteTaxEntry') {
+        const { id } = body; if (!id) return err('id required')
+        await DB.prepare(`DELETE FROM tax_history WHERE id = ?`).bind(id).run()
+        return json({ success: true, data: { id, deleted: true } })
+      }
+
+      if (action === 'savePropertyDoc') {
+        const { docId, propId, category, docName, driveUrl, driveFolderUrl, fileType, docDate, notes } = body; if (!propId || !docName) return err('propId and docName required')
+        const id = docId || ('doc_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO property_documents (doc_id, prop_id, category, doc_name, drive_url, drive_folder_url, file_type, doc_date, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM property_documents WHERE doc_id=?),?))`).bind(id, propId, category||'Other', docName.trim(), driveUrl||null, driveFolderUrl||null, fileType||null, docDate||null, notes||null, id, now()).run()
+        return json({ success: true, data: { docId: id } })
+      }
+
+      if (action === 'deletePropertyDoc') {
+        const { docId } = body; if (!docId) return err('docId required')
+        await DB.prepare(`DELETE FROM property_documents WHERE doc_id = ?`).bind(docId).run()
+        return json({ success: true, data: { docId, deleted: true } })
+      }
+
+      if (action === 'saveLeaseLoss') {
+        const { lossId, propId, leaseSnapshot, itemCategory, description, amount, currency, evidenceFileName, evidenceDriveUrl, evidenceTimestamp, status: lossStatus } = body; if (!propId || !description || amount === undefined) return err('propId, description, amount required')
+        if (!['Rent','Damage','Cleaning','Legal','Other'].includes(itemCategory)) return err('Invalid itemCategory')
+        const id = lossId || ('loss_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO lease_losses (loss_id, prop_id, lease_snapshot, item_category, description, amount, currency, evidence_file_name, evidence_drive_url, evidence_timestamp, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM lease_losses WHERE loss_id=?),?),?)`).bind(id, propId, leaseSnapshot||'', itemCategory||'Other', description, parseFloat(amount)||0, currency||'INR', evidenceFileName||null, evidenceDriveUrl||null, evidenceTimestamp||null, lossStatus||'Estimated', actor, id, now(), now()).run()
+        return json({ success: true, data: { lossId: id } })
+      }
+
+      if (action === 'updateLeaseLossStatus') {
+        const { lossId, status: lossStatus } = body; if (!lossId || !lossStatus) return err('lossId and status required')
+        await DB.prepare(`UPDATE lease_losses SET status = ?, updated_at = ? WHERE loss_id = ?`).bind(lossStatus, now(), lossId).run()
+        return json({ success: true, data: { lossId, status: lossStatus } })
+      }
+
+      if (action === 'deleteLeaseLoss') {
+        const { lossId } = body; if (!lossId) return err('lossId required')
+        await DB.prepare(`DELETE FROM lease_losses WHERE loss_id = ?`).bind(lossId).run()
+        return json({ success: true, data: { lossId, deleted: true } })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

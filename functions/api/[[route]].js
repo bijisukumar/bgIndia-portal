@@ -2187,25 +2187,45 @@ export async function onRequest(ctx) {
 
       // COCONUT HARVEST
 
-      // MANGO HARVEST — save
+// MANGO HARVEST — save
       if (action === 'saveMangoHarvest') {
         const { estate, harvestDate, boxType, buyer, pricePerBox,
                 totalRevenue, totalBoxes, notes,
                 alphonsa=0, neelam=0, malgova=0, banganapally=0,
                 kilimooku=0, sindooram=0, mix=0 } = body
+                
         if (!harvestDate || !estate) return json({ success:false, error:'estate and harvestDate required' }, 400)
+        
         const id = `MH-${Date.now()}`
+        
+        // 💻 Column names arranged exactly matching indices 0 to 17 from your PRAGMA table info
         await ActiveDB.prepare(`
-          INSERT INTO mango_harvests
-            (harvest_id, estate, harvest_date, box_type, buyer, price_per_box,
-             total_revenue, total_boxes, notes,
-             alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix,
-             created_by, updated_by, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
-        `).bind(id, estate, harvestDate, boxType||'Normal', buyer||null, pricePerBox||0,
-                totalRevenue||0, totalBoxes||0, notes||null,
-                alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix,
-                actor, actor).run()
+          INSERT INTO mango_harvests (
+            harvest_id, estate, harvest_date, box_type, 
+            alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix, 
+            total_boxes, buyer, price_per_box, total_revenue, notes, 
+            created_by, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).bind(
+          id, 
+          estate, 
+          harvestDate, 
+          boxType || 'Normal',
+          parseInt(alphonsa) || 0, 
+          parseInt(neelam) || 0, 
+          parseInt(malgova) || 0, 
+          parseInt(banganapally) || 0, 
+          parseInt(kilimooku) || 0, 
+          parseInt(sindooram) || 0, 
+          parseInt(mix) || 0,
+          parseInt(totalBoxes) || 0, 
+          buyer || null, 
+          parseFloat(pricePerBox) || 0, 
+          parseFloat(totalRevenue) || 0, 
+          notes || null,
+          actor
+        ).run()
+        
         return json({ success:true, data:{ harvestId:id } })
       }
 

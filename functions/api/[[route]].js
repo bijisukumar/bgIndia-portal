@@ -2214,6 +2214,29 @@ export async function onRequest(ctx) {
       }
 
       // COCONUT HARVEST
+
+      // MANGO HARVEST — save
+      if (action === 'saveMangoHarvest') {
+        const { estate, harvestDate, boxType, buyer, pricePerBox,
+                totalRevenue, totalBoxes, notes,
+                alphonsa=0, neelam=0, malgova=0, banganapally=0,
+                kilimooku=0, sindooram=0, mix=0 } = body
+        if (!harvestDate || !estate) return json({ success:false, error:'estate and harvestDate required' }, 400)
+        const id = `MH-${Date.now()}`
+        await ActiveDB.prepare(`
+          INSERT INTO mango_harvests
+            (harvest_id, estate, harvest_date, box_type, buyer, price_per_box,
+             total_revenue, total_boxes, notes,
+             alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix,
+             created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+        `).bind(id, estate, harvestDate, boxType||'Normal', buyer||null, pricePerBox||0,
+                totalRevenue||0, totalBoxes||0, notes||null,
+                alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix,
+                actor, actor).run()
+        return json({ success:true, data:{ harvestId:id } })
+      }
+
       if (action === 'saveCoconutHarvest') {
         const id = genId('CH')
         // Auto-calculate scheduled next harvest = harvest_date + 45 days

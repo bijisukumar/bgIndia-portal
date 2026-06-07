@@ -1558,34 +1558,6 @@ export async function onRequest(ctx) {
         }})
       }
 
-      // SAVE IRRIGATION ZONE LOG — per-zone logging (replaces Google Form)
-      if (action === 'saveIrrigationZoneLog') {
-        const { estate, zoneId, zoneName, loggedDate, durationMins, notes } = body
-        if (!estate || !zoneId || !loggedDate) return err('estate, zoneId, loggedDate required')
-        const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-        await ActiveDB.prepare(
-          `INSERT INTO irrigation_logs
-           (log_id, estate, zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`
-        ).bind(id, estate, zoneId, zoneName||null, loggedDate,
-               parseInt(durationMins)||0, notes||null, actor, now()).run()
-        return json({ success: true, data: { logId: id } })
-      }
-
-      // SAVE IRRIGATION ZONE CONFIG
-      if (action === 'saveIrrigationZone') {
-        const { zoneId, estate, zoneName, zoneLabel, expectedFreqDays, notes, active, sortOrder } = body
-        if (!estate || !zoneName) return err('estate and zoneName required')
-        const id = zoneId || ('zone_' + estate + '_' + Date.now())
-        await ActiveDB.prepare(
-          `INSERT OR REPLACE INTO irrigation_zones
-           (zone_id, estate, zone_name, zone_label, expected_freq_days, active, sort_order, notes, created_at)
-           VALUES (?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM irrigation_zones WHERE zone_id=?),?))`
-        ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7,
-               active !== false ? 1 : 0, parseInt(sortOrder)||0, notes||null, id, now()).run()
-        return json({ success: true, data: { zoneId: id } })
-      }
-
       // IRRIGATION HISTORY — full log list
       if (action === 'getIrrigationHistory') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
@@ -2920,6 +2892,73 @@ export async function onRequest(ctx) {
                cf.country || null, cf.region || null, cf.city || null,
                request.headers.get('user-agent') || null).run()
         return json({ success: true })
+      }
+
+
+      // IRRIGATION ZONE LOG — save (moved from GET block)
+      if (action === 'saveIrrigationZoneLog') {
+        const { estate, zoneId, zoneName, loggedDate, durationMins, notes } = body
+        if (!estate || !zoneId || !loggedDate) return err('estate, zoneId, loggedDate required')
+        const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        await ActiveDB.prepare(
+          `INSERT INTO irrigation_logs
+           (log_id, estate, zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)`
+        ).bind(id, estate, zoneId, zoneName||null, loggedDate,
+               parseInt(durationMins)||0, notes||null, actor, now()).run()
+        return json({ success: true, data: { logId: id } })
+      }
+
+      // IRRIGATION ZONE CONFIG — save (moved from GET block)
+      if (action === 'saveIrrigationZone') {
+        const { zoneId, estate, zoneName, zoneLabel, expectedFreqDays, notes, active, sortOrder } = body
+        if (!estate || !zoneName) return err('estate and zoneName required')
+        const id = zoneId || ('zone_' + estate + '_' + Date.now())
+        await ActiveDB.prepare(
+          `INSERT OR REPLACE INTO irrigation_zones
+           (zone_id, estate, zone_name, zone_label, expected_freq_days, active, sort_order, notes, created_at)
+           VALUES (?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM irrigation_zones WHERE zone_id=?),?))`
+        ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7,
+               active !== false ? 1 : 0, parseInt(sortOrder)||0, notes||null, id, now()).run()
+        return json({ success: true, data: { zoneId: id } })
+      }
+
+      // DELETE ESTATE TRANSACTION
+      if (action === 'deleteEstateTransaction') {
+        const { txnId } = body
+        if (!txnId) return err('txnId required')
+        await ActiveDB.prepare(
+          `DELETE FROM estate_transactions WHERE txn_id = ?`
+        ).bind(txnId).run()
+        return json({ success: true, data: { txnId, deleted: true } })
+      }
+
+      // LOG IRRIGATION — simple tap log (no zone required)
+      if (action === 'logIrrigation') {
+        const { estate, loggedDate, notes, durationMins } = body
+        if (!estate || !loggedDate) return err('estate and loggedDate required')
+        const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        await ActiveDB.prepare(
+          `INSERT INTO irrigation_logs
+           (log_id, estate, zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at)
+           VALUES (?,?,NULL,NULL,?,?,?,?,?)`
+        ).bind(id, estate, loggedDate, parseInt(durationMins)||0, notes||null, actor, now()).run()
+        return json({ success: true, data: { logId: id } })
+      }
+
+      // SAVE FERTILIZATION — log a fertilization entry
+      if (action === 'saveFertilization') {
+        const { estate, plannedDate, actualDate, fertilizerType, quantity, unit, notes } = body
+        if (!estate || !plannedDate) return err('estate and plannedDate required')
+        const id = 'fert_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        await ActiveDB.prepare(
+          `INSERT INTO fertilization_log
+           (id, estate, planned_date, actual_date, fertilizer_type, quantity, unit, notes,
+            created_by, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`
+        ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null,
+               parseFloat(quantity)||0, unit||null, notes||null, actor, now()).run()
+        return json({ success: true, data: { id } })
       }
 
       return err(`Unknown POST action: ${action}`, 404)

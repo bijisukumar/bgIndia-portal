@@ -1771,6 +1771,34 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { deleted: result.meta?.changes || 0 } })
       }
 
+
+      // GET PENDING REVIEW STAYS — POST version (Apps Script calls this as POST)
+      if (action === 'getPendingReviewStays') {
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
+                  guest_phone, guest_email, drive_folder_url, drive_folder_id,
+                  created_at, folder_created, folder_created_at
+           FROM stays
+           WHERE status = 'pending_review'
+             AND (checkout_date IS NULL OR checkout_date >= date('now'))
+           ORDER BY checkin_date ASC`
+        ).all()
+        return json({ success: true, data: results.map(r => ({
+          stayId:          r.stay_id,
+          guestName:       r.guest_name,
+          checkIn:         r.checkin_date,
+          checkOut:        r.checkout_date,
+          nights:          r.nights,
+          phone:           r.guest_phone,
+          email:           r.guest_email,
+          driveFolderUrl:  r.drive_folder_url,
+          driveFolderId:   r.drive_folder_id,
+          createdAt:       r.created_at,
+          folderCreated:   r.folder_created || 0,
+          folderCreatedAt: r.folder_created_at || null,
+        })) })
+      }
+
       return err(`Unknown POST action: ${action}`, 404)
     }
 

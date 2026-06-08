@@ -85,7 +85,7 @@ export default function KitchenIncidentals() {
       </div>
 
       <div className="screen-body">
-        {/* STAY SELECTOR CONTEXT BANNER — This is now completely un-gated and visible dynamically */}
+        {/* CONTEXT DROPDOWN HEADER — Always visible */}
         <div className="card" style={{ padding: '14px', marginBottom: '12px', background: 'var(--card-bg)' }}>
           {stay ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -127,13 +127,13 @@ export default function KitchenIncidentals() {
                   ))}
                 </select>
               ) : (
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>Loading past checkout data metrics...</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>Loading past checkout logs...</div>
               )}
             </div>
           )}
         </div>
 
-        {/* KITCHEN CATALOG CARD — Completely exposed permanently. Raman can always input items now. */}
+        {/* ITEMS MENU — Permanently un-gated and accessible */}
         <div className="card-section-label">KITCHEN INCIDENTALS
           <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem', marginLeft: '6px' }}>prices from inventory</span>
         </div>
@@ -215,7 +215,6 @@ export default function KitchenIncidentals() {
           </div>
         </div>
 
-        {/* Button automatically disabled unless a contextual target user is actively assigned */}
         <button className="btn btn-gold" onClick={handleSave} disabled={saving || total === 0 || !stay}>
           {saving ? 'Saving...' : !stay ? 'Select a guest context above' : total > 0 ? `Save · ₹${total.toLocaleString('en-IN')} →` : 'Add items above'}
         </button>

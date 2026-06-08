@@ -54,12 +54,10 @@ export default function KitchenIncidentals() {
     if (!items.length) { showToast('Add at least one item', 'error'); return }
     setSaving(true)
     try {
-      // Save incidentals for the targeted stay id context
       await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes })
       
       let commMsg = ''
-      // Only execute checkout phase if it's a live check-in transaction session
-      if (!stay?.isHistoricalSession) {
+      if (stay && !stay.isHistoricalSession) {
         const result = await api.checkOut({ stayId: stay?.stayId })
         if (result?.commissionCreated) {
           commMsg = ` · Raman ₹${result.ramanComm} commission logged`
@@ -70,8 +68,6 @@ export default function KitchenIncidentals() {
 
       showToast(`Check-out saved ✓${commMsg}`)
       setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
-      
-      // Clear fallback selection view after historical data push to return screen state gracefully
       if (stay?.isHistoricalSession) setStay(null)
     } catch { showToast('Failed to save', 'error') }
     finally { setSaving(false) }
@@ -89,131 +85,141 @@ export default function KitchenIncidentals() {
       </div>
 
       <div className="screen-body">
-        {!stay ? (
-          <div className="card" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-dim)' }}>
-            No active stay — check in a guest first
-              {recentCheckouts.length > 0 && (
-                <div style={{ marginTop: '12px' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginBottom: '8px', fontWeight: '600' }}>
-                    Last 2 checkouts — add missed items:
-                  </div>
-                  {recentCheckouts.map(s => (
-                    <div key={s.stay_id} onClick={() => setStay({ 
-                      stayId: s.stay_id, 
-                      guestName: s.guest_name, 
-                      checkoutDate: s.checkout_date, 
-                      nights: s.nights || 1, 
-                      isHistoricalSession: true 
-                    })}
-                      style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer', marginBottom: '6px', textAlign: 'left' }}>
-                      <div style={{ fontWeight: '600', fontSize: '0.85rem', color: '#EDF2F7' }}>{s.guest_name}</div>
-                      <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginTop: '2px' }}>Checked out: {s.checkout_date} · {s.num_guests || s.adults || 1} guests</div>
-                    </div>
-                  ))}
+        {/* STAY SELECTOR CONTEXT BANNER — This is now completely un-gated and visible dynamically */}
+        <div className="card" style={{ padding: '14px', marginBottom: '12px', background: 'var(--card-bg)' }}>
+          {stay ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ color: '#5C7080', fontSize: '0.65rem' }}>
+                  {stay.isHistoricalSession ? '🔴 RETROACTIVE BILLING SESSION' : '🟢 ACTIVE LIVE STAY'}
                 </div>
-              )}
-          </div>
-        ) : (
-          <>
-            {/* Stay info banner */}
-            <div style={{ background: stay.isHistoricalSession ? 'rgba(245,158,11,0.08)' : 'rgba(200,144,58,0.08)', border: stay.isHistoricalSession ? '1px solid rgba(245,158,11,0.25)' : '1px solid rgba(200,144,58,0.2)', borderRadius: '10px', padding: '10px 14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div><div style={{ color: '#5C7080', fontSize: '0.65rem' }}>STAY ID</div><div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem' }}>{stay.stayId}</div></div>
-              <div><div style={{ color: '#5C7080', fontSize: '0.65rem' }}>CHECK-OUT</div><div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.9rem' }}>{stay.checkoutDate || '—'}</div></div>
-              <div><div style={{ color: '#5C7080', fontSize: '0.65rem' }}>NIGHTS</div><div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.9rem' }}>{stay.nights || '—'}</div></div>
+                <div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem' }}>
+                  {stay.guestName} ({stay.stayId})
+                </div>
+              </div>
               {stay.isHistoricalSession && (
-                <button onClick={() => setStay(null)} style={{ background: 'transparent', border: 'none', color: '#EF4444', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer', padding: '4px' }}>✕ Clear</button>
+                <button onClick={() => setStay(null)} style={{ background: 'transparent', border: 'none', color: '#EF4444', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}>✕ Clear Selection</button>
               )}
             </div>
-
-            <div className="card-section-label">KITCHEN INCIDENTALS
-              <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem', marginLeft: '6px' }}>prices from inventory</span>
-            </div>
-            <div className="card">
-              {CHECKOUT_ITEMS.map((item, i) => {
-                const qty   = cart[item.id] || 0
-                const price = prices[item.id] || item.sellPrice
-                const sub   = qty * price
-                return (
-                  <div key={item.id} style={{
-                    display: 'grid', gridTemplateColumns: '1fr auto',
-                    paddingBottom: '12px', marginBottom: '12px',
-                    borderBottom: i < CHECKOUT_ITEMS.length - 1 ? '1px solid var(--border-dim)' : 'none',
-                    alignItems: 'center', gap: '8px',
-                  }}>
-                    <div>
-                      <div style={{ color: 'var(--text)', fontSize: '0.88rem', fontWeight: '500' }}>{item.name}</div>
-                      <div style={{ color: '#5C7080', fontSize: '0.72rem' }}>
-                        ₹{price} / {item.unit}
-                        {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', marginLeft: '8px' }}>= ₹{sub.toLocaleString('en-IN')}</span>}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button onClick={() => setQty(item.id, qty - 1)}
-                        style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>−</button>
-                      <span style={{ color: 'var(--gold)', fontWeight: '700', minWidth: '22px', textAlign: 'center', fontSize: '0.95rem' }}>{qty}</span>
-                      <button onClick={() => setQty(item.id, qty + 1)}
-                        style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>+</button>
-                    </div>
-                  </div>
-                )
-              })}
-
-              {/* Ad-hoc item */}
-              <div style={{ paddingTop: '8px', borderTop: '1px dashed rgba(255,255,255,0.08)' }}>
-                <div style={{ color: '#5C7080', fontSize: '0.72rem', marginBottom: '8px' }}>AD-HOC / OTHER</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 50px', gap: '6px', alignItems: 'center' }}>
-                  <input className="field-input" placeholder="Item name"
-                    value={custom.name} onChange={e => setCustom(c => ({ ...c, name: e.target.value }))}
-                    style={{ fontSize: '0.82rem', padding: '6px 8px' }} />
-                  <input className="field-input" placeholder="₹/unit" type="number"
-                    value={custom.price} onChange={e => setCustom(c => ({ ...c, price: e.target.value }))}
-                    style={{ fontSize: '0.82rem', padding: '6px 8px', color: 'var(--gold)' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <button onClick={() => setCustom(c => ({ ...c, qty: Math.max(0, c.qty - 1) }))}
-                      style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: '0.9rem' }}>−</button>
-                    <span style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem', minWidth: '16px', textAlign: 'center' }}>{custom.qty}</span>
-                    <button onClick={() => setCustom(c => ({ ...c, qty: c.qty + 1 }))}
-                      style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: '0.9rem' }}>+</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="field" style={{ marginBottom: 0 }}>
-                <div className="field-label">Notes (optional)</div>
-                <input className="field-input" placeholder="Any special requests or notes..."
-                  value={notes} onChange={e => setNotes(e.target.value)} />
-              </div>
-            </div>
-
-            {/* Total */}
-            <div className="net-box">
-              {CHECKOUT_ITEMS.filter(i => (cart[i.id] || 0) > 0).map(i => (
-                <div key={i.id} className="net-row">
-                  <span className="net-label">{i.name} × {cart[i.id]}</span>
-                  <span className="net-val pos">₹{itemTotal(i.id).toLocaleString('en-IN')}</span>
-                </div>
-              ))}
-              {custom.qty > 0 && custom.name && (
-                <div className="net-row">
-                  <span className="net-label">{custom.name} × {custom.qty}</span>
-                  <span className="net-val pos">₹{(custom.qty * (parseFloat(custom.price) || 0)).toLocaleString('en-IN')}</span>
-                </div>
+          ) : (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: '#F59E0B', marginBottom: '6px', fontWeight: '600' }}>
+                ⚠️ No active stay found. Select a recent checkout to apply charges:
+              </label>
+              {recentCheckouts.length > 0 ? (
+                <select 
+                  onChange={(e) => {
+                    const chosen = recentCheckouts.find(r => r.stay_id === e.target.value)
+                    if (chosen) {
+                      setStay({ stayId: chosen.stay_id, guestName: chosen.guest_name, checkoutDate: chosen.checkout_date, nights: chosen.nights || 1, isHistoricalSession: true })
+                    } else {
+                      setStay(null)
+                    }
+                  }}
+                  className="field-input"
+                  style={{ width: '100%', background: '#1A202C', color: '#FFF', padding: '8px', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.3)' }}
+                >
+                  <option value="">-- Choose a past checkout --</option>
+                  {recentCheckouts.map(s => (
+                    <option key={s.stay_id} value={s.stay_id}>
+                      {s.guest_name} (Checked out: {s.checkout_date})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>Loading past checkout data metrics...</div>
               )}
-              {total > 0 && <div className="net-divider" />}
-              <div className="net-row">
-                <span style={{ color: 'var(--text)', fontWeight: '700', fontSize: '1rem' }}>Total incidentals</span>
-                <span className="net-val big">₹{total.toLocaleString('en-IN')}</span>
+            </div>
+          )}
+        </div>
+
+        {/* KITCHEN CATALOG CARD — Completely exposed permanently. Raman can always input items now. */}
+        <div className="card-section-label">KITCHEN INCIDENTALS
+          <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem', marginLeft: '6px' }}>prices from inventory</span>
+        </div>
+        <div className="card">
+          {CHECKOUT_ITEMS.map((item, i) => {
+            const qty   = cart[item.id] || 0
+            const price = prices[item.id] || item.sellPrice
+            const sub   = qty * price
+            return (
+              <div key={item.id} style={{
+                display: 'grid', gridTemplateColumns: '1fr auto',
+                paddingBottom: '12px', marginBottom: '12px',
+                borderBottom: i < CHECKOUT_ITEMS.length - 1 ? '1px solid var(--border-dim)' : 'none',
+                alignItems: 'center', gap: '8px',
+              }}>
+                <div>
+                  <div style={{ color: 'var(--text)', fontSize: '0.88rem', fontWeight: '500' }}>{item.name}</div>
+                  <div style={{ color: '#5C7080', fontSize: '0.72rem' }}>
+                    ₹{price} / {item.unit}
+                    {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', marginLeft: '8px' }}>= ₹{sub.toLocaleString('en-IN')}</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button onClick={() => setQty(item.id, qty - 1)}
+                    style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>−</button>
+                  <span style={{ color: 'var(--gold)', fontWeight: '700', minWidth: '22px', textAlign: 'center', fontSize: '0.95rem' }}>{qty}</span>
+                  <button onClick={() => setQty(item.id, qty + 1)}
+                    style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>+</button>
+                </div>
+              </div>
+            )
+          })}
+
+          <div style={{ paddingTop: '8px', borderTop: '1px dashed rgba(255,255,255,0.08)' }}>
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', marginBottom: '8px' }}>AD-HOC / OTHER</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 50px', gap: '6px', alignItems: 'center' }}>
+              <input className="field-input" placeholder="Item name"
+                value={custom.name} onChange={e => setCustom(c => ({ ...c, name: e.target.value }))}
+                style={{ fontSize: '0.82rem', padding: '6px 8px' }} />
+              <input className="field-input" placeholder="₹/unit" type="number"
+                value={custom.price} onChange={e => setCustom(c => ({ ...c, price: e.target.value }))}
+                style={{ fontSize: '0.82rem', padding: '6px 8px', color: 'var(--gold)' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button onClick={() => setCustom(c => ({ ...c, qty: Math.max(0, c.qty - 1) }))}
+                  style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: '0.9rem' }}>−</button>
+                <span style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem', minWidth: '16px', textAlign: 'center' }}>{custom.qty}</span>
+                <button onClick={() => setCustom(c => ({ ...c, qty: c.qty + 1 }))}
+                  style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', fontSize: '0.9rem' }}>+</button>
               </div>
             </div>
+          </div>
+        </div>
 
-            <button className="btn btn-gold" onClick={handleSave} disabled={saving || total === 0}>
-              {saving ? 'Saving...' : total > 0 ? `Save · ₹${total.toLocaleString('en-IN')} →` : 'Add items above'}
-            </button>
-            <p className="btn-email-note">📧 Owner notified on save</p>
-          </>
-        )}
+        <div className="card">
+          <div className="field" style={{ marginBottom: 0 }}>
+            <div className="field-label">Notes (optional)</div>
+            <input className="field-input" placeholder="Any special requests or notes..."
+              value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="net-box">
+          {CHECKOUT_ITEMS.filter(i => (cart[i.id] || 0) > 0).map(i => (
+            <div key={i.id} className="net-row">
+              <span className="net-label">{i.name} × {cart[i.id]}</span>
+              <span className="net-val pos">₹{itemTotal(i.id).toLocaleString('en-IN')}</span>
+            </div>
+          ))}
+          {custom.qty > 0 && custom.name && (
+            <div className="net-row">
+              <span className="net-label">{custom.name} × {custom.qty}</span>
+              <span className="net-val pos">₹{(custom.qty * (parseFloat(custom.price) || 0)).toLocaleString('en-IN')}</span>
+            </div>
+          )}
+          {total > 0 && <div className="net-divider" />}
+          <div className="net-row">
+            <span style={{ color: 'var(--text)', fontWeight: '700', fontSize: '1rem' }}>Total incidentals</span>
+            <span className="net-val big">₹{total.toLocaleString('en-IN')}</span>
+          </div>
+        </div>
+
+        {/* Button automatically disabled unless a contextual target user is actively assigned */}
+        <button className="btn btn-gold" onClick={handleSave} disabled={saving || total === 0 || !stay}>
+          {saving ? 'Saving...' : !stay ? 'Select a guest context above' : total > 0 ? `Save · ₹${total.toLocaleString('en-IN')} →` : 'Add items above'}
+        </button>
+        <p className="btn-email-note">📧 Owner notified on save</p>
       </div>
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>

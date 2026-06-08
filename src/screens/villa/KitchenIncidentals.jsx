@@ -23,12 +23,34 @@ export default function KitchenIncidentals() {
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
 
   useEffect(() => {
-    api.getActiveStay('dwarka').then(s => { if (s?.stayId) setStay(s) }).catch(() => {})
-    api.getRecentCheckouts('dwarka').then(d => { if (Array.isArray(d) && d.length) setRecentCheckouts(d) }).catch(() => {})
-    // Fetch live prices from inventory if available
-    api.getInventoryPrices?.('dwarka').then(p => {
-      if (p) setPrices(prev => ({ ...prev, ...p }))
-    }).catch(() => {})
+    api.getActiveStay('dwarka')
+      .then(s => { 
+        if (s && s.stayId) {
+          // Safeguard active stay fields to avoid rendering undefined values
+          setStay({
+            stayId: s.stayId,
+            guestName: s.guestName || 'Active Guest',
+            checkoutDate: s.checkoutDate || '—',
+            nights: s.nights || '—',
+            isHistoricalSession: false
+          })
+        }
+      })
+      .catch(() => {})
+
+    api.getRecentCheckouts('dwarka')
+      .then(d => { 
+        if (Array.isArray(d) && d.length) {
+          setRecentCheckouts(d)
+        } 
+      })
+      .catch(() => {})
+
+    api.getInventoryPrices?.('dwarka')
+      .then(p => {
+        if (p) setPrices(prev => ({ ...prev, ...p }))
+      })
+      .catch(() => {})
   }, [])
 
   const setQty = (id, qty) => setCart(c => ({ ...c, [id]: Math.max(0, qty) }))
@@ -85,9 +107,9 @@ export default function KitchenIncidentals() {
       </div>
 
       <div className="screen-body">
-        {/* CONTEXT DROPDOWN HEADER — Always visible */}
+        {/* SAFE CONTEXT DROPDOWN HEADER */}
         <div className="card" style={{ padding: '14px', marginBottom: '12px', background: 'var(--card-bg)' }}>
-          {stay ? (
+          {stay && stay.stayId ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ color: '#5C7080', fontSize: '0.65rem' }}>
@@ -111,7 +133,13 @@ export default function KitchenIncidentals() {
                   onChange={(e) => {
                     const chosen = recentCheckouts.find(r => r.stay_id === e.target.value)
                     if (chosen) {
-                      setStay({ stayId: chosen.stay_id, guestName: chosen.guest_name, checkoutDate: chosen.checkout_date, nights: chosen.nights || 1, isHistoricalSession: true })
+                      setStay({ 
+                        stayId: chosen.stay_id, 
+                        guestName: chosen.guest_name, 
+                        checkoutDate: chosen.checkout_date, 
+                        nights: chosen.nights || 1, 
+                        isHistoricalSession: true 
+                      })
                     } else {
                       setStay(null)
                     }
@@ -133,7 +161,7 @@ export default function KitchenIncidentals() {
           )}
         </div>
 
-        {/* ITEMS MENU — Permanently un-gated and accessible */}
+        {/* ITEMS MENU */}
         <div className="card-section-label">KITCHEN INCIDENTALS
           <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem', marginLeft: '6px' }}>prices from inventory</span>
         </div>

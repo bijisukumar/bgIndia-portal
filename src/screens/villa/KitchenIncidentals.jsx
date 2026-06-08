@@ -54,15 +54,25 @@ export default function KitchenIncidentals() {
     if (!items.length) { showToast('Add at least one item', 'error'); return }
     setSaving(true)
     try {
-      // Save incidentals
+      // Save incidentals for the targeted stay id context
       await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes })
-      // Complete the stay lifecycle — this triggers Raman commission creation
-      const result = await api.checkOut({ stayId: stay?.stayId })
-      const commMsg = result?.commissionCreated
-        ? ` · Raman ₹${result.ramanComm} commission logged`
-        : ''
+      
+      let commMsg = ''
+      // Only execute checkout phase if it's a live check-in transaction session
+      if (!stay?.isHistoricalSession) {
+        const result = await api.checkOut({ stayId: stay?.stayId })
+        if (result?.commissionCreated) {
+          commMsg = ` · Raman ₹${result.ramanComm} commission logged`
+        }
+      } else {
+        commMsg = ' · Retroactive items added'
+      }
+
       showToast(`Check-out saved ✓${commMsg}`)
       setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
+      
+      // Clear fallback selection view after historical data push to return screen state gracefully
+      if (stay?.isHistoricalSession) setStay(null)
     } catch { showToast('Failed to save', 'error') }
     finally { setSaving(false) }
   }
@@ -81,17 +91,23 @@ export default function KitchenIncidentals() {
       <div className="screen-body">
         {!stay ? (
           <div className="card" style={{ textAlign: 'center', padding: '32px', color: 'var(--text-dim)' }}>
-No active stay — check in a guest first
+            No active stay — check in a guest first
               {recentCheckouts.length > 0 && (
                 <div style={{ marginTop: '12px' }}>
                   <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginBottom: '8px', fontWeight: '600' }}>
                     Last 2 checkouts — add missed items:
                   </div>
                   {recentCheckouts.map(s => (
-                    <div key={s.stay_id} onClick={() => setStay({ stayId: s.stay_id, guestName: s.guest_name, checkoutDate: s.checkout_date, numGuests: s.num_guests })}
-                      style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer', marginBottom: '6px' }}>
+                    <div key={s.stay_id} onClick={() => setStay({ 
+                      stayId: s.stay_id, 
+                      guestName: s.guest_name, 
+                      checkoutDate: s.checkout_date, 
+                      nights: s.nights || 1, 
+                      isHistoricalSession: true 
+                    })}
+                      style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', cursor: 'pointer', marginBottom: '6px', textAlign: 'left' }}>
                       <div style={{ fontWeight: '600', fontSize: '0.85rem', color: '#EDF2F7' }}>{s.guest_name}</div>
-                      <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginTop: '2px' }}>Checked out: {s.checkout_date} · {s.num_guests} guests</div>
+                      <div style={{ fontSize: '0.72rem', color: '#F59E0B', marginTop: '2px' }}>Checked out: {s.checkout_date} · {s.num_guests || s.adults || 1} guests</div>
                     </div>
                   ))}
                 </div>
@@ -100,10 +116,13 @@ No active stay — check in a guest first
         ) : (
           <>
             {/* Stay info banner */}
-            <div style={{ background: 'rgba(200,144,58,0.08)', border: '1px solid rgba(200,144,58,0.2)', borderRadius: '10px', padding: '10px 14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between' }}>
+            <div style={{ background: stay.isHistoricalSession ? 'rgba(245,158,11,0.08)' : 'rgba(200,144,58,0.08)', border: stay.isHistoricalSession ? '1px solid rgba(245,158,11,0.25)' : '1px solid rgba(200,144,58,0.2)', borderRadius: '10px', padding: '10px 14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div><div style={{ color: '#5C7080', fontSize: '0.65rem' }}>STAY ID</div><div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem' }}>{stay.stayId}</div></div>
               <div><div style={{ color: '#5C7080', fontSize: '0.65rem' }}>CHECK-OUT</div><div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.9rem' }}>{stay.checkoutDate || '—'}</div></div>
               <div><div style={{ color: '#5C7080', fontSize: '0.65rem' }}>NIGHTS</div><div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.9rem' }}>{stay.nights || '—'}</div></div>
+              {stay.isHistoricalSession && (
+                <button onClick={() => setStay(null)} style={{ background: 'transparent', border: 'none', color: '#EF4444', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer', padding: '4px' }}>✕ Clear</button>
+              )}
             </div>
 
             <div className="card-section-label">KITCHEN INCIDENTALS

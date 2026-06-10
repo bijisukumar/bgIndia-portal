@@ -1203,7 +1203,8 @@ export async function onRequest(ctx) {
       if (action === 'getPendingReviewStays') {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
-                  guest_phone, guest_email, drive_folder_url, created_at
+                  guest_phone, guest_email, drive_folder_url, created_at,
+                  folder_created, folder_created_at
            FROM stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date >= date('now'))
@@ -1219,8 +1220,8 @@ export async function onRequest(ctx) {
           email:           r.guest_email,
           driveFolderUrl:  r.drive_folder_url,
           createdAt:       r.created_at,
-          folderCreated:   0,
-          folderCreatedAt: null,
+          folderCreated:   r.folder_created || 0,
+          folderCreatedAt: r.folder_created_at || null,
         })) })
       }
 
@@ -1228,7 +1229,8 @@ export async function onRequest(ctx) {
       if (action === 'getReviewChaseList') {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
-                  source, guest_phone, review_rating, review_date
+                  source, guest_phone, review_rating, review_date,
+                  review_chased_at, review_chase_count
            FROM stays
            WHERE status IN ('checked_out','closed')
              AND checkout_date < date('now')
@@ -1240,20 +1242,22 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results.map(r => {
           const checkout = new Date(r.checkout_date)
           const daysOut  = Math.floor((today - checkout) / 86400000)
+          const lastChased = r.review_chased_at ? new Date(r.review_chased_at) : null
+          const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
           return {
-            stayId:       r.stay_id,
-            guestName:    r.guest_name,
-            checkIn:      r.checkin_date,
-            checkOut:     r.checkout_date,
-            nights:       r.nights,
-            adults:       r.adults,
-            source:       r.source,
-            phone:        r.guest_phone,
-            reviewRating: r.review_rating || 0,
-            reviewDate:   r.review_date || null,
-            chasedAt:     null,
-            chaseCount:   0,
-            daysSinceChase: null,
+            stayId:        r.stay_id,
+            guestName:     r.guest_name,
+            checkIn:       r.checkin_date,
+            checkOut:      r.checkout_date,
+            nights:        r.nights,
+            adults:        r.adults,
+            source:        r.source,
+            phone:         r.guest_phone,
+            reviewRating:  r.review_rating || 0,
+            reviewDate:    r.review_date || null,
+            chasedAt:      r.review_chased_at || null,
+            chaseCount:    r.review_chase_count || 0,
+            daysSinceChase,
             daysOut,
             autoCloseReady: daysOut >= 20,
           }

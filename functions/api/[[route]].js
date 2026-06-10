@@ -1064,7 +1064,7 @@ export async function onRequest(ctx) {
         }
       }
 
-
+      if (action === 'getCampaigns') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(`SELECT c.id, c.campaign_name, c.unique_token, c.channel, c.is_active, c.notes, c.created_at, SUM(CASE WHEN a.event_type='click' THEN 1 ELSE 0 END) as clicks, SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries, SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings FROM marketing_campaigns c LEFT JOIN campaign_analytics a ON a.campaign_id = c.id WHERE c.villa_id = ? GROUP BY c.id ORDER BY c.created_at DESC`).bind(villaId).all()
         return json({ success: true, data: results })

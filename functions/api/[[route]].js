@@ -1377,12 +1377,33 @@ export async function onRequest(ctx) {
         return json({ success: true })
       }
 
-      if (action === 'saveKitchenEntry') {
-        const items = body.items || []
+     if (action === 'saveKitchenEntry') {
+        const items = body.items || [];
+        
+        // SAFE CONTEXT INTIATION — Guarantee fallback tokens exist
+        const currentActor = typeof actor !== 'undefined' ? actor : 'raman';
+        const timestamp = typeof now === 'function' ? now() : new Date().toISOString();
+
         for (const item of items) {
-          await DB.prepare(`INSERT INTO stay_incidentals (item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(genId('INC'), body.stayId, item.itemId || item.inv_item_id || null, item.name, item.qty || 1, item.pricePerUnit || item.price || 0, item.subtotal || item.total || 0, actor, actor, now(), now()).run()
+          await DB.prepare(
+            `INSERT INTO stay_incidentals (
+              item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+          ).bind(
+            genId('INC'), 
+            body.stayId, 
+            item.itemId || item.inv_item_id || null, 
+            item.name, 
+            Number(item.qty) || 1, 
+            Number(item.pricePerUnit) || Number(item.price) || 0, 
+            Number(item.subtotal) || Number(item.total) || 0, 
+            currentActor, 
+            currentActor, 
+            timestamp, 
+            timestamp
+          ).run();
         }
-        return json({ success: true })
+        return json({ success: true });
       }
 
       if (action === 'saveVillaRentalIncome') {

@@ -33,7 +33,8 @@ export default function VillaHub() {
       .then(res => {
         const twoMonths = new Date()
         twoMonths.setDate(twoMonths.getDate() + 60)
-        const filtered = (res?.data || []).filter(s => {
+        const all = Array.isArray(res) ? res : (res?.data || [])
+        const filtered = all.filter(s => {
           if (!s.checkin_date) return false
           const d = new Date(s.checkin_date + 'T00:00:00')
           return d <= twoMonths

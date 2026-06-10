@@ -283,7 +283,7 @@ const s = {
   marketItem:    { textAlign: 'center', background: 'rgba(15,110,86,0.06)', borderRadius: 8, padding: '10px 6px', border: '1px solid rgba(15,110,86,0.12)' },
   marketPrice:   { color: '#4CAF50', fontSize: '1rem', fontWeight: 700 },
   marketLabel:   { color: '#5C7080', fontSize: '0.6rem', marginTop: 4, lineHeight: 1.3 },
-  marketDate:    { color: '#3A4A40', fontSize: '0.58rem', marginTop: 2 },
+  marketDate:    { color: '#5C7080', fontSize: '0.62rem', marginTop: 3 },
   marketLoading: { color: '#5C7080', textAlign: 'center', fontSize: '0.78rem', padding: '12px 0' },
   marketFetched: { color: '#3A4A40', fontSize: '0.6rem', textAlign: 'center', marginTop: 4 },
 }

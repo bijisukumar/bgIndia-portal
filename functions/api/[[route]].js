@@ -1161,7 +1161,20 @@ export async function onRequest(ctx) {
         let mangoes = []
         try {
           const { results: mangoResults } = await ActiveDB.prepare(
-            `SELECT strftime('%Y', harvest_date) as harvest_year, SUM(total_boxes) as boxes, SUM(total_revenue) as revenue FROM mango_harvests WHERE estate = ? GROUP BY harvest_year ORDER BY harvest_year DESC LIMIT 3`
+            `SELECT strftime('%Y', harvest_date) as harvest_year,
+               SUM(alphonsa)     as alphonsa,
+               SUM(neelam)       as neelam,
+               SUM(malgova)      as malgova,
+               SUM(banganapally) as banganapally,
+               SUM(kilimooku)    as kilimooku,
+               SUM(sindooram)    as sindooram,
+               SUM(mix)          as mix,
+               SUM(CASE WHEN box_type='Normal' THEN total_boxes ELSE 0 END) as normal_boxes,
+               SUM(CASE WHEN box_type='Small'  THEN total_boxes ELSE 0 END) as small_boxes,
+               SUM(total_boxes)  as total_boxes,
+               SUM(total_revenue) as revenue
+             FROM mango_harvests WHERE estate = ?
+             GROUP BY harvest_year ORDER BY harvest_year DESC LIMIT 3`
           ).bind(estateId).all()
           mangoes = mangoResults
         } catch(e) {}

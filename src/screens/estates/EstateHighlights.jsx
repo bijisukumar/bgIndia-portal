@@ -187,42 +187,87 @@ export default function EstateHighlights({ estate = 'pollachi' }) {
       </HighlightCard>
 
       {/* ── MANGO HARVEST ── */}
-      <HighlightCard icon="🥭" title="Mango harvest — year on year" color="#F59E0B">
+      <HighlightCard icon="🥭" title="Mango harvest — 2026 season" color="#F59E0B">
         {mango.length === 0 ? (
           <div style={{ textAlign:'center', color:'#5C7080', fontSize:'0.8rem', padding:'12px' }}>
-            No mango harvest data yet.<br/>
-            <span style={{ fontSize:'0.72rem' }}>Add via Income / Expense → Mango Harvest Income</span>
+            No mango harvest data yet.
           </div>
-        ) : (
-          <>
-            <div style={{ display:'flex', gap:'8px', marginBottom:'8px' }}>
-              {mango.slice(0, 2).map(m => (
-                <div key={m.harvest_year} style={{ flex:1, background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'8px', padding:'10px 12px' }}>
-                  <div style={{ fontSize:'0.62rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'4px' }}>{m.harvest_year}</div>
-                  <div style={{ fontWeight:'700', color:'#F59E0B', fontSize:'1rem' }}>
-                    {m.tons > 0 ? `${m.tons}T` : m.units > 0 ? `${m.units} units` : '—'}
+        ) : (() => {
+          const m = mango[0]
+          const NORMAL_KG = 15
+          const SMALL_KG  = 8
+          const normalBoxes = m.normal_boxes || 0
+          const smallBoxes  = m.small_boxes  || 0
+          const totalBoxes  = m.total_boxes  || 0
+          const estKg       = (normalBoxes * NORMAL_KG) + (smallBoxes * SMALL_KG)
+          const estTonnes   = (estKg / 1000).toFixed(2)
+
+          const VARIETIES = [
+            { key:'alphonsa',     label:'Alphonsa',     color:'#F59E0B' },
+            { key:'neelam',       label:'Neelam',       color:'#10B981' },
+            { key:'malgova',      label:'Malgova',      color:'#C8903A' },
+            { key:'banganapally', label:'Banganapally', color:'#34A853' },
+            { key:'kilimooku',    label:'Kilimooku',    color:'#8B5CF6' },
+            { key:'sindooram',    label:'Sindooram',    color:'#EF4444' },
+            { key:'mix',          label:'Mix',          color:'#5C7080' },
+          ]
+          const maxVar = Math.max(...VARIETIES.map(v => m[v.key] || 0), 1)
+
+          return (
+            <>
+              {/* Box type summary */}
+              <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
+                {[
+                  { label:'Normal boxes', val: normalBoxes },
+                  { label:'Small boxes',  val: smallBoxes  },
+                  { label:'Total boxes',  val: totalBoxes  },
+                ].map(s => (
+                  <div key={s.label} style={{ flex:1, textAlign:'center', background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.15)', borderRadius:'8px', padding:'8px 4px' }}>
+                    <div style={{ fontSize:'1.1rem', fontWeight:'700', color:'#F59E0B' }}>{s.val}</div>
+                    <div style={{ fontSize:'0.6rem', color:'#5C7080', marginTop:'2px' }}>{s.label}</div>
                   </div>
-                  {m.revenue > 0 && (
-                    <div style={{ fontSize:'0.7rem', color:'#9AA5B4', marginTop:'2px' }}>
-                      ₹{m.revenue >= 1000 ? (m.revenue/1000).toFixed(1)+'K' : m.revenue}
+                ))}
+              </div>
+
+              {/* Variety rows */}
+              <div style={{ fontSize:'0.6rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'6px' }}>BY VARIETY</div>
+              {VARIETIES.map(v => {
+                const count = m[v.key] || 0
+                const pct   = Math.round((count / maxVar) * 100)
+                return (
+                  <div key={v.key} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'6px 0', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ width:'8px', height:'8px', borderRadius:'50%', background: v.color, flexShrink:0 }}/>
+                    <div style={{ width:'88px', fontSize:'0.75rem', color:'#C9D1D9', flexShrink:0 }}>{v.label}</div>
+                    <div style={{ flex:1, height:'5px', background:'rgba(255,255,255,0.06)', borderRadius:'3px', overflow:'hidden' }}>
+                      <div style={{ height:'5px', width:`${pct}%`, background: v.color, borderRadius:'3px', opacity: count > 0 ? 0.85 : 0 }}/>
                     </div>
-                  )}
+                    <div style={{ width:'52px', textAlign:'right', fontSize:'0.75rem', fontWeight:'600', color: count > 0 ? '#C9D1D9' : '#3A4550', flexShrink:0 }}>
+                      {count > 0 ? `${count} boxes` : '—'}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Weight estimate */}
+              <div style={{ marginTop:'12px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:'8px', padding:'10px 12px' }}>
+                <div style={{ fontSize:'0.6rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'8px' }}>WEIGHT ESTIMATE</div>
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.72rem', color:'#5C7080', marginBottom:'4px' }}>
+                  <span>Normal × {normalBoxes} boxes @ {NORMAL_KG}kg</span>
+                  <span style={{ color:'#9AA5B4' }}>{normalBoxes * NORMAL_KG} kg</span>
                 </div>
-              ))}
-            </div>
-            {mango.length >= 2 && (() => {
-              const curr = mango[0], prev = mango[1]
-              const metric = curr.tons > 0 ? 'tons' : 'units'
-              const currVal = curr[metric], prevVal = prev[metric]
-              const diff = prevVal > 0 ? Math.round(((currVal - prevVal) / prevVal) * 100) : null
-              return diff !== null ? (
-                <div style={{ fontSize:'0.75rem', color: diff >= 0 ? '#34A853' : '#EF4444', background: diff >= 0 ? 'rgba(52,168,83,0.06)' : 'rgba(239,68,68,0.06)', padding:'6px 10px', borderRadius:'6px', fontWeight:'600' }}>
-                  {diff >= 0 ? '▲' : '▼'} {Math.abs(diff)}% vs {prev.harvest_year}
+                <div style={{ display:'flex', justifyContent:'space-between', fontSize:'0.72rem', color:'#5C7080', marginBottom:'8px' }}>
+                  <span>Small × {smallBoxes} boxes @ {SMALL_KG}kg</span>
+                  <span style={{ color:'#9AA5B4' }}>{smallBoxes * SMALL_KG} kg</span>
                 </div>
-              ) : null
-            })()}
-          </>
-        )}
+                <div style={{ display:'flex', justifyContent:'space-between', borderTop:'1px solid rgba(255,255,255,0.06)', paddingTop:'8px' }}>
+                  <span style={{ fontSize:'0.78rem', fontWeight:'600', color:'#F59E0B' }}>Est. total weight</span>
+                  <span style={{ fontSize:'0.85rem', fontWeight:'700', color:'#F59E0B' }}>{estKg} kg · {estTonnes} t</span>
+                </div>
+                <div style={{ fontSize:'0.6rem', color:'#3A4550', marginTop:'4px' }}>Estimate — actual kg/box not yet recorded</div>
+              </div>
+            </>
+          )
+        })()}
       </HighlightCard>
     </div>
   )

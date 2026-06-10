@@ -1533,6 +1533,20 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, status } })
       }
 
+      if (action === 'closeStayWithReview') {
+        const { stayId, rating, closedReason } = body
+        if (!stayId) return err('stayId required')
+        const updates = [`status = 'closed'`, `updated_by = ?`, `updated_at = ?`]
+        const binds = [actor, now()]
+        if (rating && rating > 0) {
+          updates.push(`review_rating = ?`, `review_source = 'direct'`, `review_date = ?`)
+          binds.push(rating, now().slice(0, 10))
+        }
+        binds.push(stayId)
+        await DB.prepare(`UPDATE stays SET ${updates.join(', ')} WHERE stay_id = ?`).bind(...binds).run()
+        return json({ success: true, data: { stayId, status: 'closed', rating: rating || 0 } })
+      }
+
       if (action === 'saveBreakfastEntry') {
         const id = genId('BF')
         await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()

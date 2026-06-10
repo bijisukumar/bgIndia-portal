@@ -1129,9 +1129,13 @@ export async function onRequest(ctx) {
         ).bind(estateId, cutoffStr).all()
 
         const harvestTimings = harvests.map((h, i) => {
+          // planned = what the PREVIOUS harvest said the next one should be
+          // harvests are sorted DESC so prev = harvests[i+1]
           const prev = harvests[i + 1]
-          const planned = h.scheduled_harvest_date || prev?.scheduled_harvest_date || null
-          const gap = planned ? Math.round((new Date(h.harvest_date) - new Date(planned)) / 86400000) : null
+          const planned = prev?.scheduled_harvest_date || null
+          const gap = (planned && h.harvest_date)
+            ? Math.round((new Date(h.harvest_date) - new Date(planned)) / 86400000)
+            : null
           return { date: h.harvest_date, planned, gap, nuts: h.total_nuts, weightKg: h.total_weight_kg }
         })
 

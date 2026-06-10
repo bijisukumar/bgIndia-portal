@@ -1193,21 +1193,6 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { totalIncome, totalExpense, netProfit, harvestCount: harvests.length, expBreakdown, monthly: monthlyArr } })
       }
 
-      if (action === 'getPendingReviewStays') {
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, guest_phone, guest_email, drive_folder_url, created_at, folder_created, folder_created_at FROM stays WHERE status = 'pending_review' AND (checkout_date IS NULL OR checkout_date >= date('now')) ORDER BY checkin_date ASC`).all()
-        return json({ success: true, data: results.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date, nights: r.nights, phone: r.guest_phone, email: r.guest_email, driveFolderUrl: r.drive_folder_url, createdAt: r.created_at, folderCreated: r.folder_created || 0, folderCreatedAt: r.folder_created_at || null })) })
-      }
-
-      if (action === 'getReviewChaseList') {
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, guest_phone, review_rating, review_date, review_chased_at, review_chase_count FROM stays WHERE status IN ('checked_out','pending_review') AND checkout_date < date('now') AND (review_rating IS NULL OR review_rating = 0) ORDER BY checkout_date DESC`).all()
-        const today = new Date()
-        return json({ success: true, data: results.map(r => {
-          const checkout = new Date(r.checkout_date); const daysOut = Math.floor((today - checkout) / 86400000)
-          const lastChased = r.review_chased_at ? new Date(r.review_chased_at) : null; const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
-          return { stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, phone: r.guest_phone, reviewRating: r.review_rating || 0, reviewDate: r.review_date || null, chasedAt: r.review_chased_at || null, chaseCount: r.review_chase_count || 0, daysSinceChase, daysOut, autoCloseReady: daysOut >= 20 }
-        }) })
-      }
-
       if (action === 'getCheckinLinks') {
         const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM checkin_links ORDER BY villa_id, partner`).all()
         return json({ success: true, data: results })
@@ -1218,8 +1203,7 @@ export async function onRequest(ctx) {
       if (action === 'getPendingReviewStays') {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
-                  guest_phone, guest_email, drive_folder_url, created_at,
-                  folder_created, folder_created_at
+                  guest_phone, guest_email, drive_folder_url, created_at
            FROM stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date >= date('now'))
@@ -1235,8 +1219,8 @@ export async function onRequest(ctx) {
           email:           r.guest_email,
           driveFolderUrl:  r.drive_folder_url,
           createdAt:       r.created_at,
-          folderCreated:   r.folder_created || 0,
-          folderCreatedAt: r.folder_created_at || null,
+          folderCreated:   0,
+          folderCreatedAt: null,
         })) })
       }
 
@@ -1244,36 +1228,34 @@ export async function onRequest(ctx) {
       if (action === 'getReviewChaseList') {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
-                  source, guest_phone, review_rating, review_date,
-                  review_chased_at, review_chase_count
+                  source, guest_phone, review_rating, review_date
            FROM stays
-           WHERE status IN ('checked_out','pending_review')
+           WHERE status IN ('checked_out','closed')
              AND checkout_date < date('now')
              AND (review_rating IS NULL OR review_rating = 0)
-           ORDER BY checkout_date DESC`
+           ORDER BY checkout_date DESC
+           LIMIT 100`
         ).all()
         const today = new Date()
         return json({ success: true, data: results.map(r => {
           const checkout = new Date(r.checkout_date)
           const daysOut  = Math.floor((today - checkout) / 86400000)
-          const lastChased = r.review_chased_at ? new Date(r.review_chased_at) : null
-          const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
           return {
-            stayId:          r.stay_id,
-            guestName:       r.guest_name,
-            checkIn:         r.checkin_date,
-            checkOut:        r.checkout_date,
-            nights:          r.nights,
-            adults:          r.adults,
-            source:          r.source,
-            phone:           r.guest_phone,
-            reviewRating:    r.review_rating || 0,
-            reviewDate:      r.review_date || null,
-            chasedAt:        r.review_chased_at || null,
-            chaseCount:      r.review_chase_count || 0,
-            daysSinceChase,
+            stayId:       r.stay_id,
+            guestName:    r.guest_name,
+            checkIn:      r.checkin_date,
+            checkOut:     r.checkout_date,
+            nights:       r.nights,
+            adults:       r.adults,
+            source:       r.source,
+            phone:        r.guest_phone,
+            reviewRating: r.review_rating || 0,
+            reviewDate:   r.review_date || null,
+            chasedAt:     null,
+            chaseCount:   0,
+            daysSinceChase: null,
             daysOut,
-            autoCloseReady:  daysOut >= 20,
+            autoCloseReady: daysOut >= 20,
           }
         }) })
       }

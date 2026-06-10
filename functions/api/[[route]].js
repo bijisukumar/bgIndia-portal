@@ -494,10 +494,10 @@ export async function onRequest(ctx) {
       if (action === 'getRecentCheckouts') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, status, num_guests
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
            FROM stays WHERE villa_id = ?
            AND status NOT IN ('confirmed','pending_review','checked_in','ready_for_checkout','cancelled')
-           ORDER BY updated_at DESC LIMIT 2`
+           ORDER BY checkout_date DESC LIMIT 2`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }

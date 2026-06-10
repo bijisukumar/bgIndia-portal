@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { INVENTORY_MASTER } from './Inventory'
 
-// Only kitchen-category items are billable at checkout
 const CHECKOUT_ITEMS = INVENTORY_MASTER.filter(i => i.category === 'kitchen')
 
 export default function KitchenIncidentals() {
@@ -17,7 +16,6 @@ export default function KitchenIncidentals() {
   const [saving, setSaving] = useState(false)
   const [toast, setToast]         = useState(null)
   const [recentCheckouts, setRecentCheckouts] = useState([])
-  // Custom / ad-hoc item
   const [custom, setCustom] = useState({ name: '', price: '', qty: 0 })
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
@@ -26,7 +24,6 @@ export default function KitchenIncidentals() {
     api.getActiveStay('dwarka')
       .then(s => { 
         if (s && s.stayId) {
-          // Safeguard active stay fields to avoid rendering undefined values
           setStay({
             stayId: s.stayId,
             guestName: s.guestName || 'Active Guest',
@@ -40,7 +37,7 @@ export default function KitchenIncidentals() {
 
     api.getRecentCheckouts('dwarka')
       .then(d => { 
-        if (Array.isArray(d) && d.length) {
+        if (Array.isArray(d)) {
           setRecentCheckouts(d)
         } 
       })
@@ -48,13 +45,23 @@ export default function KitchenIncidentals() {
 
     api.getInventoryPrices?.('dwarka')
       .then(p => {
-        if (p) setPrices(prev => ({ ...prev, ...p }))
+        if (p) {
+          const flatPrices = {}
+          Object.keys(p).forEach(itemId => {
+            if (p[itemId] && typeof p[itemId] === 'object') {
+              flatPrices[itemId] = p[itemId].sellPrice || p[itemId].sell_price || 0
+            } else {
+              flatPrices[itemId] = p[itemId]
+            }
+          })
+          setPrices(prev => ({ ...prev, ...flatPrices }))
+        }
       })
       .catch(() => {})
   }, [])
 
   const setQty = (id, qty) => setCart(c => ({ ...c, [id]: Math.max(0, qty) }))
-  const itemTotal = (id) => (cart[id] || 0) * (prices[id] || 0)
+  const itemTotal = (id) => (cart[id] || 0) * (Number(prices[id]) || 0)
   const total = CHECKOUT_ITEMS.reduce((s, i) => s + itemTotal(i.id), 0)
     + (custom.qty || 0) * (parseFloat(custom.price) || 0)
 
@@ -64,7 +71,7 @@ export default function KitchenIncidentals() {
         .filter(i => (cart[i.id] || 0) > 0)
         .map(i => ({
           itemId: i.id, name: i.name, qty: cart[i.id],
-          pricePerUnit: prices[i.id] || i.sellPrice,
+          pricePerUnit: Number(prices[i.id]) || i.sellPrice,
           subtotal: itemTotal(i.id),
         })),
       ...(custom.qty > 0 && custom.name ? [{
@@ -107,7 +114,6 @@ export default function KitchenIncidentals() {
       </div>
 
       <div className="screen-body">
-        {/* SAFE CONTEXT DROPDOWN HEADER */}
         <div className="card" style={{ padding: '14px', marginBottom: '12px', background: 'var(--card-bg)' }}>
           {stay && stay.stayId ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -155,20 +161,19 @@ export default function KitchenIncidentals() {
                   ))}
                 </select>
               ) : (
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>Loading past checkout logs...</div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>No recent checkouts found.</div>
               )}
             </div>
           )}
         </div>
 
-        {/* ITEMS MENU */}
         <div className="card-section-label">KITCHEN INCIDENTALS
           <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem', marginLeft: '6px' }}>prices from inventory</span>
         </div>
         <div className="card">
           {CHECKOUT_ITEMS.map((item, i) => {
             const qty   = cart[item.id] || 0
-            const price = prices[item.id] || item.sellPrice
+            const price = Number(prices[item.id]) || item.sellPrice
             const sub   = qty * price
             return (
               <div key={item.id} style={{

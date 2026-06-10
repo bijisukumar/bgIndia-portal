@@ -25,25 +25,28 @@ function daysUntil(d) {
 
 export default function VillaHub() {
   const navigate = useNavigate()
-  const [upcoming, setUpcoming] = useState([])
+  const [allUpcoming, setAllUpcoming] = useState([])
+  const [days, setDays] = useState(60)
   const [loadingGuests, setLoadingGuests] = useState(true)
 
   useEffect(() => {
     api.getUpcomingStays('dwarka')
       .then(res => {
-        const twoMonths = new Date()
-        twoMonths.setDate(twoMonths.getDate() + 60)
         const all = Array.isArray(res) ? res : (res?.data || [])
-        const filtered = all.filter(s => {
-          if (!s.checkin_date) return false
-          const d = new Date(s.checkin_date + 'T00:00:00')
-          return d <= twoMonths
-        })
-        setUpcoming(filtered)
+        setAllUpcoming(all)
       })
       .catch(() => {})
       .finally(() => setLoadingGuests(false))
   }, [])
+
+  const upcoming = days === 0
+    ? allUpcoming
+    : allUpcoming.filter(s => {
+        if (!s.checkin_date) return false
+        const cutoff = new Date()
+        cutoff.setDate(cutoff.getDate() + days)
+        return new Date(s.checkin_date + 'T00:00:00') <= cutoff
+      })
 
   return (
     <div className="screen">
@@ -110,13 +113,23 @@ export default function VillaHub() {
               <span style={{ fontSize: '1rem' }}>🗓️</span>
               <span style={styles.guestTitle}>Upcoming Guests</span>
             </div>
-            <span style={styles.guestSub}>Next 60 days</span>
+            <select
+              value={days}
+              onChange={e => setDays(Number(e.target.value))}
+              style={styles.daySelect}
+            >
+              <option value={30}>Next 30 days</option>
+              <option value={60}>Next 60 days</option>
+              <option value={90}>Next 90 days</option>
+              <option value={120}>Next 120 days</option>
+              <option value={0}>All upcoming</option>
+            </select>
           </div>
 
           {loadingGuests ? (
             <div style={styles.emptyRow}>Loading…</div>
           ) : upcoming.length === 0 ? (
-            <div style={styles.emptyRow}>No bookings in the next 60 days</div>
+            <div style={styles.emptyRow}>No bookings in the {days === 0 ? 'pipeline' : `next ${days} days`}</div>
           ) : (
             upcoming.map((s, i) => {
               const days   = daysUntil(s.checkin_date)
@@ -192,5 +205,6 @@ const styles = {
   statusPill:  { fontSize: '0.65rem', fontWeight: '700', padding: '2px 7px', borderRadius: '10px', letterSpacing: '0.04em', textTransform: 'uppercase' },
   daysChip:    { color: '#5C7080', fontSize: '0.68rem' },
   emptyRow:    { padding: '18px 16px', color: '#5C7080', fontSize: '0.8rem', textAlign: 'center' },
+  daySelect:   { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#C9D1D9', fontSize: '0.72rem', padding: '3px 7px', cursor: 'pointer', outline: 'none' },
 }
 // cache bust Wed Jun 11 2026 — upcoming guests block

@@ -1011,7 +1011,60 @@ export async function onRequest(ctx) {
         }})
       }
 
-      if (action === 'getCampaigns') {
+      if (action === 'getCoconutMarketPrice') {
+        try {
+          const html = await fetch('https://coconutboard.in/PriceAppScroll/commodity.aspx', {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; bgIndia/1.0)' },
+          }).then(r => r.text())
+
+          // Strip tags helper — pull text content from a <td>...</td>
+          const stripTags = str => str.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '').trim()
+
+          // Find column indices for Pollachi(Green), Pollachi(Black), Thrissur
+          // The header row contains <td> cells; find which position each market is at
+          const headerMatch = html.match(/<tr[^>]*>[\s\S]*?Pollachi[\s\S]*?<\/tr>/i)
+          let colPollGreen = -1, colPollBlack = -1, colThrissur = -1
+          if (headerMatch) {
+            const cells = headerMatch[0].split(/<\/td>/i)
+            cells.forEach((cell, idx) => {
+              const t = stripTags(cell).toLowerCase()
+              if (t.includes('pollachi') && t.includes('green'))  colPollGreen = idx
+              if (t.includes('pollachi') && t.includes('black'))  colPollBlack = idx
+              if (t.includes('thrissur') || t.includes('trichur')) colThrissur = idx
+            })
+          }
+
+          // Find the coconut row — look for "Coconut" in a <tr>
+          const rowMatch = html.match(/<tr[^>]*>(?:(?!<tr).)*?[Cc]oconut[\s\S]*?<\/tr>/i)
+          const parseCell = (cells, idx) => {
+            if (idx < 0 || idx >= cells.length) return null
+            const raw = stripTags(cells[idx])
+            // Format: "35 (09/06/2026)" — extract price and date
+            const m = raw.match(/([\d.]+)\s*\((\d{2}\/\d{2}\/\d{4})\)/)
+            if (!m) return null
+            return { price: parseFloat(m[1]), date: m[2] }
+          }
+
+          let pollGreen = null, pollBlack = null, thrissur = null
+          if (rowMatch) {
+            const cells = rowMatch[0].split(/<\/td>/i)
+            pollGreen = parseCell(cells, colPollGreen)
+            pollBlack = parseCell(cells, colPollBlack)
+            thrissur  = parseCell(cells, colThrissur)
+          }
+
+          return json({ success: true, data: {
+            pollachiGreen: pollGreen,
+            pollachiBlack: pollBlack,
+            thrissur:      thrissur,
+            fetchedAt:     new Date().toISOString(),
+          }})
+        } catch (e) {
+          return json({ success: false, error: 'Failed to fetch market price: ' + e.message })
+        }
+      }
+
+
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(`SELECT c.id, c.campaign_name, c.unique_token, c.channel, c.is_active, c.notes, c.created_at, SUM(CASE WHEN a.event_type='click' THEN 1 ELSE 0 END) as clicks, SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries, SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings FROM marketing_campaigns c LEFT JOIN campaign_analytics a ON a.campaign_id = c.id WHERE c.villa_id = ? GROUP BY c.id ORDER BY c.created_at DESC`).bind(villaId).all()
         return json({ success: true, data: results })

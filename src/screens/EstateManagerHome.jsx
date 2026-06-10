@@ -12,11 +12,21 @@ function fmtDate(d) {
 export default function EstateManagerHome() {
   const { logout }    = useAuth()
   const navigate      = useNavigate()
-  const [info, setInfo]       = useState(null)
+  const [info, setInfo]           = useState(null)
+  const [marketPrice, setMarketPrice] = useState(null)
+  const [marketLoading, setMarketLoading] = useState(true)
+
   useEffect(() => {
     api.getManagerQuickInfo()
       .then(d => setInfo(d))
       .catch(() => setInfo(null))
+  }, [])
+
+  useEffect(() => {
+    api.getCoconutMarketPrice()
+      .then(d => setMarketPrice(d))
+      .catch(() => setMarketPrice(null))
+      .finally(() => setMarketLoading(false))
   }, [])
 
   const handleIrrigationTap = () => navigate('/pollachi/irrigation')
@@ -162,6 +172,41 @@ export default function EstateManagerHome() {
 
         </div>
 
+        {/* ── COCONUT MARKET PRICE ── */}
+        <div className="card-section-label" style={{ marginTop: 16 }}>🥥 MARKET PRICE TODAY</div>
+        <div style={s.marketCard}>
+          {marketLoading ? (
+            <div style={s.marketLoading}>Fetching live prices…</div>
+          ) : !marketPrice || (!marketPrice.pollachiGreen && !marketPrice.pollachiBlack && !marketPrice.thrissur) ? (
+            <div style={s.marketLoading}>Price data unavailable</div>
+          ) : (
+            <>
+              <div style={s.marketGrid}>
+                {[
+                  { label: 'Pollachi (Green)', data: marketPrice.pollachiGreen },
+                  { label: 'Pollachi (Black)', data: marketPrice.pollachiBlack },
+                  { label: 'Thrissur',         data: marketPrice.thrissur },
+                ].map(({ label, data }) => (
+                  <div key={label} style={s.marketItem}>
+                    <div style={s.marketPrice}>
+                      {data ? `₹${data.price}/kg` : '—'}
+                    </div>
+                    <div style={s.marketLabel}>{label}</div>
+                    {data?.date && (
+                      <div style={s.marketDate}>{data.date}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {marketPrice.fetchedAt && (
+                <div style={s.marketFetched}>
+                  Source: coconutboard.in · fetched {new Date(marketPrice.fetchedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
         <button className="logout-btn" onClick={logout} style={{ marginTop: 8 }}>Log out</button>
       </div>
     </div>
@@ -232,4 +277,13 @@ const s = {
   infoVal:     { color: '#C8903A', fontSize: '0.92rem', fontWeight: 700 },
   infoLabel:   { color: '#5C7080', fontSize: '0.65rem', marginTop: 3, lineHeight: 1.4 },
   infoDivider: { width: 1, height: 48, background: 'rgba(255,255,255,0.06)', flexShrink: 0 },
+
+  marketCard:    { background: '#1E2535', borderRadius: 12, border: '1px solid rgba(15,110,86,0.25)', padding: '14px 12px', marginBottom: 8 },
+  marketGrid:    { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: 6 },
+  marketItem:    { textAlign: 'center', background: 'rgba(15,110,86,0.06)', borderRadius: 8, padding: '10px 6px', border: '1px solid rgba(15,110,86,0.12)' },
+  marketPrice:   { color: '#4CAF50', fontSize: '1rem', fontWeight: 700 },
+  marketLabel:   { color: '#5C7080', fontSize: '0.6rem', marginTop: 4, lineHeight: 1.3 },
+  marketDate:    { color: '#3A4A40', fontSize: '0.58rem', marginTop: 2 },
+  marketLoading: { color: '#5C7080', textAlign: 'center', fontSize: '0.78rem', padding: '12px 0' },
+  marketFetched: { color: '#3A4A40', fontSize: '0.6rem', textAlign: 'center', marginTop: 4 },
 }

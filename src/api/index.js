@@ -134,6 +134,7 @@ export const api = {
   deleteTaxEntry:       (data)   => post('deleteTaxEntry', data),
 
   getManagerQuickInfo:  ()       => get('getManagerQuickInfo'),
+  getCoconutMarketPrice: ()      => get('getCoconutMarketPrice'),
   getEstateDashboard:      (estate) => get('getEstateDashboard', { estate }),
   getEstateHighlights:        (estate) => get('getEstateHighlights', { estate }),
   getIrrigationZoneHealth:    (estate) => get('getIrrigationZoneHealth', { estate }),

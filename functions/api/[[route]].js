@@ -886,7 +886,15 @@ export async function onRequest(ctx) {
 
       if (action === 'getUpcomingStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? AND status NOT IN ('closed','cancelled','checked_out') AND (checkin_date >= date('now', '-2 days') OR status IN ('checked_in','ready_for_checkout','ready_for_checkin')) ORDER BY checkin_date ASC`).bind(villaId).all()
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children,
+                  from_city, status, villa_id
+           FROM stays
+           WHERE villa_id = ?
+             AND status NOT IN ('closed','cancelled')
+             AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
+           ORDER BY checkin_date ASC`
+        ).bind(villaId).all()
         return json({ success: true, data: results })
       }
 

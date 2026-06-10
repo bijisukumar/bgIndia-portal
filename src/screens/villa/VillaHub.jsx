@@ -113,17 +113,14 @@ export default function VillaHub() {
               <span style={{ fontSize: '1rem' }}>🗓️</span>
               <span style={styles.guestTitle}>Upcoming Guests</span>
             </div>
-            <select
-              value={days}
-              onChange={e => setDays(Number(e.target.value))}
-              style={styles.daySelect}
-            >
-              <option value={30}>Next 30 days</option>
-              <option value={60}>Next 60 days</option>
-              <option value={90}>Next 90 days</option>
-              <option value={120}>Next 120 days</option>
-              <option value={0}>All upcoming</option>
-            </select>
+            <div style={styles.dayPills}>
+              {[30, 60, 90, 120, 0].map(d => (
+                <button key={d} onClick={() => setDays(d)}
+                  style={{ ...styles.dayPill, ...(days === d ? styles.dayPillActive : {}) }}>
+                  {d === 0 ? 'All' : `${d}d`}
+                </button>
+              ))}
+            </div>
           </div>
 
           {loadingGuests ? (
@@ -204,7 +201,9 @@ const styles = {
   guestMeta:   { color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' },
   statusPill:  { fontSize: '0.65rem', fontWeight: '700', padding: '2px 7px', borderRadius: '10px', letterSpacing: '0.04em', textTransform: 'uppercase' },
   daysChip:    { color: '#5C7080', fontSize: '0.68rem' },
-  emptyRow:    { padding: '18px 16px', color: '#5C7080', fontSize: '0.8rem', textAlign: 'center' },
-  daySelect:   { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#C9D1D9', fontSize: '0.72rem', padding: '3px 7px', cursor: 'pointer', outline: 'none' },
+  emptyRow:     { padding: '18px 16px', color: '#5C7080', fontSize: '0.8rem', textAlign: 'center' },
+  dayPills:     { display: 'flex', gap: '4px' },
+  dayPill:      { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '5px', color: '#8B949E', fontSize: '0.68rem', fontWeight: '600', padding: '3px 7px', cursor: 'pointer' },
+  dayPillActive:{ background: 'rgba(200,144,58,0.18)', border: '1px solid rgba(200,144,58,0.4)', color: '#E8B86D' },
 }
 // cache bust Wed Jun 11 2026 — upcoming guests block

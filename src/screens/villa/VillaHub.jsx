@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { CONFIG } from '../../config'
-import api from '../../api'
+import { api } from '../../api'
 
 const STATUS_COLOR = {
   confirmed:          { bg: 'rgba(52,168,83,0.12)',   text: '#34A853', label: 'Confirmed' },

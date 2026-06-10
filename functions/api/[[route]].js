@@ -1017,46 +1017,24 @@ export async function onRequest(ctx) {
             headers: { 'User-Agent': 'Mozilla/5.0 (compatible; bgIndia/1.0)' },
           }).then(r => r.text())
 
-          // Strip tags helper — pull text content from a <td>...</td>
-          const stripTags = str => str.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, '').trim()
-
-          // Find column indices for Pollachi(Green), Pollachi(Black), Thrissur
-          // The header row contains <td> cells; find which position each market is at
-          const headerMatch = html.match(/<tr[^>]*>[\s\S]*?Pollachi[\s\S]*?<\/tr>/i)
-          let colPollGreen = -1, colPollBlack = -1, colThrissur = -1
-          if (headerMatch) {
-            const cells = headerMatch[0].split(/<\/td>/i)
-            cells.forEach((cell, idx) => {
-              const t = stripTags(cell).toLowerCase()
-              if (t.includes('pollachi') && t.includes('green'))  colPollGreen = idx
-              if (t.includes('pollachi') && t.includes('black'))  colPollBlack = idx
-              if (t.includes('thrissur') || t.includes('trichur')) colThrissur = idx
-            })
+          // Extract value from a named span: <span id="lblcoconutgrn">35</span>
+          const spanVal = (id) => {
+            const m = html.match(new RegExp(`<span[^>]+id=["']${id}["'][^>]*>([^<]*)<\\/span>`, 'i'))
+            return m ? m[1].trim() : ''
           }
 
-          // Find the coconut row — look for "Coconut" in a <tr>
-          const rowMatch = html.match(/<tr[^>]*>(?:(?!<tr).)*?[Cc]oconut[\s\S]*?<\/tr>/i)
-          const parseCell = (cells, idx) => {
-            if (idx < 0 || idx >= cells.length) return null
-            const raw = stripTags(cells[idx])
-            // Format: "35 (09/06/2026)" — extract price and date
-            const m = raw.match(/([\d.]+)\s*\((\d{2}\/\d{2}\/\d{4})\)/)
-            if (!m) return null
-            return { price: parseFloat(m[1]), date: m[2] }
-          }
-
-          let pollGreen = null, pollBlack = null, thrissur = null
-          if (rowMatch) {
-            const cells = rowMatch[0].split(/<\/td>/i)
-            pollGreen = parseCell(cells, colPollGreen)
-            pollBlack = parseCell(cells, colPollBlack)
-            thrissur  = parseCell(cells, colThrissur)
+          const parseEntry = (priceId, dateId) => {
+            const priceRaw = spanVal(priceId)
+            const dateRaw  = spanVal(dateId).replace(/[()]/g, '').trim()
+            const price    = priceRaw ? parseFloat(priceRaw) : null
+            const date     = dateRaw  || null
+            return (price || date) ? { price, date } : null
           }
 
           return json({ success: true, data: {
-            pollachiGreen: pollGreen,
-            pollachiBlack: pollBlack,
-            thrissur:      thrissur,
+            pollachiGreen: parseEntry('lblcoconutgrn',  'lblcoconutgrndate'),
+            pollachiBlack: parseEntry('lblcoconutblk',  'lblcoconutblkdate'),
+            thrissur:      parseEntry('lblcoconutthr',  'lblcoconutthrdate'),
             fetchedAt:     new Date().toISOString(),
           }})
         } catch (e) {

@@ -277,6 +277,7 @@ export async function onRequest(ctx) {
             request_early_checkin = ?, request_late_checkout = ?,
             request_breakfast = ?, breakfast_choice = ?, request_cab = ?,
             request_extra_beds = ?, extra_beds_count = ?,
+            source = CASE WHEN source = 'direct' OR source IS NULL THEN ? ELSE source END,
             checkin_form_submitted = 1, checkin_form_submitted_at = ?,
             status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
             updated_by = 'auto', updated_at = ?
@@ -296,7 +297,7 @@ export async function onRequest(ctx) {
           visaIssueDate||null, visaIssuePlace||null,
           arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
           reqEarly, reqLate, reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
-          submittedAt, submittedAt, stayId
+          partner||'direct', submittedAt, submittedAt, stayId
         ).run()
       } else {
         stayId = genStayId(villaId)

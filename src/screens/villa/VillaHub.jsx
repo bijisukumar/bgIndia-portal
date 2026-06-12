@@ -146,7 +146,7 @@ export default function VillaHub() {
                     <div style={styles.guestName}>{s.guest_name}</div>
                     <div style={styles.guestMeta}>
                       {s.nights} night{s.nights !== 1 ? 's' : ''}
-                      {s.adults ? ` · ${s.adults + (s.children || 0)} guests` : ''}
+                      {(s.adults || 0) + (s.children || 0) > 0 ? ` · ${(s.adults || 0) + (s.children || 0) === 1 ? '1 guest' : `${(s.adults || 0) + (s.children || 0)} guests`}` : ''}
                       {s.from_city ? ` · ${s.from_city}` : ''}
                     </div>
                   </div>

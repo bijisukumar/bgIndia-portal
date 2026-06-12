@@ -200,7 +200,7 @@ const styles = {
   guestName:   { color: '#C9D1D9', fontSize: '0.88rem', fontWeight: '600', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   guestMeta:   { color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' },
   statusPill:  { fontSize: '0.65rem', fontWeight: '700', padding: '2px 7px', borderRadius: '10px', letterSpacing: '0.04em', textTransform: 'uppercase' },
-  daysChip:    { color: '#5C7080', fontSize: '0.68rem' },
+  daysChip:    { color: '#8B949E', fontSize: '0.68rem' },
   emptyRow:     { padding: '18px 16px', color: '#5C7080', fontSize: '0.8rem', textAlign: 'center' },
   dayPills:     { display: 'flex', gap: '4px' },
   dayPill:      { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '5px', color: '#8B949E', fontSize: '0.68rem', fontWeight: '600', padding: '3px 7px', cursor: 'pointer' },

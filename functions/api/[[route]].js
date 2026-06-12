@@ -1589,6 +1589,15 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, status } })
       }
 
+      if (action === 'markReviewChased') {
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await DB.prepare(
+          `UPDATE stays SET review_chased_at = ?, review_chase_count = COALESCE(review_chase_count, 0) + 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(now(), actor, now(), stayId).run()
+        return json({ success: true, data: { stayId } })
+      }
+
       if (action === 'closeStayWithReview') {
         const { stayId, rating, closedReason } = body
         if (!stayId) return err('stayId required')

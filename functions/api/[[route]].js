@@ -888,8 +888,19 @@ export async function onRequest(ctx) {
       if (action === 'getUpcomingStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children,
-                  from_city, status, villa_id
+          `SELECT stay_id, guest_name, guest_phone, guest_email,
+                  checkin_date, checkout_date, nights, adults, children,
+                  source, status, villa_id, from_city,
+                  drive_folder_id, drive_folder_url,
+                  tariff_per_night, extra_charges, extra_lines, gross, net, notes,
+                  commission_pct, commission_amt,
+                  night_fee, cleaning_fee, host_service_fee, you_earn,
+                  guest_service_fee, guest_paid_total,
+                  airbnb_conf, folder_created,
+                  request_early_checkin, request_late_checkout,
+                  request_breakfast, breakfast_choice, request_cab,
+                  request_extra_beds, extra_beds_count,
+                  nationality, purpose_of_visit, mode_of_transport, eta
            FROM stays
            WHERE villa_id = ?
              AND status NOT IN ('closed','cancelled')

@@ -1288,7 +1288,7 @@ export async function onRequest(ctx) {
                   source, guest_phone, review_rating, review_date,
                   review_chased_at, review_chase_count
            FROM stays
-           WHERE status IN ('checked_out','closed')
+           WHERE status = 'checked_out'
              AND checkout_date < date('now')
              AND (review_rating IS NULL OR review_rating = 0)
            ORDER BY checkout_date DESC

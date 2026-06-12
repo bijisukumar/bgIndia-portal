@@ -1263,7 +1263,7 @@ export async function onRequest(ctx) {
                   folder_created, folder_created_at
            FROM stays
            WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date >= date('now'))
+             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
            ORDER BY checkin_date ASC`
         ).all()
         return json({ success: true, data: results.map(r => ({
@@ -1866,7 +1866,7 @@ export async function onRequest(ctx) {
                   created_at, folder_created, folder_created_at
            FROM stays
            WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date >= date('now'))
+             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
            ORDER BY checkin_date ASC`
         ).all()
         return json({ success: true, data: results.map(r => ({

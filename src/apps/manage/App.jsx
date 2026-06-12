@@ -37,9 +37,11 @@ import RubberTracker  from '../../screens/estates/RubberTracker'
 import EstateLedger   from '../../screens/estates/EstateLedger'
 
 // Infra / ops screens
-import DebugPanel  from '../../screens/infra/DebugPanel'
-import TestRunner  from '../../screens/infra/TestRunner'
-import D1Explorer  from '../../screens/infra/D1Explorer'
+import DebugPanel        from '../../screens/infra/DebugPanel'
+import TestRunner        from '../../screens/infra/TestRunner'
+import D1Explorer        from '../../screens/infra/D1Explorer'
+import Maintenance       from '../../screens/infra/Maintenance'
+import SchemaValidation  from '../../screens/infra/SchemaValidation'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -73,6 +75,8 @@ function ProtectedRoutes() {
         {/* Infra */}
         <Route path="/debug"                  element={<DebugPanel />} />
         <Route path="/test"                   element={<TestRunner />} />
+        <Route path="/owner/maintenance"      element={<Maintenance />} />
+        <Route path="/owner/maintenance/schema" element={<SchemaValidation />} />
         <Route path="/owner/marketing"            element={<MarketingCampaigns />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
       </>}

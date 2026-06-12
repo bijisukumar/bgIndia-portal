@@ -794,6 +794,36 @@ export async function onRequest(ctx) {
         } catch (e) { return json({ success: false, error: e.message }, 400) }
       }
 
+      // SCHEMA SNAPSHOT — returns all tables + columns from live DB
+      // Used by Maintenance > Schema Validation screen
+      if (action === 'getSchemaSnapshot') {
+        try {
+          const { results: tables } = await DB.prepare(
+            `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_cf_%' ORDER BY name`
+          ).all()
+
+          const snapshot = {}
+          for (const { name } of tables) {
+            try {
+              const { results: cols } = await DB.prepare(`PRAGMA table_info(${name})`).all()
+              snapshot[name] = cols.map(c => ({
+                name:    c.name,
+                type:    c.type,
+                notnull: c.notnull,
+                dflt:    c.dflt_value,
+                pk:      c.pk,
+              }))
+            } catch(_) {}
+          }
+
+          return json({ success: true, data: {
+            snapshot,
+            tableCount: Object.keys(snapshot).length,
+            generatedAt: new Date().toISOString(),
+          }})
+        } catch(e) { return json({ success: false, error: e.message }, 500) }
+      }
+
       if (action === 'runQuery') {
         const key = url.searchParams.get('key')
         const PRESET_QUERIES = {

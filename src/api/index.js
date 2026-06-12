@@ -198,6 +198,9 @@ export const api = {
   saveInventoryRestock: (data)   => post('saveInventoryRestock', data),
   getInventory:         (vId)    => get('getInventory', { villaId: vId }),
 
+  // ── MAINTENANCE / SCHEMA VALIDATION ────────────────────────
+  getSchemaSnapshot: () => get('getSchemaSnapshot'),
+
   // ── AD-HOC QUERIES (D1Explorer) ──────────────────────────
   runSQL: async (sql) => {
     const qs  = new URLSearchParams({ sql }).toString()

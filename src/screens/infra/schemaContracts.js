@@ -21,7 +21,7 @@ export const CONTRACTS = [
       'checkin_date','checkout_date','nights','adults','children',
       'source','status','villa_id','from_city',
       'drive_folder_id','drive_folder_url',
-      'tariff_per_night','extra_charges','extra_lines','gross','net','notes',
+      'tariff_per_night','extra_charges','extra_lines','gross','net',
       'commission_pct','commission_amt',
       'night_fee','cleaning_fee','host_service_fee','you_earn',
       'guest_service_fee','guest_paid_total',

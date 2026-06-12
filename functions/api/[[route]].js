@@ -1321,14 +1321,26 @@ export async function onRequest(ctx) {
       }
 
 
+      // GET DOCUMENT STATUS — returns doc rows for a stay (all statuses)
+      if (action === 'getDocumentStatus') {
+        const stayId = url.searchParams.get('stayId') || ''
+        if (!stayId) return err('stayId required')
+        const { results } = await DB.prepare(
+          `SELECT doc_id, stay_id, doc_type, file_name, folder_created, created_at, updated_at
+           FROM guest_documents WHERE stay_id = ?`
+        ).bind(stayId).all()
+        return json({ success: true, data: results })
+      }
+
       // DELETE GUEST DOCUMENTS — called by Apps Script after uploading to Drive
+      // Deletes ALL docs for the stay (regardless of folder_created) since upload is confirmed
       if (action === 'deleteGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
-        await DB.prepare(
-          `DELETE FROM guest_documents WHERE stay_id = ? AND folder_created = 1`
+        const result = await DB.prepare(
+          `DELETE FROM guest_documents WHERE stay_id = ?`
         ).bind(stayId).run()
-        return json({ success: true, data: { stayId, deleted: true } })
+        return json({ success: true, data: { stayId, deleted: result.meta?.changes || 0 } })
       }
 
       return err(`Unknown GET action: ${action}`, 404)
@@ -1847,14 +1859,24 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { docId } })
       }
 
-      // CLEANUP EXPIRED DOCUMENTS — removes base64 docs older than 24hrs where folder is created
+      // CLEANUP EXPIRED DOCUMENTS — removes docs older than 14 days
+      // folder_created=1: Drive upload confirmed, safe to delete
+      // folder_created=0: Drive upload never happened — stale, also cleaned after 14 days
       if (action === 'cleanupExpiredDocuments') {
+        // Count stale unprocessed docs before deleting (for logging)
+        const staleUnprocessed = await DB.prepare(
+          `SELECT COUNT(*) as cnt FROM guest_documents
+           WHERE folder_created = 0
+             AND created_at < datetime('now', '-14 days')`
+        ).first()
         const result = await DB.prepare(
           `DELETE FROM guest_documents
-           WHERE folder_created = 1
-             AND created_at < datetime('now', '-24 hours')`
+           WHERE created_at < datetime('now', '-14 days')`
         ).run()
-        return json({ success: true, data: { deleted: result.meta?.changes || 0 } })
+        return json({ success: true, data: {
+          deleted: result.meta?.changes || 0,
+          staleUnprocessed: staleUnprocessed?.cnt || 0
+        }})
       }
 
 

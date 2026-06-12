@@ -366,6 +366,8 @@ function processPendingCheckInForms() {
       folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
 
       // Upload ID docs from D1
+      var docUploadedCount = 0;
+      var docFailedCount   = 0;
       try {
         var dr = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
         if (dr && dr.success && dr.data && dr.data.length > 0) {
@@ -376,18 +378,58 @@ function processPendingCheckInForms() {
               var ts        = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
               var typeLabel = doc.doc_type === 'govt_id' ? 'ID' : doc.doc_type === 'passport' ? 'Passport' : 'Visa';
               folder.createFile(Utilities.newBlob(decoded, 'image/jpeg', typeLabel + '-' + stay.stayId + '-' + ts + '.jpg'));
-              callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
-            } catch(docErr) { Logger.log('Doc upload error: ' + docErr.message); }
+              var markResp = callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
+              if (markResp && markResp.success) { docUploadedCount++; }
+              else { docFailedCount++; Logger.log('markDocumentUploaded failed for ' + doc.doc_id + ': ' + JSON.stringify(markResp)); }
+            } catch(docErr) { docFailedCount++; Logger.log('Doc upload error [' + doc.doc_type + ']: ' + docErr.message); }
           });
         }
       } catch(docsErr) { Logger.log('getGuestDocuments error: ' + docsErr.message); }
+
+      // Verify all docs reached folder_created=1 before deleting from D1
+      var allDocsConfirmed = false;
+      try {
+        var statusResp = callWorker('GET', 'getDocumentStatus', { stayId: stay.stayId });
+        if (statusResp && statusResp.success && statusResp.data) {
+          var pending = statusResp.data.filter(function(d) { return d.folder_created === 0; });
+          if (pending.length === 0) {
+            allDocsConfirmed = true;
+          } else {
+            Logger.log('⚠️ ' + pending.length + ' doc(s) still folder_created=0 after upload loop — will NOT delete from D1');
+            try {
+              GmailApp.sendEmail(OWNER_EMAIL,
+                '[GVR Portal] ⚠️ Doc upload incomplete — ' + stay.stayId,
+                'Stay: ' + stay.stayId + ' (' + stay.guestName + ')\n' +
+                'Uploaded: ' + docUploadedCount + ' | Failed: ' + docFailedCount + '\n' +
+                'Docs still pending in D1:\n' +
+                pending.map(function(d) { return '  ' + d.doc_type + ' — ' + d.doc_id; }).join('\n') +
+                '\n\nDocs remain in D1 and will be retried next run. They will be auto-deleted after 14 days if never processed.'
+              );
+            } catch(me) {}
+          }
+        }
+      } catch(verifyErr) { Logger.log('Doc status verify error: ' + verifyErr.message); }
 
       callWorker('POST', 'updateDriveFolder', {
         stayId: stay.stayId, driveFolderId: folder.getId(),
         driveFolderUrl: folder.getUrl(), folderCreated: 1,
         processingNote: 'processPendingCheckInForms — ' + new Date().toISOString(),
       });
-      try { callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId }); } catch(e) {}
+
+      // Only delete from D1 and advance status if all docs confirmed uploaded
+      if (allDocsConfirmed) {
+        try {
+          var delResp = callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId });
+          Logger.log('Deleted ' + ((delResp && delResp.data && delResp.data.deleted) || 0) + ' doc(s) from D1 for ' + stay.stayId);
+        } catch(delErr) { Logger.log('deleteGuestDocuments error: ' + delErr.message); }
+        try {
+          callWorker('POST', 'updateStayStatus', { stayId: stay.stayId, status: 'docs_uploaded', createdBy: 'auto' });
+          Logger.log('Status → docs_uploaded for ' + stay.stayId);
+        } catch(statusErr) { Logger.log('updateStayStatus error: ' + statusErr.message); }
+      } else {
+        Logger.log('Skipping D1 delete and status update for ' + stay.stayId + ' — pending docs remain');
+      }
+
       sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'), s, CLIENT);
 
     } catch(e) {
@@ -399,7 +441,18 @@ function processPendingCheckInForms() {
 
   try {
     var cleanResp = callWorker('POST', 'cleanupExpiredDocuments', {});
-    if (cleanResp && cleanResp.success) Logger.log('Cleanup: deleted ' + (cleanResp.data.deleted || 0) + ' doc(s)');
+    if (cleanResp && cleanResp.success) {
+      Logger.log('Cleanup: deleted ' + (cleanResp.data.deleted || 0) + ' doc(s), stale unprocessed: ' + (cleanResp.data.staleUnprocessed || 0));
+      if ((cleanResp.data.staleUnprocessed || 0) > 0) {
+        try {
+          GmailApp.sendEmail(OWNER_EMAIL,
+            '[GVR Portal] ⚠️ Stale unprocessed docs cleaned — ' + cleanResp.data.staleUnprocessed + ' doc(s)',
+            cleanResp.data.staleUnprocessed + ' doc(s) were in guest_documents with folder_created=0 for 14+ days and were auto-deleted.\n' +
+            'These docs were never uploaded to Drive. Guest may need to resubmit if not already resolved.'
+          );
+        } catch(me) {}
+      }
+    }
   } catch(e) { Logger.log('Cleanup error: ' + e.message); }
 
   Logger.log('=== processPendingCheckInForms END ===');

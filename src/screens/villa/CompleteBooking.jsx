@@ -344,6 +344,60 @@ export default function CompleteBooking() {
                   </div>
                 )}
 
+                {/* Guest Info */}
+                <div className="card-section-label">GUEST INFO</div>
+                <div className="card" style={{marginBottom:'14px'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 16px'}}>
+                    <div>
+                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Check-in</div>
+                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>{fmtDate(s.checkin_date)}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Check-out</div>
+                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>{s.checkout_date ? fmtDate(s.checkout_date) : <span style={{color:'var(--text-dim)'}}>TBD</span>}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Phone</div>
+                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>
+                        {s.guest_phone
+                          ? <a href={`tel:${s.guest_phone}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_phone}</a>
+                          : <span style={{color:'var(--text-dim)'}}>—</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Email</div>
+                      <div style={{fontSize:'0.85rem',color:'var(--text)',fontWeight:'500',wordBreak:'break-all'}}>
+                        {s.guest_email
+                          ? <a href={`mailto:${s.guest_email}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_email}</a>
+                          : <span style={{color:'var(--text-dim)'}}>—</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Guests</div>
+                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>
+                        {(parseInt(s.adults)||0) + (parseInt(s.children)||0)} total
+                        <span style={{color:'var(--text-dim)',fontWeight:'400',fontSize:'0.78rem',marginLeft:'6px'}}>
+                          ({s.adults||0} adult{s.adults!==1?'s':''}{s.children>0?` · ${s.children} child${s.children!==1?'ren':''}`:''})
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Nights</div>
+                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>{nights} night{nights!==1?'s':''}</div>
+                    </div>
+                  </div>
+                  {/* Guest requests — only show if any are set */}
+                  {(s.request_early_checkin || s.request_late_checkout || s.request_breakfast || s.request_cab || s.request_extra_beds) && (
+                    <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid var(--border-dim)',display:'flex',flexWrap:'wrap',gap:'6px'}}>
+                      {s.request_early_checkin  && <span style={reqPill}>⏰ Early check-in</span>}
+                      {s.request_late_checkout  && <span style={reqPill}>🌙 Late check-out</span>}
+                      {s.request_breakfast      && <span style={reqPill}>🍳 Breakfast{s.breakfast_choice ? ` — ${s.breakfast_choice}` : ''}</span>}
+                      {s.request_cab            && <span style={reqPill}>🚗 Cab</span>}
+                      {s.request_extra_beds     && <span style={reqPill}>🛏 Extra beds × {s.extra_beds_count||1}</span>}
+                    </div>
+                  )}
+                </div>
+
                 {/* Channel & Tariff */}
                 <div className="card-section-label">CHANNEL & TARIFF</div>
                 <div className="card">
@@ -540,6 +594,32 @@ export default function CompleteBooking() {
                   </div>
                 </div>
 
+                {/* Extended check-in numbers */}
+                {(() => {
+                  const base = parseFloat(airbnb.guestPaid) || parseFloat(airbnb.youEarn) || gross || 0
+                  if (base <= 0) return null
+                  return (
+                    <div className="card" style={{marginBottom:'8px'}}>
+                      <div className="card-section-label" style={{marginBottom:'10px'}}>EXTENDED STAY REFERENCE</div>
+                      <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'10px'}}>
+                        Based on {airbnb.guestPaid ? 'guest paid total' : airbnb.youEarn ? 'you earn' : 'gross'} of {fmt(base)}
+                      </div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+                        <div style={extBox}>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of guest paid</div>
+                          <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.25))}</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Early check-in / late check-out ref</div>
+                        </div>
+                        <div style={extBox}>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of guest paid</div>
+                          <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.5))}</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Half-day / extra night ref</div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+
                 {/* Notes */}
                 <div className="card">
                   <div className="field" style={{marginBottom:0}}>
@@ -681,4 +761,15 @@ function actionBtn(color) {
     background:`${color}18`, color, fontWeight:'700', fontSize:'0.88rem',
     cursor:'pointer', textAlign:'left',
   }
+}
+
+const reqPill = {
+  display:'inline-block', padding:'3px 9px', borderRadius:'10px',
+  background:'rgba(200,144,58,0.12)', border:'1px solid rgba(200,144,58,0.25)',
+  color:'#C8903A', fontSize:'0.72rem', fontWeight:'600',
+}
+
+const extBox = {
+  background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.15)',
+  borderRadius:'8px', padding:'10px 12px',
 }

@@ -104,39 +104,43 @@ export default function CompleteBooking() {
       ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
       : 'Direct'
 
-    const nightFee = stay.night_fee || stay.nightFee || 0
     const isAirbnb = ch === 'Airbnb'
+
+    // night_fee in DB is the TOTAL night fee (e.g. ₹9,650 for 2 nights).
+    // tariff_per_night is the per-night rate (e.g. ₹4,825).
+    // Prefer tariff_per_night from DB; if missing, derive from night_fee / nights.
+    const stayNights  = stay.checkout_date
+      ? Math.max(1, Math.round((new Date(stay.checkout_date)-new Date(stay.checkin_date))/(1000*60*60*24)))
+      : (parseInt(stay.nights) || 1)
+    const totalNightFee = parseFloat(stay.night_fee || stay.nightFee || 0)
+    const perNightFromFee = totalNightFee && stayNights ? Math.round(totalNightFee / stayNights) : 0
+    const tariffPerNight  = parseFloat(stay.tariff_per_night || stay.tariffPerNight || 0) || perNightFromFee || 0
 
     setForm({
       channel:        ch,
-      // For Airbnb: default tariff to night fee (editable override), else existing value or ''
-      tariffPerNight: stay.tariff_per_night || stay.tariffPerNight ||
-                      (isAirbnb && nightFee ? String(nightFee) : '0'),
-      extraCharges:   stay.extra_charges    || stay.extraCharges   || '0',
-      notes:          stay.notes            || '',
+      tariffPerNight: String(tariffPerNight || ''),
+      extraCharges:   stay.extra_charges || stay.extraCharges || '0',
+      notes:          stay.notes || '',
     })
-    // Restore saved extra charge lines if they exist
+
+    // Restore saved extra charge lines
     try {
       const saved = stay.extra_lines || stay.extraLines
       if (saved) {
         const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setExtraLines(parsed)
-        } else {
-          setExtraLines([])
-        }
+        setExtraLines(Array.isArray(parsed) && parsed.length > 0 ? parsed : [])
       } else {
         setExtraLines([])
       }
     } catch { setExtraLines([]) }
 
-    // Pre-fill Airbnb breakdown if data exists
+    // Pre-fill Airbnb breakdown from DB values (written by email poller)
     if (isAirbnb) {
       setAirbnb({
-        nightFee:        String(nightFee || ''),
-        cleaningFee:     String(stay.cleaning_fee      || stay.cleaningFee     || '1000'),
+        nightFee:        String(totalNightFee || ''),
+        cleaningFee:     String(stay.cleaning_fee      || stay.cleaningFee     || ''),
         hostServiceFee:  String(stay.host_service_fee  || stay.hostServiceFee  || ''),
-        youEarn:         String(stay.you_earn          || stay.youEarn         || stay.tariff_per_night || stay.tariffPerNight || ''),
+        youEarn:         String(stay.you_earn          || stay.youEarn         || ''),
         guestServiceFee: String(stay.guest_service_fee || stay.guestServiceFee || ''),
         guestPaid:       String(stay.guest_paid_total  || stay.guestPaidTotal  || ''),
       })
@@ -146,8 +150,11 @@ export default function CompleteBooking() {
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   // Derived financials
+  // Use checkout_date diff if available, else fall back to stay.nights from DB
   const nights  = selected
-    ? Math.max(0, Math.round((new Date(selected.checkout_date)-new Date(selected.checkin_date))/(1000*60*60*24)))
+    ? (selected.checkout_date
+        ? Math.max(1, Math.round((new Date(selected.checkout_date)-new Date(selected.checkin_date))/(1000*60*60*24)))
+        : (parseInt(selected.nights) || 1))
     : 0
   const tariff     = parseFloat(form.tariffPerNight)||0
   const extraTotal = extraLines.reduce((s,l) => s + (parseFloat(l.amount)||0), 0)
@@ -350,7 +357,28 @@ export default function CompleteBooking() {
                     <div className="field">
                       <label className="field-label">Tariff / night (₹)</label>
                       <input className="field-input gold" type="number" placeholder="0"
-                        value={form.tariffPerNight} onChange={e=>set('tariffPerNight',e.target.value)}/>
+                        value={form.tariffPerNight}
+                        onChange={e => {
+                          const t = e.target.value
+                          set('tariffPerNight', t)
+                          // For Airbnb: auto-recalculate breakdown from tariff × nights
+                          if (form.channel === 'Airbnb') {
+                            const tNum     = parseFloat(t) || 0
+                            const n        = selected?.checkout_date
+                              ? Math.max(1, Math.round((new Date(selected.checkout_date)-new Date(selected.checkin_date))/(1000*60*60*24)))
+                              : parseInt(selected?.nights) || 1
+                            const newNightFee     = Math.round(tNum * n * 100) / 100
+                            const existingClean   = parseFloat(airbnb.cleaningFee) || 0
+                            const newHostSvc      = Math.round((newNightFee + existingClean) * 0.03 * 100) / 100
+                            const newYouEarn      = Math.round((newNightFee + existingClean - newHostSvc) * 100) / 100
+                            setAirbnb(prev => ({
+                              ...prev,
+                              nightFee:       String(newNightFee),
+                              hostServiceFee: String(newHostSvc),
+                              youEarn:        String(newYouEarn),
+                            }))
+                          }
+                        }}/>
                     </div>
                     <div className="field">
                       <label className="field-label">Add extra charge</label>
@@ -400,19 +428,48 @@ export default function CompleteBooking() {
                       From Airbnb confirmation email — "You earn" section
                     </div>
                     <div className="grid-2">
-                      {[
-                        {key:'nightFee',    label:'Night fee (₹)'},
-                        {key:'cleaningFee', label:'Cleaning fee (₹)'},
-                        {key:'hostServiceFee', label:'Host service fee (₹)'},
-                        {key:'youEarn',     label:'You earn total (₹)'},
-                      ].map(f => (
-                        <div key={f.key} className="field">
-                          <label className="field-label">{f.label}</label>
-                          <input type="number" className="field-input" placeholder="0"
-                            value={airbnb[f.key]}
-                            onChange={e => setAirbnb(prev => ({...prev, [f.key]: e.target.value}))}/>
-                        </div>
-                      ))}
+                      <div className="field">
+                        <label className="field-label">Night fee total (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto</span></label>
+                        <input type="number" className="field-input" placeholder="0"
+                          value={airbnb.nightFee}
+                          onChange={e => {
+                            const nf = parseFloat(e.target.value) || 0
+                            const cf = parseFloat(airbnb.cleaningFee) || 0
+                            const hs = Math.round((nf + cf) * 0.03 * 100) / 100
+                            const ye = Math.round((nf + cf - hs) * 100) / 100
+                            setAirbnb(prev => ({...prev, nightFee: e.target.value, hostServiceFee: String(hs), youEarn: String(ye)}))
+                          }}/>
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Cleaning fee (₹)</label>
+                        <input type="number" className="field-input" placeholder="0"
+                          value={airbnb.cleaningFee}
+                          onChange={e => {
+                            const nf = parseFloat(airbnb.nightFee) || 0
+                            const cf = parseFloat(e.target.value) || 0
+                            const hs = Math.round((nf + cf) * 0.03 * 100) / 100
+                            const ye = Math.round((nf + cf - hs) * 100) / 100
+                            setAirbnb(prev => ({...prev, cleaningFee: e.target.value, hostServiceFee: String(hs), youEarn: String(ye)}))
+                          }}/>
+                      </div>
+                      <div className="field">
+                        <label className="field-label">Host service fee (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto 3%</span></label>
+                        <input type="number" className="field-input" placeholder="0"
+                          value={airbnb.hostServiceFee}
+                          onChange={e => {
+                            const nf = parseFloat(airbnb.nightFee) || 0
+                            const cf = parseFloat(airbnb.cleaningFee) || 0
+                            const hs = parseFloat(e.target.value) || 0
+                            const ye = Math.round((nf + cf - hs) * 100) / 100
+                            setAirbnb(prev => ({...prev, hostServiceFee: e.target.value, youEarn: String(ye)}))
+                          }}/>
+                      </div>
+                      <div className="field">
+                        <label className="field-label">You earn total (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto</span></label>
+                        <input type="number" className="field-input" placeholder="0"
+                          value={airbnb.youEarn}
+                          onChange={e => setAirbnb(prev => ({...prev, youEarn: e.target.value}))}/>
+                      </div>
                     </div>
                     <div style={{fontSize:'0.75rem',color:'var(--text-dim)',margin:'8px 0 6px'}}>
                       "Guest paid" section
@@ -435,27 +492,11 @@ export default function CompleteBooking() {
 
                 {/* Revenue summary */}
                 <div className="net-box">
-                  <div className="net-row">
-                    <span className="net-label">Room ({nights}N × {fmt(tariff)})</span>
-                    <span className="net-val pos">{fmt(tariff * nights)}</span>
-                  </div>
-                  {extraLines.map((line,i) => (
-                    <div key={i} className="net-row">
-                      <span className="net-label">{line.label}</span>
-                      <span className="net-val pos">{fmt(parseFloat(line.amount)||0)}</span>
-                    </div>
-                  ))}
-                  {extraTotal > 0 && (
-                    <div className="net-row" style={{opacity:0.7}}>
-                      <span className="net-label">Gross total</span>
-                      <span className="net-val pos">{fmt(gross)}</span>
-                    </div>
-                  )}
                   {isAirbnb ? (
                     <>
                       {nightFeeAmt > 0 && <div className="net-row">
-                        <span className="net-label">Night fee × {nights}N</span>
-                        <span className="net-val pos">{fmt(nightFeeAmt * nights)}</span>
+                        <span className="net-label">{fmt(tariff)} × {nights}N</span>
+                        <span className="net-val pos">{fmt(nightFeeAmt)}</span>
                       </div>}
                       {cleanFeeAmt > 0 && <div className="net-row">
                         <span className="net-label">Cleaning fee</span>
@@ -465,12 +506,32 @@ export default function CompleteBooking() {
                         <span className="net-label">Host service fee (3%)</span>
                         <span className="net-val neg">−{fmt(hostSvcAmt)}</span>
                       </div>}
+                      {extraLines.map((line,i) => (
+                        <div key={i} className="net-row">
+                          <span className="net-label">{line.label}</span>
+                          <span className="net-val pos">{fmt(parseFloat(line.amount)||0)}</span>
+                        </div>
+                      ))}
                     </>
-                  ) : commPct > 0 && (
-                    <div className="net-row">
-                      <span className="net-label">{form.channel} commission ({commPct}%)</span>
-                      <span className="net-val neg">−{fmt(commAmt)}</span>
-                    </div>
+                  ) : (
+                    <>
+                      <div className="net-row">
+                        <span className="net-label">Room ({nights}N × {fmt(tariff)})</span>
+                        <span className="net-val pos">{fmt(tariff * nights)}</span>
+                      </div>
+                      {extraLines.map((line,i) => (
+                        <div key={i} className="net-row">
+                          <span className="net-label">{line.label}</span>
+                          <span className="net-val pos">{fmt(parseFloat(line.amount)||0)}</span>
+                        </div>
+                      ))}
+                      {commPct > 0 && (
+                        <div className="net-row">
+                          <span className="net-label">{form.channel} commission ({commPct}%)</span>
+                          <span className="net-val neg">−{fmt(commAmt)}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                   <div className="net-divider"/>
                   <div className="net-row">

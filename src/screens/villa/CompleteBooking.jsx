@@ -347,53 +347,72 @@ export default function CompleteBooking() {
                 {/* Guest Info */}
                 <div className="card-section-label">GUEST INFO</div>
                 <div className="card" style={{marginBottom:'14px'}}>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 16px'}}>
-                    <div>
-                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Check-in</div>
-                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>{fmtDate(s.checkin_date)}</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Check-out</div>
-                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>{s.checkout_date ? fmtDate(s.checkout_date) : <span style={{color:'var(--text-dim)'}}>TBD</span>}</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Phone</div>
-                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>
-                        {s.guest_phone
-                          ? <a href={`tel:${s.guest_phone}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_phone}</a>
-                          : <span style={{color:'var(--text-dim)'}}>—</span>}
+                  {(() => {
+                    // Derive checkout from checkin + nights if checkout_date is null
+                    const coDate = s.checkout_date || (() => {
+                      if (!s.checkin_date || !nights) return null
+                      const d = new Date(s.checkin_date)
+                      d.setDate(d.getDate() + nights)
+                      return d.toISOString().slice(0,10)
+                    })()
+                    const adults   = parseInt(s.adults)   || 0
+                    const children = parseInt(s.children) || 0
+                    const total    = adults + children
+                    return (
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 16px'}}>
+                        <div>
+                          <div style={infoLabel}>Check-in</div>
+                          <div style={infoVal}>{fmtDate(s.checkin_date)}</div>
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Check-out</div>
+                          <div style={infoVal}>
+                            {coDate
+                              ? <>{fmtDate(coDate)}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
+                              : <span style={{color:'var(--text-dim)'}}>TBD</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Phone</div>
+                          <div style={infoVal}>
+                            {s.guest_phone
+                              ? <a href={`tel:${s.guest_phone}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_phone}</a>
+                              : <span style={{color:'var(--text-dim)'}}>—</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Email</div>
+                          <div style={{fontSize:'0.85rem',color:'var(--text)',fontWeight:'500',wordBreak:'break-all'}}>
+                            {s.guest_email
+                              ? <a href={`mailto:${s.guest_email}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_email}</a>
+                              : <span style={{color:'var(--text-dim)'}}>—</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Guests</div>
+                          <div style={infoVal}>
+                            {total > 0 ? (
+                              <>{total} total<span style={{color:'var(--text-dim)',fontWeight:'400',fontSize:'0.78rem',marginLeft:'6px'}}>
+                                ({adults} adult{adults!==1?'s':''}{children>0?` · ${children} child${children!==1?'ren':''}`:''})
+                              </span></>
+                            ) : <span style={{color:'var(--text-dim)'}}>—</span>}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Nights</div>
+                          <div style={infoVal}>{nights} night{nights!==1?'s':''}</div>
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Email</div>
-                      <div style={{fontSize:'0.85rem',color:'var(--text)',fontWeight:'500',wordBreak:'break-all'}}>
-                        {s.guest_email
-                          ? <a href={`mailto:${s.guest_email}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_email}</a>
-                          : <span style={{color:'var(--text-dim)'}}>—</span>}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Guests</div>
-                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>
-                        {(parseInt(s.adults)||0) + (parseInt(s.children)||0)} total
-                        <span style={{color:'var(--text-dim)',fontWeight:'400',fontSize:'0.78rem',marginLeft:'6px'}}>
-                          ({s.adults||0} adult{s.adults!==1?'s':''}{s.children>0?` · ${s.children} child${s.children!==1?'ren':''}`:''})
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:'3px'}}>Nights</div>
-                      <div style={{fontSize:'0.88rem',color:'var(--text)',fontWeight:'600'}}>{nights} night{nights!==1?'s':''}</div>
-                    </div>
-                  </div>
-                  {/* Guest requests — only show if any are set */}
-                  {(s.request_early_checkin || s.request_late_checkout || s.request_breakfast || s.request_cab || s.request_extra_beds) && (
+                    )
+                  })()}
+                  {/* Guest requests */}
+                  {(!!s.request_early_checkin || !!s.request_late_checkout || !!s.request_breakfast || !!s.request_cab || !!s.request_extra_beds) && (
                     <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid var(--border-dim)',display:'flex',flexWrap:'wrap',gap:'6px'}}>
-                      {s.request_early_checkin  && <span style={reqPill}>⏰ Early check-in</span>}
-                      {s.request_late_checkout  && <span style={reqPill}>🌙 Late check-out</span>}
-                      {s.request_breakfast      && <span style={reqPill}>🍳 Breakfast{s.breakfast_choice ? ` — ${s.breakfast_choice}` : ''}</span>}
-                      {s.request_cab            && <span style={reqPill}>🚗 Cab</span>}
-                      {s.request_extra_beds     && <span style={reqPill}>🛏 Extra beds × {s.extra_beds_count||1}</span>}
+                      {!!s.request_early_checkin && <span style={reqPill}>⏰ Early check-in</span>}
+                      {!!s.request_late_checkout && <span style={reqPill}>🌙 Late check-out</span>}
+                      {!!s.request_breakfast     && <span style={reqPill}>{'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}</span>}
+                      {!!s.request_cab           && <span style={reqPill}>🚗 Cab</span>}
+                      {!!s.request_extra_beds    && <span style={reqPill}>{'🛏 Extra beds' + (s.extra_beds_count > 0 ? ` × ${s.extra_beds_count}` : '')}</span>}
                     </div>
                   )}
                 </div>
@@ -763,6 +782,8 @@ function actionBtn(color) {
   }
 }
 
+const infoLabel = { fontSize:"0.68rem", color:"var(--text-dim)", fontWeight:"600", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:"3px" }
+const infoVal   = { fontSize:"0.88rem", color:"var(--text)", fontWeight:"600" }
 const reqPill = {
   display:'inline-block', padding:'3px 9px', borderRadius:'10px',
   background:'rgba(200,144,58,0.12)', border:'1px solid rgba(200,144,58,0.25)',

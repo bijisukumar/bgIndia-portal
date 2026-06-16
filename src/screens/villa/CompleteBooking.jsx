@@ -26,6 +26,7 @@ const EXTRA_ITEMS = [
   { label: 'Early Check-in + Late Check-out', amount: 1000 },
   { label: 'Breakfast',                   amount: 0    },
   { label: 'Floor Bed',                   amount: 750  },
+  { label: 'Additional Guest',            amount: 0    },
   { label: 'Taxi Pick-up',                amount: 0    },
   { label: 'Drop-off & Pick-up',          amount: 0    },
   { label: 'Cleaning Fee',                amount: 1000 },
@@ -357,7 +358,8 @@ export default function CompleteBooking() {
                     })()
                     const adults   = parseInt(s.adults)   || 0
                     const children = parseInt(s.children) || 0
-                    const total    = adults + children
+                    const infants  = parseInt(s.infants)  || 0
+                    const total    = adults + children + infants
                     return (
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 16px'}}>
                         <div>
@@ -393,7 +395,9 @@ export default function CompleteBooking() {
                           <div style={infoVal}>
                             {total > 0 ? (
                               <>{total} total<span style={{color:'var(--text-dim)',fontWeight:'400',fontSize:'0.78rem',marginLeft:'6px'}}>
-                                ({adults} adult{adults!==1?'s':''}{children>0?` · ${children} child${children!==1?'ren':''}`:''})
+                                ({adults} adult{adults!==1?'s':''}
+                                {children>0?` · ${children} child${children!==1?'ren':''}` : ''}
+                                {infants>0?` · ${infants} infant${infants!==1?'s':''}` : ''})
                               </span></>
                             ) : <span style={{color:'var(--text-dim)'}}>—</span>}
                           </div>
@@ -427,32 +431,15 @@ export default function CompleteBooking() {
                     </select>
                   </div>
                   <div className="grid-2">
-                    <div className="field">
-                      <label className="field-label">Tariff / night (₹)</label>
-                      <input className="field-input gold" type="number" placeholder="0"
-                        value={form.tariffPerNight}
-                        onChange={e => {
-                          const t = e.target.value
-                          set('tariffPerNight', t)
-                          // For Airbnb: auto-recalculate breakdown from tariff × nights
-                          if (form.channel === 'Airbnb') {
-                            const tNum     = parseFloat(t) || 0
-                            const n        = selected?.checkout_date
-                              ? Math.max(1, Math.round((new Date(selected.checkout_date)-new Date(selected.checkin_date))/(1000*60*60*24)))
-                              : parseInt(selected?.nights) || 1
-                            const newNightFee     = Math.round(tNum * n * 100) / 100
-                            const existingClean   = parseFloat(airbnb.cleaningFee) || 0
-                            const newHostSvc      = Math.round((newNightFee + existingClean) * 0.03 * 100) / 100
-                            const newYouEarn      = Math.round((newNightFee + existingClean - newHostSvc) * 100) / 100
-                            setAirbnb(prev => ({
-                              ...prev,
-                              nightFee:       String(newNightFee),
-                              hostServiceFee: String(newHostSvc),
-                              youEarn:        String(newYouEarn),
-                            }))
-                          }
-                        }}/>
-                    </div>
+                    {/* Tariff/Night only shown for non-Airbnb — Airbnb uses nightFee breakdown */}
+                    {form.channel !== 'Airbnb' && (
+                      <div className="field">
+                        <label className="field-label">Tariff / night (₹)</label>
+                        <input className="field-input gold" type="number" placeholder="0"
+                          value={form.tariffPerNight}
+                          onChange={e => set('tariffPerNight', e.target.value)}/>
+                      </div>
+                    )}
                     <div className="field">
                       <label className="field-label">Add extra charge</label>
                       <select className="field-input" value=""
@@ -568,7 +555,7 @@ export default function CompleteBooking() {
                   {isAirbnb ? (
                     <>
                       {nightFeeAmt > 0 && <div className="net-row">
-                        <span className="net-label">{fmt(tariff)} × {nights}N</span>
+                        <span className="net-label">Night fee ({nights}N × {fmt(nightFeeAmt / (nights||1))})</span>
                         <span className="net-val pos">{fmt(nightFeeAmt)}</span>
                       </div>}
                       {cleanFeeAmt > 0 && <div className="net-row">
@@ -608,7 +595,9 @@ export default function CompleteBooking() {
                   )}
                   <div className="net-divider"/>
                   <div className="net-row">
-                    <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>Net to owner</span>
+                    <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>
+                      {isAirbnb ? 'You earn (net)' : 'Net to owner'}
+                    </span>
                     <span className="net-val big">{fmt(net)}</span>
                   </div>
                 </div>

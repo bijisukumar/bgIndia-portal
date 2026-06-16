@@ -299,6 +299,8 @@ function pollAirbnbBookings() {
         checkOutDate:    booking.checkOut,
         nights:          booking.nights,
         adults:          booking.adults || 1,
+        children:        booking.children || 0,
+        infants:         booking.infants  || 0,
         // Gross = night fee + cleaning fee (both shown on host payout)
         gross:           (booking.nightFee || 0) + (booking.cleaningFee || 0),
         // Host commission = 3% host service fee (NOT the 15% guest fee)
@@ -371,6 +373,8 @@ function pollAirbnbBookings() {
         '\nCheck-out:        ' + booking.checkOut +
         '\nNights:           ' + booking.nights +
         '\nAdults:           ' + (booking.adults || 1) +
+        (booking.children > 0 ? '\nChildren:         ' + booking.children : '') +
+        (booking.infants  > 0 ? '\nInfants:          ' + booking.infants  : '') +
         '\n' +
         '\nHOST PAYOUT:' +
         '\n  Night fee:        ₹' + (booking.nightFee || 0) +
@@ -455,9 +459,34 @@ function parseAirbnbConfirmation(body, subject) {
   var youEarn       = amt(/You earn[:\s]+₹?\s*([\d,\.]+)/i) ||
                       amt(/Total\s*\(INR\)[:\s]+₹?\s*([\d,\.]+)/i);
   var guestSvcFee   = amt(/Guest service fee[:\s]+₹?\s*([\d,\.]+)/i);
-  var guestPaid     = amt(/(?:Guest paid|Total \(INR\))[:\s]+₹?\s*([\d,\.]+)/i);
+  // guestPaid: Airbnb email has TWO "Total (INR)" lines — one in "You earn", one in "Guest paid".
+  // We need the Guest paid section total. Strategy: find the "Guest paid" section then grab Total.
+  var guestPaid = 0;
+  var guestPaidSection = body.match(/Guest paid[\s\S]*?Total\s*\(INR\)[:\s]+₹?\s*([\d,\.]+)/i);
+  if (guestPaidSection) {
+    guestPaid = parseFloat(String(guestPaidSection[1]).replace(/[,₹\s\u20B9]/g, '')) || 0;
+  } else {
+    // Fallback: sum night fee + cleaning fee + guest service fee
+    guestPaid = (nightFee || 0) + (cleaningFee || 0) + (guestSvcFee || 0);
+  }
 
-  var adultsMatch = body.match(/(\d+)\s+guest/i);
+  // Parse guest count — Airbnb emails use "2 adults, 1 child, 1 infant" format
+  // or older "2 guests" format. Try specific first, fall back to generic.
+  var adults   = 1;
+  var children = 0;
+  var infants  = 0;
+  var adultsM   = body.match(/(\d+)\s+adult/i);
+  var childrenM = body.match(/(\d+)\s+child/i);
+  var infantsM  = body.match(/(\d+)\s+infant/i);
+  if (adultsM) {
+    adults   = parseInt(adultsM[1]);
+    children = childrenM ? parseInt(childrenM[1]) : 0;
+    infants  = infantsM  ? parseInt(infantsM[1])  : 0;
+  } else {
+    // Fallback: "2 guests" — treat all as adults
+    var guestM = body.match(/(\d+)\s+guest/i);
+    adults = guestM ? parseInt(guestM[1]) : 1;
+  }
 
   return {
     confirmationCode: confCode,
@@ -465,7 +494,9 @@ function parseAirbnbConfirmation(body, subject) {
     checkIn:          checkIn,
     checkOut:         checkOut || '',
     nights:           nights,
-    adults:           adultsMatch ? parseInt(adultsMatch[1]) : 1,
+    adults:           adults,
+    children:         children,
+    infants:          infants,
     nightFee:         nightFee,
     cleaningFee:      cleaningFee,
     hostServiceFee:   hostSvcFee,
@@ -476,16 +507,37 @@ function parseAirbnbConfirmation(body, subject) {
 }
 
 function extractDate(body, label) {
-  // "Check-in: Thursday, May 22, 2026" or "Check-in: 2026-05-22"
+  // p1: "Check-in: Thursday, May 22, 2026" — day-of-week + month + date + year
   var p1 = new RegExp(label + '[:\\s]+([A-Za-z]+,?\\s+[A-Za-z]+\\s+\\d{1,2},?\\s+\\d{4})', 'i');
+  // p2: "Check-in: 2026-05-22" — ISO format
   var p2 = new RegExp(label + '[:\\s]+(\\d{4}-\\d{2}-\\d{2})', 'i');
+  // p3: "Check-in: 22 May 2026" — date + month + year
   var p3 = new RegExp(label + '[:\\s]+(\\d{1,2}\\s+[A-Za-z]+\\s+\\d{4})', 'i');
-  var m  = body.match(p1) || body.match(p2) || body.match(p3);
-  if (!m) return null;
-  try {
-    var d = new Date(m[1].replace(/(\d+)(st|nd|rd|th)/gi,'$1'));
-    return isNaN(d) ? null : d.toISOString().slice(0, 10);
-  } catch(e) { return null; }
+  // p4: "Check-in: Tue, Nov 3" — Airbnb short format without year
+  var p4 = new RegExp(label + '[:\\s]+(?:[A-Za-z]+,\\s+)?([A-Za-z]+\\s+\\d{1,2})(?:\\s|$|\\n)', 'i');
+
+  var m = body.match(p1) || body.match(p2) || body.match(p3);
+  if (m) {
+    try {
+      var d = new Date(m[1].replace(/(\d+)(st|nd|rd|th)/gi,'$1'));
+      return isNaN(d) ? null : d.toISOString().slice(0, 10);
+    } catch(e) { return null; }
+  }
+
+  // p4 fallback — no year in email, infer year
+  var m4 = body.match(p4);
+  if (m4) {
+    try {
+      var now  = new Date();
+      var year = now.getFullYear();
+      var d4   = new Date(m4[1] + ' ' + year);
+      // If parsed date is more than 60 days in the past, bump to next year
+      if (!isNaN(d4) && (now - d4) > 60 * 86400000) d4.setFullYear(year + 1);
+      return isNaN(d4) ? null : d4.toISOString().slice(0, 10);
+    } catch(e) { return null; }
+  }
+
+  return null;
 }
 
 // Extract date from subject line e.g. "arrives Jun 6" or "arrives Jun 6-10"

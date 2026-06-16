@@ -279,8 +279,6 @@ function pollAirbnbBookings() {
         return;
       }
 
-      // DEBUG — log raw body so we can see exact plain-text format from Airbnb
-      Logger.log('RAW BODY (first 2000):\n' + body.substring(0, 2000));
       Logger.log('Parsed: ' + booking.guestName +
                  ' | in:' + booking.checkIn + ' out:' + booking.checkOut +
                  ' | conf:' + booking.confirmationCode +
@@ -411,71 +409,97 @@ function pollAirbnbBookings() {
 
 // ── EMAIL PARSER ──────────────────────────────────────────────────────────
 function parseAirbnbConfirmation(body, subject) {
-  // Confirmation code: HMXXXXXXXX format
+  // Airbnb plain-text emails are ALL CAPS labels with values on same line separated by spaces.
+  // Real format (from debug): "Check-in     Checkout               Tue, Nov 3   Thu, Nov 5"
+  // "GUESTS  2 adults, 1 child, 1 infant"
+  // "TOTAL (INR)   ₹12,347.54"  "YOU EARN   ₹10,495.40"
+
+  // Confirmation code
   var confMatch = body.match(/\b(HM[A-Z0-9]{6,12})\b/) ||
+                  body.match(/CONFIRMATION CODE\s+([A-Z0-9]{8,12})/i) ||
                   body.match(/Confirmation code[:\s]+([A-Z0-9]{8,12})/i);
   var confCode  = confMatch ? confMatch[1] : ('AB-' + Date.now());
 
-  // Guest name from subject or body
-  // Handles: "Varsha Das arrives Jun 6", "John has reserved", "New reservation from John"
+  // Guest name from subject
   var nameMatch = subject.match(/^Reservation confirmed\s*[-–]\s*([A-Za-z\s]+?)\s+arrives/i) ||
                   subject.match(/^([A-Za-z\s\-\.]+?)\s+(?:has reserved|left a)/i) ||
                   body.match(/Guest name[:\s]+(.+)/i) ||
                   subject.match(/from\s+([A-Za-z\s]+)/i);
   var guestName = nameMatch ? nameMatch[1].trim() : 'Airbnb Guest';
 
-  // Dates — try body first, then subject line (e.g. "arrives Jun 6")
-  var checkIn  = extractDate(body, 'Check-in') || extractDate(body, 'Check-in date');
-  var checkOut = extractDate(body, 'Check-out') || extractDate(body, 'Checkout') ||
-                 extractDate(body, 'Check-out date');
+  // ── DATES ──────────────────────────────────────────────────────────────
+  // Airbnb plain text format: "Check-in     Checkout               Tue, Nov 3   Thu, Nov 5"
+  // All on ONE line with lots of spaces between labels and values.
+  var checkIn  = null;
+  var checkOut = null;
 
-  // Fallback: extract from subject "Reservation confirmed - Varsha Das arrives Jun 6"
+  // Pattern 1: both dates on one line — "Check-in ... Checkout ... Mon DD ... Mon DD"
+  var bothDates = body.match(/Check-in\s+Checkout\s+([A-Za-z]+,?\s+[A-Za-z]+\s+\d{1,2})\s+([A-Za-z]+,?\s+[A-Za-z]+\s+\d{1,2})/i);
+  if (bothDates) {
+    checkIn  = inferYear(bothDates[1]);
+    checkOut = inferYear(bothDates[2]);
+    Logger.log('Dates from combined line: ' + checkIn + ' / ' + checkOut);
+  }
+
+  // Pattern 2: separate lines — "Check-in: Thu, Nov 3" / "Checkout: Thu, Nov 5"
+  if (!checkIn)  checkIn  = extractDate(body, 'Check-in') || extractDate(body, 'Check-in date');
+  if (!checkOut) checkOut = extractDate(body, 'Check-out') || extractDate(body, 'Checkout') || extractDate(body, 'Check-out date');
+
+  // Pattern 3: subject fallback for check-in only
   if (!checkIn) {
     checkIn = extractDateFromSubject(subject);
     Logger.log('Used subject date fallback: ' + checkIn);
   }
+
   if (!checkIn) {
-    Logger.log('Could not find check-in date — logging body for debug:\n' + body.substring(0, 500));
-    return null; // can't create booking without date
+    Logger.log('Could not find check-in date');
+    return null;
   }
 
-  // Nights
+  // ── NIGHTS ─────────────────────────────────────────────────────────────
   var nightsMatch = body.match(/(\d+)\s+night/i);
   var nights = nightsMatch ? parseInt(nightsMatch[1]) : 0;
   if (!nights && checkIn && checkOut) {
     nights = Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000);
   }
 
-  // Fees — handles ₹ symbol, commas, en-dash, minus
+  // ── FEES — strip ₹, commas, spaces ─────────────────────────────────────
   function amt(pattern) {
     var m = body.match(pattern);
     if (!m) return 0;
     return parseFloat(String(m[1]).replace(/[,₹\s\u20B9]/g, '')) || 0;
   }
 
-  // Night fee: "₹7,770.00 x 1 night" or "1 night room fee  ₹7,770.00"
-  var nightFee = amt(/(\d[\d,\.]+)\s*(?:×|x)\s*\d+\s*night/i) ||
-                 amt(/\d+\s+night\s+room\s+fee\s+₹?\s*([\d,\.]+)/i) ||
-                 amt(/Night fee[:\s]+₹?\s*([\d,\.]+)/i);
+  // Night fee: "₹4,910.00 x 2 nights" or "2 nights room fee   ₹9,820.00"
+  var nightFee = amt(/([\d,\.]+)\s*(?:×|x)\s*\d+\s*night/i) ||
+                 amt(/(₹[\d,\.]+)\s*x\s*\d+\s*night/i) ||
+                 amt(/\d+\s+nights?\s+room\s+fee\s+₹?\s*([\d,\.]+)/i);
 
-  var cleaningFee   = amt(/Cleaning fee[:\s]+₹?\s*([\d,\.]+)/i);
-  var hostSvcFee    = amt(/Host service fee[^:\n]*[:\s]+[-−\u2212]?₹?\s*([\d,\.]+)/i);
-  var youEarn       = amt(/You earn[:\s]+₹?\s*([\d,\.]+)/i) ||
-                      amt(/Total\s*\(INR\)[:\s]+₹?\s*([\d,\.]+)/i);
-  var guestSvcFee   = amt(/Guest service fee[:\s]+₹?\s*([\d,\.]+)/i);
-  // guestPaid: Airbnb email has TWO "Total (INR)" lines — one in "You earn", one in "Guest paid".
-  // We need the Guest paid section total. Strategy: find the "Guest paid" section then grab Total.
+  var cleaningFee = amt(/Cleaning fee\s+₹?\s*([\d,\.]+)/i);
+
+  // Host service fee — may have leading minus/dash before ₹
+  // Host service fee format: 'Host service fee (3.0%)   -₹324.60' — minus before ₹
+  var hostSvcFee  = amt(/Host service fee[^\n]*[-−\u2212]₹([\d,\.]+)/i) ||
+                    amt(/Host service fee[^\n]*₹\s*([\d,\.]+)/i);
+
+  // YOU EARN — all caps in this email format
+  var youEarn = amt(/YOU EARN\s+₹?\s*([\d,\.]+)/i) ||
+                amt(/You earn\s+₹?\s*([\d,\.]+)/i);
+
+  var guestSvcFee = amt(/Guest service fee\s+₹?\s*([\d,\.]+)/i);
+
+  // GUEST PAID TOTAL — "GUEST PAID ... TOTAL (INR)   ₹12,347.54"
+  // Grab the TOTAL (INR) that appears AFTER "GUEST PAID" section header
   var guestPaid = 0;
-  var guestPaidSection = body.match(/Guest paid[\s\S]*?Total\s*\(INR\)[:\s]+₹?\s*([\d,\.]+)/i);
-  if (guestPaidSection) {
-    guestPaid = parseFloat(String(guestPaidSection[1]).replace(/[,₹\s\u20B9]/g, '')) || 0;
+  var gpSection = body.match(/GUEST PAID[\s\S]*?TOTAL\s*\(INR\)\s+₹?([\d,\.]+)/i);
+  if (gpSection) {
+    guestPaid = parseFloat(String(gpSection[1]).replace(/[,]/g, '')) || 0;
   } else {
-    // Fallback: sum night fee + cleaning fee + guest service fee
+    // Fallback: nightFee + cleaningFee + guestSvcFee
     guestPaid = (nightFee || 0) + (cleaningFee || 0) + (guestSvcFee || 0);
   }
 
-  // Parse guest count — Airbnb emails use "2 adults, 1 child, 1 infant" format
-  // or older "2 guests" format. Try specific first, fall back to generic.
+  // ── GUEST COUNT — "GUESTS  2 adults, 1 child, 1 infant" ───────────────
   var adults   = 1;
   var children = 0;
   var infants  = 0;
@@ -487,7 +511,6 @@ function parseAirbnbConfirmation(body, subject) {
     children = childrenM ? parseInt(childrenM[1]) : 0;
     infants  = infantsM  ? parseInt(infantsM[1])  : 0;
   } else {
-    // Fallback: "2 guests" — treat all as adults
     var guestM = body.match(/(\d+)\s+guest/i);
     adults = guestM ? parseInt(guestM[1]) : 1;
   }
@@ -508,6 +531,18 @@ function parseAirbnbConfirmation(body, subject) {
     guestServiceFee:  guestSvcFee,
     guestPaid:        guestPaid,
   };
+}
+
+// Infer year for a date string like "Tue, Nov 3" or "Nov 3"
+function inferYear(dateStr) {
+  try {
+    var now  = new Date();
+    var year = now.getFullYear();
+    var d    = new Date(dateStr.trim() + ' ' + year);
+    // If more than 60 days in the past, use next year
+    if (!isNaN(d) && (now - d) > 60 * 86400000) d.setFullYear(year + 1);
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  } catch(e) { return null; }
 }
 
 function extractDate(body, label) {

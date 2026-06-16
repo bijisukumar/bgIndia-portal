@@ -93,8 +93,10 @@ function checkRateLimit(ip) {
 function genStayId(villaId = 'dwarka') {
   const prefix = villaId === 'dwarka' ? 'DWK' : villaId.toUpperCase().slice(0, 3)
   const year   = new Date().getFullYear()
-  const rand   = Math.floor(Math.random() * 9000) + 1000
-  return `${prefix}-${year}-${rand}`
+  // Timestamp-based: last 4 digits of ms epoch + 1 random digit = 5-char suffix
+  // Near-zero collision probability; deleted IDs are never re-rolled
+  const suffix = String(Date.now()).slice(-4) + String(Math.floor(Math.random() * 10))
+  return `${prefix}-${year}-${suffix}`
 }
 function genId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`

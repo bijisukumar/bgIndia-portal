@@ -279,9 +279,13 @@ function pollAirbnbBookings() {
         return;
       }
 
-      Logger.log('Parsed: ' + booking.guestName + ' | ' +
-                 booking.checkIn + ' → ' + booking.checkOut +
-                 ' | conf: ' + booking.confirmationCode);
+      // DEBUG — log raw body so we can see exact plain-text format from Airbnb
+      Logger.log('RAW BODY (first 2000):\n' + body.substring(0, 2000));
+      Logger.log('Parsed: ' + booking.guestName +
+                 ' | in:' + booking.checkIn + ' out:' + booking.checkOut +
+                 ' | conf:' + booking.confirmationCode +
+                 ' | adults:' + booking.adults + ' children:' + booking.children + ' infants:' + booking.infants +
+                 ' | guestPaid:' + booking.guestPaid);
 
       // ── Duplicate check — skip if already in D1 ────────────────────────
       if (alreadyImported(booking.confirmationCode)) {

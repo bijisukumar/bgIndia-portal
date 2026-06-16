@@ -1399,8 +1399,21 @@ export async function onRequest(ctx) {
           return err('Operation not permitted — DROP TABLE and TRUNCATE are blocked')
         }
         try {
-          const result = await DB.prepare(sql).run()
-          return json({ success: true, data: { changes: result.meta?.changes ?? 0, duration: result.meta?.duration ?? 0 } })
+          // Split on semicolons to support multi-statement scripts (e.g. delete scripts)
+          const statements = sql.split(';').map(s => s.trim()).filter(s => s.length > 0)
+          if (statements.length === 1) {
+            const result = await DB.prepare(statements[0]).run()
+            return json({ success: true, data: { changes: result.meta?.changes ?? 0, duration: result.meta?.duration ?? 0, statements: 1 } })
+          }
+          // Multiple statements — run as batch
+          const batch = statements.map(s => DB.prepare(s))
+          const results = await DB.batch(batch)
+          const totalChanges = results.reduce((sum, r) => sum + (r.meta?.changes ?? 0), 0)
+          return json({ success: true, data: {
+            changes: totalChanges,
+            statements: statements.length,
+            perStatement: results.map((r, i) => ({ sql: statements[i].substring(0, 60), changes: r.meta?.changes ?? 0 }))
+          }})
         } catch (e) { return json({ success: false, error: e.message }, 400) }
       }
 

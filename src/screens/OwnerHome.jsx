@@ -16,6 +16,12 @@ const HOSPITALITY = {
       path: '/owner/villa',
     },
     {
+      id: 'marketing', icon: '📣', bg: 'rgba(236,72,153,0.08)', arrow: '#EC4899',
+      title: 'Marketing',
+      sub: 'Campaigns · Landing page · Guest outreach',
+      path: '/owner/marketing',
+    },
+    {
       id: 'rental', icon: '🏢', bg: 'rgba(24,95,165,0.08)', arrow: '#185FA5',
       title: 'Passive rental income',
       sub: 'Monthly tracker · Dashboard · Renewal alerts',
@@ -339,10 +345,12 @@ function ManualTriggerBlock() {
 
 // ── CHECKIN LINKS BLOCK ──────────────────────────────────────────────────
 // Shows all check-in links with copy button and active/inactive toggle
+// Collapsed by default — tap header to expand
 function CheckinLinksBlock() {
-  const [links,   setLinks]   = useState(null)
-  const [copied,  setCopied]  = useState(null)
-  const [toggling,setToggling]= useState(null)
+  const [links,    setLinks]    = useState(null)
+  const [open,     setOpen]     = useState(false)
+  const [copied,   setCopied]   = useState(null)
+  const [toggling, setToggling] = useState(null)
   const BASE = window.location.origin
 
   useEffect(() => {
@@ -372,48 +380,64 @@ function CheckinLinksBlock() {
 
   if (!links) return null
 
+  const activeCount = links.filter(l => l.is_active).length
+
   return (
     <div style={{ marginBottom:'16px' }}>
-      <div className="card-section-label" style={{ color:'#8B5CF6' }}>
-        🔗 CHECK-IN LINKS
+      {/* Collapsible header */}
+      <div onClick={() => setOpen(o => !o)}
+        style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+          cursor:'pointer', marginBottom: open ? '8px' : 0 }}>
+        <div className="card-section-label" style={{ color:'#8B5CF6', marginBottom:0 }}>
+          🔗 CHECK-IN LINKS
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+          <span style={{ fontSize:'0.68rem', color:'#8B5CF6', fontWeight:'600',
+            background:'rgba(139,92,246,0.12)', padding:'2px 8px', borderRadius:'10px' }}>
+            {activeCount} active
+          </span>
+          <span style={{ color:'var(--text-dim)', fontSize:'0.85rem' }}>{open ? '▼' : '▶'}</span>
+        </div>
       </div>
-      <div style={{ background:'rgba(139,92,246,0.05)', border:'1px solid rgba(139,92,246,0.2)',
-        borderRadius:'12px', overflow:'hidden' }}>
-        {links.map((lnk, i) => (
-          <div key={lnk.token} style={{ padding:'11px 14px',
-            borderBottom: i < links.length-1 ? '1px solid rgba(139,92,246,0.1)' : 'none',
-            display:'flex', alignItems:'center', gap:'10px',
-            opacity: lnk.is_active ? 1 : 0.45 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:'0.82rem', fontWeight:'600', color: lnk.is_active ? '#D0D0D0' : '#6B7280' }}>
-                {lnk.label || lnk.partner}
+
+      {/* Collapsible content */}
+      {open && (
+        <div style={{ background:'rgba(139,92,246,0.05)', border:'1px solid rgba(139,92,246,0.2)',
+          borderRadius:'12px', overflow:'hidden' }}>
+          {links.map((lnk, i) => (
+            <div key={lnk.token} style={{ padding:'11px 14px',
+              borderBottom: i < links.length-1 ? '1px solid rgba(139,92,246,0.1)' : 'none',
+              display:'flex', alignItems:'center', gap:'10px',
+              opacity: lnk.is_active ? 1 : 0.45 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:'0.82rem', fontWeight:'600', color: lnk.is_active ? '#D0D0D0' : '#6B7280' }}>
+                  {lnk.label || lnk.partner}
+                </div>
+                <div style={{ fontSize:'0.68rem', color:'#5C7080', marginTop:'2px',
+                  overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  /checkin/{lnk.token}
+                  {lnk.use_count > 0 && <span style={{ marginLeft:'8px', color:'#8B5CF6' }}>
+                    · {lnk.use_count} open{lnk.use_count !== 1 ? 's' : ''}
+                  </span>}
+                </div>
               </div>
-              <div style={{ fontSize:'0.68rem', color:'#5C7080', marginTop:'2px',
-                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                /checkin/{lnk.token}
-                {lnk.use_count > 0 && <span style={{ marginLeft:'8px', color:'#8B5CF6' }}>
-                  · {lnk.use_count} open{lnk.use_count !== 1 ? 's' : ''}
-                </span>}
-              </div>
+              <button onClick={() => copyLink(lnk)}
+                style={{ padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(139,92,246,0.3)',
+                  background: copied===lnk.token ? 'rgba(52,168,83,0.15)' : 'rgba(139,92,246,0.1)',
+                  color: copied===lnk.token ? '#34A853' : '#8B5CF6',
+                  fontSize:'0.72rem', cursor:'pointer', whiteSpace:'nowrap', fontWeight:'600' }}>
+                {copied===lnk.token ? '✅ Copied' : '📋 Copy'}
+              </button>
+              <button onClick={() => toggleLink(lnk)} disabled={toggling===lnk.token}
+                style={{ padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.08)',
+                  background:'transparent', color: lnk.is_active ? '#EF4444' : '#34A853',
+                  fontSize:'0.72rem', cursor:'pointer', whiteSpace:'nowrap' }}>
+                {toggling===lnk.token ? '…' : lnk.is_active ? 'Deactivate' : 'Activate'}
+              </button>
             </div>
-            {/* Copy */}
-            <button onClick={() => copyLink(lnk)}
-              style={{ padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(139,92,246,0.3)',
-                background: copied===lnk.token ? 'rgba(52,168,83,0.15)' : 'rgba(139,92,246,0.1)',
-                color: copied===lnk.token ? '#34A853' : '#8B5CF6',
-                fontSize:'0.72rem', cursor:'pointer', whiteSpace:'nowrap', fontWeight:'600' }}>
-              {copied===lnk.token ? '✅ Copied' : '📋 Copy'}
-            </button>
-            {/* Toggle */}
-            <button onClick={() => toggleLink(lnk)} disabled={toggling===lnk.token}
-              style={{ padding:'6px 10px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.08)',
-                background:'transparent', color: lnk.is_active ? '#EF4444' : '#34A853',
-                fontSize:'0.72rem', cursor:'pointer', whiteSpace:'nowrap' }}>
-              {toggling===lnk.token ? '…' : lnk.is_active ? 'Deactivate' : 'Activate'}
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

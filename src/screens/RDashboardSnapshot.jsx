@@ -1,17 +1,15 @@
 /**
  * RDashboardSnapshot.jsx
- * Raman's quick revenue snapshot — accessible from RamanHome.
+ * Raman's quick earnings snapshot — accessible from RamanHome.
+ * NO MONETARY VALUES ARE EVER SHOWN ON THIS SCREEN — owner-only policy.
  *
  * Shows:
- *   CURRENT YEAR
- *     Paid to date (current year)
- *     Current quarter: unpaid guest names + dates
- *     Previous quarters of current year: paid total
+ *   CURRENT YEAR (broken down by quarter -> month -> guest)
+ *     Each guest shown with paid/pending status (checkmark, no amount)
+ *     Pending count shown per quarter so Raman knows what's outstanding
  *
- *   PAST YEARS
- *     Each year: total paid
- *
- *   GRAND TOTAL (all-time paid + unpaid outstanding)
+ *   PAST YEARS (2022 - last year) — single blanket bucket
+ *     Just a total stay count, no breakdown, no money
  *
  * Route: /raman/dashboard
  * Access: Raman (manager role)
@@ -37,49 +35,33 @@ class EB extends Component {
   }
 }
 
-
 export default function RDashboardSnapshot(){return <EB><RDashboardSnapshotInner/></EB>}
 
-function fmt(n) {
-  if (!n && n !== 0) return '—'
-  return `₹${Number(n).toLocaleString('en-IN')}`
-}
 function fmtDate(d) {
   if (!d) return '—'
   try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short' }) }
   catch { return d }
 }
-function currentQuarterKey() {
+
+const MONTH_TO_Q = { 1:1,2:1,3:1, 4:2,5:2,6:2, 7:3,8:3,9:3, 10:4,11:4,12:4 }
+const Q_RANGE = { 1:'Jan–Mar', 2:'Apr–Jun', 3:'Jul–Sep', 4:'Oct–Dec' }
+
+function currentQuarter() {
   const now = new Date()
-  return `${now.getFullYear()}-Q${Math.floor(now.getMonth()/3)+1}`
-}
-const Q_MONTHS = { Q1:'Jan–Mar', Q2:'Apr–Jun', Q3:'Jul–Sep', Q4:'Oct–Dec' }
-function qLabel(key) {
-  // key = "2026-Q1" → "Q1 2026 (Jan–Mar)"
-  const parts = key.split('-')
-  const q = parts[1], yr = parts[0]
-  return `${q} ${yr} (${Q_MONTHS[q]||''})`
-}
-function quarterHasPassed(key) {
-  const parts = key.split('-')
-  const yr = parseInt(parts[0]), q = parseInt(parts[1].replace('Q',''))
-  const now = new Date()
-  const curYr = now.getFullYear()
-  const curQ  = Math.floor(now.getMonth()/3) + 1
-  if (yr < curYr) return true
-  if (yr === curYr && q < curQ) return true
-  return false
+  return MONTH_TO_Q[now.getMonth() + 1]
 }
 
 function RDashboardSnapshotInner() {
-  const navigate    = useNavigate()
-  const [data, setData]     = useState(null)
+  const navigate = useNavigate()
+  const [report, setReport]   = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError]   = useState('')
+  const [error, setError]     = useState('')
+  const [expandQ, setExpandQ] = useState({})
+  const [expandM, setExpandM] = useState({})
 
   useEffect(() => {
-    api.getRamanDashboard()
-      .then(d => { setData(d); setLoading(false) })
+    api.getRamanReport()
+      .then(d => { setReport(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [])
 
@@ -95,7 +77,7 @@ function RDashboardSnapshotInner() {
     </div>
   )
 
-  if (error || !data) return (
+  if (error || !report) return (
     <div className="screen">
       <div className="topbar">
         <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
@@ -110,20 +92,27 @@ function RDashboardSnapshotInner() {
     </div>
   )
 
-  const curYear  = String(new Date().getFullYear())
-  const curQKey  = currentQuarterKey()
+  const curYear = new Date().getFullYear()
+  const curQ    = currentQuarter()
 
-  // Split byYear into current vs past
-  const curYearData = data?.byYear?.find(y => y.year === curYear)
-  const pastYears   = data?.byYear?.filter(y => y.year !== curYear) || []
+  const years = report.years || []
+  const curYearData  = years.find(y => y.year === curYear)
+  const pastYearsData = years.filter(y => y.year !== curYear)
 
-  // Split unpaidByQ into current year vs past
-  const unpaidCurYear = (data?.unpaidByQ || []).filter(q => String(q.year) === curYear)
-  const unpaidPast    = (data?.unpaidByQ || []).filter(q => String(q.year) !== curYear)
+  // Group current year's months into quarters
+  const quarters = { 1: [], 2: [], 3: [], 4: [] }
+  ;(curYearData?.months || []).forEach(m => {
+    const q = MONTH_TO_Q[m.month]
+    quarters[q].push(m)
+  })
 
-  // For current year: split quarters into current (show detail) vs others (show total)
-  const curQ    = unpaidCurYear.find(q => q.key === curQKey)
-  const otherQs = unpaidCurYear.filter(q => q.key !== curQKey)
+  // Blanket past-years total (just stay count, no money, no breakdown)
+  const pastTotalStays = pastYearsData.reduce((s, y) => s + (y.totalGuests || 0), 0)
+  const pastYearRange = pastYearsData.length > 0
+    ? (pastYearsData.length === 1
+        ? String(pastYearsData[0].year)
+        : `${Math.min(...pastYearsData.map(y=>y.year))}–${Math.max(...pastYearsData.map(y=>y.year))}`)
+    : null
 
   return (
     <div className="screen">
@@ -145,143 +134,109 @@ function RDashboardSnapshotInner() {
           </div>
         )}
 
-        {/* ── CURRENT YEAR ── */}
-        <div className="card-section-label">CURRENT · {curYear}</div>
+        {/* ── CURRENT YEAR — by quarter -> month -> guest ── */}
+        <div className="card-section-label">{curYear}</div>
 
-        {/* Settled stays this year — no monetary amounts shown to Raman */}
-        <div style={{background:'rgba(200,144,58,0.06)',border:'1px solid rgba(200,144,58,0.25)',
-          borderRadius:'14px',padding:'16px',marginBottom:'12px'}}>
-          <div style={{color:'var(--text-dim)',fontSize:'0.7rem',letterSpacing:'1px',marginBottom:'4px'}}>
-            SETTLED · {curYear}
-          </div>
-          <div style={{color:'var(--gold)',fontSize:'2rem',fontWeight:'800',fontFamily:'monospace'}}>
-            {curYearData?.staysPaid || 0}
-          </div>
-          <div style={{color:'var(--text-dim)',fontSize:'0.75rem',marginTop:'4px'}}>
-            stay{(curYearData?.staysPaid||0)!==1?'s':''} settled this year
-          </div>
-        </div>
+        {[1,2,3,4].map(q => {
+          const months = quarters[q]
+          const hasData = months.length > 0
+          if (!hasData) return null // don't show future quarters with no data at all
 
-        {/* All quarters of current year — show each with correct status */}
-        {['Q1','Q2','Q3','Q4'].map(q => {
-          const key     = `${curYear}-${q}`
-          const isCurQ  = key === curQKey
-          const isPast  = quarterHasPassed(key)
-          const unpaidQ = unpaidCurYear.find(uq => uq.key === key)
-          const isFuture = !isPast && !isCurQ
+          const totalGuests = months.reduce((s,m) => s + m.paidCount + m.unpaidCount, 0)
+          const pendingGuests = months.reduce((s,m) => s + m.unpaidCount, 0)
+          const isCurQ = q === curQ
+          const qKey = `q${q}`
+          const qOpen = expandQ[qKey] ?? isCurQ // current quarter open by default
 
-          if (isFuture) return null  // Don't show future quarters at all
+          return (
+            <div key={q} style={{marginBottom:'10px', background:'var(--dark-card)',
+              border: pendingGuests > 0 ? '1px solid rgba(230,126,34,0.3)' : '1px solid var(--border-dim)',
+              borderRadius:'12px', overflow:'hidden'}}>
 
-          if (unpaidQ) return (
-            <div key={key} style={{marginBottom:'12px'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-                padding:'6px 2px',marginBottom:'6px'}}>
-                <span style={{color:'#e67e22',fontWeight:'700',fontSize:'0.82rem'}}>
-                  ⏳ {qLabel(key)} — UNPAID
-                </span>
-                <span style={{color:'#e67e22',fontWeight:'600',fontSize:'0.82rem'}}>
-                  {unpaidQ.stays.length} guest{unpaidQ.stays.length!==1?'s':''}
-                </span>
-              </div>
-              <div style={{background:'var(--dark-card)',borderRadius:'12px',
-                border:'1px solid rgba(230,126,34,0.25)',overflow:'hidden'}}>
-                {unpaidQ.stays.map((s,i) => (
-                  <div key={i} style={{padding:'10px 16px',
-                    borderBottom:i<unpaidQ.stays.length-1?'1px solid var(--border-dim)':'none',
-                    display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                    <div>
-                      <div style={{fontWeight:'600',fontSize:'0.88rem',color:'var(--text)'}}>
-                        {s.guestName}
-                      </div>
-                      <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'1px'}}>
-                        {fmtDate(s.checkIn)} · {s.nights} night{s.nights!==1?'s':''}
-                      </div>
-                    </div>
+              {/* Quarter header */}
+              <div onClick={() => setExpandQ(prev => ({ ...prev, [qKey]: !qOpen }))}
+                style={{padding:'12px 16px', display:'flex', justifyContent:'space-between',
+                  alignItems:'center', cursor:'pointer',
+                  borderBottom: qOpen ? '1px solid var(--border-dim)' : 'none'}}>
+                <div>
+                  <div style={{color: pendingGuests > 0 ? '#e67e22' : 'var(--text)', fontWeight:'700', fontSize:'0.92rem'}}>
+                    Q{q} {curYear} ({Q_RANGE[q]})
                   </div>
-                ))}
+                  <div style={{color:'var(--text-dim)', fontSize:'0.74rem', marginTop:'2px'}}>
+                    {totalGuests} guest{totalGuests!==1?'s':''}
+                    {pendingGuests > 0
+                      ? <span style={{color:'#e67e22'}}> · {pendingGuests} pending</span>
+                      : <span style={{color:'#34A853'}}> · all paid</span>}
+                  </div>
+                </div>
+                <span style={{color:'var(--text-dim)'}}>{qOpen ? '▼' : '▶'}</span>
               </div>
+
+              {/* Months within quarter */}
+              {qOpen && months.map(m => {
+                const mKey = `${qKey}-${m.key}`
+                const mOpen = expandM[mKey] ?? (m.unpaidCount > 0)
+                return (
+                  <div key={m.key}>
+                    <div onClick={() => setExpandM(prev => ({ ...prev, [mKey]: !mOpen }))}
+                      style={{padding:'9px 16px 9px 24px', display:'flex', justifyContent:'space-between',
+                        alignItems:'center', cursor:'pointer', borderBottom:'1px solid rgba(255,255,255,0.03)'}}>
+                      <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                        <span style={{color:'var(--text-dim)', fontSize:'0.7rem'}}>{mOpen?'▾':'▸'}</span>
+                        <span style={{color:'var(--text)', fontSize:'0.85rem', fontWeight:'600'}}>{m.monthName}</span>
+                      </div>
+                      <span style={{fontSize:'0.74rem', color: m.unpaidCount>0 ? '#e67e22':'#34A853', fontWeight:'600'}}>
+                        {m.unpaidCount > 0 ? `${m.unpaidCount} pending` : '✓ all paid'}
+                      </span>
+                    </div>
+                    {mOpen && m.guests.map((g,gi) => (
+                      <div key={gi} style={{padding:'8px 16px 8px 40px',
+                        borderBottom: gi<m.guests.length-1 ? '1px solid rgba(255,255,255,0.02)' : 'none',
+                        display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                        <div>
+                          <div style={{color:'var(--text)', fontSize:'0.8rem'}}>{g.guestName}</div>
+                          <div style={{color:'var(--text-dim)', fontSize:'0.7rem', marginTop:'1px'}}>
+                            {fmtDate(g.checkIn)} · {g.nights} night{g.nights!==1?'s':''}
+                          </div>
+                        </div>
+                        <span style={{fontSize:'0.85rem', fontWeight:'700',
+                          color: g.isPaid ? '#34A853' : '#e67e22'}}>
+                          {g.isPaid ? '✓' : '⏳'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
             </div>
           )
-
-          if (isPast && !unpaidQ) return (
-            <div key={key} style={{display:'flex',justifyContent:'space-between',
-              padding:'8px 14px',marginBottom:'6px'}}>
-              <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>{qLabel(key)}</span>
-              <span style={{color:'#34A853',fontSize:'0.82rem',fontWeight:'600'}}>✓ Paid</span>
-            </div>
-          )
-
-          if (isCurQ && !unpaidQ) return (
-            <div key={key} style={{background:'rgba(52,168,83,0.06)',border:'1px solid rgba(52,168,83,0.2)',
-              borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',
-              color:'#34A853',fontSize:'0.85rem',fontWeight:'600'}}>
-              ✅ {qLabel(key)} — All paid
-            </div>
-          )
-
-          return null
         })}
 
-        {/* ── PAST YEARS ── */}
-        {(pastYears.length > 0 || unpaidPast.length > 0) && (
+        {/* No data yet for current year */}
+        {!curYearData && (
+          <div className="card" style={{textAlign:'center', color:'var(--text-dim)', padding:'24px', marginBottom:'14px'}}>
+            No stays recorded yet for {curYear}
+          </div>
+        )}
+
+        {/* ── PAST YEARS — single blanket bucket, no breakdown, no money ── */}
+        {pastTotalStays > 0 && (
           <>
             <div className="card-section-label" style={{marginTop:'8px'}}>PAST YEARS</div>
-            <div style={{background:'var(--dark-card)',borderRadius:'12px',
-              border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'14px'}}>
-              {pastYears.map((y,i) => (
-                <div key={y.year} style={{padding:'12px 16px',
-                  borderBottom:i<pastYears.length-1?'1px solid var(--border-dim)':'none',
-                  display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <div>
-                    <div style={{fontWeight:'700',fontSize:'0.9rem'}}>{y.year}</div>
-                    <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'1px'}}>
-                      {y.staysPaid} stay{y.staysPaid!==1?'s':''} · fully settled
-                    </div>
-                  </div>
-                  <div style={{color:'#34A853',fontWeight:'700',fontSize:'0.85rem'}}>
-                    ✓ Settled
-                  </div>
-                </div>
-              ))}
-              {unpaidPast.map((q,i) => (
-                <div key={q.key} style={{padding:'12px 16px',
-                  borderBottom:'1px solid var(--border-dim)',
-                  display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                  <div>
-                    <div style={{fontWeight:'700',fontSize:'0.9rem',color:'#EF9A9A'}}>{q.label}</div>
-                    <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'1px'}}>
-                      {q.stays.length} stay{q.stays.length!==1?'s':''} · pending
-                    </div>
-                  </div>
-                  <div style={{color:'#EF9A9A',fontWeight:'700',fontSize:'0.85rem'}}>⏳ Pending</div>
-                </div>
-              ))}
+            <div style={{background:'var(--dark-card)', borderRadius:'12px',
+              border:'1px solid var(--border-dim)', padding:'16px', marginBottom:'14px'}}>
+              <div style={{color:'var(--text-dim)', fontSize:'0.72rem', letterSpacing:'1px', marginBottom:'4px'}}>
+                {pastYearRange}
+              </div>
+              <div style={{color:'var(--text)', fontSize:'1.6rem', fontWeight:'800'}}>
+                {pastTotalStays} stay{pastTotalStays!==1?'s':''}
+              </div>
+              <div style={{color:'#34A853', fontSize:'0.78rem', marginTop:'4px', fontWeight:'600'}}>
+                ✓ fully settled
+              </div>
             </div>
           </>
         )}
-
-        {/* ── SUMMARY — guest counts only, no monetary amounts ── */}
-        <div className="card-section-label">ALL TIME</div>
-        <div style={{background:'var(--dark-card)',borderRadius:'12px',
-          border:'1px solid var(--border-dim)',padding:'16px',marginBottom:'14px'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-            marginBottom:'10px',paddingBottom:'10px',borderBottom:'1px solid var(--border-dim)'}}>
-            <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>Stays settled</span>
-            <span style={{color:'#34A853',fontWeight:'700',fontSize:'1rem'}}>
-              {(data?.byYear || []).reduce((s,y)=>s+(y.staysPaid||0),0)}
-            </span>
-          </div>
-          {(data?.totalUnpaid > 0) && (
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>Stays pending</span>
-              <span style={{color:'#e67e22',fontWeight:'700',fontSize:'1rem'}}>
-                {(data?.unpaidByQ || []).reduce((s,q)=>s+(q.stays?.length||0),0)}
-              </span>
-            </div>
-          )}
-        </div>
-
-
 
       </div>
     </div>

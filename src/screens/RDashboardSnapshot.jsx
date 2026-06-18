@@ -37,6 +37,10 @@ class EB extends Component {
 
 export default function RDashboardSnapshot(){return <EB><RDashboardSnapshotInner/></EB>}
 
+function fmt(n) {
+  if (!n && n !== 0) return '—'
+  return `₹${Number(n).toLocaleString('en-IN')}`
+}
 function fmtDate(d) {
   if (!d) return '—'
   try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short' }) }
@@ -108,6 +112,9 @@ function RDashboardSnapshotInner() {
 
   // Blanket past-years total (just stay count, no money, no breakdown)
   const pastTotalStays = pastYearsData.reduce((s, y) => s + (y.totalGuests || 0), 0)
+  const pastTotalPaid  = pastYearsData.reduce((s, y) => s + (y.totalPaid  || 0), 0)
+  const curYearTotalPaid = curYearData?.totalPaid || 0
+  const lifetimeTotalPaid = pastTotalPaid + curYearTotalPaid
   const pastYearRange = pastYearsData.length > 0
     ? (pastYearsData.length === 1
         ? String(pastYearsData[0].year)
@@ -233,6 +240,37 @@ function RDashboardSnapshotInner() {
               </div>
               <div style={{color:'#34A853', fontSize:'0.78rem', marginTop:'4px', fontWeight:'600'}}>
                 ✓ fully settled
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── EARNINGS PAID OUT — lump-sum motivational total, the one place money is shown ── */}
+        {lifetimeTotalPaid > 0 && (
+          <>
+            <div className="card-section-label" style={{marginTop:'8px'}}>EARNINGS PAID OUT</div>
+            <div style={{background:'rgba(200,144,58,0.08)', border:'1px solid rgba(200,144,58,0.3)',
+              borderRadius:'14px', padding:'16px', marginBottom:'14px'}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center',
+                paddingBottom: curYearTotalPaid > 0 ? '12px' : 0,
+                borderBottom: curYearTotalPaid > 0 ? '1px solid rgba(200,144,58,0.15)' : 'none'}}>
+                <span style={{color:'var(--text-dim)', fontSize:'0.78rem'}}>
+                  {pastYearRange ? `${pastYearRange} + ${curYear}` : `${curYear}`}
+                </span>
+                <span style={{color:'var(--gold)', fontWeight:'800', fontSize:'1.3rem', fontFamily:'monospace'}}>
+                  {fmt(lifetimeTotalPaid)}
+                </span>
+              </div>
+              {curYearTotalPaid > 0 && (
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'10px'}}>
+                  <span style={{color:'var(--text-dim)', fontSize:'0.74rem'}}>{curYear} so far</span>
+                  <span style={{color:'var(--text)', fontWeight:'700', fontSize:'0.95rem'}}>
+                    {fmt(curYearTotalPaid)}
+                  </span>
+                </div>
+              )}
+              <div style={{color:'var(--text-dim)', fontSize:'0.7rem', marginTop:'10px', fontStyle:'italic'}}>
+                Keep up the great work! 🎉
               </div>
             </div>
           </>

@@ -1419,6 +1419,49 @@ export async function onRequest(ctx) {
         } catch (e) { return json({ success: false, error: e.message }, 400) }
       }
 
+      if (action === 'markRamanPaid') {
+        // Three call shapes from RDashboard.jsx:
+        //  1. { commIds: [...], paidDate } — pay specific selected stays
+        //  2. { quarter: 'Q1 2026', paidDate } — pay one whole quarter
+        //  3. { paidDate } — pay all unpaid
+        const paidDate = body.paidDate || now().slice(0, 10)
+
+        if (Array.isArray(body.commIds) && body.commIds.length > 0) {
+          // Shape 1: pay selected comm_ids
+          const placeholders = body.commIds.map(() => '?').join(',')
+          const result = await DB.prepare(
+            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
+             WHERE comm_id IN (${placeholders}) AND is_paid = 0`
+          ).bind(paidDate, actor, now(), ...body.commIds).run()
+          return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
+        }
+
+        if (body.quarter) {
+          // Shape 2: pay a whole quarter — parse "Q1 2026" into a date range
+          const m = String(body.quarter).match(/^Q([1-4])\s+(\d{4})$/)
+          if (!m) return err('Invalid quarter format — expected "Q1 2026"')
+          const q = parseInt(m[1]), year = parseInt(m[2])
+          const startMonth = (q - 1) * 3 + 1
+          const endMonth   = startMonth + 2
+          const startDate  = `${year}-${String(startMonth).padStart(2, '0')}-01`
+          // Last day of endMonth — use day 0 of the following month
+          const endDateObj = new Date(year, endMonth, 0)
+          const endDate     = `${endDateObj.getFullYear()}-${String(endDateObj.getMonth() + 1).padStart(2, '0')}-${String(endDateObj.getDate()).padStart(2, '0')}`
+
+          const result = await DB.prepare(
+            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
+             WHERE checkin_date BETWEEN ? AND ? AND is_paid = 0`
+          ).bind(paidDate, actor, now(), startDate, endDate).run()
+          return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
+        }
+
+        // Shape 3: pay all unpaid
+        const result = await DB.prepare(
+          `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0`
+        ).bind(paidDate, actor, now()).run()
+        return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
+      }
+
       if (action === 'createBooking') {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1

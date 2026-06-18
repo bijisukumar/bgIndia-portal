@@ -1529,7 +1529,12 @@ export async function onRequest(ctx) {
 
     // ── POST ROUTES ─────────────────────────────────────
     if (method === 'POST') {
-      const body = await request.json()
+      let body
+      try {
+        body = await request.json()
+      } catch (e) {
+        return err(`Invalid request body: ${e.message}`)
+      }
 
       if (action === 'runSQLWrite') {
         const sql = body?.sql ? body.sql.trim() : ''
@@ -1555,7 +1560,9 @@ export async function onRequest(ctx) {
             statements: statements.length,
             perStatement: results.map((r, i) => ({ sql: statements[i].substring(0, 60), changes: r.meta?.changes ?? 0 }))
           }})
-        } catch (e) { return json({ success: false, error: e.message }, 400) }
+        } catch (e) {
+          return json({ success: false, error: e.message || String(e), errorName: e.name, errorCause: e.cause?.message || null }, 400)
+        }
       }
 
       if (action === 'markRamanPaid') {

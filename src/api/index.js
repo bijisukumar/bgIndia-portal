@@ -222,10 +222,16 @@ export const api = {
     if (res.status === 401) { handle401(); return }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      throw new Error(body?.error || `HTTP ${res.status}`)
+      const parts = [body?.error || `HTTP ${res.status}`]
+      if (body?.errorCause) parts.push(`(cause: ${body.errorCause})`)
+      throw new Error(parts.join(' '))
     }
     const body = await res.json()
-    if (body?.success === false) throw new Error(body.error || 'Query failed')
+    if (body?.success === false) {
+      const parts = [body.error || 'Query failed']
+      if (body?.errorCause) parts.push(`(cause: ${body.errorCause})`)
+      throw new Error(parts.join(' '))
+    }
     return body.data
   },
 

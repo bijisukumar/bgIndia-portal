@@ -5,6 +5,7 @@ import { api } from '../../api'
 export default function CarRentalEntry() {
   const navigate = useNavigate()
   const [stay, setStay]             = useState(null)
+  const [recentCheckouts, setRecentCheckouts] = useState([])
   const [date, setDate]             = useState(new Date().toISOString().split('T')[0])
   const [destination, setDest]      = useState('')
   const [amount, setAmount]         = useState('')
@@ -16,14 +17,19 @@ export default function CarRentalEntry() {
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
   const net = (parseFloat(amount)||0) - (parseFloat(commission)||0)
 
-  useEffect(() => { api.getActiveStay('dwarka').then(s => { if(s?.stayId) setStay(s) }) }, [])
+  useEffect(() => {
+    api.getActiveStay('dwarka').then(s => { if(s?.stayId) setStay(s) })
+    api.getRecentCheckouts('dwarka').then(d => { if (Array.isArray(d)) setRecentCheckouts(d) }).catch(() => {})
+  }, [])
 
   const handleSave = async () => {
     if (!amount) { showToast('Enter trip amount','error'); return }
     setSaving(true)
     try {
+      // Note: only logs to guest_requests — never touches stays.status,
+      // so a retroactive (past-checkout) entry does not affect the booking lifecycle.
       await api.saveCarRental({ stayId:stay?.stayId, guestName:stay?.guestName, date, destination, amount:parseFloat(amount), commission:parseFloat(commission)||0, net, notes })
-      showToast('Car rental saved ✓')
+      showToast(`Car rental saved ✓${stay?.isHistoricalSession ? ' · retroactive' : ''}`)
       setDest(''); setAmount(''); setCommission(''); setNotes('')
     } catch { showToast('Failed to save','error') }
     finally { setSaving(false) }
@@ -38,9 +44,38 @@ export default function CarRentalEntry() {
       </div>
       <div className="screen-body">
         {!stay ? (
-          <div className="card" style={{textAlign:'center',padding:'32px',color:'var(--text-dim)'}}>No active stay — check in a guest first</div>
+          <div className="card" style={{ padding: '14px', marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '0.75rem', color: '#F59E0B', marginBottom: '6px', fontWeight: '600' }}>
+              ⚠️ No active stay found. Select a recent checkout to log a car rental:
+            </label>
+            {recentCheckouts.length > 0 ? (
+              <select
+                onChange={(e) => {
+                  const chosen = recentCheckouts.find(r => r.stay_id === e.target.value)
+                  if (chosen) {
+                    setStay({ stayId: chosen.stay_id, guestName: chosen.guest_name, isHistoricalSession: true })
+                  } else { setStay(null) }
+                }}
+                className="field-input"
+                style={{ width: '100%', background: '#1A202C', color: '#FFF', padding: '8px', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.3)' }}
+              >
+                <option value="">-- Choose a past checkout --</option>
+                {recentCheckouts.map(s => (
+                  <option key={s.stay_id} value={s.stay_id}>{s.guest_name} (Checked out: {s.checkout_date})</option>
+                ))}
+              </select>
+            ) : (
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>No recent checkouts found.</div>
+            )}
+          </div>
         ) : (
           <>
+            {stay.isHistoricalSession && (
+              <div className="card" style={{ padding: '10px 14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#5C7080', fontSize: '0.65rem' }}>🔴 RETROACTIVE — {stay.guestName}</span>
+                <button onClick={() => setStay(null)} style={{ background: 'transparent', border: 'none', color: '#EF4444', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}>✕ Clear</button>
+              </div>
+            )}
             <div className="card-section-label">TRIP DETAILS</div>
             <div className="card">
               <div className="grid-2">

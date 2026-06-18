@@ -674,6 +674,76 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      if (action === 'getRamanReport') {
+        // Year/month reporting for owner — replaces flat history laundry-list.
+        // Also detects "missed" guests: checked_out stays with NO matching
+        // raman_commissions row (e.g. commission was never auto-created).
+        const { results: paidRows } = await DB.prepare(
+          `SELECT comm_id, guest_name, checkin_date, nights, commission, paid_date
+           FROM raman_commissions WHERE is_paid = 1 ORDER BY checkin_date ASC`
+        ).all()
+        const { results: unpaidRows } = await DB.prepare(
+          `SELECT comm_id, guest_name, checkin_date, nights, commission
+           FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
+        ).all()
+        const { results: missedRows } = await DB.prepare(
+          `SELECT s.stay_id, s.guest_name, s.checkin_date, s.nights
+           FROM stays s
+           LEFT JOIN raman_commissions rc ON rc.stay_id = s.stay_id
+           WHERE s.status = 'checked_out' AND rc.comm_id IS NULL
+           ORDER BY s.checkin_date ASC`
+        ).all()
+
+        // Group paid + unpaid together by year -> month, count guests, sum totals
+        const byYearMonth = {}
+        function addRow(r, isPaid) {
+          const d = new Date(r.checkin_date)
+          const yr = d.getFullYear()
+          const mo = d.getMonth() + 1 // 1-12
+          const yKey = String(yr)
+          const mKey = `${yr}-${String(mo).padStart(2,'0')}`
+          if (!byYearMonth[yKey]) byYearMonth[yKey] = { year: yr, months: {}, totalGuests: 0, totalPaid: 0, totalUnpaid: 0 }
+          if (!byYearMonth[yKey].months[mKey]) {
+            byYearMonth[yKey].months[mKey] = { key: mKey, month: mo, year: yr, guests: [], paidCount: 0, unpaidCount: 0, totalPaid: 0, totalUnpaid: 0 }
+          }
+          const mEntry = byYearMonth[yKey].months[mKey]
+          mEntry.guests.push({ guestName: r.guest_name, checkIn: r.checkin_date, nights: r.nights, commission: r.commission, isPaid })
+          if (isPaid) { mEntry.paidCount++; mEntry.totalPaid += r.commission||0; byYearMonth[yKey].totalPaid += r.commission||0 }
+          else        { mEntry.unpaidCount++; mEntry.totalUnpaid += r.commission||0; byYearMonth[yKey].totalUnpaid += r.commission||0 }
+          byYearMonth[yKey].totalGuests++
+        }
+        paidRows.forEach(r => addRow(r, true))
+        unpaidRows.forEach(r => addRow(r, false))
+
+        // Convert nested objects to sorted arrays
+        const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        const years = Object.values(byYearMonth)
+          .sort((a,b) => b.year - a.year)
+          .map(y => ({
+            year: y.year,
+            totalGuests: y.totalGuests,
+            totalPaid: y.totalPaid,
+            totalUnpaid: y.totalUnpaid,
+            months: Object.values(y.months)
+              .sort((a,b) => b.month - a.month)
+              .map(m => ({
+                ...m,
+                monthName: MONTH_NAMES[m.month - 1],
+                guests: m.guests.sort((a,b) => new Date(a.checkIn) - new Date(b.checkIn)),
+              }))
+          }))
+
+        const grandTotalPaid   = paidRows.reduce((s,r) => s + (r.commission||0), 0)
+        const grandTotalUnpaid = unpaidRows.reduce((s,r) => s + (r.commission||0), 0)
+
+        return json({ success: true, data: {
+          years,
+          missedGuests: missedRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, nights: r.nights })),
+          grandTotalPaid, grandTotalUnpaid,
+          totalGuestsAllTime: paidRows.length + unpaidRows.length,
+        }})
+      }
+
       if (action === 'getRamanDashboard') {
         const { results: byYear } = await DB.prepare(
           `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year, SUM(commission) as total_paid, COUNT(*) as stays_paid

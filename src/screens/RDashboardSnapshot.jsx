@@ -148,20 +148,18 @@ function RDashboardSnapshotInner() {
         {/* ── CURRENT YEAR ── */}
         <div className="card-section-label">CURRENT · {curYear}</div>
 
-        {/* Paid to date this year */}
+        {/* Settled stays this year — no monetary amounts shown to Raman */}
         <div style={{background:'rgba(200,144,58,0.06)',border:'1px solid rgba(200,144,58,0.25)',
           borderRadius:'14px',padding:'16px',marginBottom:'12px'}}>
           <div style={{color:'var(--text-dim)',fontSize:'0.7rem',letterSpacing:'1px',marginBottom:'4px'}}>
-            PAID TO DATE · {curYear}
+            SETTLED · {curYear}
           </div>
           <div style={{color:'var(--gold)',fontSize:'2rem',fontWeight:'800',fontFamily:'monospace'}}>
-            {fmt(curYearData?.totalPaid || 0)}
+            {curYearData?.staysPaid || 0}
           </div>
-          {curYearData?.staysPaid > 0 && (
-            <div style={{color:'var(--text-dim)',fontSize:'0.75rem',marginTop:'4px'}}>
-              {curYearData.staysPaid} stay{curYearData.staysPaid!==1?'s':''} settled
-            </div>
-          )}
+          <div style={{color:'var(--text-dim)',fontSize:'0.75rem',marginTop:'4px'}}>
+            stay{(curYearData?.staysPaid||0)!==1?'s':''} settled this year
+          </div>
         </div>
 
         {/* All quarters of current year — show each with correct status */}
@@ -240,8 +238,8 @@ function RDashboardSnapshotInner() {
                       {y.staysPaid} stay{y.staysPaid!==1?'s':''} · fully settled
                     </div>
                   </div>
-                  <div style={{color:'#34A853',fontWeight:'700',fontSize:'1rem'}}>
-                    {fmt(y.totalPaid)}
+                  <div style={{color:'#34A853',fontWeight:'700',fontSize:'0.85rem'}}>
+                    ✓ Settled
                   </div>
                 </div>
               ))}
@@ -252,42 +250,35 @@ function RDashboardSnapshotInner() {
                   <div>
                     <div style={{fontWeight:'700',fontSize:'0.9rem',color:'#EF9A9A'}}>{q.label}</div>
                     <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'1px'}}>
-                      {q.stays.length} stay{q.stays.length!==1?'s':''} · unpaid
+                      {q.stays.length} stay{q.stays.length!==1?'s':''} · pending
                     </div>
                   </div>
-                  <div style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(q.total)}</div>
+                  <div style={{color:'#EF9A9A',fontWeight:'700',fontSize:'0.85rem'}}>⏳ Pending</div>
                 </div>
               ))}
             </div>
           </>
         )}
 
-        {/* ── GRAND TOTAL ── */}
+        {/* ── SUMMARY — guest counts only, no monetary amounts ── */}
         <div className="card-section-label">ALL TIME</div>
         <div style={{background:'var(--dark-card)',borderRadius:'12px',
           border:'1px solid var(--border-dim)',padding:'16px',marginBottom:'14px'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
             marginBottom:'10px',paddingBottom:'10px',borderBottom:'1px solid var(--border-dim)'}}>
-            <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>Total paid to date</span>
+            <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>Stays settled</span>
             <span style={{color:'#34A853',fontWeight:'700',fontSize:'1rem'}}>
-              {fmt(data?.allTimePaid || 0)}
+              {(data?.byYear || []).reduce((s,y)=>s+(y.staysPaid||0),0)}
             </span>
           </div>
           {(data?.totalUnpaid > 0) && (
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
-              marginBottom:'10px',paddingBottom:'10px',borderBottom:'1px solid var(--border-dim)'}}>
-              <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>Outstanding (unpaid)</span>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{color:'var(--text-dim)',fontSize:'0.82rem'}}>Stays pending</span>
               <span style={{color:'#e67e22',fontWeight:'700',fontSize:'1rem'}}>
-                {fmt(data?.totalUnpaid || 0)}
+                {(data?.unpaidByQ || []).reduce((s,q)=>s+(q.stays?.length||0),0)}
               </span>
             </div>
           )}
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <span style={{color:'var(--text)',fontWeight:'700',fontSize:'0.95rem'}}>Grand total earned</span>
-            <span style={{color:'var(--gold)',fontWeight:'800',fontSize:'1.15rem',fontFamily:'monospace'}}>
-              {fmt(data?.grandTotal || 0)}
-            </span>
-          </div>
         </div>
 
 

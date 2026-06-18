@@ -52,12 +52,14 @@ export default function RDashboard() {
   const navigate = useNavigate()
   const [tab, setTab]           = useState('unpaid')
   const [unpaid, setUnpaid]     = useState(null)
-  const [history, setHistory]   = useState([])
+  const [report, setReport]     = useState(null)
   const [loading, setLoading]   = useState(true)
   const [paying, setPaying]     = useState(false)
   const [toast, setToast]       = useState(null)
   const [apiError, setApiError] = useState(null)
   const [expandQ, setExpandQ]   = useState({})
+  const [expandYear, setExpandYear]   = useState({})
+  const [expandMonth, setExpandMonth] = useState({})
   // Set of stay_ids (comm_ids) selected via checkboxes
   const [selected, setSelected] = useState(new Set())
 
@@ -71,10 +73,10 @@ export default function RDashboard() {
     setApiError(null)
     Promise.all([
       api.getRamanUnpaid(),
-      api.getRamanHistory(),
-    ]).then(([u, h]) => {
+      api.getRamanReport(),
+    ]).then(([u, r]) => {
       setUnpaid(u)
-      setHistory(Array.isArray(h) ? h : [])
+      setReport(r)
       setLoading(false)
     }).catch((e) => {
       console.error('RDashboard load error:', e)
@@ -177,7 +179,6 @@ export default function RDashboard() {
     return `upi://pay?pa=${upi}&pn=RamananKutty&am=${amount}&cu=INR&tn=Villa+Commission`
   }
 
-  const totalHistoryPaid = history.reduce((s, h) => s + (h.total || 0), 0)
   const allStays = getAllStays()
   const allIds = allStays.map(s => s.commId)
   const allChecked = allIds.length > 0 && allIds.every(id => selected.has(id))
@@ -393,46 +394,127 @@ export default function RDashboard() {
           </>
         )}
 
-        {/* ── HISTORY TAB ─────────────────────────────────────────────────── */}
+        {/* ── HISTORY TAB — year/month report ─────────────────────────────── */}
         {tab === 'history' && (
           <>
-            <div className="card-section-label">ALL-TIME PAID</div>
+            {/* Missed guests banner — checked-out stays with no commission row at all */}
+            {!loading && report?.missedGuests?.length > 0 && (
+              <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
+                <div style={{ color: '#EF4444', fontWeight: '700', fontSize: '0.85rem', marginBottom: '8px' }}>
+                  ⚠️ {report.missedGuests.length} checked-out guest{report.missedGuests.length !== 1 ? 's' : ''} missing from commission tracking
+                </div>
+                <div style={{ color: '#FCA5A5', fontSize: '0.74rem', marginBottom: '8px' }}>
+                  These stays were checked out but never got a commission record. Review and add manually if needed.
+                </div>
+                {report.missedGuests.map((g, i) => (
+                  <div key={i} style={{ fontSize: '0.78rem', color: '#FCA5A5', padding: '4px 0',
+                    borderTop: i > 0 ? '1px solid rgba(239,68,68,0.15)' : 'none' }}>
+                    {g.guestName} · {fmtDate(g.checkIn)} · {g.nights} night{g.nights !== 1 ? 's' : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Summary */}
+            <div className="card-section-label">ALL-TIME SUMMARY</div>
             {loading ? <Skeleton h={80} /> : (
               <div style={{ background: 'rgba(52,168,83,0.06)', border: '1px solid rgba(52,168,83,0.2)', borderRadius: '14px', padding: '16px', marginBottom: '14px' }}>
-                <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', letterSpacing: '1px', marginBottom: '4px' }}>
-                  TOTAL PAID TO DATE · {history.length} PAYMENTS
-                </div>
-                <div style={{ color: 'var(--green)', fontSize: '2rem', fontWeight: '800', fontFamily: 'monospace' }}>
-                  {fmt(totalHistoryPaid)}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', letterSpacing: '1px', marginBottom: '4px' }}>
+                      TOTAL GUESTS TRACKED
+                    </div>
+                    <div style={{ color: 'var(--text)', fontSize: '1.6rem', fontWeight: '800' }}>
+                      {report?.totalGuestsAllTime || 0}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: 'var(--text-dim)', fontSize: '0.72rem', letterSpacing: '1px', marginBottom: '4px' }}>
+                      PAID TO DATE
+                    </div>
+                    <div style={{ color: 'var(--green)', fontSize: '1.6rem', fontWeight: '800', fontFamily: 'monospace' }}>
+                      {fmt(report?.grandTotalPaid)}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            <div className="card-section-label">PAYMENT HISTORY</div>
+            {/* Year -> Month tree */}
+            <div className="card-section-label">BY YEAR &amp; MONTH</div>
             {loading ? (
               <><Skeleton /><Skeleton /><Skeleton /></>
-            ) : !history.length ? (
+            ) : !report?.years?.length ? (
               <div className="card" style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '24px' }}>
-                No payment history yet
+                No commission history yet
               </div>
             ) : (
-              <div style={{ background: 'var(--dark-card)', borderRadius: '12px', border: '1px solid var(--border-dim)', overflow: 'hidden', marginBottom: '12px' }}>
-                {history.map((h, i) => (
-                  <div key={i} style={{ padding: '14px 16px', borderBottom: i < history.length - 1 ? '1px solid var(--border-dim)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.9rem' }}>
-                        Paid {fmtDate(h.date)}
+              report.years.map((y) => {
+                const yOpen = expandYear[y.year] !== false // default open for most-recent; toggled per year
+                return (
+                  <div key={y.year} style={{ marginBottom: '10px', background: 'var(--dark-card)',
+                    border: '1px solid var(--border-dim)', borderRadius: '12px', overflow: 'hidden' }}>
+
+                    {/* Year header */}
+                    <div onClick={() => setExpandYear(prev => ({ ...prev, [y.year]: !yOpen }))}
+                      style={{ padding: '13px 16px', display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center', cursor: 'pointer',
+                        borderBottom: yOpen ? '1px solid var(--border-dim)' : 'none' }}>
+                      <div>
+                        <div style={{ color: 'var(--gold)', fontWeight: '800', fontSize: '1rem' }}>{y.year}</div>
+                        <div style={{ color: 'var(--text-dim)', fontSize: '0.74rem', marginTop: '2px' }}>
+                          {y.totalGuests} guest{y.totalGuests !== 1 ? 's' : ''}
+                          {y.totalUnpaid > 0 && <span style={{ color: '#e67e22' }}> · {fmt(y.totalUnpaid)} unpaid</span>}
+                        </div>
                       </div>
-                      <div style={{ color: 'var(--text-dim)', fontSize: '0.75rem', marginTop: '2px' }}>
-                        {h.stays} stay{h.stays > 1 ? 's' : ''} covered
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ color: 'var(--green)', fontWeight: '700', fontSize: '0.92rem' }}>{fmt(y.totalPaid)}</span>
+                        <span style={{ color: 'var(--text-dim)' }}>{yOpen ? '▼' : '▶'}</span>
                       </div>
                     </div>
-                    <div style={{ color: 'var(--green)', fontWeight: '700', fontSize: '1rem' }}>
-                      {fmt(h.total)}
-                    </div>
+
+                    {/* Months */}
+                    {yOpen && y.months.map((m) => {
+                      const mKey = m.key
+                      const mOpen = !!expandMonth[mKey]
+                      return (
+                        <div key={mKey}>
+                          <div onClick={() => setExpandMonth(prev => ({ ...prev, [mKey]: !mOpen }))}
+                            style={{ padding: '10px 16px 10px 24px', display: 'flex', justifyContent: 'space-between',
+                              alignItems: 'center', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>{mOpen ? '▾' : '▸'}</span>
+                              <span style={{ color: 'var(--text)', fontSize: '0.85rem', fontWeight: '600' }}>{m.monthName}</span>
+                              <span style={{ color: 'var(--text-dim)', fontSize: '0.74rem' }}>
+                                · {m.paidCount + m.unpaidCount} guest{(m.paidCount + m.unpaidCount) !== 1 ? 's' : ''}
+                                {m.unpaidCount > 0 && <span style={{ color: '#e67e22' }}> ({m.unpaidCount} unpaid)</span>}
+                              </span>
+                            </div>
+                            <span style={{ color: 'var(--green)', fontSize: '0.82rem', fontWeight: '700' }}>{fmt(m.totalPaid)}</span>
+                          </div>
+                          {mOpen && m.guests.map((g, gi) => (
+                            <div key={gi} style={{ padding: '8px 16px 8px 40px',
+                              borderBottom: gi < m.guests.length - 1 ? '1px solid rgba(255,255,255,0.02)' : 'none',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <div style={{ color: 'var(--text)', fontSize: '0.8rem' }}>{g.guestName}</div>
+                                <div style={{ color: 'var(--text-dim)', fontSize: '0.7rem', marginTop: '1px' }}>
+                                  {fmtDate(g.checkIn)} · {g.nights} night{g.nights !== 1 ? 's' : ''}
+                                </div>
+                              </div>
+                              <span style={{ fontSize: '0.78rem', fontWeight: '600',
+                                color: g.isPaid ? 'var(--green)' : '#e67e22' }}>
+                                {g.isPaid ? `✓ ${fmt(g.commission)}` : `⏳ ${fmt(g.commission)}`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
+                )
+              })
             )}
 
             <div className="card-section-label">STATS</div>
@@ -441,7 +523,7 @@ export default function RDashboard() {
                 <>
                   <div className="net-row">
                     <span className="net-label">Total paid to date</span>
-                    <span style={{ color: 'var(--green)', fontWeight: '700' }}>{fmt(totalHistoryPaid)}</span>
+                    <span style={{ color: 'var(--green)', fontWeight: '700' }}>{fmt(report?.grandTotalPaid)}</span>
                   </div>
                   <div className="net-row">
                     <span className="net-label">Total outstanding</span>
@@ -449,16 +531,18 @@ export default function RDashboard() {
                   </div>
                   <div className="net-row">
                     <span className="net-label">All-time commission</span>
-                    <span style={{ fontWeight: '700' }}>{fmt((totalHistoryPaid || 0) + (unpaid?.totalUnpaid || 0))}</span>
+                    <span style={{ fontWeight: '700' }}>{fmt((report?.grandTotalPaid || 0) + (unpaid?.totalUnpaid || 0))}</span>
                   </div>
                   <div className="net-row">
-                    <span className="net-label">Number of payments made</span>
-                    <span>{history.length}</span>
+                    <span className="net-label">Total guests tracked</span>
+                    <span>{report?.totalGuestsAllTime || 0}</span>
                   </div>
-                  <div className="net-row">
-                    <span className="net-label">Avg per payment</span>
-                    <span>{history.length ? fmt(Math.round(totalHistoryPaid / history.length)) : '—'}</span>
-                  </div>
+                  {report?.missedGuests?.length > 0 && (
+                    <div className="net-row">
+                      <span className="net-label" style={{ color: '#EF4444' }}>Missing from tracking</span>
+                      <span style={{ color: '#EF4444', fontWeight: '700' }}>{report.missedGuests.length}</span>
+                    </div>
+                  )}
                 </>
               )}
             </div>

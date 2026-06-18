@@ -174,6 +174,7 @@ export const api = {
   getRamanTodo:         (villaId)=> get('getRamanTodo', { villaId: villaId || 'dwarka' }),
   getRamanUnpaid:       ()       => get('getRamanUnpaid'),
   getRamanDashboard:    ()       => get('getRamanDashboard'),
+  getRamanReport:       ()       => get('getRamanReport'),
   // -- MARKETING CAMPAIGNS --
   getCampaigns:         (villaId)  => get('getCampaigns', { villaId }),
   getCampaignAnalytics: (id)       => get('getCampaignAnalytics', { campaignId: id }),

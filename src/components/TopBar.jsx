@@ -37,9 +37,9 @@ export default function TopBar({ title, sub, back = false, onBack }) {
 
       {/* Right — sign off */}
       <div style={s.right}>
-        <button style={s.signOff} onClick={logout} title="Sign off">
-          <span style={{ fontSize: '0.85rem' }}>⏏</span>
-          <span style={s.signOffLabel}>SIGN OFF</span>
+        <button style={s.signOff} onClick={logout}>
+          <span style={s.signOffIcon}>⎋</span>
+          <span style={s.signOffLabel}>Sign off</span>
         </button>
       </div>
     </div>
@@ -60,7 +60,7 @@ const s = {
   },
   left:   { width: 40, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', flexShrink: 0 },
   centre: { flex: 1, minWidth: 0, textAlign: 'center' },
-  right:  { width: 70, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 },
+  right:  { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 },
 
   backBtn: {
     background: 'rgba(200,144,58,0.1)',
@@ -91,17 +91,19 @@ const s = {
   },
 
   signOff: {
-    background: 'rgba(220,53,53,0.1)',
-    border: '1px solid rgba(220,53,53,0.3)',
-    borderRadius: 8,
-    color: '#E05C5C',
-    padding: '5px 7px',
+    background: 'rgba(220,53,53,0.12)',
+    border: '1px solid rgba(220,53,53,0.35)',
+    borderRadius: 20,
+    color: '#F0807F',
+    padding: '7px 14px',
     cursor: 'pointer',
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 1,
+    gap: 6,
     lineHeight: 1,
+    whiteSpace: 'nowrap',
   },
-  signOffLabel: { fontSize: '0.48rem', letterSpacing: '1px', fontWeight: 700, marginTop: 1 },
+  signOffIcon: { fontSize: '0.95rem' },
+  signOffLabel: { fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.2px' },
 }

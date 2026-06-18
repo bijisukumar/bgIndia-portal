@@ -757,7 +757,7 @@ export async function onRequest(ctx) {
           `SELECT s.stay_id, s.guest_name, s.checkin_date, s.nights
            FROM stays s
            LEFT JOIN raman_commissions rc ON rc.stay_id = s.stay_id
-           WHERE s.status = 'checked_out' AND rc.comm_id IS NULL
+           WHERE s.status IN ('checked_out','closed') AND rc.comm_id IS NULL
            ORDER BY s.checkin_date ASC`
         ).all()
 
@@ -1706,6 +1706,16 @@ export async function onRequest(ctx) {
         }
         const stayId = genStayId(body.villaId || 'dwarka')
         await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'), body.guestName, body.checkInDate, body.checkOutDate, body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, actor, actor, now(), now()).run()
+        // This manual-entry path creates a stay directly in 'closed' state, bypassing
+        // the normal checked_out transition where Raman's commission is normally
+        // auto-created. Without this, guests entered here would be invisible to
+        // Raman's commission tracking entirely (silent data gap). Mirror the same
+        // commission logic used in updateStayStatus's checked_out handler.
+        {
+          const nightsForComm = parseInt(body.nights) || 1
+          const ramanComm = nightsForComm > 1 ? 2000 : 1000
+          await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nightsForComm, ramanComm, now(), now()).run()
+        }
         return json({ success: true, data: { stayId } })
       }
 

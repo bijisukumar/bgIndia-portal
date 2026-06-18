@@ -32,6 +32,10 @@ function daysFromNow(d) {
 }
 
 const STATUS_META = {
+  booked:             { label:'Booked',              color:'#185FA5', icon:'📋' },
+  confirmed:          { label:'Confirmed',           color:'#C8903A', icon:'✅' },
+  docs_uploaded:      { label:'Docs Uploaded',       color:'#8B5CF6', icon:'📁' },
+  pending_review:     { label:'Pending Review',      color:'#8B5CF6', icon:'📁' },
   ready_for_checkin:  { label:'Ready for Check-in',  color:'#34A853', icon:'🔑' },
   checked_in:         { label:'Checked In',          color:'#C8903A', icon:'🏠' },
   ready_for_checkout: { label:'Ready for Check-out', color:'#F59E0B', icon:'🧳' },
@@ -40,6 +44,7 @@ const STATUS_META = {
 export default function CheckIn() {
   const navigate = useNavigate()
   const [stays,    setStays]    = useState([])
+  const [futureGuests, setFutureGuests] = useState([])
   const [selected, setSelected] = useState(null)
   const [tab,      setTab]      = useState('checkin')  // 'checkin' | 'inhouse'
   const [carNumber, setCarNumber] = useState('')
@@ -62,12 +67,23 @@ export default function CheckIn() {
     try {
       // Load ready_for_checkin stays
       const pending = await api.getPendingCheckIns()
-      // Load checked_in and ready_for_checkout stays (in-house guests)
+      // Load all upcoming stays (any non-closed/cancelled status, checkin >= today)
       const active = await api.getUpcomingStays('dwarka')
-      const inhouse = Array.isArray(active)
-        ? active.filter(s => ['checked_in','ready_for_checkout'].includes(s.status))
-        : []
+      const allUpcoming = Array.isArray(active) ? active : []
+      const inhouse = allUpcoming.filter(s => ['checked_in','ready_for_checkout'].includes(s.status))
+
+      // Future guests block: anyone upcoming who isn't already ready-for-checkin
+      // or in-house, within the next 2 months — gives Raman visibility of the
+      // pipeline without affecting his check-in/checkout workflow.
+      const twoMonthsOut = new Date()
+      twoMonthsOut.setMonth(twoMonthsOut.getMonth() + 2)
+      const future = allUpcoming
+        .filter(s => !['ready_for_checkin','checked_in','ready_for_checkout'].includes(s.status))
+        .filter(s => new Date(s.checkin_date) <= twoMonthsOut)
+        .sort((a,b) => new Date(a.checkin_date) - new Date(b.checkin_date))
+
       setStays({ pending: Array.isArray(pending) ? pending : [], inhouse })
+      setFutureGuests(future)
       const allReady = Array.isArray(pending) ? pending : []
       if (allReady.length > 0) setSelected(allReady[0])
       else if (inhouse.length > 0) { setSelected(inhouse[0]); setTab('inhouse') }
@@ -336,6 +352,39 @@ export default function CheckIn() {
                     <p className="btn-email-note">📧 Owner notified on check-in</p>
                   </>
                 )}
+              </>
+            )}
+
+            {/* ── FUTURE GUESTS — pipeline visibility, next 2 months ── */}
+            {futureGuests.length > 0 && (
+              <>
+                <div className="card-section-label" style={{marginTop:'18px'}}>
+                  FUTURE GUESTS — NEXT 2 MONTHS ({futureGuests.length})
+                </div>
+                <div style={{background:'var(--dark-card)',borderRadius:'12px',
+                  border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'14px'}}>
+                  {futureGuests.map((stay,i) => {
+                    const m = STATUS_META[stay.status] || { label: stay.status, color:'#5C7080', icon:'📋' }
+                    const d = daysFromNow(stay.checkin_date)
+                    return (
+                      <div key={stay.stay_id} style={{padding:'11px 16px',
+                        borderBottom:i<futureGuests.length-1?'1px solid var(--border-dim)':'none',
+                        display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <div>
+                          <div style={{fontWeight:'600',fontSize:'0.85rem'}}>{stay.guest_name}</div>
+                          <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'2px'}}>
+                            {formatDate(stay.checkin_date)}
+                            {d !== null && d > 0 && <span> · in {d} day{d!==1?'s':''}</span>}
+                          </div>
+                        </div>
+                        <span style={{fontSize:'0.66rem',fontWeight:'700',padding:'2px 8px',
+                          borderRadius:'10px',background:m.color+'22',color:m.color,whiteSpace:'nowrap'}}>
+                          {m.icon} {m.label}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </>
             )}
           </>

@@ -90,6 +90,73 @@ function checkRateLimit(ip) {
 }
 
 // ── ID GENERATORS ─────────────────────────────────────────
+// Splits a SQL script into individual statements, respecting single-quoted
+// string literals (incl. escaped ''), double-quoted identifiers (incl. escaped ""),
+// line comments (-- to end of line), and block comments (/* ... */).
+// Semicolons inside any of those are NOT treated as statement separators.
+function splitSqlStatements(sql) {
+  const statements = []
+  let current = ''
+  let i = 0
+  const n = sql.length
+
+  while (i < n) {
+    const ch = sql[i]
+    const next = sql[i + 1]
+
+    if (ch === "'") {
+      current += ch; i++
+      while (i < n) {
+        current += sql[i]
+        if (sql[i] === "'") {
+          if (sql[i + 1] === "'") { current += sql[i + 1]; i += 2; continue }
+          i++; break
+        }
+        i++
+      }
+      continue
+    }
+
+    if (ch === '"') {
+      current += ch; i++
+      while (i < n) {
+        current += sql[i]
+        if (sql[i] === '"') {
+          if (sql[i + 1] === '"') { current += sql[i + 1]; i += 2; continue }
+          i++; break
+        }
+        i++
+      }
+      continue
+    }
+
+    if (ch === '-' && next === '-') {
+      while (i < n && sql[i] !== '\n') { current += sql[i]; i++ }
+      continue
+    }
+
+    if (ch === '/' && next === '*') {
+      current += ch; current += next; i += 2
+      while (i < n && !(sql[i] === '*' && sql[i + 1] === '/')) { current += sql[i]; i++ }
+      if (i < n) { current += '*'; current += '/'; i += 2 }
+      continue
+    }
+
+    if (ch === ';') {
+      statements.push(current.trim())
+      current = ''
+      i++
+      continue
+    }
+
+    current += ch
+    i++
+  }
+
+  if (current.trim().length > 0) statements.push(current.trim())
+  return statements.filter(s => s.length > 0)
+}
+
 function genStayId(villaId = 'dwarka') {
   const prefix = villaId === 'dwarka' ? 'DWK' : villaId.toUpperCase().slice(0, 3)
   const year   = new Date().getFullYear()
@@ -1471,8 +1538,10 @@ export async function onRequest(ctx) {
           return err('Operation not permitted — DROP TABLE and TRUNCATE are blocked')
         }
         try {
-          // Split on semicolons to support multi-statement scripts (e.g. delete scripts)
-          const statements = sql.split(';').map(s => s.trim()).filter(s => s.length > 0)
+          // SQL-aware split — correctly handles semicolons inside string
+          // literals, quoted identifiers, and comments (see splitSqlStatements above)
+          const statements = splitSqlStatements(sql)
+          if (statements.length === 0) return err('No valid SQL statement found')
           if (statements.length === 1) {
             const result = await DB.prepare(statements[0]).run()
             return json({ success: true, data: { changes: result.meta?.changes ?? 0, duration: result.meta?.duration ?? 0, statements: 1 } })

@@ -38,10 +38,12 @@ export default function Inventory() {
   const [tab, setTab]   = useState('stock')   // 'stock' | 'prices' | 'restock'
   const [toast, setToast] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [addNew, setAddNew] = useState(false)
+  const [restockLog, setRestockLog] = useState([])
 
-  // Stock levels — in real app these come from DB / Apps Script
-  // Initialized at defaultQty=10 per item as requested
+  // Stock levels + prices — loaded from DB on mount; fall back to
+  // INVENTORY_MASTER defaults for any item not yet in the DB for this villa.
   const [stock, setStock] = useState(() =>
     Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { qty: i.defaultQty, costPrice: i.costPrice, sellPrice: i.sellPrice }]))
   )
@@ -56,6 +58,51 @@ export default function Inventory() {
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
+  // Load live data from D1 on mount — without this, the screen always showed
+  // hardcoded INVENTORY_MASTER defaults regardless of what was actually saved.
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const rows = await api.getInventory('dwarka')
+        if (!cancelled && Array.isArray(rows) && rows.length) {
+          setStock(s => {
+            const next = { ...s }
+            rows.forEach(r => {
+              next[r.item_id] = {
+                qty: r.qty_in_stock ?? next[r.item_id]?.qty ?? 0,
+                costPrice: r.cost_price ?? next[r.item_id]?.costPrice ?? 0,
+                sellPrice: r.sell_price ?? next[r.item_id]?.sellPrice ?? 0,
+              }
+            })
+            return next
+          })
+          setPrices(p => {
+            const next = { ...p }
+            rows.forEach(r => {
+              next[r.item_id] = {
+                costPrice: r.cost_price ?? next[r.item_id]?.costPrice ?? 0,
+                sellPrice: r.sell_price ?? next[r.item_id]?.sellPrice ?? 0,
+              }
+            })
+            return next
+          })
+        }
+      } catch {
+        // DB read failed — keep hardcoded defaults, no need to alarm the user on load
+      }
+      try {
+        const log = await api.getInventoryRestockLog?.('dwarka')
+        if (!cancelled && Array.isArray(log)) setRestockLog(log)
+      } catch { /* non-critical */ }
+      if (!cancelled) setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
+
+
   const filtered = cat === 'all' ? INVENTORY_MASTER : INVENTORY_MASTER.filter(i => i.category === cat)
 
   const setStockQty = (id, qty) => setStock(s => ({ ...s, [id]: { ...s[id], qty: Math.max(0, parseInt(qty) || 0) } }))
@@ -69,6 +116,18 @@ export default function Inventory() {
       }
       return { ...r, [id]: next }
     })
+  }
+
+  const handleSaveStock = async () => {
+    setSaving(true)
+    try {
+      const payload = Object.fromEntries(
+        INVENTORY_MASTER.map(i => [i.id, { qty: stock[i.id]?.qty ?? 0, name: i.name }])
+      )
+      await api.saveInventoryStock({ villaId: 'dwarka', stock: payload })
+      showToast('Stock saved ✓')
+    } catch { showToast('Failed to save', 'error') }
+    finally { setSaving(false) }
   }
 
   const handleSavePrices = async () => {
@@ -94,6 +153,11 @@ export default function Inventory() {
       })
       setRestock(r => Object.fromEntries(Object.keys(r).map(k => [k, { qty: '', totalCost: '' }])))
       showToast('Restock recorded ✓')
+      // Pull the fresh log so the new entries show up immediately
+      try {
+        const log = await api.getInventoryRestockLog?.('dwarka')
+        if (Array.isArray(log)) setRestockLog(log)
+      } catch { /* non-critical */ }
     } catch { showToast('Failed to save', 'error') }
     finally { setSaving(false) }
   }
@@ -110,7 +174,7 @@ export default function Inventory() {
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Inventory</div>
-          <div className="topbar-sub">DWARKA · STOCK & PRICING</div>
+          <div className="topbar-sub">DWARKA · STOCK & PRICING{loading ? ' · loading…' : ''}</div>
         </div>
       </div>
 
@@ -182,6 +246,9 @@ export default function Inventory() {
                 )
               })}
             </div>
+            <button className="btn btn-gold" onClick={handleSaveStock} disabled={saving}>
+              {saving ? 'Saving...' : 'Save stock →'}
+            </button>
           </>
         )}
 
@@ -323,6 +390,27 @@ export default function Inventory() {
             <button className="btn btn-teal" onClick={handleSaveRestock} disabled={saving}>
               {saving ? 'Saving...' : 'Record restock →'}
             </button>
+
+            {restockLog.length > 0 && (
+              <>
+                <div className="card-section-label" style={{ marginTop: '18px' }}>RECENT RESTOCKS</div>
+                <div className="card">
+                  {restockLog.slice(0, 10).map((r, i) => (
+                    <div key={r.id} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      paddingBottom: '10px', marginBottom: '10px',
+                      borderBottom: i < Math.min(restockLog.length, 10) - 1 ? '1px solid var(--border-dim)' : 'none',
+                    }}>
+                      <div>
+                        <div style={{ color: 'var(--text)', fontSize: '0.82rem', fontWeight: '500' }}>{r.item_name}</div>
+                        <div style={{ color: '#5C7080', fontSize: '0.68rem' }}>{r.qty_bought} units · {fmt(r.total_cost)} · {r.created_at}</div>
+                      </div>
+                      <div style={{ color: '#34A853', fontSize: '0.8rem', fontWeight: '600' }}>{fmt(r.price_per_unit)}/unit</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

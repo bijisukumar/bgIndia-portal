@@ -898,6 +898,15 @@ export async function onRequest(ctx) {
         return json({ success: true, data: prices })
       }
 
+      if (action === 'getInventoryRestockLog') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const limit   = parseInt(url.searchParams.get('limit') || '50', 10)
+        const { results } = await DB.prepare(
+          `SELECT * FROM inventory_restock_log WHERE villa_id = ? ORDER BY created_at DESC LIMIT ?`
+        ).bind(villaId, limit).all()
+        return json({ success: true, data: results })
+      }
+
       // FREE-FORM SQL (owner only — any SELECT query)
       if (action === 'runSQL') {
         const sql = url.searchParams.get('sql') || ''
@@ -2100,6 +2109,86 @@ export async function onRequest(ctx) {
       }
 
       // KITCHEN INCIDENTALS
+      // INVENTORY — save cost/sell prices (Prices tab)
+      if (action === 'saveInventoryPrices') {
+        const villaId = body.villaId || 'dwarka'
+        const prices  = body.prices || {}
+        for (const [itemId, p] of Object.entries(prices)) {
+          const costPrice = parseFloat(p.costPrice) || 0
+          const sellPrice = parseFloat(p.sellPrice) || 0
+          // UPSERT — row may not exist yet if inventory was never seeded for this villa
+          const result = await DB.prepare(`
+            UPDATE inventory
+            SET cost_price = ?, sell_price = ?, updated_by = ?, updated_at = ?
+            WHERE item_id = ? AND villa_id = ?
+          `).bind(costPrice, sellPrice, actor, now(), itemId, villaId).run()
+          if (!result.meta?.changes) {
+            // No existing row for this item/villa — insert one so the price isn't lost
+            await DB.prepare(`
+              INSERT INTO inventory (item_id, villa_id, name, cost_price, sell_price, created_by, updated_by, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(itemId, villaId, p.name || itemId, costPrice, sellPrice, actor, actor, now(), now()).run()
+          }
+        }
+        return json({ success: true })
+      }
+
+      // INVENTORY — record a restock (Restock tab): logs the purchase + bumps qty_in_stock
+      if (action === 'saveInventoryRestock') {
+        const villaId = body.villaId || 'dwarka'
+        const entries = body.entries || []
+        if (!entries.length) return err('entries required')
+        for (const e of entries) {
+          const qty       = parseFloat(e.qty) || 0
+          const totalCost = parseFloat(e.totalCost) || 0
+          if (qty <= 0) continue
+          const pricePerUnit = qty > 0 ? totalCost / qty : 0
+
+          await DB.prepare(`
+            INSERT INTO inventory_restock_log
+              (id, villa_id, item_id, item_name, qty_bought, total_cost, price_per_unit, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(genId('RSTK'), villaId, e.id, e.name || e.id, qty, totalCost, pricePerUnit, actor, now()).run()
+
+          // Bump current stock + last_restocked. If the item row doesn't exist yet, create it.
+          const result = await DB.prepare(`
+            UPDATE inventory
+            SET qty_in_stock = COALESCE(qty_in_stock, 0) + ?,
+                last_restocked = ?,
+                updated_by = ?, updated_at = ?
+            WHERE item_id = ? AND villa_id = ?
+          `).bind(qty, now(), actor, now(), e.id, villaId).run()
+          if (!result.meta?.changes) {
+            await DB.prepare(`
+              INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, last_restocked, created_by, updated_by, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(e.id, villaId, e.name || e.id, qty, now(), actor, actor, now(), now()).run()
+          }
+        }
+        return json({ success: true })
+      }
+
+      // INVENTORY — direct stock quantity correction (Stock tab +/- and manual edit)
+      if (action === 'saveInventoryStock') {
+        const villaId = body.villaId || 'dwarka'
+        const stock   = body.stock || {}
+        for (const [itemId, s] of Object.entries(stock)) {
+          const qty = parseFloat(s.qty) || 0
+          const result = await DB.prepare(`
+            UPDATE inventory
+            SET qty_in_stock = ?, updated_by = ?, updated_at = ?
+            WHERE item_id = ? AND villa_id = ?
+          `).bind(qty, actor, now(), itemId, villaId).run()
+          if (!result.meta?.changes) {
+            await DB.prepare(`
+              INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, created_by, updated_by, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(itemId, villaId, s.name || itemId, qty, actor, actor, now(), now()).run()
+          }
+        }
+        return json({ success: true })
+      }
+
       if (action === 'saveKitchenEntry') {
         const items = body.items || []
         for (const item of items) {

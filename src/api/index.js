@@ -192,10 +192,12 @@ export const api = {
   closeStayWithReview:  (data)   => post('closeStayWithReview', data),
 
   // ── INVENTORY ────────────────────────────────────────────
-  saveInventoryPrices:  (data)   => post('saveInventoryPrices', data),
-  getInventoryPrices:   (vId)    => get('getInventoryPrices', { villaId: vId }),
-  saveInventoryRestock: (data)   => post('saveInventoryRestock', data),
-  getInventory:         (vId)    => get('getInventory', { villaId: vId }),
+  saveInventoryPrices:    (data)   => post('saveInventoryPrices', data),
+  getInventoryPrices:     (vId)    => get('getInventoryPrices', { villaId: vId }),
+  saveInventoryRestock:   (data)   => post('saveInventoryRestock', data),
+  getInventoryRestockLog: (vId)    => get('getInventoryRestockLog', { villaId: vId }),
+  getInventory:           (vId)    => get('getInventory', { villaId: vId }),
+  saveInventoryStock:     (data)   => post('saveInventoryStock', data),
 
   // ── AD-HOC QUERIES (D1Explorer) ──────────────────────────
   runSQL: async (sql) => {

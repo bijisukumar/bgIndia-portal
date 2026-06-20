@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { localTodayStr } from '../../utils/dates'
 
-const TODAY = new Date().toISOString().split('T')[0]
+const TODAY = localTodayStr()
 const INCOME_CATS  = ['Mango Harvest Income','Lease income','Govt subsidy','Other income']
 const EXPENSE_CATS = ['Labour wages','Salary','Fertilizer','Pesticide','Tractor / Land tiling',
   'JCB work','Fencing','Irrigation','Water pump','Electricity bill','Land tax','Transport',

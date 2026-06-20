@@ -6,8 +6,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
-const TODAY    = new Date().toISOString().slice(0, 10)
+const TODAY    = localTodayStr()
 const VARIETIES = ['alphonsa','neelam','malgova','banganapally','kilimooku','sindooram','mix']
 const VAR_LABEL = { alphonsa:'Alphonsa', neelam:'Neelam', malgova:'Malgova', banganapally:'Banganapally', kilimooku:'Kilimooku', sindooram:'Sindooram', mix:'Mix' }
 const VAR_COLOR = { alphonsa:'#F59E0B', neelam:'#34A853', malgova:'#C8903A', banganapally:'#F59E0B', kilimooku:'#8B5CF6', sindooram:'#EF4444', mix:'#5C7080' }
@@ -16,7 +17,7 @@ const EMPTY_FORM = { date:TODAY, boxType:'Normal', buyer:'', pricePerBox:'', not
 
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
   catch { return d }
 }
 

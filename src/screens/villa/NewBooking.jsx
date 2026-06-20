@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
-const TODAY    = new Date().toISOString().split('T')[0]
+const TODAY    = localTodayStr()
 const CHANNELS = ['Direct', 'Airbnb', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Expedia', 'VRBO', 'Other']
 // HOST fee only (what OTA deducts from your payout — NOT the guest service fee)
 const COMM = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Expedia:3, VRBO:3, Other:10 }
@@ -41,7 +42,7 @@ export default function NewBooking() {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const nights  = form.checkInDate && form.checkOutDate
-    ? Math.max(0, (new Date(form.checkOutDate) - new Date(form.checkInDate)) / (1000 * 60 * 60 * 24)) : 0
+    ? Math.max(0, (parseLocalDate(form.checkOutDate) - parseLocalDate(form.checkInDate)) / (1000 * 60 * 60 * 24)) : 0
   const tariff  = parseFloat(form.tariffPerNight) || 0
   const extra   = parseFloat(form.extraCharges) || 0
   const gross   = (tariff * nights) + extra

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
+import { parseLocalDate } from '../../utils/dates'
 
 const STATUSES = ['Active','Notice Given','Delinquent','Evicted','Runaway','Completed']
 const STATUS_COLOR = {
@@ -21,11 +22,15 @@ function fmt(n, currency='INR') {
 function daysUntil(dateStr) {
   if (!dateStr) return null
   const today = new Date(); today.setHours(0,0,0,0)
-  return Math.round((new Date(dateStr) - today) / (1000*60*60*24))
+  const parsed = parseLocalDate(dateStr)
+  if (!parsed) return null
+  return Math.round((parsed - today) / (1000*60*60*24))
 }
 function leaseDurationMonths(start, end) {
   if (!start || !end) return null
-  const m = Math.round((new Date(end) - new Date(start)) / (1000*60*60*24*30.44))
+  const s = parseLocalDate(start), e = parseLocalDate(end)
+  if (!s || !e) return null
+  const m = Math.round((e - s) / (1000*60*60*24*30.44))
   return m > 0 ? m : null
 }
 
@@ -115,7 +120,7 @@ export default function RentalAgreement() {
     if (!form.tenantName.trim()) { setError('Tenant name is required'); return }
     if (!form.leaseStart) { setError('Lease start is required'); return }
     if (!form.leaseEnd)   { setError('Lease end is required'); return }
-    if (new Date(form.leaseEnd) <= new Date(form.leaseStart)) { setError('Lease end must be after start'); return }
+    if (parseLocalDate(form.leaseEnd) <= parseLocalDate(form.leaseStart)) { setError('Lease end must be after start'); return }
     setSaving(true)
     try {
       const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)

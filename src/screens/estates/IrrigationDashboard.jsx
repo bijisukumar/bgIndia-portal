@@ -5,10 +5,11 @@
 // ============================================================
 import { useState, useEffect } from 'react'
 import { api } from '../../api'
+import { parseLocalDate } from '../../utils/dates'
 
 function fmtDate(d) {
   if (!d) return 'Never'
-  try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
   catch { return d }
 }
 

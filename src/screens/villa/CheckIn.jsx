@@ -16,19 +16,24 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate } from '../../utils/dates'
 
 function formatDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
   catch { return String(d) }
 }
 function calcNights(ci, co) {
   if (!ci||!co) return 0
-  return Math.max(0, Math.round((new Date(co)-new Date(ci))/(1000*60*60*24)))
+  return Math.max(0, Math.round((parseLocalDate(co)-parseLocalDate(ci))/(1000*60*60*24)))
 }
 function daysFromNow(d) {
   if (!d) return null
-  return Math.round((new Date(d)-new Date())/(1000*60*60*24))
+  const parsed = parseLocalDate(d)
+  if (!parsed) return null
+  const today = new Date()
+  const todayLocal = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  return Math.round((parsed-todayLocal)/(1000*60*60*24))
 }
 
 const STATUS_META = {
@@ -79,8 +84,8 @@ export default function CheckIn() {
       twoMonthsOut.setMonth(twoMonthsOut.getMonth() + 2)
       const future = allUpcoming
         .filter(s => !['ready_for_checkin','checked_in','ready_for_checkout'].includes(s.status))
-        .filter(s => new Date(s.checkin_date) <= twoMonthsOut)
-        .sort((a,b) => new Date(a.checkin_date) - new Date(b.checkin_date))
+        .filter(s => parseLocalDate(s.checkin_date) <= twoMonthsOut)
+        .sort((a,b) => parseLocalDate(a.checkin_date) - parseLocalDate(b.checkin_date))
 
       setStays({ pending: Array.isArray(pending) ? pending : [], inhouse })
       setFutureGuests(future)

@@ -4,6 +4,7 @@
 // ============================================================
 import { useState, useEffect } from 'react'
 import { api } from '../../api'
+import { parseLocalDate } from '../../utils/dates'
 
 const CATEGORIES = [
   'Purchase documents',
@@ -45,7 +46,7 @@ const EMPTY_FORM = {
 
 function fmtDate(d) {
   if (!d) return ''
-  try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
   catch { return d }
 }
 

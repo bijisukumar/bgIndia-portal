@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { CONFIG } from '../config'
 import { useState, useEffect } from 'react'
 import { api } from '../api'
+import { parseLocalDate } from '../utils/dates'
 
 // Two top-level sections: Hospitality (Villa + Rental) and Estates
 const HOSPITALITY = {
@@ -136,7 +137,7 @@ function PendingReviewBlock() {
 
   function fmt(d) {
     if (!d) return '—'
-    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
+    try { return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
     catch { return d }
   }
 
@@ -296,7 +297,7 @@ function ManualTriggerBlock() {
 
   function fmt(d) {
     if (!d) return '—'
-    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
+    try { return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
     catch { return d }
   }
 
@@ -472,7 +473,7 @@ function ReviewChaseBlock() {
 
   function fmtDate(d) {
     if (!d) return '—'
-    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
+    try { return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
     catch { return d }
   }
 

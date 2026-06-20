@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate } from '../../utils/dates'
 
 // ── SEGMENT DEFINITIONS ───────────────────────────────────────────────────
 const SEGMENTS = {
@@ -64,7 +65,7 @@ function getMarketingActions(tags) {
 
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { month:'short', year:'numeric' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { month:'short', year:'numeric' }) }
   catch { return String(d) }
 }
 function fmt(n) { return `₹${Number(n||0).toLocaleString('en-IN')}` }

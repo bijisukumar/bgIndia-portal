@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
-const TODAY = new Date().toISOString().split('T')[0]
+const TODAY = localTodayStr()
 
 function fmt(n) {
   if (n === '' || n === null || n === undefined || isNaN(Number(n))) return '—'
@@ -12,8 +13,10 @@ function fmt(n) {
 function fmtN(n) { return Number(n).toLocaleString('en-IN') }
 function addDays(dateStr, days) {
   if (!dateStr) return ''
-  const d = new Date(dateStr); d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
+  const d = parseLocalDate(dateStr)
+  if (!d) return ''
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
 function Field({ label, hint, children }) {

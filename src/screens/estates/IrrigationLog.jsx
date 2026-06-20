@@ -6,12 +6,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+const TODAY = localTodayStr()
 
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
   catch { return d }
 }
 

@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { localTodayStr } from '../../utils/dates'
 
 export default function CarRentalEntry() {
   const navigate = useNavigate()
   const [stay, setStay]             = useState(null)
   const [recentCheckouts, setRecentCheckouts] = useState([])
-  const [date, setDate]             = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate]             = useState(localTodayStr())
   const [destination, setDest]      = useState('')
   const [amount, setAmount]         = useState('')
   const [commission, setCommission] = useState('')

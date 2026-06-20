@@ -16,6 +16,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate } from '../../utils/dates'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
 
@@ -59,12 +60,16 @@ const STATUS_META = {
 function fmt(n) { return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}` }
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
   catch { return d }
 }
 function daysFromNow(d) {
   if (!d) return null
-  return Math.round((new Date(d) - new Date()) / (1000*60*60*24))
+  const parsed = parseLocalDate(d)
+  if (!parsed) return null
+  const today = new Date()
+  const todayLocal = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  return Math.round((parsed - todayLocal) / (1000*60*60*24))
 }
 
 const EMPTY_FORM = { channel:'Direct', tariffPerNight:'', extraCharges:'0', notes:'' }
@@ -111,7 +116,7 @@ export default function CompleteBooking() {
     // tariff_per_night is the per-night rate (e.g. ₹4,825).
     // Prefer tariff_per_night from DB; if missing, derive from night_fee / nights.
     const stayNights  = stay.checkout_date
-      ? Math.max(1, Math.round((new Date(stay.checkout_date)-new Date(stay.checkin_date))/(1000*60*60*24)))
+      ? Math.max(1, Math.round((parseLocalDate(stay.checkout_date)-parseLocalDate(stay.checkin_date))/(1000*60*60*24)))
       : (parseInt(stay.nights) || 1)
     const totalNightFee = parseFloat(stay.night_fee || stay.nightFee || 0)
     const perNightFromFee = totalNightFee && stayNights ? Math.round(totalNightFee / stayNights) : 0
@@ -154,7 +159,7 @@ export default function CompleteBooking() {
   // Use checkout_date diff if available, else fall back to stay.nights from DB
   const nights  = selected
     ? (selected.checkout_date
-        ? Math.max(1, Math.round((new Date(selected.checkout_date)-new Date(selected.checkin_date))/(1000*60*60*24)))
+        ? Math.max(1, Math.round((parseLocalDate(selected.checkout_date)-parseLocalDate(selected.checkin_date))/(1000*60*60*24)))
         : (parseInt(selected.nights) || 1))
     : 0
   const tariff     = parseFloat(form.tariffPerNight)||0
@@ -352,9 +357,11 @@ export default function CompleteBooking() {
                     // Derive checkout from checkin + nights if checkout_date is null
                     const coDate = s.checkout_date || (() => {
                       if (!s.checkin_date || !nights) return null
-                      const d = new Date(s.checkin_date)
+                      const d = parseLocalDate(s.checkin_date)
+                      if (!d) return null
                       d.setDate(d.getDate() + nights)
-                      return d.toISOString().slice(0,10)
+                      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0')
+                      return `${y}-${m}-${day}`
                     })()
                     const adults   = parseInt(s.adults)   || 0
                     const children = parseInt(s.children) || 0
@@ -661,7 +668,7 @@ export default function CompleteBooking() {
                   const num = raw.startsWith('91') ? raw : `91${raw}`
                   const msg = encodeURIComponent(
                     `Namaskaram ${name}! 🙏\n\n` +
-                    `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${new Date(ci).toLocaleDateString('en-IN',{month:'long',day:'numeric'})}.\n\n` +
+                    `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${parseLocalDate(ci)?.toLocaleDateString('en-IN',{month:'long',day:'numeric'}) || ci}.\n\n` +
                     `At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.\n\n` +
                     `Please let me know a convenient time to connect. We're looking forward to hosting you and your family.\n\n` +
                     `Snehapoorvam (സ്നേഹപൂർവ്വം),\nBiji | ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}`

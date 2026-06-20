@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
+import { parseLocalDate } from '../../utils/dates'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 
@@ -61,7 +62,7 @@ export default function NewEnquiry() {
   }, [form.phone, form.email, isEdit])
 
   const nights = form.checkInDate && form.checkOutDate
-    ? Math.max(0, Math.round((new Date(form.checkOutDate) - new Date(form.checkInDate)) / 86400000))
+    ? Math.max(0, Math.round((parseLocalDate(form.checkOutDate) - parseLocalDate(form.checkInDate)) / 86400000))
     : 0
   const quote = parseFloat(form.quoteAmount) || 0
   const discountPct = parseFloat(form.repeatDiscountPct) || 0

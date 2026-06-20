@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
+import { localTodayStr } from '../../utils/dates'
 
 export default function BreakfastEntry() {
   const navigate   = useNavigate()
   const [stay, setStay]         = useState(null)
   const [recentCheckouts, setRecentCheckouts] = useState([])
-  const [date, setDate]         = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate]         = useState(localTodayStr())
   const [guestCount, setCount]  = useState(0)
   const [rate, setRate]         = useState(CONFIG.breakfastRate || 275)
   const [notes, setNotes]       = useState('')

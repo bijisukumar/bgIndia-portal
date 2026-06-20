@@ -5,17 +5,20 @@ import { useAuth } from '../../hooks/useAuth'
 import EstateHighlights    from './EstateHighlights'
 import IrrigationDashboard from './IrrigationDashboard'
 import PollachiEstateMap    from './PollachiEstateMap'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
 const CUR_YEAR = new Date().getFullYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
 
 function fmtDate(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 function daysBetween(a, b) {
   if (!a || !b) return null
-  return Math.round((new Date(b) - new Date(a)) / 86400000)
+  const da = parseLocalDate(a), db = parseLocalDate(b)
+  if (!da || !db) return null
+  return Math.round((db - da) / 86400000)
 }
 function rejPct(count, rejected) {
   if (!count || count === 0) return '0%'
@@ -179,7 +182,7 @@ export default function CoconutDashboard() {
     || null
 
   const daysToNext = nextHarvestDate
-    ? daysBetween(new Date().toISOString().slice(0, 10), nextHarvestDate)
+    ? daysBetween(localTodayStr(), nextHarvestDate)
     : null
 
   return (
@@ -277,7 +280,7 @@ export default function CoconutDashboard() {
                     <div style={{ fontSize:'0.62rem', color:'#C8903A', letterSpacing:'1.5px', marginBottom:'8px' }}>MONTHLY BREAKDOWN</div>
                     {dash.monthly.map(m => {
                       const isOpen = drillMonth === m.ym
-                      const monthLabel = new Date(m.ym + '-01').toLocaleDateString('en-IN', { month:'short', year:'numeric' })
+                      const monthLabel = parseLocalDate(m.ym + '-01').toLocaleDateString('en-IN', { month:'short', year:'numeric' })
                       return (
                         <div key={m.ym} style={{ marginBottom:'6px', background:'rgba(255,255,255,0.02)', borderRadius:'8px', overflow:'hidden', border:'1px solid rgba(255,255,255,0.05)' }}>
                           <div onClick={()=>setDrillMonth(isOpen ? null : m.ym)}

@@ -1,6 +1,7 @@
 import { useState, useEffect, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { parseLocalDate } from '../../utils/dates'
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -61,14 +62,14 @@ function fmt(n) {
 
 function fmtDate(d) {
   if (!d) return '—'
-  const date = new Date(d)
-  if (isNaN(date)) return String(d)
+  const date = parseLocalDate(d)
+  if (!date || isNaN(date)) return String(d)
   return date.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })
 }
 
 function calcNights(ci, co) {
   if (!ci || !co) return 0
-  return Math.max(0, Math.round((new Date(co) - new Date(ci)) / (1000*60*60*24)))
+  return Math.max(0, Math.round((parseLocalDate(co) - parseLocalDate(ci)) / (1000*60*60*24)))
 }
 
 function Bar({ label, value, max, color }) {
@@ -107,8 +108,8 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
 
   const parsed = (stays || []).map(s => ({
     ...s,
-    checkInDate:  new Date(s.checkIn  || s.checkInDate  || ''),
-    checkOutDate: new Date(s.checkOut || s.checkOutDate || ''),
+    checkInDate:  parseLocalDate(s.checkIn  || s.checkInDate  || '') || new Date(NaN),
+    checkOutDate: parseLocalDate(s.checkOut || s.checkOutDate || '') || new Date(NaN),
   }))
 
   // Year-filtered for summary stats
@@ -241,7 +242,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
             {byMonth.map((s, i) => {
               const bd = s.bookedDate || s.bookeddate || ''
               const leadDays = bd && (s.checkIn||s.checkInDate)
-                ? Math.round((new Date(s.checkIn||s.checkInDate) - new Date(bd)) / (1000*60*60*24))
+                ? Math.round((parseLocalDate(s.checkIn||s.checkInDate) - parseLocalDate(bd)) / (1000*60*60*24))
                 : null
               return (
               <div key={i} style={{ padding:'12px 16px', borderBottom: i<byMonth.length-1?'1px solid var(--border-dim)':'none' }}>
@@ -314,7 +315,8 @@ function BookingLeadTimeChart({ allStays }) {
     const ci = s.checkIn || s.checkInDate || s.checkin_date || ''
     if (!bd || !ci) return
     try {
-      const d1 = new Date(bd), d2 = new Date(ci)
+      const d1 = parseLocalDate(bd), d2 = parseLocalDate(ci)
+      if (!d1 || !d2) return
       const lead = Math.round((d2 - d1) / (1000*60*60*24))
       if (lead >= 0 && lead <= 365) {
         monthlyLead[d2.getMonth()].push(lead)
@@ -488,8 +490,8 @@ function EarningsComparisonChart({ allStays, selectedYears }) {
   // Build month × year revenue from all stays
   const byYearMonth = {}
   ;(allStays || []).forEach(s => {
-    const ci = new Date(s.checkIn || s.checkInDate || '')
-    if (isNaN(ci)) return
+    const ci = parseLocalDate(s.checkIn || s.checkInDate || '')
+    if (!ci || isNaN(ci)) return
     const y = ci.getFullYear()
     const m = ci.getMonth()
     const rev = parseFloat(s.gross || 0)
@@ -578,8 +580,8 @@ function MonthlyTrendChart({ stays, currentYear }) {
   MONTHS.forEach(m => { matrix[m] = {} })
 
   ;(stays || []).forEach(s => {
-    const ci = new Date(s.checkIn || s.checkInDate || '')
-    if (isNaN(ci)) return
+    const ci = parseLocalDate(s.checkIn || s.checkInDate || '')
+    if (!ci || isNaN(ci)) return
     const m   = MONTHS[ci.getMonth()]
     const y   = ci.getFullYear()
     const rev = parseFloat(s.gross || 0)
@@ -861,11 +863,11 @@ function MarketingTab({ data, stays, loading, year }) {
   // Occupancy: booked nights / 30 per month
   const occupancy = Array.from({length:12}, (_,m) => {
     const monthStays = (stays||[]).filter(s => {
-      const ci = new Date(s.checkIn||s.checkInDate||'')
-      return !isNaN(ci) && ci.getMonth()===m && ci.getFullYear()===year
+      const ci = parseLocalDate(s.checkIn||s.checkInDate||'')
+      return ci && !isNaN(ci) && ci.getMonth()===m && ci.getFullYear()===year
     })
     const nights = monthStays.reduce((sum,s) => {
-      return sum + Math.min(30, Math.max(0, Math.round((new Date(s.checkOut||s.checkOutDate) - new Date(s.checkIn||s.checkInDate)) / (1000*60*60*24))))
+      return sum + Math.min(30, Math.max(0, Math.round((parseLocalDate(s.checkOut||s.checkOutDate) - parseLocalDate(s.checkIn||s.checkInDate)) / (1000*60*60*24))))
     }, 0)
     return Math.min(100, Math.round((nights/30)*100))
   })

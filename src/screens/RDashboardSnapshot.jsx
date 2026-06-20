@@ -18,6 +18,7 @@
 import { useState, useEffect, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { parseLocalDate } from '../utils/dates'
 
 class EB extends Component {
   constructor(p){super(p);this.state={err:null}}
@@ -43,7 +44,7 @@ function fmt(n) {
 }
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short' }) }
   catch { return d }
 }
 

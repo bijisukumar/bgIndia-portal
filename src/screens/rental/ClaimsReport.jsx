@@ -6,12 +6,13 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
+import { parseLocalDate } from '../../utils/dates'
 
 const CAT_ICON = { 'Rent':'💸','Damage':'🔨','Cleaning':'🧹','Legal':'⚖️','Other':'📌' }
 
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'}) }
+  try { return parseLocalDate(d).toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'}) }
   catch { return d }
 }
 function fmtAmt(amount, currency='INR') {

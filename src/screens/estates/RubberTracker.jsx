@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { localTodayStr } from '../../utils/dates'
 
-const TODAY=new Date().toISOString().split('T')[0]
+const TODAY=localTodayStr()
 function fmt(n){return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}`}
 
 export default function RubberTracker() {

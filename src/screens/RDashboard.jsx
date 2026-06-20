@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { parseLocalDate } from '../utils/dates'
 
 // ── COMMISSION LOGIC ──────────────────────────────────────────────────────────
 // To change Raman's commission rates, edit ONLY this function.
@@ -41,7 +42,7 @@ function fmt(n) {
 }
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
   catch { return String(d) }
 }
 function Skeleton({ h = 60 }) {

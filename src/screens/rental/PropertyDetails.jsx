@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import PropertyDocs from './PropertyDocs'
 import { CONFIG } from '../../config'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
 const toCamel = s => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
 function fromDB(row) {
@@ -21,7 +22,7 @@ function fmtAmt(n, cur='INR') {
 }
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
   catch { return d }
 }
 
@@ -254,7 +255,7 @@ function HoaSection({ propId, currency }) {
               </div>
             </div>
           ):(
-            <button onClick={()=>{setEditId(null);setForm({effectiveDate:new Date().toISOString().slice(0,10),monthlyAmount:'',notes:''});setShowForm(true)}}
+            <button onClick={()=>{setEditId(null);setForm({effectiveDate:localTodayStr(),monthlyAmount:'',notes:''});setShowForm(true)}}
               style={{width:'100%',padding:'9px',borderRadius:'9px',border:'1px dashed rgba(245,158,11,0.3)',background:'transparent',color:'#F59E0B',fontSize:'0.82rem',cursor:'pointer',marginTop:'8px'}}>
               + Add HOA rate change
             </button>

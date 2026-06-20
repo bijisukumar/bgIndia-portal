@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { CONFIG } from '../config'
 import TopBar from '../components/TopBar'
+import { parseLocalDate } from '../utils/dates'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmtDate(d) {
   if (!d) return '—'
-  try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
+  try { return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) }
   catch { return String(d) }
 }
 

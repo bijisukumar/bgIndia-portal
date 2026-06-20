@@ -85,6 +85,7 @@ export default function VillaHub() {
             <div style={{ padding: '4px 0' }}>
               {[
                 { icon: '📋', bg: 'rgba(52,168,83,0.08)',    arrow: '#34A853', title: 'New booking',       sub: 'Record booking · assign Stay ID · create Drive folder', path: `/owner/villa/booking` },
+                { icon: '📨', bg: 'rgba(139,92,246,0.08)',   arrow: '#8B5CF6', title: 'Guest enquiries',   sub: 'Track leads · conversion · repeat guests',              path: `/owner/villa/enquiries` },
                 { icon: '🏨', bg: 'rgba(200,144,58,0.08)',   arrow: '#C8903A', title: 'Complete booking', sub: 'Financials · docs · ready for check-in',              path: `/owner/villa/income` },
                 { icon: '📊', bg: 'rgba(24,95,165,0.08)',    arrow: '#185FA5', title: 'Villa dashboard',    sub: 'Revenue · profit · breakdown',                          path: `/owner/villa/dashboard` },
             { icon: '📦', bg: 'rgba(15,110,86,0.08)',    arrow: '#0F6E56', title: 'Inventory',          sub: 'Stock levels · sell prices · restock log',               path: `/owner/villa/inventory` },

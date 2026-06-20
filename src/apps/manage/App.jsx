@@ -24,6 +24,10 @@ import GuestRepository      from '../../screens/villa/GuestRepository'
 import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
 import Inventory         from '../../screens/villa/Inventory'
 import PreferredStock    from '../../screens/villa/PreferredStock'
+import EnquiryTracker    from '../../screens/villa/EnquiryTracker'
+import NewEnquiry        from '../../screens/villa/NewEnquiry'
+import EnquiryDetail     from '../../screens/villa/EnquiryDetail'
+import EnquiryConversionDashboard from '../../screens/villa/EnquiryConversionDashboard'
 
 // Rental screens
 import RentalProperties from '../../screens/rental/RentalProperties'
@@ -61,6 +65,11 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/owner/villa/inventory/preferred-stock"  element={<PreferredStock />} />
+        <Route path="/owner/villa/enquiries"                  element={<EnquiryTracker />} />
+        <Route path="/owner/villa/enquiries/new"               element={<NewEnquiry />} />
+        <Route path="/owner/villa/enquiries/dashboard"         element={<EnquiryConversionDashboard />} />
+        <Route path="/owner/villa/enquiries/:enquiryId/edit"   element={<NewEnquiry />} />
+        <Route path="/owner/villa/enquiries/:enquiryId"        element={<EnquiryDetail />} />
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         {/* Rental */}

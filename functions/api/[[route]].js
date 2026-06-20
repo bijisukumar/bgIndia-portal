@@ -1572,6 +1572,110 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, deleted: result.meta?.changes || 0 } })
       }
 
+      // ════════════════ GUEST ENQUIRY MANAGEMENT (CRM) — GET ═══════════════
+
+      // List enquiries for the tracker grid (optionally filtered by status)
+      if (action === 'getEnquiries') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const status  = url.searchParams.get('status') || ''
+        const { results } = await DB.prepare(
+          status
+            ? `SELECT * FROM enquiries WHERE villa_id = ? AND status = ? ORDER BY date_received DESC`
+            : `SELECT * FROM enquiries WHERE villa_id = ? ORDER BY date_received DESC`
+        ).bind(...(status ? [villaId, status] : [villaId])).all()
+        return json({ success: true, data: results })
+      }
+
+      // Single enquiry + its communication timeline, for the detail screen
+      if (action === 'getEnquiryDetail') {
+        const enquiryId = url.searchParams.get('enquiryId') || ''
+        if (!enquiryId) return err('enquiryId required')
+        const enquiry = await DB.prepare(`SELECT * FROM enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        if (!enquiry) return err('Enquiry not found', 404)
+        const { results: timeline } = await DB.prepare(
+          `SELECT * FROM communication_log WHERE enquiry_id = ? ORDER BY occurred_at ASC`
+        ).bind(enquiryId).all()
+        let guest = null
+        if (enquiry.guest_id) {
+          guest = await DB.prepare(`SELECT * FROM guests WHERE guest_id = ?`).bind(enquiry.guest_id).first()
+        }
+        return json({ success: true, data: { enquiry, timeline, guest } })
+      }
+
+      // Repeat-guest lookup by phone/email — used while creating a new enquiry,
+      // before the enquiry is saved, so the UI can show the "Repeat Guest" badge live.
+      if (action === 'findGuestMatch') {
+        const phoneRaw = (url.searchParams.get('phone') || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+        const emailRaw = (url.searchParams.get('email') || '').trim().toLowerCase()
+        if (!phoneRaw && !emailRaw) return json({ success: true, data: null })
+        const guest = await DB.prepare(
+          `SELECT * FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+        ).bind(phoneRaw, emailRaw).first()
+        if (!guest) return json({ success: true, data: null })
+        const { results: pastStays } = await DB.prepare(
+          `SELECT stay_id, checkin_date, checkout_date, net, source FROM stays
+           WHERE (guest_phone = ? OR guest_email = ?) AND status != 'cancelled'
+           ORDER BY checkin_date DESC LIMIT 10`
+        ).bind(phoneRaw, emailRaw).all()
+        return json({ success: true, data: { guest, pastStays } })
+      }
+
+      // Conversion dashboard — KPIs, source breakdown, repeat-guest metrics
+      if (action === 'getEnquiryDashboard') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const year    = url.searchParams.get('year') || new Date().getFullYear()
+        const { results: rows } = await DB.prepare(
+          `SELECT * FROM enquiries WHERE villa_id = ? AND date_received LIKE ?`
+        ).bind(villaId, `${year}%`).all()
+
+        const totalEnquiries = rows.length
+        const confirmed = rows.filter(r => r.status === 'confirmed')
+        const lost      = rows.filter(r => r.status === 'lost')
+        const revenueWon  = confirmed.reduce((s, r) => s + (r.booking_value || 0), 0)
+        const revenueLost = lost.reduce((s, r) => s + (r.quote_amount || 0), 0)
+        const conversionRate = totalEnquiries > 0 ? Math.round((confirmed.length / totalEnquiries) * 1000) / 10 : 0
+
+        const bySource = {}
+        rows.forEach(r => {
+          const src = r.source || 'other'
+          if (!bySource[src]) bySource[src] = { enquiries: 0, bookings: 0 }
+          bySource[src].enquiries++
+          if (r.status === 'confirmed') bySource[src].bookings++
+        })
+        Object.keys(bySource).forEach(src => {
+          const b = bySource[src]
+          b.conversionPct = b.enquiries > 0 ? Math.round((b.bookings / b.enquiries) * 1000) / 10 : 0
+        })
+
+        const repeatGuestRows = rows.filter(r => r.is_repeat_guest)
+        const repeatGuestsThisYear = repeatGuestRows.length
+        const repeatGuestRevenue = repeatGuestRows.filter(r => r.status === 'confirmed').reduce((s, r) => s + (r.booking_value || 0), 0)
+        const avgRepeatDiscount = repeatGuestRows.length
+          ? Math.round((repeatGuestRows.reduce((s, r) => s + (r.repeat_discount_pct || 0), 0) / repeatGuestRows.length) * 10) / 10
+          : 0
+
+        const lostReasons = {}
+        lost.forEach(r => { const reason = r.lost_reason || 'other'; lostReasons[reason] = (lostReasons[reason] || 0) + 1 })
+
+        return json({ success: true, data: {
+          totalEnquiries, confirmedCount: confirmed.length, lostCount: lost.length,
+          conversionRate, revenueWon, revenueLost, bySource,
+          repeatGuestsThisYear, repeatGuestRevenue, avgRepeatDiscount, lostReasons,
+        }})
+      }
+
+      // Enquiries needing follow-up today or overdue, for the dashboard alert block
+      if (action === 'getEnquiryFollowUps') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(`
+          SELECT * FROM enquiries
+          WHERE villa_id = ? AND status NOT IN ('confirmed','lost','cancelled')
+            AND follow_up_due IS NOT NULL AND follow_up_due <= date('now')
+          ORDER BY follow_up_due ASC
+        `).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -1582,6 +1686,200 @@ export async function onRequest(ctx) {
         body = await request.json()
       } catch (e) {
         return err(`Invalid request body: ${e.message}`)
+      }
+
+      // ════════════════ GUEST ENQUIRY MANAGEMENT (CRM) — POST ══════════════
+
+      // Create or update an enquiry. On create, runs phone/email matching
+      // against `guests` — creates a new guests row if no match, or flags
+      // is_repeat_guest + fills previous_stays/discount context if matched.
+      if (action === 'saveEnquiry') {
+        const villaId = body.villaId || 'dwarka'
+        const normPhone = (body.phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+        const normEmail = (body.email || '').trim().toLowerCase()
+
+        let enquiryId = body.enquiryId
+        let guestId = body.guestId || null
+
+        // New enquiry — match or create the guest record
+        if (!enquiryId) {
+          enquiryId = genId('ENQ')
+          if (normPhone || normEmail) {
+            const existing = await DB.prepare(
+              `SELECT * FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+            ).bind(normPhone, normEmail).first()
+            if (existing) {
+              guestId = existing.guest_id
+              await DB.prepare(`UPDATE guests SET last_seen_at = ?, updated_by = ?, updated_at = ? WHERE guest_id = ?`)
+                .bind(now(), actor, now(), guestId).run()
+            } else {
+              guestId = genId('GST')
+              await DB.prepare(`
+                INSERT INTO guests (guest_id, name, phone, email, created_by, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+              `).bind(guestId, body.guestName || 'Unknown', normPhone, normEmail, actor, actor).run()
+            }
+          }
+        }
+
+        const guest = guestId ? await DB.prepare(`SELECT * FROM guests WHERE guest_id = ?`).bind(guestId).first() : null
+        const isRepeat = !!(guest && guest.total_stays > 0)
+        const previousStays = guest?.total_stays || 0
+
+        const nights = body.checkInDate && body.checkOutDate
+          ? Math.max(0, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))
+          : 0
+        const quoteAmount = parseFloat(body.quoteAmount) || 0
+        const discountPct = parseFloat(body.repeatDiscountPct) || 0
+        const discountAmount = Math.round(quoteAmount * discountPct) / 100
+        const finalOffer = quoteAmount - discountAmount
+
+        if (body.enquiryId) {
+          // Update existing
+          await DB.prepare(`
+            UPDATE enquiries SET
+              guest_name = ?, phone = ?, email = ?, source = ?,
+              checkin_date = ?, checkout_date = ?, nights = ?, guests_count = ?, purpose = ?,
+              quote_amount = ?, repeat_discount_pct = ?, discount_amount = ?, final_offer_amount = ?,
+              status = ?, last_contact_date = ?, follow_up_due = ?,
+              lost_reason = ?, assigned_to = ?, notes = ?,
+              updated_by = ?, updated_at = ?
+            WHERE enquiry_id = ?
+          `).bind(
+            body.guestName, normPhone, normEmail, body.source || 'website',
+            body.checkInDate || null, body.checkOutDate || null, nights, body.guestsCount || 1, body.purpose || null,
+            quoteAmount, discountPct, discountAmount, finalOffer,
+            body.status || 'new', body.lastContactDate || null, body.followUpDue || null,
+            body.lostReason || null, body.assignedTo || 'owner', body.notes || null,
+            actor, now(), body.enquiryId
+          ).run()
+          return json({ success: true, data: { enquiryId: body.enquiryId, isRepeatGuest: isRepeat, previousStays } })
+        }
+
+        await DB.prepare(`
+          INSERT INTO enquiries (
+            enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
+            checkin_date, checkout_date, nights, guests_count, purpose,
+            quote_amount, is_repeat_guest, previous_stays, repeat_discount_pct, discount_amount, final_offer_amount,
+            status, assigned_to, notes, created_by, updated_by
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).bind(
+          enquiryId, villaId, guestId, body.guestName || 'Unknown', normPhone, normEmail, body.source || 'website',
+          body.checkInDate || null, body.checkOutDate || null, nights, body.guestsCount || 1, body.purpose || null,
+          quoteAmount, isRepeat ? 1 : 0, previousStays, discountPct, discountAmount, finalOffer,
+          body.status || 'new', body.assignedTo || 'owner', body.notes || null, actor, actor
+        ).run()
+
+        // First entry in the communication timeline
+        await DB.prepare(`
+          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          VALUES (?, ?, 'internal_note', 'Enquiry received', ?)
+        `).bind(genId('COMM'), enquiryId, actor).run()
+
+        return json({ success: true, data: { enquiryId, guestId, isRepeatGuest: isRepeat, previousStays, guest } })
+      }
+
+      // Append a communication log entry, optionally bumping the enquiry's
+      // status/last_contact_date/follow_up_due in the same call.
+      if (action === 'logCommunication') {
+        const enquiryId = body.enquiryId
+        if (!enquiryId) return err('enquiryId required')
+        await DB.prepare(`
+          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          VALUES (?, ?, ?, ?, ?)
+        `).bind(genId('COMM'), enquiryId, body.type || 'internal_note', body.notes || '', actor).run()
+
+        const updates = []
+        const vals = []
+        if (body.status)      { updates.push('status = ?');            vals.push(body.status) }
+        if (body.followUpDue) { updates.push('follow_up_due = ?');      vals.push(body.followUpDue) }
+        updates.push('last_contact_date = ?'); vals.push(now())
+        updates.push('updated_by = ?, updated_at = ?'); vals.push(actor, now())
+
+        await DB.prepare(`UPDATE enquiries SET ${updates.join(', ')} WHERE enquiry_id = ?`)
+          .bind(...vals, enquiryId).run()
+
+        return json({ success: true })
+      }
+
+      // Mark an enquiry Lost with a reason
+      if (action === 'markEnquiryLost') {
+        const enquiryId = body.enquiryId
+        if (!enquiryId) return err('enquiryId required')
+        await DB.prepare(`
+          UPDATE enquiries SET status = 'lost', lost_reason = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+        `).bind(body.lostReason || 'other', actor, now(), enquiryId).run()
+        await DB.prepare(`
+          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          VALUES (?, ?, 'status_change', ?, ?)
+        `).bind(genId('COMM'), enquiryId, `Marked Lost — ${body.lostReason || 'other'}`, actor).run()
+        return json({ success: true })
+      }
+
+      // Confirm an enquiry: creates a stays row (so dashboard/calendar pick it
+      // up immediately), links it via `bookings`, updates the guest's running
+      // totals, and flips the enquiry to status=confirmed.
+      if (action === 'confirmEnquiry') {
+        const enquiryId = body.enquiryId
+        if (!enquiryId) return err('enquiryId required')
+        const enquiry = await DB.prepare(`SELECT * FROM enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        if (!enquiry) return err('Enquiry not found', 404)
+        if (!enquiry.checkin_date || !enquiry.checkout_date) return err('Enquiry is missing check-in/check-out dates')
+
+        const villaId = enquiry.villa_id || 'dwarka'
+        const bookingValue = parseFloat(body.bookingValue) || enquiry.final_offer_amount || enquiry.quote_amount || 0
+
+        // Respect the same overlap protection used by createBooking — refuse
+        // to silently double-book the villa.
+        const conflict = await DB.prepare(`
+          SELECT stay_id, guest_name, checkin_date, checkout_date FROM stays
+          WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
+            AND checkin_date < ? AND checkout_date > ? LIMIT 1
+        `).bind(villaId, enquiry.checkout_date, enquiry.checkin_date).first()
+        if (conflict) {
+          return json({ success: false, error: `Villa already booked ${conflict.checkin_date} → ${conflict.checkout_date} (${conflict.guest_name})`, conflict }, 409)
+        }
+
+        const stayId = genStayId(villaId)
+        await DB.prepare(`
+          INSERT INTO stays (
+            stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+            checkin_date, checkout_date, nights, adults, children,
+            gross, net, status, created_by, updated_by
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
+        `).bind(
+          stayId, villaId, enquiry.source || 'direct', enquiry.guest_name, enquiry.phone, enquiry.email,
+          enquiry.checkin_date, enquiry.checkout_date, enquiry.nights || 1, enquiry.guests_count || 1, 0,
+          bookingValue, bookingValue, actor, actor
+        ).run()
+
+        const bookingId = genId('BKG')
+        await DB.prepare(`
+          INSERT INTO bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).bind(bookingId, enquiryId, enquiry.guest_id, stayId, bookingValue, actor).run()
+
+        await DB.prepare(`
+          UPDATE enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+        `).bind(bookingValue, actor, now(), enquiryId).run()
+
+        if (enquiry.guest_id) {
+          await DB.prepare(`
+            UPDATE guests SET
+              total_stays = total_stays + 1,
+              total_nights = total_nights + ?,
+              total_revenue = total_revenue + ?,
+              last_seen_at = ?, updated_by = ?, updated_at = ?
+            WHERE guest_id = ?
+          `).bind(enquiry.nights || 1, bookingValue, now(), actor, now(), enquiry.guest_id).run()
+        }
+
+        await DB.prepare(`
+          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          VALUES (?, ?, 'status_change', ?, ?)
+        `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor).run()
+
+        return json({ success: true, data: { stayId, bookingId } })
       }
 
       if (action === 'runSQLWrite') {

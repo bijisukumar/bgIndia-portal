@@ -203,6 +203,17 @@ export const api = {
   saveInventoryPreferredStock: (data)   => post('saveInventoryPreferredStock', data),
   getLowStockItems:            (vId)    => get('getLowStockItems', { villaId: vId }),
 
+  // ── GUEST ENQUIRY MANAGEMENT (CRM) ───────────────────────
+  getEnquiries:         (vId, status) => get('getEnquiries', status ? { villaId: vId, status } : { villaId: vId }),
+  getEnquiryDetail:     (enquiryId)   => get('getEnquiryDetail', { enquiryId }),
+  findGuestMatch:       (phone, email) => get('findGuestMatch', { phone: phone || '', email: email || '' }),
+  saveEnquiry:          (data)        => post('saveEnquiry', data),
+  logCommunication:     (data)        => post('logCommunication', data),
+  markEnquiryLost:      (data)        => post('markEnquiryLost', data),
+  confirmEnquiry:       (data)        => post('confirmEnquiry', data),
+  getEnquiryDashboard:  (vId, year)   => get('getEnquiryDashboard', year ? { villaId: vId, year } : { villaId: vId }),
+  getEnquiryFollowUps:  (vId)         => get('getEnquiryFollowUps', { villaId: vId }),
+
   // ── MAINTENANCE / SCHEMA VALIDATION ────────────────────────
   getSchemaSnapshot: () => get('getSchemaSnapshot'),
 

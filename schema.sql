@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS inventory (
   unit           TEXT,
   category       TEXT,
   qty_in_stock   INTEGER DEFAULT 0,
+  preferred_stock INTEGER DEFAULT 10,
   cost_price     REAL DEFAULT 0,
   sell_price     REAL DEFAULT 0,
   last_restocked TEXT,

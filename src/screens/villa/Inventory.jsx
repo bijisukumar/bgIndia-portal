@@ -45,7 +45,7 @@ export default function Inventory() {
   // Stock levels + prices — loaded from DB on mount; fall back to
   // INVENTORY_MASTER defaults for any item not yet in the DB for this villa.
   const [stock, setStock] = useState(() =>
-    Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { qty: i.defaultQty, costPrice: i.costPrice, sellPrice: i.sellPrice }]))
+    Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { qty: i.defaultQty, costPrice: i.costPrice, sellPrice: i.sellPrice, preferredStock: 10 }]))
   )
   const [prices, setPrices] = useState(() =>
     Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { costPrice: i.costPrice, sellPrice: i.sellPrice }]))
@@ -74,6 +74,7 @@ export default function Inventory() {
                 qty: r.qty_in_stock ?? next[r.item_id]?.qty ?? 0,
                 costPrice: r.cost_price ?? next[r.item_id]?.costPrice ?? 0,
                 sellPrice: r.sell_price ?? next[r.item_id]?.sellPrice ?? 0,
+                preferredStock: r.preferred_stock ?? next[r.item_id]?.preferredStock ?? 10,
               }
             })
             return next
@@ -208,12 +209,20 @@ export default function Inventory() {
           <>
             <div className="card-section-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
               CURRENT STOCK
-              <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem' }}>tap qty to edit</span>
+              <span style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => navigate('/owner/villa/inventory/preferred-stock')}
+                  style={{ background: 'transparent', border: 'none', color: '#C8903A', fontSize: '0.7rem', cursor: 'pointer', textDecoration: 'underline' }}>
+                  ⚙ preferred levels
+                </button>
+                <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem' }}>tap qty to edit</span>
+              </span>
             </div>
             <div className="card">
               {filtered.map((item, i) => {
                 const s = stock[item.id] || {}
-                const isLow = s.qty <= 3
+                const preferred = s.preferredStock ?? 10
+                const threshold = Math.ceil(preferred * 0.1)
+                const isLow = preferred > 0 && s.qty <= threshold
                 return (
                   <div key={item.id} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -223,7 +232,7 @@ export default function Inventory() {
                     <div>
                       <div style={{ color: 'var(--text)', fontSize: '0.88rem', fontWeight: '500' }}>
                         {item.name}
-                        {isLow && <span style={{ color: '#EF9A9A', fontSize: '0.7rem', marginLeft: '6px' }}>⚠️ Low</span>}
+                        {isLow && <span style={{ color: '#EF9A9A', fontSize: '0.7rem', marginLeft: '6px' }}>⚠️ Low (target {preferred})</span>}
                       </div>
                       <div style={{ color: '#5C7080', fontSize: '0.72rem' }}>
                         per {item.unit}

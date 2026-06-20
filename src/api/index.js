@@ -194,12 +194,14 @@ export const api = {
   closeStayWithReview:  (data)   => post('closeStayWithReview', data),
 
   // ── INVENTORY ────────────────────────────────────────────
-  saveInventoryPrices:    (data)   => post('saveInventoryPrices', data),
-  getInventoryPrices:     (vId)    => get('getInventoryPrices', { villaId: vId }),
-  saveInventoryRestock:   (data)   => post('saveInventoryRestock', data),
-  getInventoryRestockLog: (vId)    => get('getInventoryRestockLog', { villaId: vId }),
-  getInventory:           (vId)    => get('getInventory', { villaId: vId }),
-  saveInventoryStock:     (data)   => post('saveInventoryStock', data),
+  saveInventoryPrices:         (data)   => post('saveInventoryPrices', data),
+  getInventoryPrices:          (vId)    => get('getInventoryPrices', { villaId: vId }),
+  saveInventoryRestock:        (data)   => post('saveInventoryRestock', data),
+  getInventoryRestockLog:      (vId)    => get('getInventoryRestockLog', { villaId: vId }),
+  getInventory:                (vId)    => get('getInventory', { villaId: vId }),
+  saveInventoryStock:          (data)   => post('saveInventoryStock', data),
+  saveInventoryPreferredStock: (data)   => post('saveInventoryPreferredStock', data),
+  getLowStockItems:            (vId)    => get('getLowStockItems', { villaId: vId }),
 
   // ── MAINTENANCE / SCHEMA VALIDATION ────────────────────────
   getSchemaSnapshot: () => get('getSchemaSnapshot'),

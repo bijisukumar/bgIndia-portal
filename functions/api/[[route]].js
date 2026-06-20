@@ -667,6 +667,44 @@ export async function onRequest(ctx) {
           kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month), r.total||0]))
         } catch(e) {}
 
+        // Kitchen/inventory revenue + profit (revenue minus cost basis from inventory.cost_price)
+        // and a per-item sales summary, for the dashboard's inventory revenue view.
+        let kitchenSummary = { revenue: 0, cost: 0, profit: 0, items: [] }
+        try {
+          const { results: itemRows } = await DB.prepare(`
+            SELECT si.inv_item_id as item_id,
+                   COALESCE(i.name, si.name) as name,
+                   SUM(si.qty) as qty_sold,
+                   SUM(si.total) as revenue,
+                   SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
+            FROM stay_incidentals si
+            LEFT JOIN inventory i ON i.item_id = si.inv_item_id
+            WHERE strftime('%Y', si.created_at) = ?
+            GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
+            ORDER BY revenue DESC
+          `).bind(String(year)).all()
+          const items = (itemRows||[]).map(r => ({
+            itemId: r.item_id, name: r.name, qtySold: r.qty_sold || 0,
+            revenue: r.revenue || 0, cost: r.cost || 0, profit: (r.revenue||0) - (r.cost||0),
+          }))
+          kitchenSummary = {
+            revenue: items.reduce((s,i)=>s+i.revenue, 0),
+            cost:    items.reduce((s,i)=>s+i.cost, 0),
+            profit:  items.reduce((s,i)=>s+i.profit, 0),
+            items,
+          }
+        } catch(e) {}
+
+        // Current low-stock count for a dashboard alert tile
+        let lowStockCount = 0
+        try {
+          const { results: lowStock } = await DB.prepare(`
+            SELECT COUNT(*) as c FROM inventory
+            WHERE villa_id = ? AND preferred_stock > 0 AND qty_in_stock <= (preferred_stock * 0.1)
+          `).bind(villaId).all()
+          lowStockCount = lowStock?.[0]?.c || 0
+        } catch(e) {}
+
         const months = {}
         for (let m = 1; m <= 12; m++) {
           const mStays  = stays.filter(s => new Date(s.checkin_date).getMonth() + 1 === m)
@@ -708,7 +746,8 @@ export async function onRequest(ctx) {
         return json({ success: true, data: {
           totalBookings, totalNights, grossRevenue, totalNet, totalComm,
           totalDirect, byChannel, stays, months, quarterly,
-          bestMonth, topChannel, directSaving, avgNights
+          bestMonth, topChannel, directSaving, avgNights,
+          kitchenSummary, lowStockCount
         }})
       }
 
@@ -1763,12 +1802,48 @@ export async function onRequest(ctx) {
         return json({ success: true })
       }
 
+      // INVENTORY — set preferred (target) stock levels per item; used to flag low stock
+      if (action === 'saveInventoryPreferredStock') {
+        const villaId = body.villaId || 'dwarka'
+        const levels  = body.levels || {}
+        for (const [itemId, val] of Object.entries(levels)) {
+          const preferred = Math.max(0, parseInt(val, 10) || 0)
+          const result = await DB.prepare(`
+            UPDATE inventory
+            SET preferred_stock = ?, updated_by = ?, updated_at = ?
+            WHERE item_id = ? AND villa_id = ?
+          `).bind(preferred, actor, now(), itemId, villaId).run()
+          if (!result.meta?.changes) {
+            await DB.prepare(`
+              INSERT INTO inventory (item_id, villa_id, name, preferred_stock, created_by, updated_by, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(itemId, villaId, itemId, preferred, actor, actor, now(), now()).run()
+          }
+        }
+        return json({ success: true })
+      }
+
+      // INVENTORY — low-stock items (qty_in_stock <= 10% of preferred_stock), for dashboard alerts
+      if (action === 'getLowStockItems') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(`
+          SELECT item_id, name, unit, category, qty_in_stock, preferred_stock
+          FROM inventory
+          WHERE villa_id = ? AND preferred_stock > 0 AND qty_in_stock <= (preferred_stock * 0.1)
+          ORDER BY (CAST(qty_in_stock AS REAL) / preferred_stock) ASC
+        `).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
      if (action === 'saveKitchenEntry') {
         const items = body.items || [];
+        const villaId = body.villaId || 'dwarka';
         
         // SAFE CONTEXT INTIATION — Guarantee fallback tokens exist
         const currentActor = typeof actor !== 'undefined' ? actor : 'raman';
         const timestamp = typeof now === 'function' ? now() : new Date().toISOString();
+
+        const lowStockAlerts = [];
 
         for (const item of items) {
           await DB.prepare(
@@ -1788,8 +1863,28 @@ export async function onRequest(ctx) {
             timestamp, 
             timestamp
           ).run();
+
+          // Decrement live stock — skip ad-hoc/custom items, they have no inventory row.
+          const invItemId = item.itemId || item.inv_item_id || null
+          if (invItemId && invItemId !== 'custom') {
+            const qtySold = Number(item.qty) || 1
+            await DB.prepare(`
+              UPDATE inventory
+              SET qty_in_stock = MAX(0, COALESCE(qty_in_stock, 0) - ?),
+                  updated_by = ?, updated_at = ?
+              WHERE item_id = ? AND villa_id = ?
+            `).bind(qtySold, currentActor, timestamp, invItemId, villaId).run()
+
+            // Check resulting stock against 10% of preferred level
+            const row = await DB.prepare(
+              `SELECT name, qty_in_stock, preferred_stock FROM inventory WHERE item_id = ? AND villa_id = ?`
+            ).bind(invItemId, villaId).first()
+            if (row && row.preferred_stock > 0 && row.qty_in_stock <= row.preferred_stock * 0.1) {
+              lowStockAlerts.push({ itemId: invItemId, name: row.name, qtyInStock: row.qty_in_stock, preferredStock: row.preferred_stock })
+            }
+          }
         }
-        return json({ success: true });
+        return json({ success: true, data: { lowStockAlerts } });
       }
 
       if (action === 'saveVillaRentalIncome') {

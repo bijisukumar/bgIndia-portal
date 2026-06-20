@@ -23,6 +23,7 @@ import CarRentalEntry    from '../../screens/villa/CarRentalEntry'
 import GuestRepository      from '../../screens/villa/GuestRepository'
 import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
 import Inventory         from '../../screens/villa/Inventory'
+import PreferredStock    from '../../screens/villa/PreferredStock'
 
 // Rental screens
 import RentalProperties from '../../screens/rental/RentalProperties'
@@ -59,6 +60,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
+        <Route path="/owner/villa/inventory/preferred-stock"  element={<PreferredStock />} />
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         {/* Rental */}

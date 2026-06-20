@@ -83,7 +83,7 @@ export default function KitchenIncidentals() {
     if (!items.length) { showToast('Add at least one item', 'error'); return }
     setSaving(true)
     try {
-      await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes })
+      const saveResult = await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes, villaId: 'dwarka' })
       
       let commMsg = ''
       if (stay && !stay.isHistoricalSession) {
@@ -96,6 +96,15 @@ export default function KitchenIncidentals() {
       }
 
       showToast(`Check-out saved ✓${commMsg}`)
+
+      // If selling these items dropped any of them to/below 10% of the preferred
+      // stock level, warn so a restock can be scheduled before running out.
+      const lowStockAlerts = saveResult?.lowStockAlerts || []
+      if (lowStockAlerts.length) {
+        const names = lowStockAlerts.map(a => `${a.name} (${a.qtyInStock} left)`).join(', ')
+        setTimeout(() => showToast(`⚠️ Low stock: ${names}`, 'error'), 1200)
+      }
+
       setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
       if (stay?.isHistoricalSession) setStay(null)
     } catch { showToast('Failed to save', 'error') }

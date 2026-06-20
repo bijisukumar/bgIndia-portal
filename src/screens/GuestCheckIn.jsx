@@ -46,6 +46,13 @@ const TRANSPORT_OPTIONS= ['Car / SUV','Train','Flight','Bus','Auto / Taxi']
 const ID_TYPES_INDIAN  = ['Aadhaar Card','PAN Card','Driving License','Voter ID','Passport']
 const VISA_TYPES       = ['Tourist','Business','e-Visa','OCI Card','PIO Card','Other']
 const INDIAN_STATES    = ['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Delhi','Jammu & Kashmir','Ladakh','Puducherry','Other']
+// Full country list for the FOREIGN NATIONAL home-country-address section only.
+// Indian guests never see this — their country is always 'India', set directly
+// in the submit payload, no dropdown needed.
+// India is still listed first/default in case a foreign-passport guest is an NRI
+// whose permanent address happens to be in India; native <select> typeahead lets
+// guests jump straight to their country by typing the first letter regardless.
+const COUNTRIES = ['India','Afghanistan','Albania','Algeria','Andorra','Angola','Antigua and Barbuda','Argentina','Armenia','Australia','Austria','Azerbaijan','Bahamas','Bahrain','Bangladesh','Barbados','Belarus','Belgium','Belize','Benin','Bhutan','Bolivia','Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi','Cambodia','Cameroon','Canada','Cape Verde','Central African Republic','Chad','Chile','China','Colombia','Comoros','Congo','Costa Rica','Croatia','Cuba','Cyprus','Czech Republic','Denmark','Djibouti','Dominica','Dominican Republic','Ecuador','Egypt','El Salvador','Equatorial Guinea','Eritrea','Estonia','Ethiopia','Fiji','Finland','France','Gabon','Gambia','Georgia','Germany','Ghana','Greece','Grenada','Guatemala','Guinea','Guinea-Bissau','Guyana','Haiti','Honduras','Hungary','Iceland','Indonesia','Iran','Iraq','Ireland','Israel','Italy','Ivory Coast','Jamaica','Japan','Jordan','Kazakhstan','Kenya','Kiribati','Kosovo','Kuwait','Kyrgyzstan','Laos','Latvia','Lebanon','Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg','Madagascar','Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Mauritania','Mauritius','Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Morocco','Mozambique','Myanmar','Namibia','Nauru','Nepal','Netherlands','New Zealand','Nicaragua','Niger','Nigeria','North Korea','North Macedonia','Norway','Oman','Pakistan','Palau','Palestine','Panama','Papua New Guinea','Paraguay','Peru','Philippines','Poland','Portugal','Qatar','Romania','Russia','Rwanda','Saint Kitts and Nevis','Saint Lucia','Saint Vincent and the Grenadines','Samoa','San Marino','Sao Tome and Principe','Saudi Arabia','Senegal','Serbia','Seychelles','Sierra Leone','Singapore','Slovakia','Slovenia','Solomon Islands','Somalia','South Africa','South Korea','South Sudan','Spain','Sri Lanka','Sudan','Suriname','Swaziland','Sweden','Switzerland','Syria','Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste','Togo','Tonga','Trinidad and Tobago','Tunisia','Turkey','Turkmenistan','Tuvalu','Uganda','Ukraine','United Arab Emirates','United Kingdom','United States','Uruguay','Uzbekistan','Vanuatu','Vatican City','Venezuela','Vietnam','Yemen','Zambia','Zimbabwe']
 
 function Field({ label, required, children, hint }) {
   return (
@@ -238,6 +245,8 @@ export default function GuestCheckIn() {
     if (!transport)        return 'Mode of transport is required'
     if (!isForeign && !idType)   return 'Please select your ID type'
     if (!isForeign && !idNumber) return 'Please enter your ID number'
+    if (isForeign && !homeCountryAddr.trim()) return 'Permanent address in home country is required'
+    if (isForeign && !country)   return 'Please select your country'
     if (isForeign && !passportNo)     return 'Passport number is required'
     if (isForeign && !passportExpiry) return 'Passport expiry date is required'
     if (isForeign && !visaNo && !docsLater)   return 'Visa number is required (or check "I will submit later")'
@@ -260,11 +269,16 @@ export default function GuestCheckIn() {
         villaId, partner, stayId: stayId||null,
         guestName: fullName.trim(), dob, gender, nationality,
         phone, email,
+        // For foreign guests, home_address/city/state/pincode/country stay as the
+        // VILLA'S India address — that's what Form C requires (current address in
+        // India during the stay). The guest's actual home country is a separate
+        // field below (homeCountry), so it doesn't get silently overwritten.
         homeAddress: isForeign ? `${villaAddr.address}, ${villaAddr.city}` : address,
         city: isForeign ? villaAddr.city : city,
         state: isForeign ? villaAddr.state : state,
         pincode: isForeign ? villaAddr.pincode : pincode,
         country: isForeign ? villaAddr.country : 'India',
+        homeCountry: isForeign ? country : 'India',
         fromCity: isForeign ? '' : city,
         homeCountryAddress: isForeign ? homeCountryAddr : null,
         checkInDate: checkIn, checkOutDate: checkOut, nights,
@@ -438,7 +452,10 @@ export default function GuestCheckIn() {
           <>
             <Field label="Permanent address in home country" required>
               <Textarea value={homeCountryAddr} onChange={setHomeCountryAddr}
-                placeholder="Full address including city, country" rows={3} />
+                placeholder="Full address including city, state/province" rows={3} />
+            </Field>
+            <Field label="Country" required>
+              <Select value={country} onChange={setCountry} options={COUNTRIES} placeholder="Select country" />
             </Field>
             {/* Pre-filled villa address for foreign guests */}
             <div style={{ background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.2)',

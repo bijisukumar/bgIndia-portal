@@ -297,6 +297,10 @@ export default function CompleteBooking() {
   // had a guests row yet, so the link silently couldn't be made).
   async function openMergePrompt() {
     setMergePromptOpen(true)
+    setMergeContactId(null)   // always start fresh — a stale selection from a
+                              // previous attempt must never carry over, since
+                              // it would render as "selected" before the new
+                              // lookup has even finished checking who's valid
     setMergeGuestMatches({}) // marks both as "loading" (undefined) while we check
     for (const stayId of mergeChecked) {
       const stay = stays.find(s => s.stay_id === stayId)
@@ -315,7 +319,15 @@ export default function CompleteBooking() {
     if (mergeChecked.length !== 2 || !mergeContactId) return
     const stayToUpdate = mergeChecked.find(id => id !== mergeContactId)
     const contactGuest = mergeGuestMatches[mergeContactId]
-    if (!contactGuest) return // shouldn't happen — picker only allows resolved contacts
+    // Defensive check, even though the UI shouldn't allow selecting an
+    // unresolved contact — if this ever fires it means mergeContactId got
+    // set some other way (e.g. stale state from a prior attempt), so fail
+    // loudly instead of silently doing nothing.
+    if (!contactGuest) {
+      showToast('That guest has no history yet — pick the other one', 'error')
+      setMergeContactId(null)
+      return
+    }
     try {
       await api.linkBookedBy({ stayId: stayToUpdate, guestId: contactGuest.guest_id })
       showToast('Linked ✓')

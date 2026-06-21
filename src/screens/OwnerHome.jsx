@@ -673,7 +673,7 @@ function NeedsAttentionBlock() {
         </span>
       </div>
       {items.map((item, i) => (
-        <div key={i} onClick={() => navigate('/owner/villa')}
+        <div key={i} onClick={() => navigate(`/owner/villa/income?stayId=${item.stayId}`)}
           style={{ padding:'11px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:'10px',
             borderBottom: i < items.length-1 ? '1px solid rgba(239,68,68,0.1)' : 'none' }}>
           <span style={{ fontSize:'1.1rem' }}>🔶</span>

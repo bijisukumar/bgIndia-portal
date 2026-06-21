@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
 
@@ -76,6 +76,7 @@ const EMPTY_FORM = { channel:'Direct', tariffPerNight:'', extraCharges:'0', note
 
 export default function CompleteBooking() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [stays, setStays]       = useState([])
   const [selected, setSelected] = useState(null)
   const [form, setForm]         = useState(EMPTY_FORM)
@@ -105,7 +106,14 @@ export default function CompleteBooking() {
       const data = await api.getUpcomingStays('dwarka')
       const list = Array.isArray(data) ? data : []
       setStays(list)
-      if (list.length > 0) selectStay(list[0])
+      if (list.length > 0) {
+        // Deep-link support: if arriving via ?stayId=DWK-... (e.g. from the
+        // owner dashboard's "Needs Attention" list), select that exact stay
+        // instead of always defaulting to the soonest one.
+        const wantedId = searchParams.get('stayId')
+        const wanted = wantedId ? list.find(s => s.stay_id === wantedId) : null
+        selectStay(wanted || list[0])
+      }
     } catch(e) {
       showToast('Could not load bookings: ' + e.message, 'error')
     } finally { setLoading(false) }

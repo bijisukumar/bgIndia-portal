@@ -88,6 +88,8 @@ export const api = {
   checkOut:             (data)   => post('checkOut', data),
   cancelStay:           (data)   => post('cancelStay', data),
   updateStayStatus:     (data)   => post('updateStayStatus', data),
+  searchGuestsByName:   (q)      => get('searchGuestsByName', { q }),
+  linkBookedBy:         (data)   => post('linkBookedBy', data),
   getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
   getUpcomingStays:     (villaId)=> get('getUpcomingStays', { villaId }),
 

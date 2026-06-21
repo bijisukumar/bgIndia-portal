@@ -1620,6 +1620,20 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { guest, pastStays } })
       }
 
+      // Type-ahead name search for the "Booked By" linker on Complete Booking —
+      // returns guest_id (which findGuestMatch above doesn't, since it's keyed
+      // off phone/email, not freeform name text). Minimum 2 chars to avoid
+      // scanning the whole table on every keystroke.
+      if (action === 'searchGuestsByName') {
+        const q = (url.searchParams.get('q') || '').trim()
+        if (q.length < 2) return json({ success: true, data: [] })
+        const { results } = await DB.prepare(
+          `SELECT guest_id, name, phone, email, total_stays FROM guests
+           WHERE name LIKE ? ORDER BY total_stays DESC LIMIT 15`
+        ).bind(`%${q}%`).all()
+        return json({ success: true, data: results })
+      }
+
       // Conversion dashboard — KPIs, source breakdown, repeat-guest metrics
       if (action === 'getEnquiryDashboard') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
@@ -2343,6 +2357,26 @@ export async function onRequest(ctx) {
           `UPDATE stays SET review_chased_at = ?, review_chase_count = COALESCE(review_chase_count, 0) + 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
         ).bind(now(), actor, now(), stayId).run()
         return json({ success: true, data: { stayId } })
+      }
+
+      // Link a stay to whoever actually made the enquiry/booking, when that's
+      // a different person from whoever checks in (e.g. a family member books
+      // and pays, someone else physically stays). Pass guestId=null to unlink.
+      // Denormalizes the name alongside the id so list views can render
+      // "Booked by: X" without an extra JOIN, same pattern as guest_name itself.
+      if (action === 'linkBookedBy') {
+        const { stayId, guestId } = body
+        if (!stayId) return err('stayId required')
+        let guestName = null
+        if (guestId) {
+          const guest = await DB.prepare(`SELECT name FROM guests WHERE guest_id = ?`).bind(guestId).first()
+          if (!guest) return err('Guest not found', 404)
+          guestName = guest.name
+        }
+        await DB.prepare(
+          `UPDATE stays SET booked_by_guest_id = ?, booked_by_name = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(guestId || null, guestName, actor, now(), stayId).run()
+        return json({ success: true, data: { stayId, guestId: guestId || null, guestName } })
       }
 
       if (action === 'closeStayWithReview') {

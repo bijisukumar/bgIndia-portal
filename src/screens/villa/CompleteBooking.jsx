@@ -86,6 +86,13 @@ export default function CompleteBooking() {
   const [transitioning, setTransitioning] = useState(false)
   const [toast, setToast]       = useState(null)
 
+  // ── Booked By picker (links a stay to a different enquiry/booking contact
+  // when the person who actually checks in isn't the one who booked & paid) ──
+  const [bookedByOpen,    setBookedByOpen]    = useState(false)
+  const [bookedByQuery,   setBookedByQuery]   = useState('')
+  const [bookedByResults, setBookedByResults] = useState([])
+  const [bookedBySearching, setBookedBySearching] = useState(false)
+
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),3500)
   }
@@ -106,6 +113,7 @@ export default function CompleteBooking() {
 
   function selectStay(stay) {
     setSelected(stay)
+    setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
     const ch = stay.source
       ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
       : 'Direct'
@@ -220,6 +228,32 @@ export default function CompleteBooking() {
       await loadStays()
     } catch(e) { showToast('Failed: ' + e.message, 'error') }
     finally { setTransitioning(false) }
+  }
+
+  // Debounced type-ahead search for the Booked By picker
+  useEffect(() => {
+    if (!bookedByOpen) return
+    const q = bookedByQuery.trim()
+    if (q.length < 2) { setBookedByResults([]); return }
+    setBookedBySearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const results = await api.searchGuestsByName(q)
+        setBookedByResults(results || [])
+      } catch (e) { /* silent — search box just shows no results */ }
+      finally { setBookedBySearching(false) }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [bookedByQuery, bookedByOpen])
+
+  async function handleLinkBookedBy(guestId) {
+    if (!selected) return
+    try {
+      await api.linkBookedBy({ stayId: selected.stay_id, guestId })
+      showToast(guestId ? 'Linked ✓' : 'Unlinked ✓')
+      setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
   }
 
   const s = selected
@@ -396,6 +430,81 @@ export default function CompleteBooking() {
                               ? <a href={`mailto:${s.guest_email}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_email}</a>
                               : <span style={{color:'var(--text-dim)'}}>—</span>}
                           </div>
+                        </div>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Booked By</div>
+                          {!bookedByOpen ? (
+                            <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+                              {s.booked_by_name ? (
+                                <>
+                                  <span style={{fontSize:'0.85rem',color:'var(--text)',fontWeight:'500'}}>
+                                    {s.booked_by_name}
+                                  </span>
+                                  <span style={{fontSize:'0.68rem',color:'var(--text-dim)'}}>
+                                    (booked &amp; paid — different from guest who checked in)
+                                  </span>
+                                  <button onClick={()=>setBookedByOpen(true)}
+                                    style={{fontSize:'0.7rem',color:'#85B7EB',background:'none',border:'none',
+                                      cursor:'pointer',padding:'2px 6px',textDecoration:'underline'}}>
+                                    change
+                                  </button>
+                                  <button onClick={()=>handleLinkBookedBy(null)}
+                                    style={{fontSize:'0.7rem',color:'var(--text-dim)',background:'none',border:'none',
+                                      cursor:'pointer',padding:'2px 6px',textDecoration:'underline'}}>
+                                    unlink
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span style={{fontSize:'0.82rem',color:'var(--text-dim)'}}>
+                                    Same as guest above
+                                  </span>
+                                  <button onClick={()=>setBookedByOpen(true)}
+                                    style={{fontSize:'0.7rem',color:'#85B7EB',background:'none',border:'none',
+                                      cursor:'pointer',padding:'2px 6px',textDecoration:'underline'}}>
+                                    + link a different booking contact
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{position:'relative'}}>
+                              <input autoFocus value={bookedByQuery}
+                                onChange={e=>setBookedByQuery(e.target.value)}
+                                placeholder="Type a name to search guests…"
+                                style={{width:'100%',padding:'8px 10px',background:'var(--dark-bg)',
+                                  border:'1px solid var(--border-dim)',borderRadius:'8px',
+                                  color:'var(--text)',fontSize:'0.85rem'}} />
+                              <button onClick={()=>{setBookedByOpen(false);setBookedByQuery('');setBookedByResults([])}}
+                                style={{position:'absolute',right:'8px',top:'6px',background:'none',border:'none',
+                                  color:'var(--text-dim)',cursor:'pointer',fontSize:'0.9rem'}}>
+                                ✕
+                              </button>
+                              {bookedBySearching && (
+                                <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'6px'}}>Searching…</div>
+                              )}
+                              {!bookedBySearching && bookedByResults.length > 0 && (
+                                <div style={{marginTop:'6px',background:'var(--dark-card)',
+                                  border:'1px solid var(--border-dim)',borderRadius:'8px',overflow:'hidden'}}>
+                                  {bookedByResults.map(g => (
+                                    <div key={g.guest_id} onClick={()=>handleLinkBookedBy(g.guest_id)}
+                                      style={{padding:'8px 10px',cursor:'pointer',
+                                        borderBottom:'1px solid var(--border-dim)',fontSize:'0.82rem'}}
+                                      onMouseEnter={e=>e.currentTarget.style.background='rgba(200,144,58,0.08)'}
+                                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                                      <div style={{fontWeight:'600'}}>{g.name}</div>
+                                      <div style={{fontSize:'0.7rem',color:'var(--text-dim)'}}>
+                                        {g.phone || g.email || '—'} · {g.total_stays || 0} past stay{g.total_stays!==1?'s':''}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {!bookedBySearching && bookedByQuery.trim().length >= 2 && bookedByResults.length === 0 && (
+                                <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'6px'}}>No matching guests found</div>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div>
                           <div style={infoLabel}>Guests</div>

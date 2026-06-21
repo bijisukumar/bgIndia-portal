@@ -102,6 +102,7 @@ export default function CompleteBooking() {
   const [mergeChecked,  setMergeChecked]  = useState([])   // array of stay_id
   const [mergePromptOpen, setMergePromptOpen] = useState(false)
   const [mergeContactId,  setMergeContactId]  = useState(null) // which checked stay_id is the "booked by" contact
+  const [mergeGuestMatches, setMergeGuestMatches] = useState({}) // stay_id -> {guest_id, name} | null (not found) | undefined (loading)
 
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),3500)
@@ -282,23 +283,41 @@ export default function CompleteBooking() {
   }
 
   function exitMergeMode() {
-    setMergeMode(false); setMergeChecked([]); setMergePromptOpen(false); setMergeContactId(null)
+    setMergeMode(false); setMergeChecked([]); setMergePromptOpen(false)
+    setMergeContactId(null); setMergeGuestMatches({})
+  }
+
+  // The "booked by" contact must already have a guests-table row (that's
+  // literally what booked_by_guest_id points at) — but checking in (the
+  // OTHER stay) never requires one. So as soon as both names are picked,
+  // look both up right away and only let the owner choose whichever one(s)
+  // actually resolve, instead of letting them pick freely and finding out
+  // it fails afterwards (which is exactly what happened the first time
+  // this shipped — Venkittaswamy was picked as contact, but only Parvathy
+  // had a guests row yet, so the link silently couldn't be made).
+  async function openMergePrompt() {
+    setMergePromptOpen(true)
+    setMergeGuestMatches({}) // marks both as "loading" (undefined) while we check
+    for (const stayId of mergeChecked) {
+      const stay = stays.find(s => s.stay_id === stayId)
+      if (!stay) continue
+      try {
+        const matches = await api.searchGuestsByName(stay.guest_name)
+        const exact = (matches || []).find(g => g.name === stay.guest_name)
+        setMergeGuestMatches(prev => ({ ...prev, [stayId]: exact || null }))
+      } catch {
+        setMergeGuestMatches(prev => ({ ...prev, [stayId]: null }))
+      }
+    }
   }
 
   async function handleConfirmMerge() {
     if (mergeChecked.length !== 2 || !mergeContactId) return
     const stayToUpdate = mergeChecked.find(id => id !== mergeContactId)
-    // The guest_id to link with comes from the contact's own guests-table
-    // record. We don't have guest_id directly on the stay row, so look it
-    // up by exact name match — same matching key the guests rebuild itself
-    // uses, so this stays consistent with how guests.guest_id is assigned.
-    const contactStay = stays.find(s => s.stay_id === mergeContactId)
-    if (!contactStay) return
+    const contactGuest = mergeGuestMatches[mergeContactId]
+    if (!contactGuest) return // shouldn't happen — picker only allows resolved contacts
     try {
-      const matches = await api.searchGuestsByName(contactStay.guest_name)
-      const exact = (matches || []).find(g => g.name === contactStay.guest_name)
-      if (!exact) { showToast(`Could not find a guest record for ${contactStay.guest_name}`, 'error'); return }
-      await api.linkBookedBy({ stayId: stayToUpdate, guestId: exact.guest_id })
+      await api.linkBookedBy({ stayId: stayToUpdate, guestId: contactGuest.guest_id })
       showToast('Linked ✓')
       exitMergeMode()
       await loadStays()
@@ -417,30 +436,50 @@ export default function CompleteBooking() {
             </div>
             {mergeMode && mergeChecked.length === 2 && !mergePromptOpen && (
               <button className="btn btn-gold" style={{width:'100%',marginBottom:'14px'}}
-                onClick={() => setMergePromptOpen(true)}>
+                onClick={openMergePrompt}>
                 🔗 Link these 2 bookings
               </button>
             )}
             {mergePromptOpen && (
               <div style={{background:'var(--dark-card)',border:'1px solid rgba(200,144,58,0.3)',
                 borderRadius:'12px',padding:'14px 16px',marginBottom:'14px'}}>
-                <div style={{fontSize:'0.85rem',fontWeight:'600',marginBottom:'10px'}}>
+                <div style={{fontSize:'0.85rem',fontWeight:'600',marginBottom:'4px'}}>
                   Which one booked & is paying?
+                </div>
+                <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginBottom:'10px'}}>
+                  Only a guest with existing history can be the booking contact —
+                  the other guest's check-in stay isn't touched either way.
                 </div>
                 {mergeChecked.map(stayId => {
                   const stay = stays.find(s => s.stay_id === stayId)
                   if (!stay) return null
+                  const match = mergeGuestMatches[stayId]       // undefined=loading, null=not found, object=found
+                  const resolvable = match !== undefined && match !== null
+                  const loading = !(stayId in mergeGuestMatches)
                   return (
-                    <div key={stayId} onClick={() => setMergeContactId(stayId)}
-                      style={{padding:'10px 12px', marginBottom:'8px', borderRadius:'8px', cursor:'pointer',
+                    <div key={stayId}
+                      onClick={() => resolvable && setMergeContactId(stayId)}
+                      style={{padding:'10px 12px', marginBottom:'8px', borderRadius:'8px',
+                        cursor: resolvable ? 'pointer' : 'default',
+                        opacity: resolvable ? 1 : 0.5,
                         border: mergeContactId===stayId ? '1px solid var(--gold)' : '1px solid var(--border-dim)',
                         background: mergeContactId===stayId ? 'rgba(200,144,58,0.08)' : 'transparent',
                         display:'flex', alignItems:'center', gap:'8px'}}>
                       {mergeContactId===stayId && <span style={{color:'var(--gold)'}}>✓</span>}
-                      <span style={{fontSize:'0.85rem',fontWeight:'500'}}>{stay.guest_name}</span>
+                      <span style={{fontSize:'0.85rem',fontWeight:'500',flex:1}}>{stay.guest_name}</span>
+                      {loading && <span style={{fontSize:'0.7rem',color:'var(--text-dim)'}}>checking…</span>}
+                      {!loading && match === null && (
+                        <span style={{fontSize:'0.68rem',color:'#e67e22'}}>no guest history yet</span>
+                      )}
                     </div>
                   )
                 })}
+                {mergeChecked.every(id => mergeGuestMatches[id] === null) && Object.keys(mergeGuestMatches).length === mergeChecked.length && (
+                  <div style={{fontSize:'0.72rem',color:'#e67e22',marginTop:'4px',marginBottom:'8px'}}>
+                    Neither guest has history yet — link isn't possible until at least one
+                    of them has a completed stay on record. Try again after their next stay closes.
+                  </div>
+                )}
                 <div style={{display:'flex',gap:'8px',marginTop:'8px'}}>
                   <button className="btn btn-gold" style={{flex:1}} disabled={!mergeContactId}
                     onClick={handleConfirmMerge}>
@@ -448,7 +487,7 @@ export default function CompleteBooking() {
                   </button>
                   <button style={{flex:1,padding:'10px',borderRadius:'10px',border:'1px solid var(--border-dim)',
                     background:'transparent',color:'var(--text-dim)',cursor:'pointer'}}
-                    onClick={() => { setMergePromptOpen(false); setMergeContactId(null) }}>
+                    onClick={() => { setMergePromptOpen(false); setMergeContactId(null); setMergeGuestMatches({}) }}>
                     Back
                   </button>
                 </div>

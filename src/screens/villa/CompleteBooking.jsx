@@ -94,6 +94,15 @@ export default function CompleteBooking() {
   const [bookedByResults, setBookedByResults] = useState([])
   const [bookedBySearching, setBookedBySearching] = useState(false)
 
+  // ── Merge/Link mode: tick 2+ guests in the list, then link them in one
+  // step instead of typing a name to search (most useful when both stays
+  // are already visible in the same list, e.g. an enquiry's placeholder
+  // stay sitting right next to the real stay someone else checked into) ──
+  const [mergeMode,     setMergeMode]     = useState(false)
+  const [mergeChecked,  setMergeChecked]  = useState([])   // array of stay_id
+  const [mergePromptOpen, setMergePromptOpen] = useState(false)
+  const [mergeContactId,  setMergeContactId]  = useState(null) // which checked stay_id is the "booked by" contact
+
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),3500)
   }
@@ -264,6 +273,38 @@ export default function CompleteBooking() {
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
   }
 
+  function toggleMergeCheck(stayId) {
+    setMergeChecked(prev =>
+      prev.includes(stayId) ? prev.filter(id => id !== stayId)
+        : prev.length >= 2 ? prev  // cap at 2 — linking is always pairwise
+        : [...prev, stayId]
+    )
+  }
+
+  function exitMergeMode() {
+    setMergeMode(false); setMergeChecked([]); setMergePromptOpen(false); setMergeContactId(null)
+  }
+
+  async function handleConfirmMerge() {
+    if (mergeChecked.length !== 2 || !mergeContactId) return
+    const stayToUpdate = mergeChecked.find(id => id !== mergeContactId)
+    // The guest_id to link with comes from the contact's own guests-table
+    // record. We don't have guest_id directly on the stay row, so look it
+    // up by exact name match — same matching key the guests rebuild itself
+    // uses, so this stays consistent with how guests.guest_id is assigned.
+    const contactStay = stays.find(s => s.stay_id === mergeContactId)
+    if (!contactStay) return
+    try {
+      const matches = await api.searchGuestsByName(contactStay.guest_name)
+      const exact = (matches || []).find(g => g.name === contactStay.guest_name)
+      if (!exact) { showToast(`Could not find a guest record for ${contactStay.guest_name}`, 'error'); return }
+      await api.linkBookedBy({ stayId: stayToUpdate, guestId: exact.guest_id })
+      showToast('Linked ✓')
+      exitMergeMode()
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+  }
+
   const s = selected
   const meta = s ? (STATUS_META[s.status] || STATUS_META.booked) : null
   const days = s ? daysFromNow(s.checkin_date) : null
@@ -305,28 +346,55 @@ export default function CompleteBooking() {
         {!loading && stays.length > 0 && (
           <>
             {/* Guest selector */}
-            <div className="card-section-label">SELECT GUEST</div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div className="card-section-label">SELECT GUEST</div>
+              {stays.length >= 2 && (
+                <button onClick={() => mergeMode ? exitMergeMode() : setMergeMode(true)}
+                  style={{fontSize:'0.72rem',color: mergeMode ? '#EF4444' : '#85B7EB',
+                    background:'none',border:'none',cursor:'pointer',textDecoration:'underline',
+                    marginBottom:'6px'}}>
+                  {mergeMode ? 'Cancel' : '🔗 Merge bookings'}
+                </button>
+              )}
+            </div>
+            {mergeMode && (
+              <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:'8px'}}>
+                Tick the booking contact and the guest who actually checked in (2 guests),
+                then confirm who booked.
+              </div>
+            )}
             <div style={{background:'var(--dark-card)',borderRadius:'12px',border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'14px'}}>
               {stays.map((stay, i) => {
                 const m   = STATUS_META[stay.status] || STATUS_META.booked
                 const d   = daysFromNow(stay.checkin_date)
                 const sel = selected?.stay_id === stay.stay_id
+                const checked = mergeChecked.includes(stay.stay_id)
                 return (
                   <div key={stay.stay_id}
-                    onClick={() => selectStay(stay)}
+                    onClick={() => mergeMode ? toggleMergeCheck(stay.stay_id) : selectStay(stay)}
                     style={{
                       padding:'12px 16px', cursor:'pointer',
                       borderBottom: i < stays.length-1 ? '1px solid var(--border-dim)' : 'none',
-                      background: sel ? 'rgba(200,144,58,0.07)' : 'transparent',
+                      background: mergeMode ? (checked ? 'rgba(133,183,235,0.1)' : 'transparent')
+                        : (sel ? 'rgba(200,144,58,0.07)' : 'transparent'),
                       display:'flex', justifyContent:'space-between', alignItems:'center',
                     }}>
+                    {mergeMode && (
+                      <input type="checkbox" checked={checked} readOnly
+                        style={{marginRight:'10px', width:'16px', height:'16px', accentColor:'#85B7EB', flexShrink:0}} />
+                    )}
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'3px'}}>
-                        {sel && <span style={{color:'var(--gold)'}}>✓</span>}
+                        {!mergeMode && sel && <span style={{color:'var(--gold)'}}>✓</span>}
                         <span style={{fontWeight:'600',fontSize:'0.9rem',
                           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                           {stay.guest_name}
                         </span>
+                        {stay.booked_by_name && (
+                          <span style={{fontSize:'0.65rem',color:'#85B7EB',flexShrink:0}}>
+                            🔗 booked by {stay.booked_by_name}
+                          </span>
+                        )}
                       </div>
                       <div style={{fontSize:'0.73rem',color:'var(--text-dim)'}}>
                         {fmtDate(stay.checkin_date)} → {fmtDate(stay.checkout_date)}
@@ -347,6 +415,45 @@ export default function CompleteBooking() {
                 )
               })}
             </div>
+            {mergeMode && mergeChecked.length === 2 && !mergePromptOpen && (
+              <button className="btn btn-gold" style={{width:'100%',marginBottom:'14px'}}
+                onClick={() => setMergePromptOpen(true)}>
+                🔗 Link these 2 bookings
+              </button>
+            )}
+            {mergePromptOpen && (
+              <div style={{background:'var(--dark-card)',border:'1px solid rgba(200,144,58,0.3)',
+                borderRadius:'12px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'0.85rem',fontWeight:'600',marginBottom:'10px'}}>
+                  Which one booked & is paying?
+                </div>
+                {mergeChecked.map(stayId => {
+                  const stay = stays.find(s => s.stay_id === stayId)
+                  if (!stay) return null
+                  return (
+                    <div key={stayId} onClick={() => setMergeContactId(stayId)}
+                      style={{padding:'10px 12px', marginBottom:'8px', borderRadius:'8px', cursor:'pointer',
+                        border: mergeContactId===stayId ? '1px solid var(--gold)' : '1px solid var(--border-dim)',
+                        background: mergeContactId===stayId ? 'rgba(200,144,58,0.08)' : 'transparent',
+                        display:'flex', alignItems:'center', gap:'8px'}}>
+                      {mergeContactId===stayId && <span style={{color:'var(--gold)'}}>✓</span>}
+                      <span style={{fontSize:'0.85rem',fontWeight:'500'}}>{stay.guest_name}</span>
+                    </div>
+                  )
+                })}
+                <div style={{display:'flex',gap:'8px',marginTop:'8px'}}>
+                  <button className="btn btn-gold" style={{flex:1}} disabled={!mergeContactId}
+                    onClick={handleConfirmMerge}>
+                    Confirm link
+                  </button>
+                  <button style={{flex:1,padding:'10px',borderRadius:'10px',border:'1px solid var(--border-dim)',
+                    background:'transparent',color:'var(--text-dim)',cursor:'pointer'}}
+                    onClick={() => { setMergePromptOpen(false); setMergeContactId(null) }}>
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
 
             {s && (
               <>

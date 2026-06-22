@@ -2294,6 +2294,26 @@ export async function onRequest(ctx) {
             total_boxes, buyer, price_per_box, total_revenue, notes, created_by, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         `).bind(id, estate, harvestDate, boxType || 'Normal', parseInt(alphonsa) || 0, parseInt(neelam) || 0, parseInt(malgova) || 0, parseInt(banganapally) || 0, parseInt(kilimooku) || 0, parseInt(sindooram) || 0, parseInt(mix) || 0, parseInt(totalBoxes) || 0, buyer || null, parseFloat(pricePerBox) || 0, parseFloat(totalRevenue) || 0, notes || null, actor).run()
+
+        const mangoEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
+        const mangoRevenue = parseFloat(totalRevenue) || 0
+        sendAlert(env, `🥭 Estate360 — New mango harvest: ₹${mangoRevenue.toLocaleString('en-IN')} (${mangoEstateLabel})`, [
+          'A new mango harvest entry was logged.',
+          '',
+          `Estate:       ${mangoEstateLabel}`,
+          `Harvest date: ${harvestDate}`,
+          `Box type:     ${boxType || 'Normal'}`,
+          `Total boxes:  ${parseInt(totalBoxes) || 0}`,
+          `Price/box:    ₹${(parseFloat(pricePerBox) || 0).toLocaleString('en-IN')}`,
+          `Total revenue:₹${mangoRevenue.toLocaleString('en-IN')}`,
+          `Buyer:        ${buyer || '—'}`,
+          `Notes:        ${notes || '—'}`,
+          `Harvest ID:   ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ])
+
         return json({ success:true, data:{ harvestId:id } })
       }
 
@@ -2415,12 +2435,52 @@ export async function onRequest(ctx) {
       if (action === 'saveEstateTransaction') {
         const { estate, type, date, category, amount, paidTo, description, txnId } = body
         if (!estate || !type || !date || !category || !amount) return err('Missing required fields', 400)
+
+        const estateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
+        const amt = parseFloat(amount) || 0
+        const typeLabel = type === 'income' ? 'Income' : 'Expense'
+        const emoji = type === 'income' ? '💰' : '🧾'
+
         if (txnId) {
-          await ActiveDB.prepare(`UPDATE estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, parseFloat(amount)||0, paidTo||null, description||null, actor, now(), txnId).run()
+          await ActiveDB.prepare(`UPDATE estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, amt, paidTo||null, description||null, actor, now(), txnId).run()
+
+          sendAlert(env, `${emoji} Estate360 — ${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
+            `An estate ${typeLabel.toLowerCase()} entry was UPDATED.`,
+            '',
+            `Estate:      ${estateLabel}`,
+            `Type:        ${typeLabel}`,
+            `Date:        ${date}`,
+            `Category:    ${category}`,
+            `Amount:      ₹${amt.toLocaleString('en-IN')}`,
+            `Paid to:     ${paidTo || '—'}`,
+            `Description: ${description || '—'}`,
+            `Txn ID:      ${txnId}`,
+            '',
+            `Updated by: ${actor}`,
+            `Updated at: ${now()}`,
+          ])
+
           return json({ success: true, data: { txnId } })
         } else {
           const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
-          await ActiveDB.prepare(`INSERT INTO estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, parseFloat(amount)||0, paidTo||null, description||null, actor, actor, now(), now()).run()
+          await ActiveDB.prepare(`INSERT INTO estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, amt, paidTo||null, description||null, actor, actor, now(), now()).run()
+
+          sendAlert(env, `${emoji} Estate360 — New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
+            `A new estate ${typeLabel.toLowerCase()} entry was logged.`,
+            '',
+            `Estate:      ${estateLabel}`,
+            `Type:        ${typeLabel}`,
+            `Date:        ${date}`,
+            `Category:    ${category}`,
+            `Amount:      ₹${amt.toLocaleString('en-IN')}`,
+            `Paid to:     ${paidTo || '—'}`,
+            `Description: ${description || '—'}`,
+            `Txn ID:      ${id}`,
+            '',
+            `Logged by: ${actor}`,
+            `Logged at: ${now()}`,
+          ])
+
           return json({ success: true, data: { txnId: id } })
         }
       }
@@ -2473,6 +2533,21 @@ export async function onRequest(ctx) {
           `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
            VALUES (?,?,?,?,?,?, NULL, NULL, ?)`
         ).bind(id, estate, loggedDate, notes||null, actor, now(), parseInt(durationMins)||0).run()
+
+        const irrEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
+        sendAlert(env, `💧 Estate360 — Irrigation logged (${irrEstateLabel})`, [
+          'An irrigation entry was logged.',
+          '',
+          `Estate:    ${irrEstateLabel}`,
+          `Date:      ${loggedDate}`,
+          `Duration:  ${parseInt(durationMins)||0} mins`,
+          `Notes:     ${notes || '—'}`,
+          `Log ID:    ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ])
+
         return json({ success: true, data: { logId: id } })
       }
 
@@ -2485,6 +2560,22 @@ export async function onRequest(ctx) {
           `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
            VALUES (?,?,?,?,?,?,?,?,?)`
         ).bind(id, estate, loggedDate, notes||null, actor, now(), zoneId, zoneName||null, parseInt(durationMins)||0).run()
+
+        const zoneEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
+        sendAlert(env, `💧 Estate360 — Irrigation logged: ${zoneName || zoneId} (${zoneEstateLabel})`, [
+          'An irrigation zone entry was logged.',
+          '',
+          `Estate:    ${zoneEstateLabel}`,
+          `Zone:      ${zoneName || zoneId}`,
+          `Date:      ${loggedDate}`,
+          `Duration:  ${parseInt(durationMins)||0} mins`,
+          `Notes:     ${notes || '—'}`,
+          `Log ID:    ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ])
+
         return json({ success: true, data: { logId: id } })
       }
 
@@ -2509,6 +2600,25 @@ export async function onRequest(ctx) {
           `INSERT INTO fertilization_log (log_id, estate, planned_date, actual_date, fertilizer_type, quantity_kg, cost, done_by, notes, created_by, created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?)`
         ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null, parseFloat(quantityKg)||0, parseFloat(cost)||0, doneBy||null, notes||null, actor, now()).run()
+
+        const fertEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
+        sendAlert(env, `🌱 Estate360 — Fertilization logged (${fertEstateLabel})`, [
+          'A fertilization entry was logged.',
+          '',
+          `Estate:        ${fertEstateLabel}`,
+          `Planned date:  ${plannedDate}`,
+          `Actual date:   ${actualDate || '—'}`,
+          `Fertilizer:    ${fertilizerType || '—'}`,
+          `Quantity (kg): ${parseFloat(quantityKg) || 0}`,
+          `Cost:          ₹${(parseFloat(cost) || 0).toLocaleString('en-IN')}`,
+          `Done by:       ${doneBy || '—'}`,
+          `Notes:         ${notes || '—'}`,
+          `Log ID:        ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ])
+
         return json({ success: true, data: { id } })
       }
 

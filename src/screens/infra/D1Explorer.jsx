@@ -207,6 +207,9 @@ export default function D1Explorer() {
   const [editingQuery, setEditingQuery] = useState(null)   // null | 'new' | {id,name,sql,cat}
   const [activeQueryId, setActiveQueryId] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null) // id to delete
+  const [liveSchema, setLiveSchema] = useState(null)        // null = not loaded yet
+  const [schemaLoading, setSchemaLoading] = useState(false)
+  const [schemaGeneratedAt, setSchemaGeneratedAt] = useState(null)
 
   const persistAndSet = (list) => { setSavedQueries(list); persistSaved(list) }
 
@@ -286,6 +289,34 @@ export default function D1Explorer() {
     { name: 'coconut_harvests',  cols: 'harvest_id · estate_id · harvest_date · total_nuts · net_income · balance_due' },
     { name: 'rubber_harvests',   cols: 'harvest_id · estate_id · harvest_date · weight_kg · net' },
   ]
+  // Fallback list shown only if the live schema fetch hasn't completed/failed —
+  // kept as a static reference so the tab never renders fully empty, but the
+  // live snapshot (fetched fresh from sqlite_master/PRAGMA table_info via
+  // getSchemaSnapshot) is what's actually shown once loaded. This is what was
+  // missing before: SCHEMA_TABLES was hand-maintained and never updated when
+  // new tables (guests, enquiries, communication_log, bookings,
+  // inventory_restock_log, etc.) were added — there was no way to see them
+  // here without editing this file and redeploying.
+
+  async function loadLiveSchema() {
+    setSchemaLoading(true)
+    try {
+      const data = await api.getSchemaSnapshot()
+      if (data?.snapshot) {
+        const tables = Object.entries(data.snapshot).map(([name, cols]) => ({
+          name,
+          cols: cols.map(c => c.name).join(' · '),
+        })).sort((a, b) => a.name.localeCompare(b.name))
+        setLiveSchema(tables)
+        setSchemaGeneratedAt(data.generatedAt)
+      }
+    } catch { /* keep showing whatever we had before (or the static fallback) */ }
+    finally { setSchemaLoading(false) }
+  }
+
+  useEffect(() => { if (tab === 'schema' && liveSchema === null) loadLiveSchema() }, [tab])
+
+
 
   // Group saved queries by cat
   const savedCats = [...new Set(savedQueries.map(q => q.cat))]
@@ -537,8 +568,18 @@ export default function D1Explorer() {
         {/* ── SCHEMA TAB ──────────────────────────────── */}
         {tab === 'schema' && (
           <>
-            <div className="card-section-label">TABLES — tap to browse</div>
-            {SCHEMA_TABLES.map(t => (
+            <div className="card-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>TABLES — tap to browse{schemaGeneratedAt && !schemaLoading && (
+                <span style={{ color: '#5C7080', fontWeight: 400, textTransform: 'none', marginLeft: '6px' }}>
+                  · live as of {new Date(schemaGeneratedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}</span>
+              <button onClick={loadLiveSchema} disabled={schemaLoading}
+                style={{ background: 'transparent', border: '1px solid rgba(200,144,58,0.3)', borderRadius: '8px', color: '#C8903A', fontSize: '0.68rem', fontWeight: '600', padding: '4px 10px', cursor: 'pointer' }}>
+                {schemaLoading ? '⟳ Loading…' : '⟳ Refresh schema'}
+              </button>
+            </div>
+            {(liveSchema || SCHEMA_TABLES).map(t => (
               <button key={t.name} onClick={() => { setTab('sql'); setSql(`SELECT * FROM ${t.name} LIMIT 50`); setResults(null) }}
                 style={{
                   width: '100%', background: '#1E2535', borderRadius: '10px', padding: '12px 14px',

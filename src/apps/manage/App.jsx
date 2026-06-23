@@ -37,8 +37,11 @@ import RentalAgreement  from '../../screens/rental/RentalAgreement'
 import PollachiHub    from '../../screens/estates/PollachiHub'
 import CoconutTracker from '../../screens/estates/CoconutTracker'
 import CoconutDashboard from '../../screens/estates/CoconutDashboard'
+import IrrigationLog  from '../../screens/estates/IrrigationLog'
+import MangoHarvest   from '../../screens/estates/MangoHarvest'
 import PavutumuriHub  from '../../screens/estates/PavutumuriHub'
 import RubberTracker  from '../../screens/estates/RubberTracker'
+import RubberDashboard from '../../screens/estates/RubberDashboard'
 import EstateLedger   from '../../screens/estates/EstateLedger'
 
 // Infra / ops screens
@@ -80,8 +83,11 @@ function ProtectedRoutes() {
         <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
         <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
         <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
+        <Route path="/pollachi/irrigation"    element={<IrrigationLog estate="pollachi" />} />
+        <Route path="/pollachi/mango"         element={<MangoHarvest estate="pollachi" />} />
         <Route path="/owner/pavutumuri"       element={<PavutumuriHub />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
+        <Route path="/pavutumuri/dashboard"   element={<RubberDashboard />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
         {/* Infra */}
         <Route path="/debug"                  element={<DebugPanel />} />

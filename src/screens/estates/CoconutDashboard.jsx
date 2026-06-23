@@ -138,6 +138,8 @@ export default function CoconutDashboard() {
   const [zoneHealth, setZoneHealth] = useState([])
   const [plOpen, setPlOpen]     = useState(false)      // P&L block expanded
   const [drillMonth, setDrillMonth] = useState(null)   // expanded month in drill-down
+  const [harvestLogOpen, setHarvestLogOpen] = useState(false)   // Harvest Log collapsible
+  const [irrigationOpen, setIrrigationOpen] = useState(false)   // Irrigation Zone Health collapsible
 
   useEffect(() => {
     setLoading(true)
@@ -219,6 +221,43 @@ export default function CoconutDashboard() {
         {/* ── OPERATIONAL HIGHLIGHTS — estate manager only ── */}
         {!isOwner && <EstateHighlights estate="pollachi" />}
 
+        {/* ── THIS MONTH + YEAR-TO-DATE — owner only, always visible ── */}
+        {isOwner && dash && (() => {
+          const nowYm = localTodayStr().slice(0, 7)          // 'YYYY-MM'
+          const curYr = localTodayStr().slice(0, 4)          // 'YYYY'
+          const thisMonth = (dash.monthly || []).find(m => m.ym === nowYm)
+            || { income: 0, expense: 0, net: 0 }
+          const ytd = (dash.monthly || [])
+            .filter(m => m.ym.slice(0, 4) === curYr)
+            .reduce((acc, m) => ({ income: acc.income + m.income, expense: acc.expense + m.expense, net: acc.net + m.net }), { income: 0, expense: 0, net: 0 })
+          const monthLabel = parseLocalDate(nowYm + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+          const fmtShort = (v) => `₹${Math.abs(v) >= 100000 ? (Math.abs(v)/100000).toFixed(1)+'L' : Math.abs(v) >= 1000 ? (Math.abs(v)/1000).toFixed(1)+'K' : Math.abs(v).toLocaleString('en-IN')}`
+          return (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'14px' }}>
+              <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'12px 14px' }}>
+                <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1.5px', marginBottom:'8px' }}>{monthLabel.toUpperCase()}</div>
+                <div style={{ display:'flex', gap:'10px', marginBottom:'4px' }}>
+                  <span style={{ fontSize:'0.78rem', color:'#34A853' }}>+{fmtShort(thisMonth.income)}</span>
+                  <span style={{ fontSize:'0.78rem', color:'#EF4444' }}>-{fmtShort(thisMonth.expense)}</span>
+                </div>
+                <div style={{ fontSize:'1rem', fontWeight:'700', color: thisMonth.net >= 0 ? '#C8903A' : '#EF4444' }}>
+                  {thisMonth.net >= 0 ? '+' : '-'}{fmtShort(thisMonth.net)}
+                </div>
+              </div>
+              <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'12px 14px' }}>
+                <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1.5px', marginBottom:'8px' }}>NET YTD · {curYr}</div>
+                <div style={{ display:'flex', gap:'10px', marginBottom:'4px' }}>
+                  <span style={{ fontSize:'0.78rem', color:'#34A853' }}>+{fmtShort(ytd.income)}</span>
+                  <span style={{ fontSize:'0.78rem', color:'#EF4444' }}>-{fmtShort(ytd.expense)}</span>
+                </div>
+                <div style={{ fontSize:'1rem', fontWeight:'700', color: ytd.net >= 0 ? '#C8903A' : '#EF4444' }}>
+                  {ytd.net >= 0 ? '+' : '-'}{fmtShort(ytd.net)}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* ── 12-MONTH P&L SUMMARY — owner only ── */}
         {isOwner && dash && (
           <div style={{ background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.2)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>
@@ -243,6 +282,7 @@ export default function CoconutDashboard() {
               </div>
               <div style={{ color:'#5C7080', fontSize:'1.1rem' }}>{plOpen ? '∧' : '∨'}</div>
             </div>
+
 
             {/* Drill-down — expanded */}
             {plOpen && (
@@ -315,132 +355,149 @@ export default function CoconutDashboard() {
           </div>
         )}
 
-        {/* ── IRRIGATION ZONE HEALTH — both owner and manager ── */}
-        <div style={{ marginBottom:'4px' }}>
-          <div style={{ fontSize:'0.62rem', color:'#185FA5', letterSpacing:'2px', marginBottom:'8px' }}>
-            💧 IRRIGATION ZONE HEALTH
+        {/* ── IRRIGATION ZONE HEALTH — both owner and manager, collapsible ── */}
+        <div style={{ background:'rgba(24,95,165,0.05)', border:'1px solid rgba(24,95,165,0.18)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>
+          <div onClick={()=>setIrrigationOpen(o=>!o)} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', cursor:'pointer' }}>
+            <div style={{ flex:1, fontSize:'0.62rem', color:'#185FA5', letterSpacing:'2px' }}>
+              💧 IRRIGATION ZONE HEALTH
+            </div>
+            <div style={{ color:'#5C7080', fontSize:'1.1rem' }}>{irrigationOpen ? '∧' : '∨'}</div>
           </div>
-          <PollachiEstateMap zoneHealth={zoneHealth} />
-          <div style={{ marginTop:'8px' }}>
-            <IrrigationDashboard estate="pollachi" />
-          </div>
+          {irrigationOpen && (
+            <div style={{ borderTop:'1px solid rgba(24,95,165,0.12)', padding:'12px 16px' }}>
+              <PollachiEstateMap zoneHealth={zoneHealth} />
+              <div style={{ marginTop:'8px' }}>
+                <IrrigationDashboard estate="pollachi" />
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Year filter */}
-        <div className="month-strip" style={{ marginBottom: '12px' }}>
-          <button className={`month-pill${year === 0 ? ' active' : ''}`} onClick={() => setYear(0)}>All</button>
-          {YEARS.slice(1).map(y => (
-            <button key={y} className={`month-pill${year === y ? ' active' : ''}`} onClick={() => setYear(y)}>{y}</button>
-          ))}
+        {/* ── HARVEST LOG — collapsible, year filter pills inside ── */}
+        <div style={{ background:'rgba(15,110,86,0.05)', border:'1px solid rgba(15,110,86,0.18)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>
+          <div onClick={()=>setHarvestLogOpen(o=>!o)} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', cursor:'pointer' }}>
+            <div style={{ flex:1, fontSize:'0.62rem', color:'#0F6E56', letterSpacing:'2px' }}>
+              🥥 HARVEST LOG · {harvests.length} RECORDS
+            </div>
+            <div style={{ color:'#5C7080', fontSize:'1.1rem' }}>{harvestLogOpen ? '∧' : '∨'}</div>
+          </div>
+          {harvestLogOpen && (
+            <div style={{ borderTop:'1px solid rgba(15,110,86,0.12)', padding:'12px 16px' }}>
+              {/* Year filter */}
+              <div className="month-strip" style={{ marginBottom: '12px' }}>
+                <button className={`month-pill${year === 0 ? ' active' : ''}`} onClick={() => setYear(0)}>All</button>
+                {YEARS.slice(1).map(y => (
+                  <button key={y} className={`month-pill${year === y ? ' active' : ''}`} onClick={() => setYear(y)}>{y}</button>
+                ))}
+              </div>
+
+              {loading ? (
+                <div className="loading"><div className="spinner"/>Loading...</div>
+              ) : withDelay.length === 0 ? (
+                <div style={s.empty}>No harvests recorded{year !== 0 ? ` for ${year}` : ''}</div>
+              ) : withDelay.map((h, i) => {
+                const rejPctVal  = h.count > 0 ? ((h.rejected / h.count) * 100).toFixed(1) : 0
+                const rejHigh    = parseFloat(rejPctVal) > 10
+                const gapOk      = h.gap !== null && h.gap >= 40 && h.gap <= 55
+                const gapLow     = h.gap !== null && h.gap < 40
+                const delayDays  = h.vsScheduled  // positive = late, negative = early
+                const isLate     = delayDays !== null && delayDays > 3
+                const isEarly    = delayDays !== null && delayDays < -3
+                const onTime     = delayDays !== null && Math.abs(delayDays) <= 3
+
+                return (
+                  <div key={i} style={s.harvestCard}>
+                    {/* Row 1 — date + delay badges */}
+                    <div style={s.cardHeader}>
+                      <span style={s.harvestDate}>{fmtDate(h.date)}</span>
+                      <div style={{ display:'flex', gap:6 }}>
+                        {h.gap !== null && (
+                          <span style={{
+                            ...s.delayBadge,
+                            background: gapOk ? 'rgba(76,175,80,0.15)' : 'rgba(200,144,58,0.15)',
+                            color:       gapOk ? '#4CAF50' : gapLow ? '#EF9A9A' : '#FFCC80',
+                            borderColor: gapOk ? 'rgba(76,175,80,0.3)' : 'rgba(200,144,58,0.3)',
+                          }}>
+                            {h.gap}d gap
+                          </span>
+                        )}
+                        {delayDays !== null && (
+                          <span style={{
+                            ...s.delayBadge,
+                            background: onTime  ? 'rgba(76,175,80,0.15)'  : isLate ? 'rgba(220,53,53,0.15)' : 'rgba(33,150,243,0.15)',
+                            color:      onTime  ? '#4CAF50'               : isLate ? '#EF9A9A'              : '#90CAF9',
+                            borderColor:onTime  ? 'rgba(76,175,80,0.3)'   : isLate ? 'rgba(220,53,53,0.3)'  : 'rgba(33,150,243,0.3)',
+                          }}>
+                            {onTime  ? '✓ on time' : isLate ? `${delayDays}d late` : `${Math.abs(delayDays)}d early`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Scheduled vs actual line */}
+                    {h.scheduledNext && (
+                      <div style={{ fontSize:'0.65rem', color:'#5C7080', marginBottom:8 }}>
+                        Scheduled next: <span style={{ color:'#C8903A' }}>{fmtDate(h.scheduledNext)}</span>
+                        {h.actualNext && (
+                          <span style={{ marginLeft:8, color: isLate ? '#EF9A9A' : '#4CAF50' }}>
+                            · Actual: {fmtDate(h.actualNext)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Row 2 — main metrics grid */}
+                    <div style={s.metricGrid}>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>HARVEST #</div>
+                        <div style={s.metricVal}>{harvests.length - i}</div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>TOTAL NUTS</div>
+                        <div style={s.metricVal}>{(h.count || 0).toLocaleString('en-IN')}</div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>REJECTED</div>
+                        <div style={{ ...s.metricVal, color: rejHigh ? '#EF9A9A' : '#EDF2F7' }}>
+                          {(h.rejected || 0).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>REJ %</div>
+                        <div style={{ ...s.metricVal, color: rejHigh ? '#EF9A9A' : '#4CAF50' }}>
+                          {rejPct(h.count, h.rejected)}
+                        </div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>WEIGHT</div>
+                        <div style={s.metricVal}>{h.weight}kg</div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>₹/KG</div>
+                        <div style={{ ...s.metricVal, color: '#C8903A' }}>₹{h.pricePerKg}</div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>EXPENSES</div>
+                        <div style={{ ...s.metricVal, color: '#EF9A9A' }}>
+                          ₹{(h.totalExpense || 0).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                      <div style={s.metric}>
+                        <div style={s.metricLabel}>HARVESTER</div>
+                        <div style={s.metricVal}>{h.harvester}</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {loading ? (
           <div className="loading"><div className="spinner"/>Loading...</div>
         ) : (
           <>
-            {/* ── HARVEST TABLE ── */}
-            <div className="card-section-label">
-              HARVEST LOG · {harvests.length} RECORDS
-            </div>
-
-            {withDelay.length === 0 ? (
-              <div style={s.empty}>No harvests recorded{year !== 0 ? ` for ${year}` : ''}</div>
-            ) : withDelay.map((h, i) => {
-              const rejPctVal  = h.count > 0 ? ((h.rejected / h.count) * 100).toFixed(1) : 0
-              const rejHigh    = parseFloat(rejPctVal) > 10
-              const gapOk      = h.gap !== null && h.gap >= 40 && h.gap <= 55
-              const gapLow     = h.gap !== null && h.gap < 40
-              const delayDays  = h.vsScheduled  // positive = late, negative = early
-              const isLate     = delayDays !== null && delayDays > 3
-              const isEarly    = delayDays !== null && delayDays < -3
-              const onTime     = delayDays !== null && Math.abs(delayDays) <= 3
-
-              return (
-                <div key={i} style={s.harvestCard}>
-                  {/* Row 1 — date + delay badges */}
-                  <div style={s.cardHeader}>
-                    <span style={s.harvestDate}>{fmtDate(h.date)}</span>
-                    <div style={{ display:'flex', gap:6 }}>
-                      {h.gap !== null && (
-                        <span style={{
-                          ...s.delayBadge,
-                          background: gapOk ? 'rgba(76,175,80,0.15)' : 'rgba(200,144,58,0.15)',
-                          color:       gapOk ? '#4CAF50' : gapLow ? '#EF9A9A' : '#FFCC80',
-                          borderColor: gapOk ? 'rgba(76,175,80,0.3)' : 'rgba(200,144,58,0.3)',
-                        }}>
-                          {h.gap}d gap
-                        </span>
-                      )}
-                      {delayDays !== null && (
-                        <span style={{
-                          ...s.delayBadge,
-                          background: onTime  ? 'rgba(76,175,80,0.15)'  : isLate ? 'rgba(220,53,53,0.15)' : 'rgba(33,150,243,0.15)',
-                          color:      onTime  ? '#4CAF50'               : isLate ? '#EF9A9A'              : '#90CAF9',
-                          borderColor:onTime  ? 'rgba(76,175,80,0.3)'   : isLate ? 'rgba(220,53,53,0.3)'  : 'rgba(33,150,243,0.3)',
-                        }}>
-                          {onTime  ? '✓ on time' : isLate ? `${delayDays}d late` : `${Math.abs(delayDays)}d early`}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Scheduled vs actual line */}
-                  {h.scheduledNext && (
-                    <div style={{ fontSize:'0.65rem', color:'#5C7080', marginBottom:8 }}>
-                      Scheduled next: <span style={{ color:'#C8903A' }}>{fmtDate(h.scheduledNext)}</span>
-                      {h.actualNext && (
-                        <span style={{ marginLeft:8, color: isLate ? '#EF9A9A' : '#4CAF50' }}>
-                          · Actual: {fmtDate(h.actualNext)}
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Row 2 — main metrics grid */}
-                  <div style={s.metricGrid}>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>HARVEST #</div>
-                      <div style={s.metricVal}>{harvests.length - i}</div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>TOTAL NUTS</div>
-                      <div style={s.metricVal}>{(h.count || 0).toLocaleString('en-IN')}</div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>REJECTED</div>
-                      <div style={{ ...s.metricVal, color: rejHigh ? '#EF9A9A' : '#EDF2F7' }}>
-                        {(h.rejected || 0).toLocaleString('en-IN')}
-                      </div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>REJ %</div>
-                      <div style={{ ...s.metricVal, color: rejHigh ? '#EF9A9A' : '#4CAF50' }}>
-                        {rejPct(h.count, h.rejected)}
-                      </div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>WEIGHT</div>
-                      <div style={s.metricVal}>{h.weight}kg</div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>₹/KG</div>
-                      <div style={{ ...s.metricVal, color: '#C8903A' }}>₹{h.pricePerKg}</div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>EXPENSES</div>
-                      <div style={{ ...s.metricVal, color: '#EF9A9A' }}>
-                        ₹{(h.totalExpense || 0).toLocaleString('en-IN')}
-                      </div>
-                    </div>
-                    <div style={s.metric}>
-                      <div style={s.metricLabel}>HARVESTER</div>
-                      <div style={s.metricVal}>{h.harvester}</div>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-
             {/* ── NUT COUNT TREND ── */}
             <div className="card-section-label" style={{ marginTop: 20 }}>
               TREND — TOTAL COCONUT COUNT BY HARVEST

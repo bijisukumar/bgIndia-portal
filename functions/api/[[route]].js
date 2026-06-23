@@ -1447,12 +1447,14 @@ export async function onRequest(ctx) {
         }})
       }
 
-      // ESTATE DASHBOARD — Financial 12-Month Master P&L Aggregation
+      // ESTATE DASHBOARD — Financial Year-to-Date P&L Aggregation
       if (action === 'getEstateDashboard') {
         if (payload.role !== 'owner') return err('Owner access only', 403)
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
-        const cutoffStr = cutoff.toISOString().slice(0, 10)
+        const today = new Date()
+        const curYear = today.getFullYear()
+        const cutoffStr = `${curYear}-01-01`            // calendar year-to-date
+        const todayStr  = today.toISOString().slice(0, 10)
 
         const { results: harvests } = await ActiveDB.prepare(
           `SELECT harvest_date, total_earnings, total_expense, net_income, harvest_expense, dehusk_expense, tractor_expense, other_expense FROM coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
@@ -1490,43 +1492,58 @@ export async function onRequest(ctx) {
         const netProfit    = totalIncome - totalExpense
 
         const expBreakdown = {}
+        const addExp = (bucket, k, v) => { if (v) bucket[k] = (bucket[k]||0) + v }
         harvests.forEach(r => {
-          const add = (k, v) => { expBreakdown[k] = (expBreakdown[k]||0) + (v||0) }
-          add('Harvest labour',    r.harvest_expense)
-          add('Dehusking',         r.dehusk_expense)
-          add('Tractor / tiling',  r.tractor_expense)
-          add('Other (harvest)',   r.other_expense)
+          addExp(expBreakdown, 'Harvest labour',   r.harvest_expense)
+          addExp(expBreakdown, 'Dehusking',         r.dehusk_expense)
+          addExp(expBreakdown, 'Tractor / tiling',  r.tractor_expense)
+          addExp(expBreakdown, 'Other (harvest)',   r.other_expense)
         })
         if (rubberExpense > 0) expBreakdown['Rubber tapping'] = (expBreakdown['Rubber tapping']||0) + rubberExpense
-        txns.filter(t => t.type === 'expense').forEach(t => { expBreakdown[t.category] = (expBreakdown[t.category]||0) + (t.amount||0) })
+        txns.filter(t => t.type === 'expense').forEach(t => addExp(expBreakdown, t.category, t.amount))
 
+        // Per-month aggregation, including a per-month expense category breakdown
         const monthly = {}
+        const ensureMonth = (ym) => { if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0, expBreakdown:{} } }
+
         harvests.forEach(r => {
           const ym = r.harvest_date.slice(0, 7)
-          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
+          ensureMonth(ym)
           monthly[ym].income  += r.total_earnings || 0
           monthly[ym].expense += r.total_expense  || 0
+          monthly[ym].harvests += 1
+          addExp(monthly[ym].expBreakdown, 'Harvest labour',  r.harvest_expense)
+          addExp(monthly[ym].expBreakdown, 'Dehusking',        r.dehusk_expense)
+          addExp(monthly[ym].expBreakdown, 'Tractor / tiling', r.tractor_expense)
+          addExp(monthly[ym].expBreakdown, 'Other (harvest)',  r.other_expense)
         })
         rubberHarvests.forEach(r => {
           if (!r.harvest_date) return
           const ym = r.harvest_date.slice(0, 7)
-          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
+          ensureMonth(ym)
           monthly[ym].income  += r.gross   || 0
           monthly[ym].expense += r.expense || 0
+          addExp(monthly[ym].expBreakdown, 'Rubber tapping', r.expense)
         })
         txns.forEach(t => {
           const ym = t.date.slice(0, 7)
-          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
+          ensureMonth(ym)
           if (t.type === 'income')  monthly[ym].income  += t.amount || 0
-          if (t.type === 'expense') monthly[ym].expense += t.amount || 0
+          if (t.type === 'expense') { monthly[ym].expense += t.amount || 0; addExp(monthly[ym].expBreakdown, t.category, t.amount) }
         })
 
         const monthlyArr = Object.entries(monthly)
           .sort((a,b) => b[0].localeCompare(a[0]))
           .map(([ym, v]) => ({ ym, ...v, net: v.income - v.expense }))
 
-        return json({ success: true, data: { totalIncome, totalExpense, netProfit, harvestCount: harvests.length + rubberHarvests.length, expBreakdown, monthly: monthlyArr } })
+        return json({ success: true, data: {
+          rangeFrom: cutoffStr, rangeTo: todayStr,
+          totalIncome, totalExpense, netProfit,
+          harvestCount: harvests.length + rubberHarvests.length,
+          expBreakdown, monthly: monthlyArr,
+        } })
       }
+
 
 
       if (action === 'getCheckinLinks') {

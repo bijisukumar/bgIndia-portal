@@ -221,60 +221,53 @@ export default function CoconutDashboard() {
         {/* ── OPERATIONAL HIGHLIGHTS — estate manager only ── */}
         {!isOwner && <EstateHighlights estate="pollachi" />}
 
-        {/* ── THIS MONTH + YEAR-TO-DATE — owner only, always visible ── */}
+        {/* ── THIS MONTH — owner only, always visible ── */}
         {isOwner && dash && (() => {
           const nowYm = localTodayStr().slice(0, 7)          // 'YYYY-MM'
-          const curYr = localTodayStr().slice(0, 4)          // 'YYYY'
           const thisMonth = (dash.monthly || []).find(m => m.ym === nowYm)
             || { income: 0, expense: 0, net: 0 }
-          const ytd = (dash.monthly || [])
-            .filter(m => m.ym.slice(0, 4) === curYr)
-            .reduce((acc, m) => ({ income: acc.income + m.income, expense: acc.expense + m.expense, net: acc.net + m.net }), { income: 0, expense: 0, net: 0 })
           const monthLabel = parseLocalDate(nowYm + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
           const fmtShort = (v) => `₹${Math.abs(v) >= 100000 ? (Math.abs(v)/100000).toFixed(1)+'L' : Math.abs(v) >= 1000 ? (Math.abs(v)/1000).toFixed(1)+'K' : Math.abs(v).toLocaleString('en-IN')}`
+          const isLoss = thisMonth.net < 0
           return (
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'14px' }}>
-              <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'12px 14px' }}>
-                <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1.5px', marginBottom:'8px' }}>{monthLabel.toUpperCase()}</div>
-                <div style={{ display:'flex', gap:'10px', marginBottom:'4px' }}>
-                  <span style={{ fontSize:'0.78rem', color:'#34A853' }}>+{fmtShort(thisMonth.income)}</span>
-                  <span style={{ fontSize:'0.78rem', color:'#EF4444' }}>-{fmtShort(thisMonth.expense)}</span>
-                </div>
-                <div style={{ fontSize:'1rem', fontWeight:'700', color: thisMonth.net >= 0 ? '#C8903A' : '#EF4444' }}>
-                  {thisMonth.net >= 0 ? '+' : '-'}{fmtShort(thisMonth.net)}
-                </div>
+            <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'12px 14px', marginBottom:'14px' }}>
+              <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1.5px', marginBottom:'8px' }}>{monthLabel.toUpperCase()}</div>
+              <div style={{ display:'flex', gap:'10px', marginBottom:'4px' }}>
+                <span style={{ fontSize:'0.78rem', color:'#34A853' }}>+{fmtShort(thisMonth.income)}</span>
+                <span style={{ fontSize:'0.78rem', color:'#F59E0B' }}>-{fmtShort(thisMonth.expense)}</span>
               </div>
-              <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'12px 14px' }}>
-                <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1.5px', marginBottom:'8px' }}>NET YTD · {curYr}</div>
-                <div style={{ display:'flex', gap:'10px', marginBottom:'4px' }}>
-                  <span style={{ fontSize:'0.78rem', color:'#34A853' }}>+{fmtShort(ytd.income)}</span>
-                  <span style={{ fontSize:'0.78rem', color:'#EF4444' }}>-{fmtShort(ytd.expense)}</span>
-                </div>
-                <div style={{ fontSize:'1rem', fontWeight:'700', color: ytd.net >= 0 ? '#C8903A' : '#EF4444' }}>
-                  {ytd.net >= 0 ? '+' : '-'}{fmtShort(ytd.net)}
-                </div>
+              <div className={isLoss ? 'loss-gleam' : ''} style={{ fontSize:'1rem', fontWeight:'700', color: isLoss ? '#EF4444' : '#C8903A' }}>
+                {thisMonth.net >= 0 ? '+' : '-'}{fmtShort(thisMonth.net)}{isLoss && ' (loss)'}
               </div>
             </div>
           )
         })()}
 
-        {/* ── 12-MONTH P&L SUMMARY — owner only ── */}
-        {isOwner && dash && (
+        {/* ── YEAR-TO-DATE P&L SUMMARY — owner only ── */}
+        {isOwner && dash && (() => {
+          const expEntries = Object.entries(dash.expBreakdown || {}).filter(([,v]) => v > 0).sort(([,a],[,b]) => b - a)
+          const isLoss = dash.netProfit < 0
+          const rangeLabel = (dash.rangeFrom && dash.rangeTo)
+            ? `${parseLocalDate(dash.rangeFrom).toLocaleDateString('en-IN',{month:'short',year:'numeric'})} – ${parseLocalDate(dash.rangeTo).toLocaleDateString('en-IN',{month:'short',day:'2-digit',year:'numeric'})}`
+            : ''
+          return (
           <div style={{ background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.2)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>
             {/* Header row — always visible */}
             <div onClick={()=>setPlOpen(o=>!o)} style={{ display:'flex', alignItems:'center', gap:'12px', padding:'14px 16px', cursor:'pointer' }}>
               <div style={{ flex:1 }}>
-                <div style={{ fontSize:'0.62rem', color:'#C8903A', letterSpacing:'2px', marginBottom:'6px' }}>LAST 12 MONTHS · P&L</div>
+                <div style={{ fontSize:'0.62rem', color:'#C8903A', letterSpacing:'2px', marginBottom:'2px' }}>YEAR TO DATE · {CUR_YEAR}</div>
+                {rangeLabel && <div style={{ fontSize:'0.6rem', color:'#5C7080', marginBottom:'6px' }}>{rangeLabel}</div>}
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px' }}>
                   {[
                     { label:'INCOME',  val: dash.totalIncome,  color:'#34A853' },
-                    { label:'EXPENSE', val: dash.totalExpense, color:'#EF4444' },
-                    { label:'NET PROFIT', val: dash.netProfit, color: dash.netProfit >= 0 ? '#C8903A' : '#EF4444' },
+                    { label:'EXPENSE', val: dash.totalExpense, color:'#F59E0B' },
+                    { label:'NET PROFIT', val: dash.netProfit, color: isLoss ? '#EF4444' : '#C8903A', gleam: isLoss },
                   ].map(k => (
                     <div key={k.label}>
                       <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'3px' }}>{k.label}</div>
-                      <div style={{ fontWeight:'700', color: k.color, fontSize:'1rem' }}>
-                        ₹{Math.abs(k.val) >= 100000 ? (Math.abs(k.val)/100000).toFixed(1)+'L' : Math.abs(k.val) >= 1000 ? (Math.abs(k.val)/1000).toFixed(1)+'K' : Math.abs(k.val).toLocaleString('en-IN')}
+                      <div className={k.gleam ? 'loss-gleam' : ''} style={{ fontWeight:'700', color: k.color, fontSize:'1rem' }}>
+                        {k.label === 'NET PROFIT' && isLoss ? '−' : ''}₹{Math.abs(k.val) >= 100000 ? (Math.abs(k.val)/100000).toFixed(1)+'L' : Math.abs(k.val) >= 1000 ? (Math.abs(k.val)/1000).toFixed(1)+'K' : Math.abs(k.val).toLocaleString('en-IN')}
+                        {k.label === 'NET PROFIT' && isLoss && <span style={{ fontSize:'0.62rem', fontWeight:600, marginLeft:'4px' }}>LOSS</span>}
                       </div>
                     </div>
                   ))}
@@ -289,21 +282,20 @@ export default function CoconutDashboard() {
               <div style={{ borderTop:'1px solid rgba(200,144,58,0.15)', padding:'12px 16px' }}>
 
                 {/* Expense breakdown */}
-                {Object.keys(dash.expBreakdown || {}).length > 0 && (
+                {expEntries.length > 0 && (
                   <div style={{ marginBottom:'14px' }}>
-                    <div style={{ fontSize:'0.62rem', color:'#EF4444', letterSpacing:'1.5px', marginBottom:'8px' }}>EXPENSE BREAKDOWN</div>
-                    {Object.entries(dash.expBreakdown)
-                      .filter(([,v]) => v > 0)
-                      .sort(([,a],[,b]) => b - a)
-                      .map(([cat, amt]) => {
+                    <div style={{ fontSize:'0.62rem', color:'#F59E0B', letterSpacing:'1.5px', marginBottom:'8px' }}>EXPENSE BREAKDOWN</div>
+                    {expEntries.map(([cat, amt]) => {
                         const pct = Math.round((amt / dash.totalExpense) * 100)
+                        const isTop = pct > 10
+                        const barColor = isTop ? '#EF4444' : '#F59E0B'
                         return (
                           <div key={cat} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px' }}>
                             <div style={{ fontSize:'0.72rem', color:'#9AA5B4', width:'120px', flexShrink:0 }}>{cat}</div>
                             <div style={{ flex:1, height:'4px', background:'rgba(255,255,255,0.06)', borderRadius:'2px' }}>
-                              <div style={{ height:'4px', width:`${pct}%`, background:'#EF4444', borderRadius:'2px' }}/>
+                              <div style={{ height:'4px', width:`${pct}%`, background: barColor, borderRadius:'2px' }}/>
                             </div>
-                            <div style={{ fontSize:'0.72rem', color:'#EF4444', fontWeight:'600', width:'48px', textAlign:'right' }}>
+                            <div style={{ fontSize:'0.72rem', color: barColor, fontWeight:'600', width:'48px', textAlign:'right' }}>
                               ₹{amt >= 1000 ? (amt/1000).toFixed(1)+'K' : amt}
                             </div>
                             <div style={{ fontSize:'0.65rem', color:'#5C7080', width:'30px', textAlign:'right' }}>{pct}%</div>
@@ -321,6 +313,8 @@ export default function CoconutDashboard() {
                     {dash.monthly.map(m => {
                       const isOpen = drillMonth === m.ym
                       const monthLabel = parseLocalDate(m.ym + '-01').toLocaleDateString('en-IN', { month:'short', year:'numeric' })
+                      const monthIsLoss = m.net < 0
+                      const monthExpEntries = Object.entries(m.expBreakdown || {}).filter(([,v]) => v > 0).sort(([,a],[,b]) => b - a)
                       return (
                         <div key={m.ym} style={{ marginBottom:'6px', background:'rgba(255,255,255,0.02)', borderRadius:'8px', overflow:'hidden', border:'1px solid rgba(255,255,255,0.05)' }}>
                           <div onClick={()=>setDrillMonth(isOpen ? null : m.ym)}
@@ -328,21 +322,42 @@ export default function CoconutDashboard() {
                             <div style={{ fontSize:'0.78rem', color:'#EDF2F7', fontWeight:'600', width:'70px' }}>{monthLabel}</div>
                             <div style={{ flex:1, display:'flex', gap:'12px' }}>
                               <span style={{ fontSize:'0.72rem', color:'#34A853' }}>+₹{m.income >= 1000 ? (m.income/1000).toFixed(1)+'K' : m.income}</span>
-                              <span style={{ fontSize:'0.72rem', color:'#EF4444' }}>-₹{m.expense >= 1000 ? (m.expense/1000).toFixed(1)+'K' : m.expense}</span>
+                              <span style={{ fontSize:'0.72rem', color:'#F59E0B' }}>-₹{m.expense >= 1000 ? (m.expense/1000).toFixed(1)+'K' : m.expense}</span>
                             </div>
-                            <div style={{ fontSize:'0.78rem', fontWeight:'700', color: m.net >= 0 ? '#C8903A' : '#EF4444' }}>
-                              {m.net >= 0 ? '+' : ''}₹{Math.abs(m.net) >= 1000 ? (Math.abs(m.net)/1000).toFixed(1)+'K' : Math.abs(m.net)}
+                            <div style={{ fontSize:'0.78rem', fontWeight:'700', color: monthIsLoss ? '#EF4444' : '#C8903A' }}>
+                              {m.net >= 0 ? '+' : '−'}₹{Math.abs(m.net) >= 1000 ? (Math.abs(m.net)/1000).toFixed(1)+'K' : Math.abs(m.net)}
                             </div>
                             <div style={{ fontSize:'0.7rem', color:'#5C7080' }}>{isOpen ? '∧' : '›'}</div>
                           </div>
                           {isOpen && (
                             <div style={{ padding:'8px 10px 10px', borderTop:'1px solid rgba(255,255,255,0.05)' }}>
                               {m.harvests > 0 && <div style={{ fontSize:'0.7rem', color:'#5C7080', marginBottom:'4px' }}>🥥 {m.harvests} harvest{m.harvests>1?'s':''} this month</div>}
-                              <div style={{ display:'flex', gap:'16px' }}>
+                              <div style={{ display:'flex', gap:'16px', marginBottom: monthExpEntries.length > 0 ? '10px' : 0 }}>
                                 <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>INCOME</div><div style={{ color:'#34A853', fontWeight:'600', fontSize:'0.82rem' }}>₹{m.income.toLocaleString('en-IN')}</div></div>
-                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>EXPENSE</div><div style={{ color:'#EF4444', fontWeight:'600', fontSize:'0.82rem' }}>₹{m.expense.toLocaleString('en-IN')}</div></div>
-                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>NET</div><div style={{ color: m.net>=0?'#C8903A':'#EF4444', fontWeight:'700', fontSize:'0.82rem' }}>₹{m.net.toLocaleString('en-IN')}</div></div>
+                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>EXPENSE</div><div style={{ color:'#F59E0B', fontWeight:'600', fontSize:'0.82rem' }}>₹{m.expense.toLocaleString('en-IN')}</div></div>
+                                <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>NET</div><div style={{ color: monthIsLoss?'#EF4444':'#C8903A', fontWeight:'700', fontSize:'0.82rem' }}>₹{m.net.toLocaleString('en-IN')}</div></div>
                               </div>
+                              {monthExpEntries.length > 0 && (
+                                <div style={{ paddingTop: m.harvests > 0 ? '0' : '0' }}>
+                                  <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'6px' }}>EXPENSE COMPONENTS</div>
+                                  {monthExpEntries.map(([cat, amt]) => {
+                                    const pct = Math.round((amt / m.expense) * 100)
+                                    const isTop = pct > 10
+                                    const barColor = isTop ? '#EF4444' : '#F59E0B'
+                                    return (
+                                      <div key={cat} style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'4px' }}>
+                                        <div style={{ fontSize:'0.68rem', color:'#9AA5B4', width:'100px', flexShrink:0 }}>{cat}</div>
+                                        <div style={{ flex:1, height:'3px', background:'rgba(255,255,255,0.06)', borderRadius:'2px' }}>
+                                          <div style={{ height:'3px', width:`${pct}%`, background: barColor, borderRadius:'2px' }}/>
+                                        </div>
+                                        <div style={{ fontSize:'0.66rem', color: barColor, fontWeight:'600', width:'44px', textAlign:'right' }}>
+                                          ₹{amt >= 1000 ? (amt/1000).toFixed(1)+'K' : amt}
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -353,7 +368,8 @@ export default function CoconutDashboard() {
               </div>
             )}
           </div>
-        )}
+          )
+        })()}
 
         {/* ── IRRIGATION ZONE HEALTH — both owner and manager, collapsible ── */}
         <div style={{ background:'rgba(24,95,165,0.05)', border:'1px solid rgba(24,95,165,0.18)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>

@@ -38,6 +38,8 @@ const EMPTY_FORM = {
   tenantName:'', tenantEmail:'', tenantPhone:'', deposit:'', agreedRent:'',
   maintenance:'', leaseStart:'', leaseEnd:'', notes:'',
   country:'IN', currency:'INR', driveFolderUrl:'', status:'Active',
+  nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
+  docContractSigned:false, docIdCaptured:false, docMoveIn:false, docMoveOut:false, docDamageReport:false,
 }
 
 export default function RentalAgreement() {
@@ -85,6 +87,14 @@ export default function RentalAgreement() {
       currency:      a.currency       || 'INR',
       driveFolderUrl:a.drive_folder_url || '',
       status:        a.status         || 'Active',
+      nextRenewalDate:      a.next_renewal_date      || '',
+      earlyTerminated:      !!a.early_terminated,
+      earlyTerminationDate: a.early_termination_date || '',
+      docContractSigned: !!a.doc_contract_signed,
+      docIdCaptured:     !!a.doc_id_captured,
+      docMoveIn:         !!a.doc_move_in,
+      docMoveOut:        !!a.doc_move_out,
+      docDamageReport:   !!a.doc_damage_report,
     })
   }
 
@@ -115,12 +125,27 @@ export default function RentalAgreement() {
     }
   }
 
+  async function handleDocToggle(field, currentValue) {
+    const newValue = !currentValue
+    setField(field, newValue)
+    if (!agreements[selectedProp]) return  // not saved yet — just update local form, will persist on next Save
+    const backendField = {
+      docContractSigned:'doc_contract_signed', docIdCaptured:'doc_id_captured',
+      docMoveIn:'doc_move_in', docMoveOut:'doc_move_out', docDamageReport:'doc_damage_report',
+    }[field]
+    try {
+      await api.updateRentalDocChecklist({ propId: selectedProp, field: backendField, value: newValue })
+      setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], [backendField]: newValue ? 1 : 0}}))
+    } catch(e) { showToast('Could not update checklist', 'error'); setField(field, currentValue) }
+  }
+
   async function handleSave() {
     setError('')
     if (!form.tenantName.trim()) { setError('Tenant name is required'); return }
     if (!form.leaseStart) { setError('Lease start is required'); return }
     if (!form.leaseEnd)   { setError('Lease end is required'); return }
     if (parseLocalDate(form.leaseEnd) <= parseLocalDate(form.leaseStart)) { setError('Lease end must be after start'); return }
+    if (form.earlyTerminated && !form.earlyTerminationDate) { setError('Early termination date is required when marked early-terminated'); return }
     setSaving(true)
     try {
       const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
@@ -140,12 +165,23 @@ export default function RentalAgreement() {
         leaseEnd:     form.leaseEnd,
         notes:        form.notes.trim(),
         driveFolderUrl: form.driveFolderUrl.trim(),
+        nextRenewalDate:      form.nextRenewalDate || null,
+        earlyTerminated:      form.earlyTerminated,
+        earlyTerminationDate: form.earlyTerminated ? form.earlyTerminationDate : null,
+        docContractSigned: form.docContractSigned,
+        docIdCaptured:     form.docIdCaptured,
+        docMoveIn:         form.docMoveIn,
+        docMoveOut:        form.docMoveOut,
+        docDamageReport:   form.docDamageReport,
       })
       setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp],
         prop_id:selectedProp, tenant_name:form.tenantName, tenant_email:form.tenantEmail,
         deposit:parseFloat(form.deposit)||0, agreed_rent:parseFloat(form.agreedRent)||0,
         lease_start:form.leaseStart, lease_end:form.leaseEnd,
         country:form.country, currency:form.currency, drive_folder_url:form.driveFolderUrl, status:form.status,
+        next_renewal_date:form.nextRenewalDate, early_terminated:form.earlyTerminated?1:0, early_termination_date:form.earlyTerminationDate,
+        doc_contract_signed:form.docContractSigned?1:0, doc_id_captured:form.docIdCaptured?1:0,
+        doc_move_in:form.docMoveIn?1:0, doc_move_out:form.docMoveOut?1:0, doc_damage_report:form.docDamageReport?1:0,
       }}))
       showToast(`✅ Agreement saved for ${prop?.name}`)
     } catch(e) { setError(`Save failed: ${e.message}`) }
@@ -178,6 +214,16 @@ export default function RentalAgreement() {
   const expiryColor = days===null?'#34A853':days<0?'#c62828':days<=30?'#e67e22':days<=60?'#f1c40f':'#34A853'
   const expiryMsg = days===null?null:days<0?`⚠️ Lease EXPIRED ${Math.abs(days)} days ago`:
     days===0?'⚠️ Expires TODAY':days<=60?`📅 Expires in ${days} days (${form.leaseEnd})`:`✓ Active — ${days} days remaining`
+
+  // Renewal reminder — only shown when nextRenewalDate is set AND differs from
+  // leaseEnd, so we don't show two banners saying the same thing for the common
+  // case where renewal coincides with lease end.
+  const renewalDays = daysUntil(form.nextRenewalDate)
+  const showRenewalBanner = form.nextRenewalDate && form.nextRenewalDate !== form.leaseEnd && renewalDays !== null && renewalDays <= 60
+  const renewalColor = renewalDays<0?'#c62828':renewalDays<=14?'#e67e22':'#f1c40f'
+  const renewalMsg = renewalDays<0?`⚠️ Renewal review OVERDUE by ${Math.abs(renewalDays)} days`:
+    renewalDays===0?'🔔 Renewal review due TODAY':`🔔 Renewal review due in ${renewalDays} days (${form.nextRenewalDate})`
+
   const curSymbol = form.currency === 'USD' ? '$' : '₹'
 
   const F = {
@@ -288,6 +334,12 @@ export default function RentalAgreement() {
               </div>
             )}
 
+            {showRenewalBanner && (
+              <div style={{background:`${renewalColor}18`,border:`1px solid ${renewalColor}55`,borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',color:renewalColor,fontSize:'0.85rem',fontWeight:'600'}}>
+                {renewalMsg}
+              </div>
+            )}
+
             <div className="card-section-label">{prop?.name?.toUpperCase()} · {prop?.location}</div>
             <div className="card">
               {/* Country + Currency */}
@@ -360,6 +412,48 @@ export default function RentalAgreement() {
                 </div>
               </div>
               {duration && <div style={{color:'#C8903A',fontSize:'0.75rem',marginTop:'4px',opacity:0.8}}>Duration: {duration} months</div>}
+
+              <div className="grid-2" style={{marginTop:'4px'}}>
+                <div>
+                  <label style={F.label}>NEXT RENEWAL DATE</label>
+                  <input type="date" value={form.nextRenewalDate} onChange={e=>setField('nextRenewalDate',e.target.value)} style={F.input}/>
+                  <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>Defaults to lease end if left blank — drives renewal reminders.</div>
+                </div>
+                <div>
+                  <label style={F.label}>EARLY TERMINATION DATE</label>
+                  <input type="date" value={form.earlyTerminationDate} disabled={!form.earlyTerminated}
+                    onChange={e=>setField('earlyTerminationDate',e.target.value)}
+                    style={{...F.input, opacity: form.earlyTerminated ? 1 : 0.4}}/>
+                </div>
+              </div>
+              <label style={{display:'flex',alignItems:'center',gap:'8px',marginTop:'10px',cursor:'pointer'}}>
+                <input type="checkbox" checked={form.earlyTerminated}
+                  onChange={e=>setField('earlyTerminated', e.target.checked)} style={{width:16,height:16}}/>
+                <span style={{fontSize:'0.82rem',color: form.earlyTerminated ? '#EF4444' : 'var(--text-dim)'}}>
+                  Lease was terminated early
+                </span>
+              </label>
+
+              <label style={F.label}>DOCUMENTS ON FILE</label>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'4px'}}>
+                {[
+                  { key:'docContractSigned', label:'📝 Contract signed' },
+                  { key:'docIdCaptured',     label:'🪪 ID captured' },
+                  { key:'docMoveIn',         label:'🔑 Move-in doc' },
+                  { key:'docMoveOut',        label:'📦 Move-out doc' },
+                  { key:'docDamageReport',   label:'⚠️ Damage report' },
+                ].map(item => (
+                  <label key={item.key} onClick={()=>handleDocToggle(item.key, form[item.key])} style={{
+                    display:'flex', alignItems:'center', gap:'8px', cursor:'pointer',
+                    padding:'8px 10px', borderRadius:'8px',
+                    background: form[item.key] ? 'rgba(52,168,83,0.1)' : 'var(--dark-input)',
+                    border: `1px solid ${form[item.key] ? 'rgba(52,168,83,0.35)' : 'var(--border-dim)'}`,
+                  }}>
+                    <input type="checkbox" checked={form[item.key]} onChange={()=>{}} style={{width:15,height:15,flexShrink:0}}/>
+                    <span style={{fontSize:'0.78rem', color: form[item.key] ? '#34A853' : 'var(--text-dim)'}}>{item.label}</span>
+                  </label>
+                ))}
+              </div>
 
               <label style={F.label}>GOOGLE DRIVE FOLDER PATH</label>
               <input value={form.driveFolderUrl} onChange={e=>setField('driveFolderUrl',e.target.value)}

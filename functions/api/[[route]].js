@@ -2726,11 +2726,99 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { txnId, deleted: true } })
       }
 
+      // RENTAL AGREEMENT — create or update a tenant's lease record on rental_props.
+      // This action was called by RentalAgreement.jsx's Save button and Add-Property
+      // flow, but had NO backend handler at all — every save silently did nothing.
+      if (action === 'saveRentalAgreement') {
+        const d = body
+        if (!d.propId) return err('propId required')
+
+        const existing = await DB.prepare(`SELECT prop_id, next_renewal_date FROM rental_props WHERE prop_id = ?`).bind(d.propId).first()
+
+        // next_renewal_date: if the caller didn't explicitly pass one, default it to
+        // leaseEnd (the natural "renew or vacate" checkpoint). Once set, later saves
+        // that omit nextRenewalDate should not silently null it back out — preserve
+        // the existing value unless a new one is explicitly supplied.
+        const nextRenewal = d.nextRenewalDate !== undefined
+          ? (d.nextRenewalDate || null)
+          : (existing ? existing.next_renewal_date : (d.leaseEnd || null))
+
+        const earlyTerminated     = d.earlyTerminated ? 1 : 0
+        const earlyTerminationDt  = earlyTerminated ? (d.earlyTerminationDate || null) : null
+
+        const docFlags = {
+          doc_contract_signed: d.docContractSigned ? 1 : 0,
+          doc_id_captured:     d.docIdCaptured     ? 1 : 0,
+          doc_move_in:         d.docMoveIn         ? 1 : 0,
+          doc_move_out:        d.docMoveOut        ? 1 : 0,
+          doc_damage_report:   d.docDamageReport   ? 1 : 0,
+        }
+
+        if (existing) {
+          await DB.prepare(`
+            UPDATE rental_props SET
+              name = COALESCE(?, name), location = COALESCE(?, location),
+              country = ?, currency = ?,
+              tenant_name = ?, tenant_email = ?, tenant_phone = ?,
+              deposit = ?, agreed_rent = ?, maintenance_fee = ?,
+              lease_start = ?, lease_end = ?, notes = ?,
+              drive_folder_url = ?, next_renewal_date = ?,
+              early_terminated = ?, early_termination_date = ?,
+              doc_contract_signed = ?, doc_id_captured = ?, doc_move_in = ?, doc_move_out = ?, doc_damage_report = ?,
+              updated_by = ?, updated_at = ?
+            WHERE prop_id = ?
+          `).bind(
+            d.propName || null, d.location || null,
+            d.country || 'IN', d.currency || 'INR',
+            d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null,
+            parseFloat(d.deposit) || 0, parseFloat(d.agreedRent) || 0, parseFloat(d.maintenance) || 0,
+            d.leaseStart || null, d.leaseEnd || null, d.notes || null,
+            d.driveFolderUrl || null, nextRenewal,
+            earlyTerminated, earlyTerminationDt,
+            docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
+            actor, now(), d.propId
+          ).run()
+        } else {
+          await DB.prepare(`
+            INSERT INTO rental_props (
+              prop_id, name, location, country, currency,
+              tenant_name, tenant_email, tenant_phone,
+              deposit, agreed_rent, maintenance_fee,
+              lease_start, lease_end, notes, drive_folder_url, status,
+              next_renewal_date, early_terminated, early_termination_date,
+              doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              created_by, updated_by, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
+            d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null,
+            parseFloat(d.deposit) || 0, parseFloat(d.agreedRent) || 0, parseFloat(d.maintenance) || 0,
+            d.leaseStart || null, d.leaseEnd || null, d.notes || null, d.driveFolderUrl || null, 'Active',
+            nextRenewal, earlyTerminated, earlyTerminationDt,
+            docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
+            actor, actor, now(), now()
+          ).run()
+        }
+
+        return json({ success: true, data: { propId: d.propId } })
+      }
+
       if (action === 'updateTenantStatus') {
         const { propId, status } = body; if (!propId || !status) return err('propId and status required')
         if (!['Active','Notice Given','Delinquent','Evicted','Runaway','Completed'].includes(status)) return err('Invalid status')
         await DB.prepare(`UPDATE rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`).bind(status, actor, now(), propId).run()
         return json({ success: true, data: { propId, status } })
+      }
+
+      // Instant single-checkbox toggle for the document checklist, so ticking a box
+      // doesn't require resubmitting the whole tenant form.
+      if (action === 'updateRentalDocChecklist') {
+        const { propId, field, value } = body
+        const allowed = ['doc_contract_signed','doc_id_captured','doc_move_in','doc_move_out','doc_damage_report']
+        if (!propId || !allowed.includes(field)) return err('propId and a valid field required')
+        await DB.prepare(`UPDATE rental_props SET ${field} = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`)
+          .bind(value ? 1 : 0, actor, now(), propId).run()
+        return json({ success: true, data: { propId, field, value: !!value } })
       }
 
       if (action === 'savePropertyDetails') {

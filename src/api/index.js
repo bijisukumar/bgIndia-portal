@@ -137,7 +137,6 @@ export const api = {
 
   getManagerQuickInfo:  ()       => get('getManagerQuickInfo'),
   getCoconutMarketPrice: ()      => get('getCoconutMarketPrice'),
-  getEstateDashboard:      (estate) => get('getEstateDashboard', { estate }),
   getEstateHighlights:        (estate) => get('getEstateHighlights', { estate }),
   getIrrigationZoneHealth:    (estate) => get('getIrrigationZoneHealth', { estate }),
   saveIrrigationZoneLog:      (data)   => post('saveIrrigationZoneLog', data),
@@ -147,8 +146,6 @@ export const api = {
   getMangoHarvests:        (estate) => get('getMangoHarvests', { estate }),
   getIrrigationHistory:    (estate) => get('getIrrigationHistory', { estate }),
   getEstateContacts:       (estate) => get('getEstateContacts', { estate }),
-  getEstateTransactions:   (estate) => get('getEstateTransactions', { estate }),
-  deleteEstateTransaction: (data)   => post('deleteEstateTransaction', data),
   logIrrigation:        (data)   => post('logIrrigation', data),
 
   // ── COCONUT ──────────────────────────────────────────────
@@ -160,9 +157,11 @@ export const api = {
   getRubberHarvests:    (year)   => get('getRubberHarvests', { year }),
 
   // ── ESTATES ──────────────────────────────────────────────
-  saveEstateTransaction:(data)   => post('saveEstateTransaction', data),
-  getEstateTransactions:(estate, y) => get('getEstateTransactions', { estate, year: y || new Date().getFullYear() }),
-  getEstateDashboard:   (year)   => get('getEstateDashboard', { year }),
+  saveEstateTransaction:  (data)   => post('saveEstateTransaction', data),
+  getEstateTransactions:  (estate) => get('getEstateTransactions', { estate }),
+  deleteEstateTransaction:(data)   => post('deleteEstateTransaction', data),
+  getEstateDashboard:     (estate) => get('getEstateDashboard', { estate }),
+
 
   // ── DASHBOARDS ───────────────────────────────────────────
   getVillaDashboard:    (vId, y) => get('getVillaDashboard', { villaId: vId, year: y }),

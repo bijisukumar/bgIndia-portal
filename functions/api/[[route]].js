@@ -1340,6 +1340,16 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // ESTATE LEDGER TRANSACTIONS — full history list (Income/Expense tab)
+      if (action === 'getEstateTransactions') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        const { results } = await ActiveDB.prepare(
+          `SELECT txn_id, estate, type, date, category, amount, paid_to, description, created_at
+           FROM estate_transactions WHERE estate = ? ORDER BY date DESC, created_at DESC LIMIT 500`
+        ).bind(estateId).all()
+        return json({ success: true, data: results })
+      }
+
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'

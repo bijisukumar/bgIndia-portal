@@ -162,6 +162,11 @@ function PendingReviewBlock() {
               <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
                 {fmt(p.checkIn)} · {p.nights || 1}N · {p.phone || p.email || ''}
               </div>
+              {p.bookedByName && (
+                <div style={{ fontSize: '0.68rem', color: '#8B5CF6', marginTop: '2px' }}>
+                  🔗 Booked by {p.bookedByName}
+                </div>
+              )}
             </div>
             <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px',
               borderRadius: '10px', background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
@@ -682,6 +687,11 @@ function NeedsAttentionBlock() {
             <div style={{ fontSize:'0.72rem', color:'#9AA5B4', marginTop:'2px' }}>
               Check-in: {item.checkIn} · Pending your review
             </div>
+            {item.bookedByName && (
+              <div style={{ fontSize:'0.68rem', color:'#8B5CF6', marginTop:'2px' }}>
+                🔗 Booked by {item.bookedByName}
+              </div>
+            )}
           </div>
           <span style={{ color:'#EF4444' }}>›</span>
         </div>

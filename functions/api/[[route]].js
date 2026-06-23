@@ -1117,7 +1117,8 @@ export async function onRequest(ctx) {
                   request_early_checkin, request_late_checkout,
                   request_breakfast, breakfast_choice, request_cab,
                   request_extra_beds, extra_beds_count,
-                  nationality, purpose_of_visit, mode_of_transport, eta
+                  nationality, purpose_of_visit, mode_of_transport, eta,
+                  booked_by_guest_id, booked_by_name
            FROM stays
            WHERE villa_id = ?
              AND status NOT IN ('closed','cancelled')
@@ -1489,7 +1490,7 @@ export async function onRequest(ctx) {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, created_at,
-                  folder_created, folder_created_at
+                  folder_created, folder_created_at, booked_by_name
            FROM stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
@@ -1507,6 +1508,7 @@ export async function onRequest(ctx) {
           createdAt:       r.created_at,
           folderCreated:   r.folder_created || 0,
           folderCreatedAt: r.folder_created_at || null,
+          bookedByName:    r.booked_by_name || null,
         })) })
       }
 

@@ -191,14 +191,14 @@ export default function KitchenIncidentals() {
                 borderBottom: i < CHECKOUT_ITEMS.length - 1 ? '1px solid var(--border-dim)' : 'none',
                 alignItems: 'center', gap: '8px',
               }}>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ color: 'var(--text)', fontSize: '0.88rem', fontWeight: '500' }}>{item.name}</div>
-                  <div style={{ color: '#5C7080', fontSize: '0.72rem' }}>
-                    ₹{price} / {item.unit}
-                    {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', marginLeft: '8px' }}>= ₹{sub.toLocaleString('en-IN')}</span>}
+                  <div style={{ color: '#5C7080', fontSize: '0.72rem', display: 'flex', flexWrap: 'wrap', columnGap: '6px', rowGap: '2px' }}>
+                    <span style={{ whiteSpace: 'nowrap' }}>₹{price} / {item.unit}</span>
+                    {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', whiteSpace: 'nowrap' }}>= ₹{sub.toLocaleString('en-IN')}</span>}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                   <button onClick={() => setQty(item.id, qty - 1)}
                     style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>−</button>
                   <span style={{ color: 'var(--gold)', fontWeight: '700', minWidth: '22px', textAlign: 'center', fontSize: '0.95rem' }}>{qty}</span>

@@ -153,8 +153,8 @@ export const api = {
   getCoconutHarvests:   (year)   => get('getCoconutHarvests', { year }),
 
   // ── RUBBER ───────────────────────────────────────────────
-  saveRubberHarvest:    (data)   => post('saveRubberHarvest', data),
-  getRubberHarvests:    (year)   => get('getRubberHarvests', { year }),
+  saveRubberHarvest:    (data)        => post('saveRubberHarvest', data),
+  getRubberHarvests:    (year, estate) => get('getRubberHarvests', { year, estate: estate || 'pavutumuri' }),
 
   // ── ESTATES ──────────────────────────────────────────────
   saveEstateTransaction:  (data)   => post('saveEstateTransaction', data),

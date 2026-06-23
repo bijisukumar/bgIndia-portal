@@ -4,6 +4,7 @@ export default function PavutumuriHub() {
   const rows=[
     {icon:'🌿',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Income / expense',sub:'Monthly ledger',action:()=>navigate('/pavutumuri/ledger')},
     {icon:'🌳',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Rubber tracker',sub:'Harvest · tapping log',action:()=>navigate('/pavutumuri/rubber')},
+    {icon:'📊',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Dashboard',sub:'Harvest history · income · P&L',action:()=>navigate('/pavutumuri/dashboard')},
   ]
   return (
     <div className="screen">

@@ -163,9 +163,8 @@ const TESTS = [
   {
     id: 16, name: 'Get Rubber Harvests', group: 'Estate',
     fn: async () => {
-      const h = await api.getRubberHarvests(new Date().getFullYear())
-      if (!Array.isArray(h)) throw new Error('Not an array')
-      return `${h.length} rubber entry(s) this year ✓`
+      const d = await api.getRubberHarvests(new Date().getFullYear())
+      return `${d?.totalHarvests || 0} rubber entry(s) this year ✓`
     }
   },
 ]

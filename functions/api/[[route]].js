@@ -941,11 +941,31 @@ export async function onRequest(ctx) {
 
       // RUBBER HARVESTS — Get History List
       if (action === 'getRubberHarvests') {
-        const year = url.searchParams.get('year') || new Date().getFullYear()
-        const { results } = await ActiveDB.prepare(
-          `SELECT * FROM rubber_harvests WHERE harvest_date LIKE ? ORDER BY harvest_date DESC`
-        ).bind(`${year}%`).all()
-        return json({ success: true, data: results })
+        const year     = url.searchParams.get('year')
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        let query = `SELECT * FROM rubber_harvests WHERE estate_id = ?`
+        const binds = [estateId]
+        if (year && year !== 'all') { query += ` AND harvest_date LIKE ?`; binds.push(`${year}%`) }
+        query += ` ORDER BY harvest_date DESC`
+        const { results } = await ActiveDB.prepare(query).bind(...binds).all()
+
+        const totalHarvests = results.length
+        const totalWeightKg = results.reduce((s, r) => s + (r.weight_kg || 0), 0)
+        const grossRevenue  = results.reduce((s, r) => s + (r.gross     || 0), 0)
+        const totalExpense  = results.reduce((s, r) => s + (r.expense   || 0), 0)
+        const netIncome     = results.reduce((s, r) => s + (r.net       || 0), 0)
+        const harvests = results.map(r => ({
+          date:         r.harvest_date,
+          monthShort:   r.harvest_date ? new Date(r.harvest_date).toLocaleString('en-IN', { month: 'short' }) : '—',
+          year:         r.harvest_date ? new Date(r.harvest_date).getFullYear() : null,
+          weightKg:     r.weight_kg    || 0,
+          pricePerKg:   r.price_per_kg || 0,
+          gross:        r.gross        || 0,
+          expense:      r.expense      || 0,
+          net:          r.net          || 0,
+          notes:        r.notes        || '',
+        }))
+        return json({ success: true, data: { totalHarvests, totalWeightKg, grossRevenue, totalExpense, netIncome, harvests } })
       }
 
       if (action === 'getInventory') {
@@ -1448,14 +1468,25 @@ export async function onRequest(ctx) {
           mangoRevenue = mangoData?.total || 0
         } catch(e) {}
 
+        let rubberHarvests = []
+        try {
+          const { results: rh } = await ActiveDB.prepare(
+            `SELECT harvest_date, gross, expense, net FROM rubber_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
+          ).bind(estateId, cutoffStr).all()
+          rubberHarvests = rh
+        } catch(e) {}
+
         const harvestIncome  = harvests.reduce((s, r) => s + (r.total_earnings || 0), 0)
         const harvestExpense = harvests.reduce((s, r) => s + (r.total_expense  || 0), 0)
+
+        const rubberIncome  = rubberHarvests.reduce((s, r) => s + (r.gross   || 0), 0)
+        const rubberExpense = rubberHarvests.reduce((s, r) => s + (r.expense || 0), 0)
 
         const txnIncome  = txns.filter(t => t.type === 'income' ).reduce((s,t) => s+(t.amount||0), 0)
         const txnExpense = txns.filter(t => t.type === 'expense').reduce((s,t) => s+(t.amount||0), 0)
 
-        const totalIncome  = harvestIncome  + txnIncome + mangoRevenue
-        const totalExpense = harvestExpense + txnExpense
+        const totalIncome  = harvestIncome  + txnIncome + mangoRevenue + rubberIncome
+        const totalExpense = harvestExpense + txnExpense + rubberExpense
         const netProfit    = totalIncome - totalExpense
 
         const expBreakdown = {}
@@ -1466,6 +1497,7 @@ export async function onRequest(ctx) {
           add('Tractor / tiling',  r.tractor_expense)
           add('Other (harvest)',   r.other_expense)
         })
+        if (rubberExpense > 0) expBreakdown['Rubber tapping'] = (expBreakdown['Rubber tapping']||0) + rubberExpense
         txns.filter(t => t.type === 'expense').forEach(t => { expBreakdown[t.category] = (expBreakdown[t.category]||0) + (t.amount||0) })
 
         const monthly = {}
@@ -1474,6 +1506,13 @@ export async function onRequest(ctx) {
           if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
           monthly[ym].income  += r.total_earnings || 0
           monthly[ym].expense += r.total_expense  || 0
+        })
+        rubberHarvests.forEach(r => {
+          if (!r.harvest_date) return
+          const ym = r.harvest_date.slice(0, 7)
+          if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0 }
+          monthly[ym].income  += r.gross   || 0
+          monthly[ym].expense += r.expense || 0
         })
         txns.forEach(t => {
           const ym = t.date.slice(0, 7)
@@ -1486,8 +1525,9 @@ export async function onRequest(ctx) {
           .sort((a,b) => b[0].localeCompare(a[0]))
           .map(([ym, v]) => ({ ym, ...v, net: v.income - v.expense }))
 
-        return json({ success: true, data: { totalIncome, totalExpense, netProfit, harvestCount: harvests.length, expBreakdown, monthly: monthlyArr } })
+        return json({ success: true, data: { totalIncome, totalExpense, netProfit, harvestCount: harvests.length + rubberHarvests.length, expBreakdown, monthly: monthlyArr } })
       }
+
 
       if (action === 'getCheckinLinks') {
         const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM checkin_links ORDER BY villa_id, partner`).all()
@@ -2284,13 +2324,42 @@ export async function onRequest(ctx) {
       // RUBBER HARVEST — Record entries (Mapped cleanly to exact layout)
       if (action === 'saveRubberHarvest') {
         const id = genId('RH')
-        const gross = (parseFloat(body.weightKg)||0) * (parseFloat(body.pricePerKg)||0)
-        const net   = gross - (parseFloat(body.expense)||0)
+        // RubberTracker.jsx sends: tappingDate, latexKg, pricePerKg, netKg, totalAmount,
+        // totalExpenses, netIncome, estate — NOT harvestDate/weightKg/expense/estateId.
+        const estateId    = body.estate || body.estateId || 'pavutumuri'
+        const harvestDate = body.harvestDate || body.tappingDate
+        const weightKg    = parseFloat(body.weightKg ?? body.netKg ?? body.latexKg) || 0
+        const pricePerKg  = parseFloat(body.pricePerKg) || 0
+        const expense     = parseFloat(body.expense ?? body.totalExpenses) || 0
+        if (!harvestDate) return err('harvestDate (tappingDate) required', 400)
+
+        const gross = (body.totalAmount != null ? parseFloat(body.totalAmount) : weightKg * pricePerKg) || 0
+        const net   = body.netIncome != null ? parseFloat(body.netIncome) : (gross - expense)
         await ActiveDB.prepare(`
           INSERT INTO rubber_harvests
             (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes, created_by, created_at, updated_by, updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        `).bind(id, body.estateId || 'pavutumuri', body.harvestDate, parseFloat(body.weightKg)||0, parseFloat(body.pricePerKg)||0, gross, parseFloat(body.expense)||0, net, body.notes||null, actor, now(), actor, now()).run()
+        `).bind(id, estateId, harvestDate, weightKg, pricePerKg, gross, expense, net, body.notes||null, actor, now(), actor, now()).run()
+
+        const rubberEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
+        sendAlert(env, `🌳 Estate360 — New rubber harvest: ₹${net.toLocaleString('en-IN')} net (${rubberEstateLabel})`, [
+          'A new rubber harvest entry was logged.',
+          '',
+          `Estate:       ${rubberEstateLabel}`,
+          `Tapping date: ${harvestDate}`,
+          `Tapper:       ${body.tapperName || '—'}`,
+          `Latex (kg):   ${weightKg}`,
+          `Price/kg:     ₹${pricePerKg.toLocaleString('en-IN')}`,
+          `Gross:        ₹${gross.toLocaleString('en-IN')}`,
+          `Expenses:     ₹${expense.toLocaleString('en-IN')}`,
+          `Net income:   ₹${net.toLocaleString('en-IN')}`,
+          `Notes:        ${body.notes || '—'}`,
+          `Harvest ID:   ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ])
+
         return json({ success: true, data: { harvestId: id } })
       }
 

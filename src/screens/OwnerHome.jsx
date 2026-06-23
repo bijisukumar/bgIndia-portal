@@ -805,8 +805,16 @@ export default function OwnerHome() {
         {/* Review Chase — past-checkout stays with no review yet */}
         <ReviewChaseBlock />
 
-        {/* Manual Trigger — only visible when sheet guests have no folder */}
-        <ManualTriggerBlock />
+        {/* Manual Trigger — DISABLED: this block fetched a Google Sheet CSV
+            export directly from the browser for manual onboarding fallback.
+            That sheet is no longer publicly shared (now redirects to a Google
+            login page), so every page load threw a CORS error + "Failed to
+            fetch" into the console. Google Sheets isn't part of the workflow
+            anymore (replaced by the Enquiry/CRM flow), so disabling the
+            render rather than fixing the broken link. The function itself
+            (ManualTriggerBlock, below) is left intact in case this is ever
+            revisited — just not rendered. */}
+        {/* <ManualTriggerBlock /> */}
 
         {/* Check-in Links — always visible for owner */}
         <CheckinLinksBlock />

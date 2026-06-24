@@ -207,6 +207,8 @@ export const api = {
 
   // ── GUEST ENQUIRY MANAGEMENT (CRM) ───────────────────────
   getEnquiries:         (vId, status) => get('getEnquiries', status ? { villaId: vId, status } : { villaId: vId }),
+  getStaleEnquiries:    ()            => get('getStaleEnquiries'),
+  markReminderSent:     (data)        => post('markReminderSent', data),
   getEnquiryDetail:     (enquiryId)   => get('getEnquiryDetail', { enquiryId }),
   findGuestMatch:       (phone, email) => get('findGuestMatch', { phone: phone || '', email: email || '' }),
   saveEnquiry:          (data)        => post('saveEnquiry', data),

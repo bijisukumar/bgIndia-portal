@@ -625,13 +625,107 @@ function updateStayField(stayId, field, value) {
 }
 
 // ============================================================
-// PART 6: TRIGGER SETUP — run this function once manually
+// PART 7: ENQUIRY FOLLOW-UP REMINDERS (2-day / 5-day)
 // ============================================================
+// Runs once a day. Asks the Worker for any active (non-confirmed/
+// lost/cancelled) enquiry that's gone 2+ or 5+ days without contact
+// and hasn't already been emailed for that exact threshold. Sends one
+// owner email per stale enquiry, with a ready-to-tap WhatsApp link —
+// most mail clients auto-linkify a bare https://wa.me/... URL, so this
+// stays plain text like every other email in this script rather than
+// introducing HTML emails as a one-off.
+//
+// Skips sending nothing as silently as it skips sending duplicates:
+// if getStaleEnquiries returns zero rows, this just logs and exits —
+// no email noise on a quiet day.
+
+function sendEnquiryFollowUpReminders() {
+  var resp = callWorker('GET', 'getStaleEnquiries', {});
+  if (!resp || !resp.success) {
+    Logger.log('sendEnquiryFollowUpReminders: getStaleEnquiries failed: ' + JSON.stringify(resp));
+    return;
+  }
+
+  var rows = resp.data || [];
+  Logger.log('sendEnquiryFollowUpReminders: ' + rows.length + ' stale enquiry(ies) found');
+
+  rows.forEach(function(enq) {
+    var days = enq.days_since_contact;
+    // Prefer the 5-day threshold if both qualify (a guest stale enough for
+    // 5 days has obviously also passed 2) — but only send ONE email per
+    // enquiry per run, and only for a threshold not already sent.
+    var threshold = (days >= 5 && !enq.reminder_5day_sent_at) ? '5day'
+                   : (days >= 2 && !enq.reminder_2day_sent_at) ? '2day'
+                   : null;
+    if (!threshold) return;  // shouldn't happen given the query, but guard anyway
+
+    var waLink = buildEnquiryWaLink(enq.phone, enq.guest_name);
+    var stayInfo = (enq.checkin_date && enq.checkout_date)
+      ? enq.checkin_date + ' \u2192 ' + enq.checkout_date + ' \u00b7 ' + (enq.nights || 0) + 'n \u00b7 ' + (enq.guests_count || 1) + 'p'
+      : 'Dates not yet set';
+    var amount = enq.final_offer_amount || enq.quote_amount || 0;
+
+    var subjectLabel = threshold === '5day' ? '5+ days, no response' : '2+ days, no response';
+    var subject = '\ud83d\udd14 Enquiry follow-up: ' + enq.guest_name + ' \u2014 ' + subjectLabel;
+
+    var body =
+      'This enquiry has gone ' + days + ' day' + (days === 1 ? '' : 's') + ' without any contact logged.\n\n' +
+      'GUEST\n' +
+      '  Name    :  ' + enq.guest_name + '\n' +
+      (enq.phone ? '  Phone   :  ' + enq.phone + '\n' : '') +
+      (enq.email ? '  Email   :  ' + enq.email + '\n' : '') +
+      '  Source  :  ' + (enq.source || '\u2014') + '\n' +
+      '  Status  :  ' + (enq.status || '\u2014') + '\n\n' +
+      'STAY\n' +
+      '  ' + stayInfo + '\n' +
+      (amount ? '  Quoted/offered: \u20b9' + Math.round(amount).toLocaleString('en-IN') + '\n' : '') +
+      (enq.notes ? '\nNOTES\n  ' + enq.notes + '\n' : '') +
+      '\n------------------------------------------------------------\n' +
+      'Tap to message them on WhatsApp (asks if they had any\n' +
+      'questions, or if they\'ve decided to go another way \u2014 either\n' +
+      'way, we\'d appreciate knowing):\n\n' +
+      (waLink || '(no phone number on file \u2014 reach out by email instead)') +
+      '\n------------------------------------------------------------\n\n' +
+      'Quicker responses tend to convert better \u2014 worth a check-in.';
+
+    try {
+      sendEmail(subject, body);
+      callWorker('POST', 'markReminderSent', { enquiryId: enq.enquiry_id, threshold: threshold });
+      Logger.log('Sent ' + threshold + ' reminder for ' + enq.guest_name + ' (' + enq.enquiry_id + ')');
+    } catch(e) {
+      Logger.log('sendEnquiryFollowUpReminders: failed for ' + enq.enquiry_id + ': ' + e.message);
+    }
+  });
+}
+
+// Builds a wa.me link from a raw phone string. Only assumes India's '91'
+// country code for a bare <=10-digit number with no '+' in the original
+// string — anything that already looks international (has a '+', or is
+// already longer than 10 digits) is left untouched. Blindly prepending
+// '91' onto an already-international number (e.g. a Qatar guest's
+// +974...) would corrupt it into a wrong, undeliverable number.
+function buildEnquiryWaLink(rawPhone, guestName) {
+  var raw = String(rawPhone || '').trim();
+  if (!raw) return null;
+  var digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+  var looksInternational = raw.indexOf('+') >= 0 || digits.length > 10;
+  var num = looksInternational ? digits : ('91' + digits);
+  var firstName = String(guestName || '').split(' ')[0] || 'there';
+  var msg = encodeURIComponent(
+    'Hi ' + firstName + ', just checking in \u2014 were you able to look over the details for your stay? ' +
+    'Happy to answer any questions you have. And if you\'ve decided to go a different way, no worries at all, ' +
+    'just let us know so we can keep things updated on our end. Thank you! \ud83d\ude4f'
+  );
+  return 'https://wa.me/' + num + '?text=' + msg;
+}
+
+
 function setupTriggers() {
   // Remove existing poller triggers to avoid duplicates
   ScriptApp.getProjectTriggers().forEach(function(t) {
     var fn = t.getHandlerFunction();
-    if (['pollGmail', 'pollDriveCheckIns'].indexOf(fn) >= 0) {
+    if (['pollGmail', 'pollDriveCheckIns', 'sendEnquiryFollowUpReminders'].indexOf(fn) >= 0) {
       ScriptApp.deleteTrigger(t);
       Logger.log('Removed existing trigger: ' + fn);
     }
@@ -649,7 +743,16 @@ function setupTriggers() {
     .everyMinutes(10)
     .create();
 
-  Logger.log('✅ Triggers set up: pollGmail (5min) + pollDriveCheckIns (10min)');
+  // Enquiry follow-up reminders (2-day / 5-day stale check): once daily.
+  // Runs at 9am in the script's timezone (Triggers UI shows/lets you
+  // adjust this — Apps Script picks a window, not an exact minute).
+  ScriptApp.newTrigger('sendEnquiryFollowUpReminders')
+    .timeBased()
+    .everyDays(1)
+    .atHour(9)
+    .create();
+
+  Logger.log('✅ Triggers set up: pollGmail (5min) + pollDriveCheckIns (10min) + sendEnquiryFollowUpReminders (daily ~9am)');
   Logger.log('Also set up onFormSubmit manually: Triggers → Add Trigger → onGuestFormSubmit → From spreadsheet → On form submit');
 }
 

@@ -1655,6 +1655,41 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // Active (non-terminal) enquiries that have gone quiet — used by the daily
+      // Apps Script run to decide who needs a 2-day or 5-day follow-up reminder
+      // emailed to the owner. Excludes anything already emailed for that exact
+      // threshold (reminder_Nday_sent_at IS NOT NULL), so the script can call
+      // this every day without re-sending duplicates — markReminderSent clears
+      // that once the email goes out, and logCommunication clears it again on
+      // any fresh contact, restarting the clock.
+      if (action === 'getStaleEnquiries') {
+        const { results } = await DB.prepare(`
+          SELECT enquiry_id, guest_name, phone, email, source, checkin_date, checkout_date,
+                 nights, guests_count, status, quote_amount, final_offer_amount, notes,
+                 date_received, last_contact_date, reminder_2day_sent_at, reminder_5day_sent_at,
+                 CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) AS days_since_contact
+          FROM enquiries
+          WHERE status NOT IN ('confirmed','lost','cancelled')
+            AND (
+              (CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) >= 2 AND reminder_2day_sent_at IS NULL)
+              OR
+              (CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) >= 5 AND reminder_5day_sent_at IS NULL)
+            )
+          ORDER BY days_since_contact DESC
+        `).all()
+        return json({ success: true, data: results })
+      }
+
+      // Mark a 2-day or 5-day reminder as sent, so getStaleEnquiries won't
+      // return this enquiry again for the same threshold tomorrow.
+      if (action === 'markReminderSent') {
+        const { enquiryId, threshold } = body
+        if (!enquiryId || !['2day','5day'].includes(threshold)) return err('enquiryId and threshold (2day|5day) required')
+        const col = threshold === '2day' ? 'reminder_2day_sent_at' : 'reminder_5day_sent_at'
+        await DB.prepare(`UPDATE enquiries SET ${col} = ? WHERE enquiry_id = ?`).bind(now(), enquiryId).run()
+        return json({ success: true })
+      }
+
       // Single enquiry + its communication timeline, for the detail screen
       if (action === 'getEnquiryDetail') {
         const enquiryId = url.searchParams.get('enquiryId') || ''
@@ -1877,6 +1912,9 @@ export async function onRequest(ctx) {
         if (body.status)      { updates.push('status = ?');            vals.push(body.status) }
         if (body.followUpDue) { updates.push('follow_up_due = ?');      vals.push(body.followUpDue) }
         updates.push('last_contact_date = ?'); vals.push(now())
+        // Any fresh contact resets the staleness clock — clear prior reminder
+        // flags so the 2-day/5-day emails can fire again on the next gap.
+        updates.push('reminder_2day_sent_at = NULL, reminder_5day_sent_at = NULL')
         updates.push('updated_by = ?, updated_at = ?'); vals.push(actor, now())
 
         await DB.prepare(`UPDATE enquiries SET ${updates.join(', ')} WHERE enquiry_id = ?`)

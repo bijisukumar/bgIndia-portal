@@ -640,9 +640,15 @@ function updateStayField(stayId, field, value) {
 // no email noise on a quiet day.
 
 function sendEnquiryFollowUpReminders() {
-  var resp = callWorker('GET', 'getStaleEnquiries', {});
+  var resp = callWorkerAuth('GET', 'getStaleEnquiries', {});
   if (!resp || !resp.success) {
     Logger.log('sendEnquiryFollowUpReminders: getStaleEnquiries failed: ' + JSON.stringify(resp));
+    if (!resp) {
+      sendEmail('⚠️ Enquiry reminders — Worker call failed',
+        'getStaleEnquiries returned nothing. This usually means the SYSTEM_TOKEN ' +
+        'Script Property is missing or wrong. Check Project Settings → Script ' +
+        'Properties → SYSTEM_TOKEN matches the value in Cloudflare exactly.');
+    }
     return;
   }
 
@@ -690,12 +696,61 @@ function sendEnquiryFollowUpReminders() {
 
     try {
       sendEmail(subject, body);
-      callWorker('POST', 'markReminderSent', { enquiryId: enq.enquiry_id, threshold: threshold });
+      var markResp = callWorkerAuth('POST', 'markReminderSent', { enquiryId: enq.enquiry_id, threshold: threshold });
+      if (!markResp || !markResp.success) {
+        Logger.log('WARNING: markReminderSent failed for ' + enq.enquiry_id + ' — this enquiry may get re-emailed tomorrow: ' + JSON.stringify(markResp));
+      }
       Logger.log('Sent ' + threshold + ' reminder for ' + enq.guest_name + ' (' + enq.enquiry_id + ')');
     } catch(e) {
       Logger.log('sendEnquiryFollowUpReminders: failed for ' + enq.enquiry_id + ': ' + e.message);
     }
   });
+}
+
+// Dedicated, correctly-authenticated Worker call for the reminder feature.
+// The ambient callWorker() in this script sends 'X-Actor: auto' with NO
+// Authorization header — the Worker requires a Bearer token on every
+// action (confirmed by checking functions/api/[[route]].js directly), so
+// that header is silently rejected. Rather than touch the shared
+// callWorker() and risk affecting pollGmail/pollDriveCheckIns/etc, this
+// reminder feature uses its own call that reads SYSTEM_TOKEN from this
+// script's own Project Settings → Script Properties.
+//
+// ONE-TIME SETUP REQUIRED: Project Settings (gear icon, left sidebar) →
+// Script Properties → Add property → key: SYSTEM_TOKEN, value: the exact
+// same value set in Cloudflare Pages → bgindia-portal → Settings →
+// Environment variables → SYSTEM_TOKEN.
+function callWorkerAuth(method, action, payload) {
+  try {
+    var token = PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN');
+    if (!token) {
+      Logger.log('callWorkerAuth (' + action + '): SYSTEM_TOKEN Script Property not set');
+      return null;
+    }
+    var url  = WORKER_URL + '/' + action;
+    var opts = {
+      method:             method.toLowerCase(),
+      headers:            { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      muteHttpExceptions: true,
+    };
+    if (method === 'GET' && payload && Object.keys(payload).length > 0) {
+      var qs = Object.keys(payload).map(function(k) {
+        return encodeURIComponent(k) + '=' + encodeURIComponent(String(payload[k] || ''));
+      }).join('&');
+      url += '?' + qs;
+    }
+    if (method === 'POST') opts.payload = JSON.stringify(payload || {});
+    var httpResp = UrlFetchApp.fetch(url, opts);
+    var code = httpResp.getResponseCode();
+    if (code === 401) {
+      Logger.log('callWorkerAuth (' + action + '): 401 Unauthorized — SYSTEM_TOKEN does not match Cloudflare');
+      return null;
+    }
+    return JSON.parse(httpResp.getContentText());
+  } catch(e) {
+    Logger.log('callWorkerAuth (' + action + ') error: ' + e.message);
+    return null;
+  }
 }
 
 // Builds a wa.me link from a raw phone string. Only assumes India's '91'

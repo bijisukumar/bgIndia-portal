@@ -1690,6 +1690,27 @@ export async function onRequest(ctx) {
         return json({ success: true })
       }
 
+      // Generic structured logging endpoint for the Apps Script side — lets
+      // any scheduled function (not just enquiry reminders) write into the
+      // same processing_log table already used for check-in error logging,
+      // so execution history is visible from D1 Admin / the D1 console
+      // instead of only Apps Script's own Executions panel (which the
+      // owner doesn't check day to day, and which ages out after ~30 days).
+      if (action === 'logScriptEvent') {
+        const { source, eventType, note, refId } = body
+        if (!source || !note) return err('source and note required')
+        await DB.prepare(`
+          INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+        `).bind(
+          'LOG-' + Date.now() + '-' + Math.floor(Math.random()*1000),
+          eventType || 'info',
+          refId || ('script:' + source),
+          `[${source}] ${note}`,
+        ).run()
+        return json({ success: true })
+      }
+
       // Single enquiry + its communication timeline, for the detail screen
       if (action === 'getEnquiryDetail') {
         const enquiryId = url.searchParams.get('enquiryId') || ''

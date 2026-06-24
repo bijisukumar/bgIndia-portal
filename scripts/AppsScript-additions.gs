@@ -640,9 +640,10 @@ function updateStayField(stayId, field, value) {
 // no email noise on a quiet day.
 
 function sendEnquiryFollowUpReminders() {
-  var resp = callWorkerAuth('GET', 'getStaleEnquiries', {});
+  var resp = callWorkerWithSystemToken('GET', 'getStaleEnquiries', {});
   if (!resp || !resp.success) {
     Logger.log('sendEnquiryFollowUpReminders: getStaleEnquiries failed: ' + JSON.stringify(resp));
+    logScriptEvent('sendEnquiryFollowUpReminders', 'error', 'getStaleEnquiries failed or returned no response');
     if (!resp) {
       sendEmail('⚠️ Enquiry reminders — Worker call failed',
         'getStaleEnquiries returned nothing. This usually means the SYSTEM_TOKEN ' +
@@ -654,6 +655,7 @@ function sendEnquiryFollowUpReminders() {
 
   var rows = resp.data || [];
   Logger.log('sendEnquiryFollowUpReminders: ' + rows.length + ' stale enquiry(ies) found');
+  logScriptEvent('sendEnquiryFollowUpReminders', 'info', rows.length + ' stale enquiry(ies) found this run');
 
   rows.forEach(function(enq) {
     var days = enq.days_since_contact;
@@ -696,35 +698,57 @@ function sendEnquiryFollowUpReminders() {
 
     try {
       sendEmail(subject, body);
-      var markResp = callWorkerAuth('POST', 'markReminderSent', { enquiryId: enq.enquiry_id, threshold: threshold });
+      var markResp = callWorkerWithSystemToken('POST', 'markReminderSent', { enquiryId: enq.enquiry_id, threshold: threshold });
       if (!markResp || !markResp.success) {
         Logger.log('WARNING: markReminderSent failed for ' + enq.enquiry_id + ' — this enquiry may get re-emailed tomorrow: ' + JSON.stringify(markResp));
+        logScriptEvent('sendEnquiryFollowUpReminders', 'warning',
+          'markReminderSent failed for ' + enq.guest_name + ' (' + threshold + ') — may re-email tomorrow', enq.enquiry_id);
       }
       Logger.log('Sent ' + threshold + ' reminder for ' + enq.guest_name + ' (' + enq.enquiry_id + ')');
+      logScriptEvent('sendEnquiryFollowUpReminders', 'success',
+        'Sent ' + threshold + ' reminder for ' + enq.guest_name + ' (' + days + ' days since contact)', enq.enquiry_id);
     } catch(e) {
       Logger.log('sendEnquiryFollowUpReminders: failed for ' + enq.enquiry_id + ': ' + e.message);
+      logScriptEvent('sendEnquiryFollowUpReminders', 'error',
+        'Exception for ' + enq.guest_name + ': ' + e.message, enq.enquiry_id);
     }
   });
 }
 
-// Dedicated, correctly-authenticated Worker call for the reminder feature.
-// The ambient callWorker() in this script sends 'X-Actor: auto' with NO
-// Authorization header — the Worker requires a Bearer token on every
-// action (confirmed by checking functions/api/[[route]].js directly), so
-// that header is silently rejected. Rather than touch the shared
-// callWorker() and risk affecting pollGmail/pollDriveCheckIns/etc, this
-// reminder feature uses its own call that reads SYSTEM_TOKEN from this
-// script's own Project Settings → Script Properties.
+// Generic, correctly-authenticated Worker call — reads SYSTEM_TOKEN from
+// this script's own Script Properties and sends it as a Bearer token,
+// matching exactly what the Worker requires on every action.
+//
+// WHY THIS EXISTS SEPARATELY FROM callWorker(): the existing callWorker()
+// (PART 5 below) sends 'X-Actor: auto' with NO Authorization header at
+// all. Checked functions/api/[[route]].js directly — the Worker requires
+// 'Authorization: Bearer <SYSTEM_TOKEN>' on every action (only
+// submitGuestCheckIn and resolveCheckinLink are public exceptions), so
+// every callWorker() call has actually been getting silently rejected
+// (confirmed live: pollDriveCheckIns logged "no open stays or Worker
+// unavailable" on a real run — that's the message that fires specifically
+// when the Worker call fails, not when there's genuinely nothing to do).
+//
+// callWorkerWithSystemToken() is currently used ONLY by the enquiry
+// reminder feature below — it is NOT yet wired into pollGmail,
+// pollDriveCheckIns, or anything else. Once this has run cleanly for a
+// few days with no errors, it can replace callWorker() everywhere, but
+// that swap is deliberately NOT done yet — those other flows are at
+// least partially working today (e.g. check-in folder creation has been
+// confirmed to succeed), and changing their auth mechanism before
+// confirming this one is solid risks breaking something that currently
+// works some of the time, in exchange for fixing something that doesn't
+// work at all yet anyway.
 //
 // ONE-TIME SETUP REQUIRED: Project Settings (gear icon, left sidebar) →
 // Script Properties → Add property → key: SYSTEM_TOKEN, value: the exact
 // same value set in Cloudflare Pages → bgindia-portal → Settings →
 // Environment variables → SYSTEM_TOKEN.
-function callWorkerAuth(method, action, payload) {
+function callWorkerWithSystemToken(method, action, payload) {
   try {
     var token = PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN');
     if (!token) {
-      Logger.log('callWorkerAuth (' + action + '): SYSTEM_TOKEN Script Property not set');
+      Logger.log('callWorkerWithSystemToken (' + action + '): SYSTEM_TOKEN Script Property not set');
       return null;
     }
     var url  = WORKER_URL + '/' + action;
@@ -743,13 +767,35 @@ function callWorkerAuth(method, action, payload) {
     var httpResp = UrlFetchApp.fetch(url, opts);
     var code = httpResp.getResponseCode();
     if (code === 401) {
-      Logger.log('callWorkerAuth (' + action + '): 401 Unauthorized — SYSTEM_TOKEN does not match Cloudflare');
+      Logger.log('callWorkerWithSystemToken (' + action + '): 401 Unauthorized — SYSTEM_TOKEN does not match Cloudflare');
       return null;
     }
     return JSON.parse(httpResp.getContentText());
   } catch(e) {
-    Logger.log('callWorkerAuth (' + action + ') error: ' + e.message);
+    Logger.log('callWorkerWithSystemToken (' + action + ') error: ' + e.message);
     return null;
+  }
+}
+
+// Writes a structured log entry into the Worker's processing_log table
+// (D1) via the logScriptEvent action — same table already used for
+// check-in error logging, viewable from D1 Admin / the D1 console at any
+// time, rather than only from Apps Script's own Executions panel (which
+// the owner doesn't check day to day, and which ages out after ~30 days).
+// Best-effort: a logging failure should never break the calling function,
+// so this never throws — it just falls back to Logger.log if the Worker
+// call itself fails (e.g. same SYSTEM_TOKEN issue this whole thing exists
+// to guard against).
+function logScriptEvent(source, eventType, note, refId) {
+  try {
+    var resp = callWorkerWithSystemToken('POST', 'logScriptEvent', {
+      source: source, eventType: eventType, note: note, refId: refId || null,
+    });
+    if (!resp || !resp.success) {
+      Logger.log('logScriptEvent: failed to write to D1, falling back to Logger only — ' + JSON.stringify(resp));
+    }
+  } catch(e) {
+    Logger.log('logScriptEvent error: ' + e.message);
   }
 }
 

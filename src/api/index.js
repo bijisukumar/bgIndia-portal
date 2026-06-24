@@ -209,6 +209,7 @@ export const api = {
   getEnquiries:         (vId, status) => get('getEnquiries', status ? { villaId: vId, status } : { villaId: vId }),
   getStaleEnquiries:    ()            => get('getStaleEnquiries'),
   markReminderSent:     (data)        => post('markReminderSent', data),
+  logScriptEvent:       (data)        => post('logScriptEvent', data),
   getEnquiryDetail:     (enquiryId)   => get('getEnquiryDetail', { enquiryId }),
   findGuestMatch:       (phone, email) => get('findGuestMatch', { phone: phone || '', email: email || '' }),
   saveEnquiry:          (data)        => post('saveEnquiry', data),

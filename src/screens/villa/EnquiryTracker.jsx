@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { daysFromToday } from '../../utils/dates'
 
 export const SOURCES = [
   { id: 'website',     label: 'Website' },
@@ -34,12 +35,34 @@ export const STATUS_META = {
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 function fmtDate(d) { if (!d) return '—'; return String(d).slice(0, 10) }
 
+const TERMINAL_STATUSES = ['confirmed', 'lost', 'cancelled']
+
+function nudgeWaLink(enq) {
+  const raw = (enq.phone || '').trim()
+  if (!raw) return null
+  const digits = raw.replace(/\D/g, '')
+  if (!digits) return null
+  // Only assume India's country code for a bare 10-digit number with no
+  // '+' in the original string. Anything that already looks international
+  // (has a '+', or is already longer than 10 digits) is left as-is —
+  // blindly prepending '91' would corrupt a real international number
+  // (e.g. a Qatar guest's +974... becoming 91974...).
+  const looksInternational = raw.includes('+') || digits.length > 10
+  const num = looksInternational ? digits : `91${digits}`
+  const firstName = (enq.guest_name || '').split(' ')[0]
+  const msg = encodeURIComponent(
+    `Hi ${firstName}, just checking in — were you able to look over the details for your stay? Happy to answer any questions you have. And if you've decided to go a different way, no worries at all, just let us know so we can keep things updated on our end. Thank you! 🙏`
+  )
+  return `https://wa.me/${num}?text=${msg}`
+}
+
 export default function EnquiryTracker() {
   const navigate = useNavigate()
   const [enquiries, setEnquiries] = useState([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [nudging, setNudging] = useState(null)   // enquiry_id currently being nudged, for a brief disabled state
 
   useEffect(() => {
     let cancelled = false
@@ -48,6 +71,24 @@ export default function EnquiryTracker() {
     }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [])
+
+  async function handleNudge(e, enq) {
+    e.stopPropagation()   // don't trigger the card's own onClick (navigate to detail)
+    const link = nudgeWaLink(enq)
+    if (!link) { alert('No phone number on file for this enquiry.'); return }
+    window.open(link, '_blank')
+    setNudging(enq.enquiry_id)
+    try {
+      await api.logCommunication({ enquiryId: enq.enquiry_id, type: 'whatsapp', notes: 'Follow-up nudge sent (traction check-in)' })
+      setEnquiries(prev => prev.map(r => r.enquiry_id === enq.enquiry_id ? { ...r, last_contact_date: new Date().toISOString() } : r))
+    } catch (err) {
+      // WhatsApp already opened regardless — just the "days since contact" badge
+      // won't reset. Not worth blocking or alerting the user over; they already
+      // sent the message, this is just bookkeeping.
+    } finally {
+      setNudging(null)
+    }
+  }
 
   const filtered = useMemo(() => {
     let rows = enquiries
@@ -121,6 +162,9 @@ export default function EnquiryTracker() {
 
         {filtered.map(enq => {
           const meta = STATUS_META[enq.status] || STATUS_META.new
+          const isActive = !TERMINAL_STATUSES.includes(enq.status)
+          const sinceDate = enq.last_contact_date || enq.date_received
+          const daysSince = sinceDate ? -daysFromToday(sinceDate) : null   // negate: daysFromToday is future-positive
           return (
             <div key={enq.enquiry_id} onClick={() => navigate(`/owner/villa/enquiries/${enq.enquiry_id}`)}
               className="card" style={{ marginBottom: '10px', cursor: 'pointer', padding: '14px' }}>
@@ -153,6 +197,28 @@ export default function EnquiryTracker() {
               {enq.follow_up_due && enq.status !== 'confirmed' && enq.status !== 'lost' && (
                 <div style={{ marginTop: '6px', color: '#FB923C', fontSize: '0.68rem' }}>
                   ⏰ Follow up by {fmtDate(enq.follow_up_due)}
+                </div>
+              )}
+
+              {isActive && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-dim)' }}>
+                  {daysSince !== null ? (
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: '600',
+                      color: daysSince >= 3 ? '#EF4444' : daysSince >= 1 ? '#FB923C' : '#5C7080',
+                    }}>
+                      {daysSince <= 0 ? 'Contacted today' : `⏳ ${daysSince} day${daysSince === 1 ? '' : 's'} since last contact`}
+                    </span>
+                  ) : <span/>}
+                  <button onClick={(e) => handleNudge(e, enq)} disabled={nudging === enq.enquiry_id}
+                    style={{
+                      background: 'rgba(52,168,83,0.12)', border: '1px solid rgba(52,168,83,0.35)',
+                      borderRadius: '8px', color: '#34A853', fontWeight: '700', fontSize: '0.72rem',
+                      padding: '6px 12px', cursor: nudging === enq.enquiry_id ? 'default' : 'pointer',
+                      opacity: nudging === enq.enquiry_id ? 0.6 : 1, flexShrink: 0,
+                    }}>
+                    💬 Nudge
+                  </button>
                 </div>
               )}
             </div>

@@ -1680,37 +1680,6 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
-      // Mark a 2-day or 5-day reminder as sent, so getStaleEnquiries won't
-      // return this enquiry again for the same threshold tomorrow.
-      if (action === 'markReminderSent') {
-        const { enquiryId, threshold } = body
-        if (!enquiryId || !['2day','5day'].includes(threshold)) return err('enquiryId and threshold (2day|5day) required')
-        const col = threshold === '2day' ? 'reminder_2day_sent_at' : 'reminder_5day_sent_at'
-        await DB.prepare(`UPDATE enquiries SET ${col} = ? WHERE enquiry_id = ?`).bind(now(), enquiryId).run()
-        return json({ success: true })
-      }
-
-      // Generic structured logging endpoint for the Apps Script side — lets
-      // any scheduled function (not just enquiry reminders) write into the
-      // same processing_log table already used for check-in error logging,
-      // so execution history is visible from D1 Admin / the D1 console
-      // instead of only Apps Script's own Executions panel (which the
-      // owner doesn't check day to day, and which ages out after ~30 days).
-      if (action === 'logScriptEvent') {
-        const { source, eventType, note, refId } = body
-        if (!source || !note) return err('source and note required')
-        await DB.prepare(`
-          INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
-          VALUES (?, ?, ?, ?, datetime('now'))
-        `).bind(
-          'LOG-' + Date.now() + '-' + Math.floor(Math.random()*1000),
-          eventType || 'info',
-          refId || ('script:' + source),
-          `[${source}] ${note}`,
-        ).run()
-        return json({ success: true })
-      }
-
       // Single enquiry + its communication timeline, for the detail screen
       if (action === 'getEnquiryDetail') {
         const enquiryId = url.searchParams.get('enquiryId') || ''
@@ -1941,6 +1910,44 @@ export async function onRequest(ctx) {
         await DB.prepare(`UPDATE enquiries SET ${updates.join(', ')} WHERE enquiry_id = ?`)
           .bind(...vals, enquiryId).run()
 
+        return json({ success: true })
+      }
+
+      // Mark a 2-day or 5-day reminder as sent, so getStaleEnquiries won't
+      // return this enquiry again for the same threshold tomorrow.
+      // FIX (2026-06-24): this was originally placed in the GET block by
+      // mistake, where `body` doesn't exist — every call silently fell
+      // through to "Unknown POST action" even though the action existed
+      // in the file. Confirmed live via Apps Script execution log before
+      // moving it here.
+      if (action === 'markReminderSent') {
+        const { enquiryId, threshold } = body
+        if (!enquiryId || !['2day','5day'].includes(threshold)) return err('enquiryId and threshold (2day|5day) required')
+        const col = threshold === '2day' ? 'reminder_2day_sent_at' : 'reminder_5day_sent_at'
+        await DB.prepare(`UPDATE enquiries SET ${col} = ? WHERE enquiry_id = ?`).bind(now(), enquiryId).run()
+        return json({ success: true })
+      }
+
+      // Generic structured logging endpoint for the Apps Script side — lets
+      // any scheduled function (not just enquiry reminders) write into the
+      // same processing_log table already used for check-in error logging,
+      // so execution history is visible from D1 Admin / the D1 console
+      // instead of only Apps Script's own Executions panel (which the
+      // owner doesn't check day to day, and which ages out after ~30 days).
+      // Same misplacement bug as markReminderSent above — moved here for
+      // the same reason.
+      if (action === 'logScriptEvent') {
+        const { source, eventType, note, refId } = body
+        if (!source || !note) return err('source and note required')
+        await DB.prepare(`
+          INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+        `).bind(
+          'LOG-' + Date.now() + '-' + Math.floor(Math.random()*1000),
+          eventType || 'info',
+          refId || ('script:' + source),
+          `[${source}] ${note}`,
+        ).run()
         return json({ success: true })
       }
 

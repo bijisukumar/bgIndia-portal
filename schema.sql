@@ -423,3 +423,23 @@ CREATE TABLE IF NOT EXISTS bookings (
 CREATE INDEX IF NOT EXISTS idx_bookings_enquiry ON bookings(enquiry_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_guest   ON bookings(guest_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_stay    ON bookings(stay_id);
+
+-- ── PROCESSING LOG ────────────────────────────────────────────
+-- Generic error/event log written by the Worker. Two current writers:
+--   1. submitGuestCheckIn's crash handler (stay_id='unknown' on parse errors)
+--   2. logScriptEvent action (Apps Script execution logging — stay_id is
+--      either a real enquiry_id/stay_id, or 'script:<function name>')
+-- Confirmed missing in production via a sqlite_master check on 2026-06-24
+-- (zero rows returned) despite being referenced since at least the
+-- original submitGuestCheckIn implementation — created here and added to
+-- tracked schema so this gap isn't rediscovered again later.
+CREATE TABLE IF NOT EXISTS processing_log (
+  log_id     TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL DEFAULT 'info',   -- info|success|warning|error
+  stay_id    TEXT,
+  note       TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_log_created ON processing_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_processing_log_stay    ON processing_log(stay_id);

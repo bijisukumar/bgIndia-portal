@@ -2957,6 +2957,47 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { lossId, deleted: true } })
       }
 
+      // RENT LEDGER — backs the Quick-Post Billing component on the Tenant
+      // Agreement screen. "Paid on Time" posts isException=0 with lateFee=0;
+      // the late-fee drawer posts isException=1 with a non-zero lateFee.
+      // periodMonth is 'YYYY-MM' — one row per property per period, enforced
+      // by a UNIQUE index in the migration so a double-click can't duplicate
+      // a month's entry.
+      if (action === 'getRentTransactions') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(`SELECT * FROM rent_transactions WHERE prop_id = ? ORDER BY period_month DESC`).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      if (action === 'postRentPayment') {
+        const { propId, periodMonth, baseRent, maintenance, lateFee, paidDate, currency, isException, notes } = body
+        if (!propId || !periodMonth) return err('propId and periodMonth required')
+        if (!/^\d{4}-\d{2}$/.test(periodMonth)) return err('periodMonth must be YYYY-MM')
+        const base = parseFloat(baseRent) || 0
+        const maint = parseFloat(maintenance) || 0
+        const late = parseFloat(lateFee) || 0
+        const total = base + maint + late
+        const id = 'rtxn_' + Date.now() + '_' + Math.floor(Math.random()*1000)
+        try {
+          await DB.prepare(`
+            INSERT INTO rent_transactions (
+              txn_id, prop_id, period_month, base_rent, maintenance, late_fee,
+              total_due, is_exception, paid_date, currency, notes, created_by, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            id, propId, periodMonth, base, maint, late,
+            total, isException ? 1 : 0, paidDate || now().slice(0,10), currency || 'INR', notes || null, actor, now()
+          ).run()
+        } catch (e) {
+          if (String(e.message || '').includes('UNIQUE')) {
+            return err(`Rent for ${periodMonth} has already been posted for this property.`, 409)
+          }
+          throw e
+        }
+        return json({ success: true, data: { txnId: id, propId, periodMonth, totalDue: total } })
+      }
+
 
       // CREATE PROVISIONAL BOOKING — called when guest submits form but no booking exists
       if (action === 'createProvisionalBooking') {

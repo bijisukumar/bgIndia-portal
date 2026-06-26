@@ -109,6 +109,8 @@ export const api = {
   saveRentalAgreement:  (data)   => post('saveRentalAgreement', data),
   updateTenantStatus:   (data)   => post('updateTenantStatus', data),
   updateRentalDocChecklist: (data) => post('updateRentalDocChecklist', data),
+  getRentTransactions: (propId)  => get('getRentTransactions', { propId }),
+  postRentPayment:     (data)    => post('postRentPayment', data),
 
   // ── LEASE LOSSES / CLAIMS ────────────────────────────────
   getLeaseLosses:       (propId) => get('getLeaseLosses', { propId }),

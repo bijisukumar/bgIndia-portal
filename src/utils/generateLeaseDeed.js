@@ -6,7 +6,7 @@
 //  2026-06-24 — Pinnacle's older draft was missing the late-fee
 //  table, premature-termination tiers, deep-clean clause, and used
 //  a different renewal % and maintenance arrangement). Per explicit
-//  decision, the late-fee tiers, termination penalties, 7% renewal
+//  decision, the late-fee tiers, termination penalties, 5% renewal
 //  increase, and maintenance-excluded-from-rent are now FIXED
 //  standard terms for every India tenancy — not configurable per
 //  agreement — and live in CONFIG.leaseIndia. Only tenant identity,

@@ -57,7 +57,7 @@ export const CONFIG = {
 
   // Lessor + standard India lease terms — shared across every rentalProperties
   // entry. Fixed, not per-tenant: late-fee tiers, premature-termination
-  // penalties, and the 7% renewal increase are deliberately standardized
+  // penalties, and the 5% renewal increase are deliberately standardized
   // across all India tenancies (explicit decision, 2026-06-24) rather than
   // configurable per agreement.
   leaseIndia: {

@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { parseLocalDate } from '../../utils/dates'
+import { downloadLeaseDeed } from '../../utils/generateLeaseDeed'
 
 const STATUSES = ['Active','Notice Given','Delinquent','Evicted','Runaway','Completed']
 const STATUS_COLOR = {
@@ -35,7 +36,8 @@ function leaseDurationMonths(start, end) {
 }
 
 const EMPTY_FORM = {
-  tenantName:'', tenantEmail:'', tenantPhone:'', deposit:'', agreedRent:'',
+  tenantName:'', tenantEmail:'', tenantPhone:'', tenantAddress:'', tenantPan:'',
+  deposit:'', agreedRent:'',
   maintenance:'', leaseStart:'', leaseEnd:'', notes:'',
   country:'IN', currency:'INR', driveFolderUrl:'', status:'Active',
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
@@ -54,6 +56,7 @@ export default function RentalAgreement() {
   const [showAddProp, setShowAddProp] = useState(false)
   const [newProp, setNewProp] = useState({ name:'', location:'', country:'IN', currency:'INR' })
   const [addingProp, setAddingProp] = useState(false)
+  const [generatingDeed, setGeneratingDeed] = useState(false)
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
   const setField = (key, val) => setForm(f => ({...f, [key]: val}))
@@ -77,6 +80,8 @@ export default function RentalAgreement() {
       tenantName:    a.tenant_name    || '',
       tenantEmail:   a.tenant_email   || '',
       tenantPhone:   a.tenant_phone   || '',
+      tenantAddress: a.tenant_address || '',
+      tenantPan:     a.tenant_pan     || '',
       deposit:       a.deposit        || '',
       agreedRent:    a.agreed_rent    || '',
       maintenance:   a.maintenance_fee|| '',
@@ -158,6 +163,8 @@ export default function RentalAgreement() {
         tenantName:   form.tenantName.trim(),
         tenantEmail:  form.tenantEmail.trim(),
         tenantPhone:  form.tenantPhone.trim(),
+        tenantAddress:form.tenantAddress.trim(),
+        tenantPan:    form.tenantPan.trim(),
         deposit:      parseFloat(form.deposit) || 0,
         agreedRent:   parseFloat(form.agreedRent) || 0,
         maintenance:  parseFloat(form.maintenance) || 0,
@@ -176,6 +183,7 @@ export default function RentalAgreement() {
       })
       setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp],
         prop_id:selectedProp, tenant_name:form.tenantName, tenant_email:form.tenantEmail,
+        tenant_address:form.tenantAddress, tenant_pan:form.tenantPan,
         deposit:parseFloat(form.deposit)||0, agreed_rent:parseFloat(form.agreedRent)||0,
         lease_start:form.leaseStart, lease_end:form.leaseEnd,
         country:form.country, currency:form.currency, drive_folder_url:form.driveFolderUrl, status:form.status,
@@ -186,6 +194,24 @@ export default function RentalAgreement() {
       showToast(`✅ Agreement saved for ${prop?.name}`)
     } catch(e) { setError(`Save failed: ${e.message}`) }
     finally { setSaving(false) }
+  }
+
+  async function handleGenerateDeed() {
+    const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+    const saved = agreements[selectedProp]
+    if (!saved) {
+      showToast('Save the agreement first, then generate the deed', 'error')
+      return
+    }
+    setGeneratingDeed(true)
+    try {
+      await downloadLeaseDeed(saved, prop)
+      showToast(`📄 Lease deed generated for ${saved.tenant_name}`)
+    } catch(e) {
+      showToast(e.message, 'error')
+    } finally {
+      setGeneratingDeed(false)
+    }
   }
 
   async function handleAddProperty() {
@@ -377,6 +403,18 @@ export default function RentalAgreement() {
                 </div>
               </div>
 
+              <label style={F.label}>TENANT ADDRESS</label>
+              <textarea value={form.tenantAddress} onChange={e=>setField('tenantAddress',e.target.value)}
+                placeholder="Full permanent address, as it should appear on the lease deed" rows={2}
+                style={{...F.input,resize:'vertical'}}/>
+
+              <label style={F.label}>TENANT PAN / AADHAAR NUMBER</label>
+              <input value={form.tenantPan} onChange={e=>setField('tenantPan',e.target.value)}
+                placeholder="e.g. AXRPS9969C or 1234 5678 9012" style={F.input}/>
+              <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>
+                Required on the lease deed — used to identify the LESSEE in the legal document.
+              </div>
+
               <div className="grid-2">
                 <div>
                   <label style={F.label}>SECURITY DEPOSIT ({curSymbol})</label>
@@ -473,6 +511,26 @@ export default function RentalAgreement() {
             <button className="btn btn-gold" onClick={handleSave} disabled={saving}>
               {saving ? 'Saving…' : `💾 Save — ${prop?.name}`}
             </button>
+
+            {form.country === 'IN' && (
+              <button
+                onClick={handleGenerateDeed}
+                disabled={generatingDeed || !agreements[selectedProp]}
+                style={{
+                  width:'100%', marginTop:'10px', padding:'12px',
+                  borderRadius:'10px', cursor: (generatingDeed || !agreements[selectedProp]) ? 'default' : 'pointer',
+                  border:'1px solid rgba(24,95,165,0.4)', background:'rgba(24,95,165,0.08)',
+                  color:'#185FA5', fontWeight:'700', fontSize:'0.88rem',
+                  opacity: (generatingDeed || !agreements[selectedProp]) ? 0.5 : 1,
+                }}>
+                {generatingDeed ? 'Generating…' : '📄 Generate Lease Deed (.docx)'}
+              </button>
+            )}
+            {form.country === 'IN' && !agreements[selectedProp] && (
+              <div style={{fontSize:'0.68rem', color:'#5C7080', marginTop:'6px', textAlign:'center'}}>
+                Save the agreement first to enable deed generation.
+              </div>
+            )}
           </>
         )}
       </div>

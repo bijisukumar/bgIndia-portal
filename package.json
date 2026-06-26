@@ -3,16 +3,17 @@
   "version": "2.1.0",
   "private": true,
   "scripts": {
-    "dev":            "vite",
-    "build":          "vite build",
-    "preview":        "vite preview",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "build:stayvibe": "vite build --config vite.stayvibe.config.js",
-    "build:rev360":   "vite build --config vite.rev360.config.js",
-    "build:estate360":"vite build --config vite.estate360.config.js",
-    "build:manage":   "vite build",
-    "build:all":      "npm run build:stayvibe && npm run build:rev360 && npm run build:estate360 && npm run build:manage"
+    "build:rev360": "vite build --config vite.rev360.config.js",
+    "build:estate360": "vite build --config vite.estate360.config.js",
+    "build:manage": "vite build",
+    "build:all": "npm run build:stayvibe && npm run build:rev360 && npm run build:estate360 && npm run build:manage"
   },
   "dependencies": {
+    "docx": "^9.7.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0"

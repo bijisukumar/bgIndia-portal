@@ -36,11 +36,58 @@ export const CONFIG = {
   // tenantName and leaseEnd are now managed via the Tenant Agreements screen (/owner/rental/agreement)
   // and stored in the rental_props table. The fields below are fallbacks for display only.
   // Add leaseEnd (YYYY-MM-DD) here to enable renewal alerts (60-day warning) as a quick override.
+  //
+  // unitNo/floor/building/hasParking/electricityConsumerNo are used by the
+  // Lease Deed generator (Tenant Agreement screen → "Generate Lease Deed").
+  // hasParking and electricityConsumerNo are optional — leave blank/false if
+  // not applicable to a given property; the generated document only
+  // mentions them when present, per explicit decision (not every property
+  // has covered parking or a tracked electricity consumer number).
   rentalProperties: [
-    { id: 'rental_1', name: 'Tritvam',  location: 'Kochi, KL',  tenantName: '', leaseEnd: '' },
-    { id: 'rental_2', name: 'Pacifica', location: 'OMR, TN',    tenantName: '', leaseEnd: '' },
-    { id: 'rental_3', name: 'Pinnacle', location: 'TCR, KL',    tenantName: '', leaseEnd: '' },
+    { id: 'rental_1', name: 'Tritvam',  location: 'Kochi, KL',  tenantName: '', leaseEnd: '',
+      unitNo: 'T4 9D', floor: '9th', building: 'Tata Tritvam at Marine Drive', city: 'Kochi',
+      hasParking: true, electricityConsumerNo: '1155466025977', furnishing: 'semi furnished' },
+    { id: 'rental_2', name: 'Pacifica', location: 'OMR, TN',    tenantName: '', leaseEnd: '',
+      unitNo: '', floor: '', building: 'Pacifica', city: 'Chennai',
+      hasParking: false, electricityConsumerNo: '', furnishing: 'non-furnished' },
+    { id: 'rental_3', name: 'Pinnacle', location: 'TCR, KL',    tenantName: '', leaseEnd: '',
+      unitNo: '103', floor: '1st', building: 'Pinnacle Residency', city: 'Trichur',
+      hasParking: false, electricityConsumerNo: '', furnishing: 'non-furnished' },
   ],
+
+  // Lessor + standard India lease terms — shared across every rentalProperties
+  // entry. Fixed, not per-tenant: late-fee tiers, premature-termination
+  // penalties, and the 7% renewal increase are deliberately standardized
+  // across all India tenancies (explicit decision, 2026-06-24) rather than
+  // configurable per agreement.
+  leaseIndia: {
+    lessorName:    'Biji Sukumar',
+    lessorAddress: 'Thandayamgattil House, P O Chavakkad, Trichur Dist, Kerala 680501',
+    lessorPan:     'AXRPS9969C',
+    executionCity: 'Cochin',
+    bank: {
+      accountName:   'Biji Sukumar',
+      bankName:      'Federal Bank',
+      accountNumber: '14320100138300',
+      ifsc:          'FDRL0001432',
+      swift:         'FDRLINBBIBD',
+    },
+    renewalIncreasePct: 7,
+    maintenanceIncludedInRent: false,   // standard: tenant pays maintenance separately
+    lateFeeTiers: [
+      { label: 'Due on 1st of every month',          from: 1,  to: 1,  fee: 0 },
+      { label: 'Emergency Grace period (2nd-5th)',    from: 2,  to: 5,  fee: 0 },
+      { label: '6th-8th of the month',                from: 6,  to: 8,  fee: 2000 },
+      { label: '9th-15th of the month',               from: 9,  to: 15, fee: 7000 },
+      { label: '16th-31st of the month',               from: 16, to: 31, fee: 12000 },
+    ],
+    prematureTermination: {
+      beforeFullTerm:  'LESSEE is to pay broker commission',
+      before6Months:   'LESSEE is to pay 1 month additional Rent amount',
+    },
+    defectNoticeDays: 10,
+    jurisdiction:  'Ernakulam',
+  },
 
   // Estate properties
   estates: [

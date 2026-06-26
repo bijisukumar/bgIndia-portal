@@ -2825,7 +2825,7 @@ export async function onRequest(ctx) {
             UPDATE rental_props SET
               name = COALESCE(?, name), location = COALESCE(?, location),
               country = ?, currency = ?,
-              tenant_name = ?, tenant_email = ?, tenant_phone = ?,
+              tenant_name = ?, tenant_email = ?, tenant_phone = ?, tenant_address = ?, tenant_pan = ?,
               deposit = ?, agreed_rent = ?, maintenance_fee = ?,
               lease_start = ?, lease_end = ?, notes = ?,
               drive_folder_url = ?, next_renewal_date = ?,
@@ -2836,7 +2836,7 @@ export async function onRequest(ctx) {
           `).bind(
             d.propName || null, d.location || null,
             d.country || 'IN', d.currency || 'INR',
-            d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null,
+            d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
             parseFloat(d.deposit) || 0, parseFloat(d.agreedRent) || 0, parseFloat(d.maintenance) || 0,
             d.leaseStart || null, d.leaseEnd || null, d.notes || null,
             d.driveFolderUrl || null, nextRenewal,
@@ -2848,16 +2848,16 @@ export async function onRequest(ctx) {
           await DB.prepare(`
             INSERT INTO rental_props (
               prop_id, name, location, country, currency,
-              tenant_name, tenant_email, tenant_phone,
+              tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
               deposit, agreed_rent, maintenance_fee,
               lease_start, lease_end, notes, drive_folder_url, status,
               next_renewal_date, early_terminated, early_termination_date,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
-            d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null,
+            d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
             parseFloat(d.deposit) || 0, parseFloat(d.agreedRent) || 0, parseFloat(d.maintenance) || 0,
             d.leaseStart || null, d.leaseEnd || null, d.notes || null, d.driveFolderUrl || null, 'Active',
             nextRenewal, earlyTerminated, earlyTerminationDt,

@@ -72,7 +72,7 @@ export const CONFIG = {
       ifsc:          'FDRL0001432',
       swift:         'FDRLINBBIBD',
     },
-    renewalIncreasePct: 7,
+    renewalIncreasePct: 5,
     maintenanceIncludedInRent: false,   // standard: tenant pays maintenance separately
     lateFeeTiers: [
       { label: 'Due on 1st of every month',          from: 1,  to: 1,  fee: 0 },

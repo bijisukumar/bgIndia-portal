@@ -115,6 +115,10 @@ export const api = {
   getTenancyHistory:    (propId) => get('getTenancyHistory', { propId }),
   saveTenancyHistory:   (data)   => post('saveTenancyHistory', data),
   deleteTenancyHistory: (historyId) => post('deleteTenancyHistory', { historyId }),
+  getIncomingTenant:    (propId) => get('getIncomingTenant', { propId }),
+  saveIncomingTenant:   (data)   => post('saveIncomingTenant', data),
+  deleteIncomingTenant: (propId) => post('deleteIncomingTenant', { propId }),
+  moveInIncomingTenant: (data)   => post('moveInIncomingTenant', data),
 
   // ── LEASE LOSSES / CLAIMS ────────────────────────────────
   getLeaseLosses:       (propId) => get('getLeaseLosses', { propId }),

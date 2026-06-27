@@ -31,6 +31,7 @@ import DocumentEngineCard from './DocumentEngineCard'
 import FinancialsReceiptCard from './FinancialsReceiptCard'
 import MetaDiagnosticsCard from './MetaDiagnosticsCard'
 import TenancyHistoryCard from './TenancyHistoryCard'
+import IncomingTenantCard from './IncomingTenantCard'
 
 const STAGES = ['Signed Up','Active','Notice Given','Completed']
 const STAGE_COLOR = {
@@ -632,6 +633,30 @@ export default function RentalAgreement() {
             />
 
             <MetaDiagnosticsCard form={form} setField={setField} propName={prop?.name} readOnly={false}/>
+
+            {/* Incoming Tenant — the forward-looking mirror of Past
+                Tenants: a new tenant who's already signed/paid while the
+                CURRENT tenant (above) is still living here, e.g. on
+                Notice Given. rental_props only has one live slot, so this
+                stays in its own table until "Move In Now" swaps them in. */}
+            <IncomingTenantCard
+              propId={selectedProp}
+              propCountry={form.country}
+              currentTenantName={form.tenantName}
+              showToast={showToast}
+              onMovedIn={async () => {
+                // Re-pull this property's agreement so the live form
+                // immediately reflects the swap (new tenant, stage=Active)
+                // rather than showing stale data until next reload.
+                try {
+                  const data = await api.getRentalAgreements()
+                  const map = {}
+                  ;(Array.isArray(data) ? data : []).forEach(a => { map[a.prop_id] = a })
+                  setAgreements(map)
+                  if (map[selectedProp]) prefill(map[selectedProp])
+                } catch (e) { console.warn(e) }
+              }}
+            />
 
             {/* Past Tenants — a SEPARATE button, not a tab filter, since a
                 property's live tenant can be Active while it separately

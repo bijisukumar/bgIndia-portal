@@ -3119,6 +3119,139 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { historyId, deleted: true } })
       }
 
+      // INCOMING TENANTS — the forward-looking mirror of tenancy_history.
+      // Holds a queued future tenant's full intake data separately from
+      // rental_props' single live slot, for the real situation where a
+      // new tenant has signed while the current one is still living there
+      // (e.g. on Notice Given). At most ONE incoming tenant per property,
+      // enforced by a UNIQUE index — two people queued for the same unit
+      // is a scheduling conflict, not a data state to silently allow.
+      if (action === 'getIncomingTenant') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const row = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
+        return json({ success: true, data: row || null })
+      }
+
+      if (action === 'saveIncomingTenant') {
+        const t = body
+        if (!t.propId) return err('propId required')
+        if (!t.tenantName) return err('tenantName required')
+        const existing = await DB.prepare(`SELECT incoming_id FROM incoming_tenants WHERE prop_id = ?`).bind(t.propId).first()
+        const id = existing?.incoming_id || ('inc_' + Date.now() + '_' + Math.floor(Math.random()*1000))
+        if (existing) {
+          await DB.prepare(`
+            UPDATE incoming_tenants SET
+              tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
+              deposit=?, agreed_rent=?, maintenance_fee=?, lease_start=?, lease_end=?,
+              country=?, currency=?, notes=?, doc_contract_signed=?, doc_id_captured=?,
+              updated_by=?, updated_at=?
+            WHERE prop_id=?
+          `).bind(
+            t.tenantName, t.tenantEmail||null, t.tenantPhone||null, t.tenantAddress||null, t.tenantPan||null,
+            parseFloat(t.deposit)||0, parseFloat(t.agreedRent)||0, parseFloat(t.maintenance)||0,
+            t.leaseStart||null, t.leaseEnd||null, t.country||'IN', t.currency||'INR', t.notes||null,
+            t.docContractSigned?1:0, t.docIdCaptured?1:0, actor, now(), t.propId
+          ).run()
+        } else {
+          await DB.prepare(`
+            INSERT INTO incoming_tenants (
+              incoming_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
+              deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
+              country, currency, notes, doc_contract_signed, doc_id_captured,
+              created_by, created_at, updated_by, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            id, t.propId, t.tenantName, t.tenantEmail||null, t.tenantPhone||null, t.tenantAddress||null, t.tenantPan||null,
+            parseFloat(t.deposit)||0, parseFloat(t.agreedRent)||0, parseFloat(t.maintenance)||0,
+            t.leaseStart||null, t.leaseEnd||null, t.country||'IN', t.currency||'INR', t.notes||null,
+            t.docContractSigned?1:0, t.docIdCaptured?1:0, actor, now(), actor, now()
+          ).run()
+        }
+        return json({ success: true, data: { incomingId: id } })
+      }
+
+      if (action === 'deleteIncomingTenant') {
+        const { propId } = body; if (!propId) return err('propId required')
+        await DB.prepare(`DELETE FROM incoming_tenants WHERE prop_id = ?`).bind(propId).run()
+        return json({ success: true, data: { propId, deleted: true } })
+      }
+
+      // The actual handover, run as ONE atomic D1 batch so a failure
+      // partway through can never leave the property half-swapped (e.g.
+      // archived to history but not yet overwritten, or overwritten but
+      // the incoming row not yet cleared so it looks like it's still
+      // pending). Either all three steps land, or none do.
+      //   1. archive the CURRENT rental_props row into tenancy_history
+      //   2. overwrite rental_props with the incoming tenant's data, stage='Active'
+      //   3. delete the now-consumed incoming_tenants row
+      if (action === 'moveInIncomingTenant') {
+        const { propId, endReason } = body
+        if (!propId) return err('propId required')
+        const current = await DB.prepare(`SELECT * FROM rental_props WHERE prop_id = ?`).bind(propId).first()
+        const incoming = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
+        if (!incoming) return err('No incoming tenant queued for this property')
+
+        const histId = 'hist_' + Date.now() + '_' + Math.floor(Math.random()*1000)
+        const batch = []
+
+        // Step 1 — only archive if there's an actual outgoing tenant to
+        // archive (a property moving in its very first-ever tenant has
+        // no prior occupant, so current.tenant_name may be empty).
+        if (current && current.tenant_name) {
+          batch.push(DB.prepare(`
+            INSERT INTO tenancy_history (
+              history_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
+              deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
+              country, currency, status, end_reason, early_terminated, early_termination_date,
+              notes, drive_folder_url,
+              doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              created_by, created_at, updated_by, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            histId, propId, current.tenant_name, current.tenant_email, current.tenant_phone,
+            current.tenant_address, current.tenant_pan,
+            current.deposit||0, current.agreed_rent||0, current.maintenance_fee||0,
+            current.lease_start, current.lease_end,
+            current.country||'IN', current.currency||'INR', 'Completed', endReason || 'Lease Ended',
+            current.early_terminated||0, current.early_termination_date,
+            current.notes, current.drive_folder_url,
+            current.doc_contract_signed||0, current.doc_id_captured||0, current.doc_move_in||0,
+            current.doc_move_out||0, current.doc_damage_report||0,
+            actor, now(), actor, now()
+          ))
+        }
+
+        // Step 2 — overwrite rental_props with the incoming tenant,
+        // resetting per-tenancy fields (doc checklist, delinquent flag,
+        // early-termination) that must not carry over from the outgoing
+        // tenant onto the new one.
+        batch.push(DB.prepare(`
+          UPDATE rental_props SET
+            tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
+            deposit=?, agreed_rent=?, maintenance_fee=?, lease_start=?, lease_end=?,
+            country=?, currency=?, notes=?,
+            stage='Active', is_delinquent=0, end_reason=NULL, status='Active',
+            early_terminated=0, early_termination_date=NULL,
+            doc_contract_signed=?, doc_id_captured=?, doc_move_in=0, doc_move_out=0, doc_damage_report=0,
+            next_renewal_date=?, updated_by=?, updated_at=?
+          WHERE prop_id=?
+        `).bind(
+          incoming.tenant_name, incoming.tenant_email, incoming.tenant_phone, incoming.tenant_address, incoming.tenant_pan,
+          incoming.deposit||0, incoming.agreed_rent||0, incoming.maintenance_fee||0,
+          incoming.lease_start, incoming.lease_end,
+          incoming.country||'IN', incoming.currency||'INR', incoming.notes,
+          incoming.doc_contract_signed||0, incoming.doc_id_captured||0,
+          incoming.lease_end, actor, now(), propId
+        ))
+
+        // Step 3 — the incoming record is now consumed.
+        batch.push(DB.prepare(`DELETE FROM incoming_tenants WHERE prop_id = ?`).bind(propId))
+
+        await DB.batch(batch)
+        return json({ success: true, data: { propId, movedInTenant: incoming.tenant_name, archivedOutgoing: !!(current && current.tenant_name) } })
+      }
+
 
       // CREATE PROVISIONAL BOOKING — called when guest submits form but no booking exists
       if (action === 'createProvisionalBooking') {

@@ -27,7 +27,15 @@ const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
 
 function buildQuote(e) {
   const nights = e.nights || 1
-  const nightly = nights > 0 ? Math.round((e.final_offer_amount || e.quote_amount || 0) / nights) : 0
+  const finalTotal = e.final_offer_amount || e.quote_amount || 0
+  const nightly = nights > 0 ? Math.round(finalTotal / nights) : 0
+  const billableGuests = (e.adults || 0) + (e.children || 0)
+  const overflowGuests = Math.max(0, billableGuests - RATE_CARD_MAX_GUESTS)
+  const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
+
+  const guestLine = overflowGuests > 0
+    ? `${e.guests_count || 1} (${RATE_CARD_MAX_GUESTS} + ${overflowGuests} on floor beds)`
+    : `${e.guests_count || 1}`
 
   const lines = [
     `🙏 Namaskaram ${e.guest_name}!`,
@@ -38,9 +46,30 @@ function buildQuote(e) {
     `📅 Check-out: ${e.checkout_date || '—'} - check-out by 11:00 AM`,
     `Check-in/Check-out timings for Villa - https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `💰 Total Tariff: ₹${Number(e.final_offer_amount || e.quote_amount || 0).toLocaleString('en-IN')}`,
+  ]
+
+  // Show the pre-discount quote, the saved amount (labeled by what it actually is —
+  // a guest-facing discount for repeat guests, or a partner commission for B2B), and
+  // the resulting total — rather than only the final number, so it's clear at a
+  // glance what was reduced and why.
+  const discountAmount = e.discount_amount || 0
+  if (discountAmount > 0) {
+    lines.push(`💰 Tariff: ₹${Number(e.quote_amount || 0).toLocaleString('en-IN')}`)
+    if (e.discount_category) {
+      const label = DISCOUNT_CATEGORIES.find(c => c.id === e.discount_category)?.label || e.discount_category
+      const savedLabel = isB2B ? `${label} Commission` : `${label} Discount`
+      lines.push(`${isB2B ? '🤝' : '🎁'} ${savedLabel} (${e.discount_pct}%): −₹${Math.round(discountAmount).toLocaleString('en-IN')}`)
+    } else if (e.repeat_discount_pct > 0) {
+      lines.push(`🎁 Repeat Guest Discount (${e.repeat_discount_pct}%): −₹${Math.round(discountAmount).toLocaleString('en-IN')}`)
+    }
+    lines.push(`💰 Total Tariff: ₹${Math.round(finalTotal).toLocaleString('en-IN')}`)
+  } else {
+    lines.push(`💰 Total Tariff: ₹${Math.round(finalTotal).toLocaleString('en-IN')}`)
+  }
+
+  lines.push(
     `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
-    `👥 Guests: ${e.guests_count || 1}`,
+    `👥 Guests: ${guestLine}`,
     ``,
     `💡 Why book directly with us?`,
     `When you book through our official portal, we can offer flexible options like early check-in or late check-out to better suit your travel plans—a premium perk we cannot offer through third-party major channel partners.`,
@@ -48,14 +77,7 @@ function buildQuote(e) {
     `Secure your dates and enjoy these direct booking benefits here:`,
     `🌐 Book Direct: https://www.luxuryvillasofguruvayur.com`,
     `FAQ: https://luxuryvillasofguruvayur.com/faq.html`,
-  ]
-
-  if (e.discount_category && e.discount_pct > 0) {
-    const label = DISCOUNT_CATEGORIES.find(c => c.id === e.discount_category)?.label || e.discount_category
-    lines.push(``, `🎁 ${label} Discount: ${e.discount_pct}%`)
-  } else if (e.repeat_discount_pct > 0) {
-    lines.push(``, `🎁 Repeat Guest Discount: ${e.repeat_discount_pct}%`)
-  }
+  )
 
   lines.push(
     ``,

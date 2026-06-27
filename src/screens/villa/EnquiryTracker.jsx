@@ -37,6 +37,19 @@ function fmtDate(d) { if (!d) return '—'; return String(d).slice(0, 10) }
 
 const TERMINAL_STATUSES = ['confirmed', 'lost', 'cancelled']
 
+// An enquiry is "archivable" — moved out of the main list into the collapsed
+// Archive section — once it can no longer realistically convert: either its
+// check-in date has already passed, or it's already Lost/Cancelled (even if
+// the dates are still in the future, e.g. guest cancelled early). Confirmed
+// bookings with future dates stay in the main list since they're still live,
+// upcoming business — only a past check-in date archives a Confirmed one too
+// (the stay has already happened, nothing left to track here).
+function isArchivable(enq) {
+  if (enq.status === 'lost' || enq.status === 'cancelled') return true
+  const daysUntilCheckin = daysFromToday(enq.checkin_date)
+  return daysUntilCheckin !== null && daysUntilCheckin < 0
+}
+
 function nudgeWaLink(enq) {
   const raw = (enq.phone || '').trim()
   if (!raw) return null
@@ -56,6 +69,71 @@ function nudgeWaLink(enq) {
   return `https://wa.me/${num}?text=${msg}`
 }
 
+function EnquiryCard({ enq, navigate, nudging, handleNudge, dimmed = false }) {
+  const meta = STATUS_META[enq.status] || STATUS_META.new
+  const isActive = !TERMINAL_STATUSES.includes(enq.status)
+  const sinceDate = enq.last_contact_date || enq.date_received
+  const daysSince = sinceDate ? -daysFromToday(sinceDate) : null   // negate: daysFromToday is future-positive
+  return (
+    <div onClick={() => navigate(`/owner/villa/enquiries/${enq.enquiry_id}`)}
+      className="card" style={{ marginBottom: '10px', cursor: 'pointer', padding: '14px', opacity: dimmed ? 0.7 : 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: 'var(--text)', fontWeight: '700', fontSize: '0.92rem' }}>{enq.guest_name}</span>
+            {!!enq.is_repeat_guest && (
+              <span style={{ background: 'rgba(139,92,246,0.15)', color: '#8B5CF6', fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
+                Repeat · {enq.previous_stays}×
+              </span>
+            )}
+          </div>
+          <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
+            {enq.phone || enq.email || 'No contact on file'} · {SOURCES.find(s => s.id === enq.source)?.label || enq.source}
+          </div>
+        </div>
+        <span style={{ background: meta.bg, color: meta.color, fontSize: '0.68rem', fontWeight: '700', padding: '4px 10px', borderRadius: '10px', whiteSpace: 'nowrap' }}>
+          {meta.label}
+        </span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-dim)' }}>
+        <div style={{ color: '#5C7080', fontSize: '0.72rem' }}>
+          {fmtDate(enq.checkin_date)} → {fmtDate(enq.checkout_date)} · {enq.nights || 0}n · {enq.guests_count || 1}p
+        </div>
+        <div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.85rem' }}>
+          {fmt(enq.final_offer_amount || enq.quote_amount)}
+        </div>
+      </div>
+      {enq.follow_up_due && enq.status !== 'confirmed' && enq.status !== 'lost' && (
+        <div style={{ marginTop: '6px', color: '#FB923C', fontSize: '0.68rem' }}>
+          ⏰ Follow up by {fmtDate(enq.follow_up_due)}
+        </div>
+      )}
+
+      {isActive && !dimmed && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-dim)' }}>
+          {daysSince !== null ? (
+            <span style={{
+              fontSize: '0.7rem', fontWeight: '600',
+              color: daysSince >= 3 ? '#EF4444' : daysSince >= 1 ? '#FB923C' : '#5C7080',
+            }}>
+              {daysSince <= 0 ? 'Contacted today' : `⏳ ${daysSince} day${daysSince === 1 ? '' : 's'} since last contact`}
+            </span>
+          ) : <span/>}
+          <button onClick={(e) => handleNudge(e, enq)} disabled={nudging === enq.enquiry_id}
+            style={{
+              background: 'rgba(52,168,83,0.12)', border: '1px solid rgba(52,168,83,0.35)',
+              borderRadius: '8px', color: '#34A853', fontWeight: '700', fontSize: '0.72rem',
+              padding: '6px 12px', cursor: nudging === enq.enquiry_id ? 'default' : 'pointer',
+              opacity: nudging === enq.enquiry_id ? 0.6 : 1, flexShrink: 0,
+            }}>
+            💬 Nudge
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function EnquiryTracker() {
   const navigate = useNavigate()
   const [enquiries, setEnquiries] = useState([])
@@ -63,6 +141,7 @@ export default function EnquiryTracker() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [nudging, setNudging] = useState(null)   // enquiry_id currently being nudged, for a brief disabled state
+  const [archiveOpen, setArchiveOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -103,6 +182,17 @@ export default function EnquiryTracker() {
     }
     return rows
   }, [enquiries, statusFilter, search])
+
+  // Split whatever matches the current filter/search into the main list and
+  // the collapsed Archive — past check-in date or already Lost/Cancelled.
+  // A search match always surfaces in the main list (so searching by name
+  // still finds an old guest immediately) rather than being hidden in Archive.
+  const { activeRows, archivedRows } = useMemo(() => {
+    if (search.trim()) return { activeRows: filtered, archivedRows: [] }
+    const active = [], archived = []
+    filtered.forEach(r => (isArchivable(r) ? archived : active).push(r))
+    return { activeRows: active, archivedRows: archived }
+  }, [filtered, search])
 
   const statusCounts = useMemo(() => {
     const c = { all: enquiries.length }
@@ -154,76 +244,42 @@ export default function EnquiryTracker() {
           })}
         </div>
 
-        {filtered.length === 0 && !loading && (
+        {activeRows.length === 0 && archivedRows.length === 0 && !loading && (
           <div className="card" style={{ textAlign: 'center', padding: '30px 14px', color: '#5C7080', fontSize: '0.85rem' }}>
             No enquiries {statusFilter !== 'all' ? `with status "${STATUS_META[statusFilter]?.label}"` : 'yet'}.
           </div>
         )}
 
-        {filtered.map(enq => {
-          const meta = STATUS_META[enq.status] || STATUS_META.new
-          const isActive = !TERMINAL_STATUSES.includes(enq.status)
-          const sinceDate = enq.last_contact_date || enq.date_received
-          const daysSince = sinceDate ? -daysFromToday(sinceDate) : null   // negate: daysFromToday is future-positive
-          return (
-            <div key={enq.enquiry_id} onClick={() => navigate(`/owner/villa/enquiries/${enq.enquiry_id}`)}
-              className="card" style={{ marginBottom: '10px', cursor: 'pointer', padding: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'var(--text)', fontWeight: '700', fontSize: '0.92rem' }}>{enq.guest_name}</span>
-                    {!!enq.is_repeat_guest && (
-                      <span style={{ background: 'rgba(139,92,246,0.15)', color: '#8B5CF6', fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
-                        Repeat · {enq.previous_stays}×
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
-                    {enq.phone || enq.email || 'No contact on file'} · {SOURCES.find(s => s.id === enq.source)?.label || enq.source}
-                  </div>
-                </div>
-                <span style={{ background: meta.bg, color: meta.color, fontSize: '0.68rem', fontWeight: '700', padding: '4px 10px', borderRadius: '10px', whiteSpace: 'nowrap' }}>
-                  {meta.label}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-dim)' }}>
-                <div style={{ color: '#5C7080', fontSize: '0.72rem' }}>
-                  {fmtDate(enq.checkin_date)} → {fmtDate(enq.checkout_date)} · {enq.nights || 0}n · {enq.guests_count || 1}p
-                </div>
-                <div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.85rem' }}>
-                  {fmt(enq.final_offer_amount || enq.quote_amount)}
-                </div>
-              </div>
-              {enq.follow_up_due && enq.status !== 'confirmed' && enq.status !== 'lost' && (
-                <div style={{ marginTop: '6px', color: '#FB923C', fontSize: '0.68rem' }}>
-                  ⏰ Follow up by {fmtDate(enq.follow_up_due)}
-                </div>
-              )}
+        {activeRows.map(enq => (
+          <EnquiryCard key={enq.enquiry_id} enq={enq} navigate={navigate} nudging={nudging} handleNudge={handleNudge} />
+        ))}
 
-              {isActive && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-dim)' }}>
-                  {daysSince !== null ? (
-                    <span style={{
-                      fontSize: '0.7rem', fontWeight: '600',
-                      color: daysSince >= 3 ? '#EF4444' : daysSince >= 1 ? '#FB923C' : '#5C7080',
-                    }}>
-                      {daysSince <= 0 ? 'Contacted today' : `⏳ ${daysSince} day${daysSince === 1 ? '' : 's'} since last contact`}
-                    </span>
-                  ) : <span/>}
-                  <button onClick={(e) => handleNudge(e, enq)} disabled={nudging === enq.enquiry_id}
-                    style={{
-                      background: 'rgba(52,168,83,0.12)', border: '1px solid rgba(52,168,83,0.35)',
-                      borderRadius: '8px', color: '#34A853', fontWeight: '700', fontSize: '0.72rem',
-                      padding: '6px 12px', cursor: nudging === enq.enquiry_id ? 'default' : 'pointer',
-                      opacity: nudging === enq.enquiry_id ? 0.6 : 1, flexShrink: 0,
-                    }}>
-                    💬 Nudge
-                  </button>
-                </div>
-              )}
-            </div>
-          )
-        })}
+        {activeRows.length === 0 && archivedRows.length > 0 && (
+          <div className="card" style={{ textAlign: 'center', padding: '20px 14px', color: '#5C7080', fontSize: '0.82rem', marginBottom: '10px' }}>
+            Nothing needs attention right now — {archivedRows.length} past/closed {archivedRows.length === 1 ? 'enquiry is' : 'enquiries are'} in Archive below.
+          </div>
+        )}
+
+        {archivedRows.length > 0 && (
+          <div style={{ marginTop: '6px' }}>
+            <button onClick={() => setArchiveOpen(o => !o)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'transparent', border: '1px solid var(--border-dim)', borderRadius: '10px',
+                padding: '10px 14px', cursor: 'pointer', color: '#5C7080', fontSize: '0.78rem', fontWeight: '600',
+              }}>
+              <span>🗄 Archive — past dates or closed ({archivedRows.length})</span>
+              <span style={{ transform: archiveOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▾</span>
+            </button>
+            {archiveOpen && (
+              <div style={{ marginTop: '10px' }}>
+                {archivedRows.map(enq => (
+                  <EnquiryCard key={enq.enquiry_id} enq={enq} navigate={navigate} nudging={nudging} handleNudge={handleNudge} dimmed />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

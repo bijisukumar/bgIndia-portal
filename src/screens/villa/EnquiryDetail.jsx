@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
+import { DISCOUNT_CATEGORIES } from '../../utils/villaPricing'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 function fmtDateTime(d) { if (!d) return ''; return String(d).replace('T', ' ').slice(0, 16) }
@@ -29,7 +30,10 @@ function buildQuote(e) {
     `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
     `👥 Guests: ${e.guests_count || 1}`,
   ]
-  if (e.repeat_discount_pct > 0) {
+  if (e.discount_category && e.discount_pct > 0) {
+    const label = DISCOUNT_CATEGORIES.find(c => c.id === e.discount_category)?.label || e.discount_category
+    lines.push(``, `🎁 ${label} Discount: ${e.discount_pct}%`)
+  } else if (e.repeat_discount_pct > 0) {
     lines.push(``, `🎁 Repeat Guest Discount: ${e.repeat_discount_pct}%`)
   }
   lines.push(
@@ -150,7 +154,8 @@ export default function EnquiryDetail() {
           </div>
           <div style={{ color: '#5C7080', fontSize: '0.78rem', lineHeight: 1.7 }}>
             📞 {e.phone || '—'} {e.email && <>· ✉️ {e.email}</>}<br />
-            📅 {e.checkin_date || '—'} → {e.checkout_date || '—'} ({e.nights || 0}n) · 👥 {e.guests_count || 1} guests<br />
+            📅 {e.checkin_date || '—'} → {e.checkout_date || '—'} ({e.nights || 0}n) · 👥 {e.guests_count || 1} guests
+            {(e.adults || e.children || e.infants) ? <> ({e.adults || 0}A{e.children ? ` + ${e.children}C` : ''}{e.infants ? ` + ${e.infants}I` : ''})</> : null}<br />
             🎯 {e.purpose || '—'} · via {SOURCES.find(s => s.id === e.source)?.label || e.source}
           </div>
         </div>
@@ -160,7 +165,14 @@ export default function EnquiryDetail() {
           <div className="net-box" style={{ margin: 0 }}>
             <div className="net-row"><span className="net-label">Quote amount</span><span className="net-val">{fmt(e.quote_amount)}</span></div>
             {e.discount_amount > 0 && (
-              <div className="net-row"><span className="net-label">Repeat discount ({e.repeat_discount_pct}%)</span><span className="net-val">−{fmt(e.discount_amount)}</span></div>
+              <div className="net-row">
+                <span className="net-label">
+                  {e.discount_category
+                    ? `${DISCOUNT_CATEGORIES.find(c => c.id === e.discount_category)?.label || e.discount_category} (${e.discount_pct}%)`
+                    : `Repeat discount (${e.repeat_discount_pct}%)`}
+                </span>
+                <span className="net-val">−{fmt(e.discount_amount)}</span>
+              </div>
             )}
             <div className="net-divider" />
             <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(e.final_offer_amount)}</span></div>

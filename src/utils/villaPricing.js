@@ -20,6 +20,18 @@ export const OVERFLOW_PER_GUEST_PER_NIGHT = 750
 export const OVERFLOW_MAX_RECOMMENDED = 4
 export const RATE_CARD_MAX_GUESTS = 12
 
+// Dwarka has 4 bedrooms, ~2 guests/bedroom as a simple display estimate (not an
+// occupancy rule) — once billable guests exceed 8 (4 bedrooms x 2), the bedroom
+// count shown just stays capped at 4 rather than implying more bedrooms exist.
+export const VILLA_BEDROOMS = { dwarka: 4 }
+export const GUESTS_PER_BEDROOM = 2
+
+export function getBedroomEstimate(villaId, billableGuests) {
+  const maxBedrooms = VILLA_BEDROOMS[villaId] || VILLA_BEDROOMS.dwarka
+  if (!billableGuests || billableGuests <= 0) return maxBedrooms
+  return Math.min(maxBedrooms, Math.ceil(billableGuests / GUESTS_PER_BEDROOM))
+}
+
 // Fallback rate card used only if the backend rate-card fetch hasn't completed yet
 // or fails — mirrors the seeded `villa_rate_cards` table exactly. The backend table
 // is the source of truth; this just avoids a blank UI on a slow/failed fetch.

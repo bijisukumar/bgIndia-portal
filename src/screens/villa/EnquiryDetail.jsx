@@ -5,7 +5,7 @@ import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate } from '../../utils/dates'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
-  OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS,
+  OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
 } from '../../utils/villaPricing'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
@@ -36,6 +36,7 @@ function buildQuote(e) {
   const guestLine = overflowGuests > 0
     ? `${e.guests_count || 1} (${RATE_CARD_MAX_GUESTS} + ${overflowGuests} on floor beds)`
     : `${e.guests_count || 1}`
+  const bedroomCount = getBedroomEstimate(e.villa_id || 'dwarka', billableGuests)
 
   const lines = [
     `🙏 Namaskaram ${e.guest_name}!`,
@@ -70,6 +71,7 @@ function buildQuote(e) {
   lines.push(
     `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
     `👥 Guests: ${guestLine}`,
+    `🛏 Bedrooms: ${bedroomCount}`,
     ``,
     `💡 Why book directly with us?`,
     `When you book through our official portal, we can offer flexible options like early check-in or late check-out to better suit your travel plans—a premium perk we cannot offer through third-party major channel partners.`,

@@ -90,7 +90,7 @@ export const DISCOUNT_CATEGORIES = [
   { id: 'loyal_patron', label: 'Loyal Patron / Valued Return Guest / Preferred Guest', defaultPct: 10 },
   { id: 'elite_guest', label: 'Elite Guest', defaultPct: 15 },
   { id: 'platinum_guest', label: 'Platinum Guest', defaultPct: 20 },
-  { id: 'b2b_india', label: 'B2B – India', defaultPct: 15 },
+  { id: 'b2b_india', label: 'B2B – India', defaultPct: 10 },
   { id: 'b2b_intl', label: 'B2B – International', defaultPct: 20 },
 ]
 

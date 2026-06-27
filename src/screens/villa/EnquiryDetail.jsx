@@ -4,7 +4,7 @@ import { api } from '../../api'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate } from '../../utils/dates'
 import {
-  getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES,
+  getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS,
 } from '../../utils/villaPricing'
 
@@ -28,24 +28,41 @@ const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
 function buildQuote(e) {
   const nights = e.nights || 1
   const nightly = nights > 0 ? Math.round((e.final_offer_amount || e.quote_amount || 0) / nights) : 0
+  const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
+
   const lines = [
     `🙏 Namaskaram ${e.guest_name}!`,
     ``,
     `Thank you for choosing Luxury Villas of Guruvayur. We would be delighted to host your family.`,
     ``,
-    `📅 Check-in: ${e.checkin_date || '—'}`,
-    `📅 Check-out: ${e.checkout_date || '—'}`,
+    `📅 Check-in: ${e.checkin_date || '—'} - check-in after 4:00 PM`,
+    `📅 Check-out: ${e.checkout_date || '—'} - check-out by 11:00 AM`,
+    `Check-in/Check-out timings for Villa - https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
     `💰 Total Tariff: ₹${Number(e.final_offer_amount || e.quote_amount || 0).toLocaleString('en-IN')}`,
     `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
     `👥 Guests: ${e.guests_count || 1}`,
   ]
+
   if (e.discount_category && e.discount_pct > 0) {
     const label = DISCOUNT_CATEGORIES.find(c => c.id === e.discount_category)?.label || e.discount_category
     lines.push(``, `🎁 ${label} Discount: ${e.discount_pct}%`)
   } else if (e.repeat_discount_pct > 0) {
     lines.push(``, `🎁 Repeat Guest Discount: ${e.repeat_discount_pct}%`)
   }
+
+  if (isB2B) {
+    lines.push(
+      ``,
+      `💡 Why book directly with us?`,
+      `When you book through our official portal, we can offer flexible options like early check-in or late check-out to better suit your travel plans—a premium perk we cannot offer through third-party major channel partners.`,
+      `Plus, direct booking ensures you get the most cost-effective rates!`,
+      `Secure your dates and enjoy these direct booking benefits here:`,
+      `🌐 Book Direct: https://www.luxuryvillasofguruvayur.com`,
+      `FAQ: https://luxuryvillasofguruvayur.com/faq.html`,
+    )
+  }
+
   lines.push(
     ``,
     `If you would like to proceed, please confirm at your earliest convenience.`,
@@ -75,6 +92,8 @@ export default function EnquiryDetail() {
   const [pricingNote, setPricingNote] = useState(null)
   const [pricingBusy, setPricingBusy] = useState(false)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [discountParams, setDiscountParams] = useState(null)   // { discountCategory, discountPct }
+  const [discountBusy, setDiscountBusy] = useState(false)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -88,6 +107,10 @@ export default function EnquiryDetail() {
         setPricingParams({
           checkInDate: en.checkin_date || '', checkOutDate: en.checkout_date || '',
           adults: en.adults || en.guests_count || 1, children: en.children || 0, infants: en.infants || 0,
+        })
+        setDiscountParams({
+          discountCategory: en.discount_category || '',
+          discountPct: en.discount_category ? (en.discount_pct || 0) : (en.repeat_discount_pct || 0),
         })
       }
     }).catch(() => showToast('Failed to load enquiry', 'error')).finally(() => setLoading(false))
@@ -135,6 +158,35 @@ export default function EnquiryDetail() {
       load()
     } catch { showToast('Failed to update', 'error') }
     finally { setBusy(false) }
+  }
+
+  const handleDiscountCategoryChange = (categoryId) => {
+    setDiscountParams({
+      discountCategory: categoryId,
+      discountPct: categoryId ? getDefaultDiscountPct(categoryId) : 0,
+    })
+  }
+
+  const handleSaveDiscount = async () => {
+    if (!e || !discountParams) return
+    setDiscountBusy(true)
+    try {
+      const isCategory = !!discountParams.discountCategory
+      await api.saveEnquiry({
+        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
+        checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
+        adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
+        purpose: e.purpose, quoteAmount: e.quote_amount,
+        repeatDiscountPct: isCategory ? 0 : (discountParams.discountPct || 0),
+        discountCategory: discountParams.discountCategory || null,
+        discountPct: isCategory ? (discountParams.discountPct || 0) : 0,
+        status: e.status, notes: e.notes,
+      })
+      showToast('Discount updated ✓')
+      load()
+    } catch { showToast('Failed to update discount', 'error') }
+    finally { setDiscountBusy(false) }
   }
 
   const handleStatusChange = async (newStatus) => {
@@ -258,6 +310,27 @@ export default function EnquiryDetail() {
 
         <div className="card-section-label" style={{ marginTop: '14px' }}>PRICING</div>
         <div className="card">
+          {discountParams && (
+            <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border-dim)' }}>
+              <div className="field">
+                <div className="field-label">Discount type</div>
+                <select className="field-input" value={discountParams.discountCategory} onChange={e2 => handleDiscountCategoryChange(e2.target.value)}>
+                  <option value="">None / Repeat guest (legacy)</option>
+                  {DISCOUNT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <div className="field-label">{discountParams.discountCategory ? 'Discount %' : 'Repeat guest discount %'}</div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="number" min="0" max="100" className="field-input" value={discountParams.discountPct}
+                    onChange={e2 => setDiscountParams(p => ({ ...p, discountPct: e2.target.value }))} style={{ flex: 1 }} />
+                  <button type="button" className="btn" onClick={handleSaveDiscount} disabled={discountBusy} style={{ whiteSpace: 'nowrap', padding: '0 14px' }}>
+                    {discountBusy ? 'Saving...' : 'Apply'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="net-box" style={{ margin: 0 }}>
             <div className="net-row"><span className="net-label">Quote amount</span><span className="net-val">{fmt(e.quote_amount)}</span></div>
             {e.discount_amount > 0 && (

@@ -28,7 +28,6 @@ const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
 function buildQuote(e) {
   const nights = e.nights || 1
   const nightly = nights > 0 ? Math.round((e.final_offer_amount || e.quote_amount || 0) / nights) : 0
-  const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
 
   const lines = [
     `🙏 Namaskaram ${e.guest_name}!`,
@@ -42,6 +41,13 @@ function buildQuote(e) {
     `💰 Total Tariff: ₹${Number(e.final_offer_amount || e.quote_amount || 0).toLocaleString('en-IN')}`,
     `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
     `👥 Guests: ${e.guests_count || 1}`,
+    ``,
+    `💡 Why book directly with us?`,
+    `When you book through our official portal, we can offer flexible options like early check-in or late check-out to better suit your travel plans—a premium perk we cannot offer through third-party major channel partners.`,
+    `Plus, direct booking ensures you get the most cost-effective rates!`,
+    `Secure your dates and enjoy these direct booking benefits here:`,
+    `🌐 Book Direct: https://www.luxuryvillasofguruvayur.com`,
+    `FAQ: https://luxuryvillasofguruvayur.com/faq.html`,
   ]
 
   if (e.discount_category && e.discount_pct > 0) {
@@ -49,18 +55,6 @@ function buildQuote(e) {
     lines.push(``, `🎁 ${label} Discount: ${e.discount_pct}%`)
   } else if (e.repeat_discount_pct > 0) {
     lines.push(``, `🎁 Repeat Guest Discount: ${e.repeat_discount_pct}%`)
-  }
-
-  if (isB2B) {
-    lines.push(
-      ``,
-      `💡 Why book directly with us?`,
-      `When you book through our official portal, we can offer flexible options like early check-in or late check-out to better suit your travel plans—a premium perk we cannot offer through third-party major channel partners.`,
-      `Plus, direct booking ensures you get the most cost-effective rates!`,
-      `Secure your dates and enjoy these direct booking benefits here:`,
-      `🌐 Book Direct: https://www.luxuryvillasofguruvayur.com`,
-      `FAQ: https://luxuryvillasofguruvayur.com/faq.html`,
-    )
   }
 
   lines.push(

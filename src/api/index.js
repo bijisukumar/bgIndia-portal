@@ -38,7 +38,14 @@ async function get(action, params = {}) {
     const data = await res.json()
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
     logger.info('API:GET', `${action} OK`)
-    return data?.data ?? data
+    // NOTE: must NOT use `data?.data ?? data` here — `??` treats a
+    // legitimately-null `data.data` (a correct "nothing found" response,
+    // e.g. getIncomingTenant/getActiveStay/findOpenStay) as absent and
+    // falls through to returning the whole {success,data} wrapper object
+    // instead of null. That wrapper is truthy, so callers doing
+    // `if (!result)` never catch the "nothing found" case. Checking `in`
+    // distinguishes "no data property" from "data property is null".
+    return (data && typeof data === 'object' && 'data' in data) ? data.data : data
   } catch (err) {
     logger.error('API:GET', err, { action, params })
     throw err
@@ -58,7 +65,8 @@ async function post(action, payload) {
     const data = await res.json()
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
     logger.info('API:POST', `${action} OK`)
-    return data?.data ?? data
+    // See matching note in get() above — same fix, same reason.
+    return (data && typeof data === 'object' && 'data' in data) ? data.data : data
   } catch (err) {
     logger.error('API:POST', err, { action })
     throw err

@@ -339,6 +339,12 @@ export default function EnquiryDetail() {
             )}
             <div className="net-divider" />
             <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(e.final_offer_amount)}</span></div>
+            {(e.nights || 0) > 0 && (
+              <div className="net-row">
+                <span className="net-label">≈ per night ({e.nights}n)</span>
+                <span className="net-val">{fmt(Math.round((e.final_offer_amount || e.quote_amount || 0) / e.nights))}</span>
+              </div>
+            )}
             {e.status === 'confirmed' && (
               <div className="net-row"><span className="net-label">Booking value</span><span className="net-val pos">{fmt(e.booking_value)}</span></div>
             )}

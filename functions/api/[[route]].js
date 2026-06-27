@@ -2877,6 +2877,13 @@ export async function onRequest(ctx) {
         const earlyTerminated     = d.earlyTerminated ? 1 : 0
         const earlyTerminationDt  = earlyTerminated ? (d.earlyTerminationDate || null) : null
 
+        // Month-to-month: suppresses both the lease-expiry and
+        // renewal-overdue warnings on the frontend while set (explicit
+        // decision, 2026-06-27) -- this does NOT touch lease_end, which
+        // stays as the original fixed term's end date for reference.
+        const isMonthToMonth      = d.isMonthToMonth ? 1 : 0
+        const monthToMonthSince   = isMonthToMonth ? (d.monthToMonthSince || null) : null
+
         const docFlags = {
           doc_contract_signed: d.docContractSigned ? 1 : 0,
           doc_id_captured:     d.docIdCaptured     ? 1 : 0,
@@ -2895,6 +2902,7 @@ export async function onRequest(ctx) {
               lease_start = ?, lease_end = ?, notes = ?,
               drive_folder_url = ?, next_renewal_date = ?,
               early_terminated = ?, early_termination_date = ?,
+              is_month_to_month = ?, month_to_month_since = ?,
               doc_contract_signed = ?, doc_id_captured = ?, doc_move_in = ?, doc_move_out = ?, doc_damage_report = ?,
               updated_by = ?, updated_at = ?
             WHERE prop_id = ?
@@ -2906,6 +2914,7 @@ export async function onRequest(ctx) {
             d.leaseStart || null, d.leaseEnd || null, d.notes || null,
             d.driveFolderUrl || null, nextRenewal,
             earlyTerminated, earlyTerminationDt,
+            isMonthToMonth, monthToMonthSince,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
             actor, now(), d.propId
           ).run()
@@ -2917,15 +2926,17 @@ export async function onRequest(ctx) {
               deposit, agreed_rent, maintenance_fee,
               lease_start, lease_end, notes, drive_folder_url, status,
               next_renewal_date, early_terminated, early_termination_date,
+              is_month_to_month, month_to_month_since,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
             parseFloat(d.deposit) || 0, parseFloat(d.agreedRent) || 0, parseFloat(d.maintenance) || 0,
             d.leaseStart || null, d.leaseEnd || null, d.notes || null, d.driveFolderUrl || null, 'Signed Up',
             nextRenewal, earlyTerminated, earlyTerminationDt,
+            isMonthToMonth, monthToMonthSince,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
             actor, actor, now(), now()
           ).run()

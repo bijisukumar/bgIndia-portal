@@ -38,12 +38,21 @@ export default function TenancyHistoryCard({ propId, propCountry, showToast }) {
   useEffect(() => { load() }, [propId])
 
   async function load() {
+    // Same stale-response guard as IncomingTenantCard: if the user
+    // switches properties again before this resolves, discard the
+    // response instead of letting it populate the wrong property's list.
+    const requestedFor = propId
+    setRecords([])
     setLoading(true)
     try {
-      const data = await api.getTenancyHistory(propId)
+      const data = await api.getTenancyHistory(requestedFor)
+      if (requestedFor !== propId) return
       setRecords(Array.isArray(data) ? data : [])
-    } catch (e) { console.warn(e) }
-    finally { setLoading(false) }
+    } catch (e) {
+      console.warn(e)
+      if (requestedFor === propId) setRecords([])
+    }
+    finally { if (requestedFor === propId) setLoading(false) }
   }
 
   function openNew() {

@@ -63,6 +63,7 @@ const EMPTY_FORM = {
   country:'IN', currency:'INR', driveFolderUrl:'',
   stage:'Signed Up', isDelinquent:false, endReason:'',
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
+  isMonthToMonth:false, monthToMonthSince:'',
   docContractSigned:false, docIdCaptured:false, docMoveIn:false, docMoveOut:false, docDamageReport:false,
 }
 
@@ -143,6 +144,8 @@ export default function RentalAgreement() {
       nextRenewalDate:      a.next_renewal_date      || '',
       earlyTerminated:      !!a.early_terminated,
       earlyTerminationDate: a.early_termination_date || '',
+      isMonthToMonth:    !!a.is_month_to_month,
+      monthToMonthSince: a.month_to_month_since || '',
       docContractSigned: !!a.doc_contract_signed,
       docIdCaptured:     !!a.doc_id_captured,
       docMoveIn:         !!a.doc_move_in,
@@ -231,6 +234,7 @@ export default function RentalAgreement() {
     if (!form.leaseEnd)   { setError('Lease end is required'); return }
     if (parseLocalDate(form.leaseEnd) <= parseLocalDate(form.leaseStart)) { setError('Lease end must be after start'); return }
     if (form.earlyTerminated && !form.earlyTerminationDate) { setError('Early termination date is required when marked early-terminated'); return }
+    if (form.isMonthToMonth && !form.monthToMonthSince) { setError('Month-to-month start date is required when marked month-to-month'); return }
     setSaving(true)
     try {
       const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
@@ -255,6 +259,8 @@ export default function RentalAgreement() {
         nextRenewalDate:      form.nextRenewalDate || null,
         earlyTerminated:      form.earlyTerminated,
         earlyTerminationDate: form.earlyTerminated ? form.earlyTerminationDate : null,
+        isMonthToMonth:    form.isMonthToMonth,
+        monthToMonthSince: form.isMonthToMonth ? form.monthToMonthSince : null,
         docContractSigned: form.docContractSigned,
         docIdCaptured:     form.docIdCaptured,
         docMoveIn:         form.docMoveIn,
@@ -273,6 +279,7 @@ export default function RentalAgreement() {
         lease_start:form.leaseStart, lease_end:form.leaseEnd,
         country:form.country, currency:form.currency, drive_folder_url:form.driveFolderUrl,
         next_renewal_date:form.nextRenewalDate, early_terminated:form.earlyTerminated?1:0, early_termination_date:form.earlyTerminationDate,
+        is_month_to_month:form.isMonthToMonth?1:0, month_to_month_since:form.monthToMonthSince,
         doc_contract_signed:form.docContractSigned?1:0, doc_id_captured:form.docIdCaptured?1:0,
         doc_move_in:form.docMoveIn?1:0, doc_move_out:form.docMoveOut?1:0, doc_damage_report:form.docDamageReport?1:0,
       }}))
@@ -306,11 +313,14 @@ export default function RentalAgreement() {
   const days = daysUntil(form.leaseEnd)
   const duration = leaseDurationMonths(form.leaseStart, form.leaseEnd)
   const expiryColor = days===null?'#34A853':days<0?'#c62828':days<=30?'#e67e22':days<=60?'#f1c40f':'#34A853'
-  const expiryMsg = days===null?null:days<0?`⚠️ Lease EXPIRED ${Math.abs(days)} days ago`:
-    days===0?'⚠️ Expires TODAY':days<=60?`📅 Expires in ${days} days (${form.leaseEnd})`:`✓ Active — ${days} days remaining`
+  // Month-to-month suppresses this entirely (explicit decision,
+  // 2026-06-27) — once a tenancy has gone rolling, the original fixed
+  // lease_end is no longer a real deadline to warn about.
+  const expiryMsg = form.isMonthToMonth ? null : (days===null?null:days<0?`⚠️ Lease EXPIRED ${Math.abs(days)} days ago`:
+    days===0?'⚠️ Expires TODAY':days<=60?`📅 Expires in ${days} days (${form.leaseEnd})`:`✓ Active — ${days} days remaining`)
 
   const renewalDays = daysUntil(form.nextRenewalDate)
-  const showRenewalBanner = form.nextRenewalDate && form.nextRenewalDate !== form.leaseEnd && renewalDays !== null && renewalDays <= 60
+  const showRenewalBanner = !form.isMonthToMonth && form.nextRenewalDate && form.nextRenewalDate !== form.leaseEnd && renewalDays !== null && renewalDays <= 60
   const renewalColor = renewalDays<0?'#c62828':renewalDays<=14?'#e67e22':'#f1c40f'
   const renewalMsg = renewalDays<0?`⚠️ Renewal review OVERDUE by ${Math.abs(renewalDays)} days`:
     renewalDays===0?'🔔 Renewal review due TODAY':`🔔 Renewal review due in ${renewalDays} days (${form.nextRenewalDate})`
@@ -357,7 +367,7 @@ export default function RentalAgreement() {
           {visibleProps.map(p => {
             const a = agreements[p.id]
             const stage = a?.stage || 'Signed Up'
-            const d = a?.lease_end ? daysUntil(a.lease_end) : null
+            const d = (a?.lease_end && !a?.is_month_to_month) ? daysUntil(a.lease_end) : null
             const dot = d===null?null:d<0?'#c62828':d<=60?'#e67e22':'#34A853'
             return (
               <button key={p.id} onClick={()=>handlePropChange(p.id)} style={{
@@ -585,6 +595,24 @@ export default function RentalAgreement() {
                   Lease was terminated early
                 </span>
               </label>
+
+              <label style={{display:'flex',alignItems:'center',gap:'8px',marginTop:'10px',cursor:'pointer'}}>
+                <input type="checkbox" checked={form.isMonthToMonth}
+                  onChange={e=>setField('isMonthToMonth', e.target.checked)} style={{width:16,height:16}}/>
+                <span style={{fontSize:'0.82rem',color: form.isMonthToMonth ? '#185FA5' : 'var(--text-dim)'}}>
+                  Now on month-to-month (no fixed end date — hides expiry/renewal warnings below)
+                </span>
+              </label>
+              {form.isMonthToMonth && (
+                <div style={{marginTop:'8px', marginLeft:'24px'}}>
+                  <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>MONTH-TO-MONTH SINCE *</label>
+                  <input type="date" value={form.monthToMonthSince} onChange={e=>setField('monthToMonthSince',e.target.value)}
+                    style={{width:'100%',maxWidth:'220px',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
+                  <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>
+                    Original lease end ({form.leaseEnd || '—'}) is kept for reference, not erased.
+                  </div>
+                </div>
+              )}
 
               <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px',marginTop:'14px'}}>DOCUMENTS ON FILE</label>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'4px'}}>

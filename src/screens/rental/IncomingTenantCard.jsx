@@ -43,9 +43,17 @@ export default function IncomingTenantCard({ propId, propCountry, currentTenantN
   useEffect(() => { load() }, [propId])
 
   async function load() {
-    setLoading(true)
+    // Capture the propId this load() call was started for, so that if the
+    // user switches properties again before this request resolves, we can
+    // detect the response is stale and discard it instead of letting a
+    // late response for the OLD property overwrite the NEW property's
+    // (correctly different, possibly empty) state.
+    const requestedFor = propId
+    setRecord(null)   // clear immediately -- don't keep showing the
+    setLoading(true)  // previous property's record while this loads
     try {
-      const data = await api.getIncomingTenant(propId)
+      const data = await api.getIncomingTenant(requestedFor)
+      if (requestedFor !== propId) return // stale response, a newer load() has since started -- discard
       setRecord(data || false)
       if (data) {
         setForm({
@@ -56,9 +64,14 @@ export default function IncomingTenantCard({ propId, propCountry, currentTenantN
           country: data.country||propCountry, currency: data.currency|| (propCountry==='US'?'USD':'INR'),
           notes: data.notes||'', docContractSigned: !!data.doc_contract_signed, docIdCaptured: !!data.doc_id_captured,
         })
+      } else {
+        setForm(EMPTY)
       }
-    } catch (e) { console.warn(e) }
-    finally { setLoading(false) }
+    } catch (e) {
+      console.warn(e)
+      if (requestedFor === propId) setRecord(false)
+    }
+    finally { if (requestedFor === propId) setLoading(false) }
   }
 
   function openNew() {

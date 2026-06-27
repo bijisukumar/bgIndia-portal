@@ -1796,6 +1796,41 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // TENANCY HISTORY read — past tenants for a property, kept fully
+      // separate from rental_props' single current-tenant slot. The
+      // matching write actions (saveTenancyHistory/deleteTenancyHistory)
+      // are in the POST block below.
+      if (action === 'getTenancyHistory') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(`SELECT * FROM tenancy_history WHERE prop_id = ? ORDER BY lease_end DESC`).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      // RENT LEDGER read — backs the Quick-Post Billing component on the
+      // Tenant Agreement screen. The matching write actions
+      // (postRentPayment) are in the POST block below.
+      if (action === 'getRentTransactions') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(`SELECT * FROM rent_transactions WHERE prop_id = ? ORDER BY period_month DESC`).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      // INCOMING TENANT read — the forward-looking mirror of
+      // getTenancyHistory. Holds a queued future tenant's intake data
+      // separately from rental_props' single live slot, for the real
+      // situation where a new tenant has signed while the current one is
+      // still living there (e.g. on Notice Given). The matching write
+      // actions (saveIncomingTenant/deleteIncomingTenant/
+      // moveInIncomingTenant) are in the POST block below.
+      if (action === 'getIncomingTenant') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const row = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
+        return json({ success: true, data: row || null })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -3011,19 +3046,10 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { lossId, deleted: true } })
       }
 
-      // RENT LEDGER — backs the Quick-Post Billing component on the Tenant
-      // Agreement screen. "Paid on Time" posts isException=0 with lateFee=0;
-      // the late-fee drawer posts isException=1 with a non-zero lateFee.
-      // periodMonth is 'YYYY-MM' — one row per property per period, enforced
-      // by a UNIQUE index in the migration so a double-click can't duplicate
-      // a month's entry.
-      if (action === 'getRentTransactions') {
-        const propId = url.searchParams.get('propId') || ''
-        if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM rent_transactions WHERE prop_id = ? ORDER BY period_month DESC`).bind(propId).all()
-        return json({ success: true, data: results })
-      }
-
+      // RENT LEDGER — "Paid on Time" / late-fee exception POST lands here.
+      // (getRentTransactions, the matching read, lives in the GET block
+      // above — it was originally misplaced here too, which is exactly
+      // why it 404'd: GET requests never reach code inside this POST block.)
       if (action === 'postRentPayment') {
         const { propId, periodMonth, baseRent, maintenance, lateFee, paidDate, currency, isException, notes } = body
         if (!propId || !periodMonth) return err('propId and periodMonth required')
@@ -3052,18 +3078,10 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { txnId: id, propId, periodMonth, totalDue: total } })
       }
 
-      // TENANCY HISTORY — past tenants for a property, kept fully separate
-      // from rental_props' single current-tenant slot. Many rows can exist
-      // per propId (one per past tenancy). Used both for manually
-      // back-filling old records and for archiving a current tenancy when
-      // it ends (see archiveTenancyToHistory below).
-      if (action === 'getTenancyHistory') {
-        const propId = url.searchParams.get('propId') || ''
-        if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM tenancy_history WHERE prop_id = ? ORDER BY lease_end DESC`).bind(propId).all()
-        return json({ success: true, data: results })
-      }
-
+      // TENANCY HISTORY write actions (saveTenancyHistory/
+      // deleteTenancyHistory) land here. (getTenancyHistory, the matching
+      // read, lives in the GET block above — same originally-misplaced
+      // bug as the other two GET actions fixed alongside this one.)
       if (action === 'saveTenancyHistory') {
         const h = body
         if (!h.propId) return err('propId required')
@@ -3119,20 +3137,10 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { historyId, deleted: true } })
       }
 
-      // INCOMING TENANTS — the forward-looking mirror of tenancy_history.
-      // Holds a queued future tenant's full intake data separately from
-      // rental_props' single live slot, for the real situation where a
-      // new tenant has signed while the current one is still living there
-      // (e.g. on Notice Given). At most ONE incoming tenant per property,
-      // enforced by a UNIQUE index — two people queued for the same unit
-      // is a scheduling conflict, not a data state to silently allow.
-      if (action === 'getIncomingTenant') {
-        const propId = url.searchParams.get('propId') || ''
-        if (!propId) return err('propId required')
-        const row = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
-        return json({ success: true, data: row || null })
-      }
-
+      // INCOMING TENANTS — saveIncomingTenant/deleteIncomingTenant POST
+      // actions land here. (getIncomingTenant, the matching read, lives in
+      // the GET block above — same originally-misplaced-here bug as
+      // getRentTransactions, fixed at the same time for the same reason.)
       if (action === 'saveIncomingTenant') {
         const t = body
         if (!t.propId) return err('propId required')

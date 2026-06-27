@@ -1,18 +1,25 @@
 // ============================================================
-//  RentalAgreement.jsx — v3: progressive flow + modular cards
-//  Country Toggle -> Property Tabs -> Tenant Lifecycle Filter,
-//  then 4 cards: TenantProfileCard, DocumentEngineCard,
-//  FinancialsReceiptCard, MetaDiagnosticsCard.
+//  RentalAgreement.jsx — v4: real 4-stage tenancy lifecycle
 //
-//  Carried over unchanged from v2 (not in the new spec, but real,
-//  working, saved functionality — not dropped on a rebuild):
-//    - status bar (Active/Notice Given/Delinquent/Evicted/Runaway/Completed)
-//    - expiry + renewal banners
-//    - 5-item document checklist with instant-save checkboxes
-//    - Add Property modal
-//  "Prior" from the spec's lifecycle filter doesn't exist as a real
-//  status in this database — dropped per explicit decision, using the
-//  actual 6 statuses instead (see STATUSES below).
+//  Lifecycle model (per explicit decision, 2026-06-27):
+//    stage:          'Signed Up' -> 'Active' -> 'Notice Given' -> 'Completed'
+//    is_delinquent:  0/1 flag that can sit on top of Active/Notice Given
+//                    (behind on rent while still living there) -- NOT a
+//                    stage of its own.
+//    end_reason:     only meaningful when stage='Completed' -- 'Lease Ended'
+//                    / 'Early Termination' / 'Evicted' / 'Runaway' /
+//                    'After Delinquency'.
+//
+//  The property TAB LIST defaults to showing only Active + Notice Given
+//  properties (what's actually relevant day to day). Signed Up and
+//  Completed properties are tucked away behind small toggle buttons
+//  rather than living in the main filter row, since they're checked
+//  rarely. Past Tenants (manually back-filled historic records, a
+//  SEPARATE table from the live agreement) are reached via a dedicated
+//  per-property button, NOT a tab filter -- a property's current tenant
+//  can be Active while it separately has past tenants on file, so
+//  filtering tabs by lifecycle stage can never surface that property
+//  under a "history" filter.
 // ============================================================
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -23,18 +30,13 @@ import TenantProfileCard from './TenantProfileCard'
 import DocumentEngineCard from './DocumentEngineCard'
 import FinancialsReceiptCard from './FinancialsReceiptCard'
 import MetaDiagnosticsCard from './MetaDiagnosticsCard'
+import TenancyHistoryCard from './TenancyHistoryCard'
 
-const STATUSES = ['Active','Notice Given','Delinquent','Evicted','Runaway','Completed']
-const STATUS_COLOR = {
-  'Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
-  'Evicted':'#EF4444','Runaway':'#EF4444','Completed':'#5C7080',
+const STAGES = ['Signed Up','Active','Notice Given','Completed']
+const STAGE_COLOR = {
+  'Signed Up':'#185FA5','Active':'#34A853','Notice Given':'#F59E0B','Completed':'#5C7080',
 }
-const LIFECYCLE_FILTERS = [
-  { key: 'active', label: 'Active',         match: s => s === 'Active' },
-  { key: 'notice',  label: 'Notice Given',   match: s => s === 'Notice Given' },
-  { key: 'delinquent', label: 'Delinquent',  match: s => s === 'Delinquent' },
-  { key: 'prior',   label: 'Prior Tenants',  match: s => ['Evicted','Runaway','Completed'].includes(s) },
-]
+const END_REASONS = ['Lease Ended','Early Termination','Evicted','Runaway','After Delinquency']
 const DRIVE_FOLDER_TEMPLATE = (tenantName, propName) =>
   `RentalManagement/${propName}/${tenantName}`
 
@@ -57,7 +59,8 @@ const EMPTY_FORM = {
   tenantName:'', tenantEmail:'', tenantPhone:'', tenantAddress:'', tenantPan:'',
   deposit:'', agreedRent:'',
   maintenance:'', leaseStart:'', leaseEnd:'', notes:'',
-  country:'IN', currency:'INR', driveFolderUrl:'', status:'Active',
+  country:'IN', currency:'INR', driveFolderUrl:'',
+  stage:'Signed Up', isDelinquent:false, endReason:'',
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
   docContractSigned:false, docIdCaptured:false, docMoveIn:false, docMoveOut:false, docDamageReport:false,
 }
@@ -65,7 +68,9 @@ const EMPTY_FORM = {
 export default function RentalAgreement() {
   const navigate = useNavigate()
   const [country, setCountry] = useState('IN')
-  const [lifecycle, setLifecycle] = useState('active')
+  const [showSignedUp, setShowSignedUp] = useState(false)   // tucked-away toggle
+  const [showCompleted, setShowCompleted] = useState(false) // tucked-away toggle
+  const [showHistory, setShowHistory] = useState(false)     // Past Tenants card visibility, per selected property
   const [selectedProp, setSelectedProp] = useState(null)
   const [form, setForm]       = useState(EMPTY_FORM)
   const [agreements, setAgreements] = useState({})
@@ -89,23 +94,30 @@ export default function RentalAgreement() {
       const map = {}
       ;(Array.isArray(data) ? data : []).forEach(a => { map[a.prop_id] = a })
       setAgreements(map)
-      const firstMatch = CONFIG.rentalProperties.find(p => matchesView(p, map, 'IN', 'active'))
+      const inDayToDay = CONFIG.rentalProperties.find(p => matchesDayToDay(p, map, 'IN'))
         || CONFIG.rentalProperties[0]
-      if (firstMatch) {
-        setSelectedProp(firstMatch.id)
-        if (map[firstMatch.id]) prefill(map[firstMatch.id])
+      if (inDayToDay) {
+        setSelectedProp(inDayToDay.id)
+        if (map[inDayToDay.id]) prefill(map[inDayToDay.id])
       }
     } catch(e) { console.warn(e) }
     finally { setLoading(false) }
   }
 
-  function matchesView(prop, agreementsMap, ctry, lifecycleKey) {
+  function getStage(propId, agreementsMap) {
+    const a = agreementsMap[propId]
+    return a?.stage || 'Signed Up'
+  }
+  function getCountry(prop, agreementsMap) {
     const a = agreementsMap[prop.id]
-    const propCountry = a?.country || prop.country || 'IN'
-    if (propCountry !== ctry) return false
-    const status = a?.status || 'Active'
-    const filter = LIFECYCLE_FILTERS.find(f => f.key === lifecycleKey)
-    return filter ? filter.match(status) : true
+    return a?.country || prop.country || 'IN'
+  }
+
+  // Default tab list: only Active + Notice Given, for the country in view.
+  function matchesDayToDay(prop, agreementsMap, ctry) {
+    if (getCountry(prop, agreementsMap) !== ctry) return false
+    const stage = getStage(prop.id, agreementsMap)
+    return stage === 'Active' || stage === 'Notice Given'
   }
 
   function prefill(a) {
@@ -124,7 +136,9 @@ export default function RentalAgreement() {
       country:       a.country        || 'IN',
       currency:      a.currency       || 'INR',
       driveFolderUrl:a.drive_folder_url || '',
-      status:        a.status         || 'Active',
+      stage:         a.stage          || 'Signed Up',
+      isDelinquent:  !!a.is_delinquent,
+      endReason:     a.end_reason     || '',
       nextRenewalDate:      a.next_renewal_date      || '',
       earlyTerminated:      !!a.early_terminated,
       earlyTerminationDate: a.early_termination_date || '',
@@ -139,21 +153,15 @@ export default function RentalAgreement() {
   function handlePropChange(propId) {
     setSelectedProp(propId)
     setError('')
+    setShowHistory(false)
     if (agreements[propId]) prefill(agreements[propId])
     else setForm({...EMPTY_FORM, country, currency: country === 'US' ? 'USD' : 'INR'})
   }
 
   function handleCountryChange(newCountry) {
     setCountry(newCountry)
-    setLifecycle('active')
-    const visible = CONFIG.rentalProperties.filter(p => matchesView(p, agreements, newCountry, 'active'))
-    if (visible[0]) handlePropChange(visible[0].id)
-    else setSelectedProp(null)
-  }
-
-  function handleLifecycleChange(key) {
-    setLifecycle(key)
-    const visible = CONFIG.rentalProperties.filter(p => matchesView(p, agreements, country, key))
+    setShowSignedUp(false); setShowCompleted(false)
+    const visible = CONFIG.rentalProperties.filter(p => matchesDayToDay(p, agreements, newCountry))
     if (visible[0]) handlePropChange(visible[0].id)
     else setSelectedProp(null)
   }
@@ -166,15 +174,39 @@ export default function RentalAgreement() {
     }
   }
 
-  async function handleStatusChange(newStatus) {
-    setField('status', newStatus)
-    if (agreements[selectedProp]) {
-      try {
-        await api.updateTenantStatus({ propId: selectedProp, status: newStatus })
-        setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], status: newStatus}}))
-        showToast(`Status updated to ${newStatus}`)
-      } catch(e) { showToast('Status update failed', 'error') }
+  async function handleStageChange(newStage) {
+    const payload = { propId: selectedProp, stage: newStage, isDelinquent: form.isDelinquent, endReason: form.endReason }
+    // Completing a tenancy needs a reason -- ask via inline state rather
+    // than silently defaulting to 'Lease Ended' for every completion.
+    if (newStage === 'Completed' && !form.endReason) {
+      setField('stage', newStage) // open the end-reason picker; not saved until a reason is chosen
+      return
     }
+    setField('stage', newStage)
+    try {
+      await api.updateTenantStage(payload)
+      setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], stage:newStage, is_delinquent:form.isDelinquent?1:0, end_reason:form.endReason||null}}))
+      showToast(`Stage updated to ${newStage}`)
+    } catch(e) { showToast('Stage update failed', 'error') }
+  }
+
+  async function handleEndReasonChange(reason) {
+    setField('endReason', reason)
+    try {
+      await api.updateTenantStage({ propId: selectedProp, stage: 'Completed', isDelinquent: form.isDelinquent, endReason: reason })
+      setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], stage:'Completed', end_reason:reason}}))
+      showToast(`Marked Completed — ${reason}`)
+    } catch(e) { showToast('Update failed', 'error') }
+  }
+
+  async function handleDelinquentToggle() {
+    const next = !form.isDelinquent
+    setField('isDelinquent', next)
+    try {
+      await api.updateTenantStage({ propId: selectedProp, stage: form.stage, isDelinquent: next, endReason: form.endReason })
+      setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], is_delinquent: next?1:0}}))
+      showToast(next ? '⚠️ Marked behind on rent' : 'Delinquent flag cleared')
+    } catch(e) { showToast('Update failed', 'error'); setField('isDelinquent', !next) }
   }
 
   async function handleDocToggle(field, currentValue) {
@@ -228,13 +260,17 @@ export default function RentalAgreement() {
         docMoveOut:        form.docMoveOut,
         docDamageReport:   form.docDamageReport,
       })
+      // saveRentalAgreement never touches stage/is_delinquent/end_reason
+      // (confirmed in the backend) -- those are only ever changed via
+      // updateTenantStage, so it's safe to merge the rest here without
+      // risk of clobbering whatever stage was last set.
       setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp],
         prop_id:selectedProp, tenant_name:form.tenantName, tenant_email:form.tenantEmail,
         tenant_phone:form.tenantPhone, tenant_address:form.tenantAddress, tenant_pan:form.tenantPan,
         deposit:parseFloat(form.deposit)||0, agreed_rent:parseFloat(form.agreedRent)||0,
         maintenance_fee:parseFloat(form.maintenance)||0,
         lease_start:form.leaseStart, lease_end:form.leaseEnd,
-        country:form.country, currency:form.currency, drive_folder_url:form.driveFolderUrl, status:form.status,
+        country:form.country, currency:form.currency, drive_folder_url:form.driveFolderUrl,
         next_renewal_date:form.nextRenewalDate, early_terminated:form.earlyTerminated?1:0, early_termination_date:form.earlyTerminationDate,
         doc_contract_signed:form.docContractSigned?1:0, doc_id_captured:form.docIdCaptured?1:0,
         doc_move_in:form.docMoveIn?1:0, doc_move_out:form.docMoveOut?1:0, doc_damage_report:form.docDamageReport?1:0,
@@ -278,9 +314,20 @@ export default function RentalAgreement() {
   const renewalMsg = renewalDays<0?`⚠️ Renewal review OVERDUE by ${Math.abs(renewalDays)} days`:
     renewalDays===0?'🔔 Renewal review due TODAY':`🔔 Renewal review due in ${renewalDays} days (${form.nextRenewalDate})`
 
-  const readOnly = lifecycle === 'prior'
-
-  const visibleProps = CONFIG.rentalProperties.filter(p => matchesView(p, agreements, country, lifecycle))
+  // Tab list: Active + Notice Given by default, plus Signed Up / Completed
+  // only if their respective tucked-away toggle is on. Past Tenants is
+  // NOT a tab filter at all -- see TenancyHistoryCard, reached via its
+  // own button per selected property regardless of that property's stage.
+  const visibleProps = CONFIG.rentalProperties.filter(p => {
+    if (getCountry(p, agreements) !== country) return false
+    const stage = getStage(p.id, agreements)
+    if (stage === 'Active' || stage === 'Notice Given') return true
+    if (stage === 'Signed Up') return showSignedUp
+    if (stage === 'Completed') return showCompleted
+    return false
+  })
+  const signedUpCount  = CONFIG.rentalProperties.filter(p => getCountry(p,agreements)===country && getStage(p.id,agreements)==='Signed Up').length
+  const completedCount = CONFIG.rentalProperties.filter(p => getCountry(p,agreements)===country && getStage(p.id,agreements)==='Completed').length
 
   return (
     <div className="screen">
@@ -305,12 +352,12 @@ export default function RentalAgreement() {
           ))}
         </div>
 
-        <div style={{display:'flex',gap:'8px',marginBottom:'10px',alignItems:'stretch',flexWrap:'wrap'}}>
+        <div style={{display:'flex',gap:'8px',marginBottom:'8px',alignItems:'stretch',flexWrap:'wrap'}}>
           {visibleProps.map(p => {
             const a = agreements[p.id]
+            const stage = a?.stage || 'Signed Up'
             const d = a?.lease_end ? daysUntil(a.lease_end) : null
             const dot = d===null?null:d<0?'#c62828':d<=60?'#e67e22':'#34A853'
-            const statusCol = a?.status ? STATUS_COLOR[a.status] : null
             return (
               <button key={p.id} onClick={()=>handlePropChange(p.id)} style={{
                 flex:'1 1 100px', padding:'10px 6px',borderRadius:'10px',cursor:'pointer',textAlign:'center',
@@ -319,7 +366,9 @@ export default function RentalAgreement() {
               }}>
                 <div style={{fontWeight:'700',fontSize:'0.85rem'}}>{p.name}</div>
                 <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'2px'}}>{p.location}</div>
-                {statusCol && <div style={{fontSize:'0.62rem',color:statusCol,marginTop:'3px',fontWeight:'600'}}>{a.status}</div>}
+                <div style={{fontSize:'0.62rem',color:STAGE_COLOR[stage],marginTop:'3px',fontWeight:'600'}}>
+                  {a?.is_delinquent ? '⚠️ Delinquent' : stage}
+                </div>
                 {dot && <div style={{width:6,height:6,borderRadius:'50%',background:dot,margin:'4px auto 0'}}/>}
               </button>
             )
@@ -331,15 +380,26 @@ export default function RentalAgreement() {
           }}>+</button>
         </div>
 
-        <div style={{display:'flex', gap:'6px', marginBottom:'16px', flexWrap:'wrap'}}>
-          {LIFECYCLE_FILTERS.map(f => (
-            <button key={f.key} onClick={()=>handleLifecycleChange(f.key)} style={{
-              padding:'6px 12px', borderRadius:'20px', cursor:'pointer', fontSize:'0.74rem', fontWeight:'600',
-              border: `1px solid ${lifecycle===f.key ? '#34A853' : 'rgba(255,255,255,0.1)'}`,
-              background: lifecycle===f.key ? 'rgba(52,168,83,0.14)' : 'transparent',
-              color: lifecycle===f.key ? '#34A853' : '#5C7080',
-            }}>{f.label}</button>
-          ))}
+        {/* Tucked-away toggles for the rarely-checked ends of the lifecycle —
+            NOT a filter row sitting at equal visual weight with the tabs above,
+            on purpose, since these are checked far less often. */}
+        <div style={{display:'flex', gap:'10px', marginBottom:'16px', fontSize:'0.72rem'}}>
+          {signedUpCount > 0 && (
+            <button onClick={()=>setShowSignedUp(v=>!v)} style={{
+              background:'none', border:'none', cursor:'pointer', color: showSignedUp ? '#185FA5' : '#5C7080',
+              textDecoration:'underline', textDecorationStyle:'dotted',
+            }}>
+              {showSignedUp ? '− Hide' : '+ Show'} Signed Up ({signedUpCount})
+            </button>
+          )}
+          {completedCount > 0 && (
+            <button onClick={()=>setShowCompleted(v=>!v)} style={{
+              background:'none', border:'none', cursor:'pointer', color: showCompleted ? '#5C7080' : '#5C7080',
+              textDecoration:'underline', textDecorationStyle:'dotted', opacity:0.8,
+            }}>
+              {showCompleted ? '− Hide' : '+ Show'} Completed / Term Ended ({completedCount})
+            </button>
+          )}
         </div>
 
         {showAddProp && (
@@ -391,7 +451,7 @@ export default function RentalAgreement() {
               {country === 'US' ? '🇺🇸' : '🇮🇳'}
             </div>
             <div className="card-dashed-text">
-              <strong>No {country === 'US' ? 'USA' : 'India'} properties{lifecycle !== 'active' ? ` in "${LIFECYCLE_FILTERS.find(f=>f.key===lifecycle)?.label}"` : ''} yet</strong>
+              <strong>No {country === 'US' ? 'USA' : 'India'} properties yet</strong>
               <span>{country === 'US'
                 ? 'Add your first US property to get started — note that US lease document generation isn\u2019t set up yet.'
                 : 'Tap to add a property in this country.'}</span>
@@ -401,23 +461,51 @@ export default function RentalAgreement() {
 
         {!loading && selectedProp && prop && (
           <>
-            {readOnly && (
-              <div style={{background:'rgba(92,112,128,0.15)',border:'1px solid rgba(92,112,128,0.4)',borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',color:'#8A9BAE',fontSize:'0.8rem',fontWeight:'600'}}>
-                📁 Archival view — Prior Tenants are read-only. Generation and posting actions are disabled.
-              </div>
-            )}
-
-            <div style={{display:'flex',gap:'6px',marginBottom:'12px',flexWrap:'wrap'}}>
-              {STATUSES.map(s => (
-                <button key={s} onClick={()=>!readOnly && handleStatusChange(s)} disabled={readOnly} style={{
-                  padding:'5px 12px',borderRadius:'20px',cursor: readOnly ? 'default' : 'pointer',fontSize:'0.72rem',fontWeight:'600',
-                  border:`1px solid ${form.status===s?STATUS_COLOR[s]:'rgba(255,255,255,0.1)'}`,
-                  background:form.status===s?`${STATUS_COLOR[s]}22`:'transparent',
-                  color:form.status===s?STATUS_COLOR[s]:'#5C7080',
-                  opacity: readOnly ? 0.6 : 1,
+            {/* TENANT STAGE — this is the action that SAVES. Visually and
+                verbally distinct from the property-tab list above, which
+                only filters what's shown and saves nothing. */}
+            <div className="card-section-label">{prop?.name?.toUpperCase()} · {prop?.location} — TENANT STAGE</div>
+            <div style={{display:'flex',gap:'6px',marginBottom:'8px',flexWrap:'wrap'}}>
+              {STAGES.map(s => (
+                <button key={s} onClick={()=>handleStageChange(s)} style={{
+                  padding:'5px 12px',borderRadius:'20px',cursor:'pointer',fontSize:'0.72rem',fontWeight:'600',
+                  border:`1px solid ${form.stage===s?STAGE_COLOR[s]:'rgba(255,255,255,0.1)'}`,
+                  background:form.stage===s?`${STAGE_COLOR[s]}22`:'transparent',
+                  color:form.stage===s?STAGE_COLOR[s]:'#5C7080',
                 }}>{s}</button>
               ))}
             </div>
+
+            {form.stage === 'Completed' && (
+              <div style={{marginBottom:'12px'}}>
+                <div style={{fontSize:'0.68rem', color:'var(--text-dim)', marginBottom:'6px'}}>How did this tenancy end?</div>
+                <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                  {END_REASONS.map(r => (
+                    <button key={r} onClick={()=>handleEndReasonChange(r)} style={{
+                      padding:'5px 10px',borderRadius:'20px',cursor:'pointer',fontSize:'0.68rem',fontWeight:'600',
+                      border:`1px solid ${form.endReason===r?'#EF4444':'rgba(255,255,255,0.1)'}`,
+                      background:form.endReason===r?'rgba(239,68,68,0.14)':'transparent',
+                      color:form.endReason===r?'#EF4444':'#5C7080',
+                    }}>{r}</button>
+                  ))}
+                </div>
+                {!form.endReason && (
+                  <div style={{fontSize:'0.68rem', color:'#F59E0B', marginTop:'6px'}}>Pick a reason to confirm — not saved until you do.</div>
+                )}
+              </div>
+            )}
+
+            {(form.stage === 'Active' || form.stage === 'Notice Given') && (
+              <button onClick={handleDelinquentToggle} style={{
+                display:'flex', alignItems:'center', gap:'8px', padding:'8px 14px', borderRadius:'20px',
+                marginBottom:'14px', cursor:'pointer', fontSize:'0.78rem', fontWeight:'600',
+                border:`1px solid ${form.isDelinquent?'#EF4444':'var(--border-dim)'}`,
+                background: form.isDelinquent?'rgba(239,68,68,0.12)':'transparent',
+                color: form.isDelinquent?'#EF4444':'var(--text-dim)',
+              }}>
+                {form.isDelinquent ? '⚠️ Behind on rent — tap to clear' : '☐ Mark behind on rent'}
+              </button>
+            )}
 
             {expiryMsg && (
               <div style={{background:`${expiryColor}18`,border:`1px solid ${expiryColor}55`,borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',color:expiryColor,fontSize:'0.85rem',fontWeight:'600'}}>
@@ -431,27 +519,25 @@ export default function RentalAgreement() {
               </div>
             )}
 
-            <div className="card-section-label">{prop?.name?.toUpperCase()} · {prop?.location}</div>
-
-            <TenantProfileCard form={form} setField={setField} onTenantNameChange={handleTenantNameChange} readOnly={readOnly}/>
+            <TenantProfileCard form={form} setField={setField} onTenantNameChange={handleTenantNameChange} readOnly={false}/>
 
             <div className="card">
               <div className="card-section-label">Lease Terms (editable)</div>
               <div className="grid-2">
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>SECURITY DEPOSIT ({form.currency==='USD'?'$':'₹'})</label>
-                  <input type="number" min="0" value={form.deposit} disabled={readOnly} onChange={e=>setField('deposit',e.target.value)}
-                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:readOnly?0.6:1}}/>
+                  <input type="number" min="0" value={form.deposit} onChange={e=>setField('deposit',e.target.value)}
+                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>RENT / MONTH ({form.currency==='USD'?'$':'₹'})</label>
-                  <input type="number" min="0" value={form.agreedRent} disabled={readOnly} onChange={e=>setField('agreedRent',e.target.value)}
-                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'#34A853',fontSize:'0.9rem',opacity:readOnly?0.6:1}}/>
+                  <input type="number" min="0" value={form.agreedRent} onChange={e=>setField('agreedRent',e.target.value)}
+                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'#34A853',fontSize:'0.9rem'}}/>
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>MAINTENANCE ({form.currency==='USD'?'$':'₹'})</label>
-                  <input type="number" min="0" value={form.maintenance} disabled={readOnly} onChange={e=>setField('maintenance',e.target.value)}
-                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:readOnly?0.6:1}}/>
+                  <input type="number" min="0" value={form.maintenance} onChange={e=>setField('maintenance',e.target.value)}
+                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>TOTAL MONTHLY ({form.currency==='USD'?'$':'₹'})</label>
@@ -466,13 +552,13 @@ export default function RentalAgreement() {
               <div className="grid-2" style={{marginTop:'10px'}}>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>LEASE START *</label>
-                  <input type="date" value={form.leaseStart} disabled={readOnly} onChange={e=>setField('leaseStart',e.target.value)}
-                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:readOnly?0.6:1}}/>
+                  <input type="date" value={form.leaseStart} onChange={e=>setField('leaseStart',e.target.value)}
+                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>LEASE END *</label>
-                  <input type="date" value={form.leaseEnd} disabled={readOnly} onChange={e=>setField('leaseEnd',e.target.value)}
-                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:readOnly?0.6:1}}/>
+                  <input type="date" value={form.leaseEnd} onChange={e=>setField('leaseEnd',e.target.value)}
+                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                 </div>
               </div>
               {duration && <div style={{color:'#C8903A',fontSize:'0.75rem',marginTop:'4px',opacity:0.8}}>Duration: {duration} months</div>}
@@ -480,19 +566,19 @@ export default function RentalAgreement() {
               <div className="grid-2" style={{marginTop:'10px'}}>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>NEXT RENEWAL DATE</label>
-                  <input type="date" value={form.nextRenewalDate} disabled={readOnly} onChange={e=>setField('nextRenewalDate',e.target.value)}
-                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:readOnly?0.6:1}}/>
+                  <input type="date" value={form.nextRenewalDate} onChange={e=>setField('nextRenewalDate',e.target.value)}
+                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                   <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>Defaults to lease end if left blank.</div>
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>EARLY TERMINATION DATE</label>
-                  <input type="date" value={form.earlyTerminationDate} disabled={readOnly || !form.earlyTerminated}
+                  <input type="date" value={form.earlyTerminationDate} disabled={!form.earlyTerminated}
                     onChange={e=>setField('earlyTerminationDate',e.target.value)}
-                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:(readOnly||!form.earlyTerminated)?0.4:1}}/>
+                    style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',opacity:!form.earlyTerminated?0.4:1}}/>
                 </div>
               </div>
-              <label style={{display:'flex',alignItems:'center',gap:'8px',marginTop:'10px',cursor: readOnly ? 'default' : 'pointer'}}>
-                <input type="checkbox" checked={form.earlyTerminated} disabled={readOnly}
+              <label style={{display:'flex',alignItems:'center',gap:'8px',marginTop:'10px',cursor:'pointer'}}>
+                <input type="checkbox" checked={form.earlyTerminated}
                   onChange={e=>setField('earlyTerminated', e.target.checked)} style={{width:16,height:16}}/>
                 <span style={{fontSize:'0.82rem',color: form.earlyTerminated ? '#EF4444' : 'var(--text-dim)'}}>
                   Lease was terminated early
@@ -508,14 +594,13 @@ export default function RentalAgreement() {
                   { key:'docMoveOut',        label:'📦 Move-out doc' },
                   { key:'docDamageReport',   label:'⚠️ Damage report' },
                 ].map(item => (
-                  <label key={item.key} onClick={()=>!readOnly && handleDocToggle(item.key, form[item.key])} style={{
-                    display:'flex', alignItems:'center', gap:'8px', cursor: readOnly ? 'default' : 'pointer',
+                  <label key={item.key} onClick={()=>handleDocToggle(item.key, form[item.key])} style={{
+                    display:'flex', alignItems:'center', gap:'8px', cursor:'pointer',
                     padding:'8px 10px', borderRadius:'8px',
                     background: form[item.key] ? 'rgba(52,168,83,0.1)' : 'var(--dark-input)',
                     border: `1px solid ${form[item.key] ? 'rgba(52,168,83,0.35)' : 'var(--border-dim)'}`,
-                    opacity: readOnly ? 0.7 : 1,
                   }}>
-                    <input type="checkbox" checked={form[item.key]} disabled={readOnly} onChange={()=>{}} style={{width:15,height:15,flexShrink:0}}/>
+                    <input type="checkbox" checked={form[item.key]} onChange={()=>{}} style={{width:15,height:15,flexShrink:0}}/>
                     <span style={{fontSize:'0.78rem', color: form[item.key] ? '#34A853' : 'var(--text-dim)'}}>{item.label}</span>
                   </label>
                 ))}
@@ -524,18 +609,16 @@ export default function RentalAgreement() {
               {error && <div style={{color:'#EF9A9A',fontSize:'0.82rem',marginTop:'10px',background:'rgba(198,40,40,0.1)',padding:'8px 10px',borderRadius:'8px'}}>❌ {error}</div>}
             </div>
 
-            {!readOnly && (
-              <button className="btn btn-gold" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : `💾 Save — ${prop?.name}`}
-              </button>
-            )}
+            <button className="btn btn-gold" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : `💾 Save — ${prop?.name}`}
+            </button>
 
             <DocumentEngineCard
               agreement={agreements[selectedProp]}
               property={prop}
               country={form.country}
               saved={saved}
-              readOnly={readOnly}
+              readOnly={false}
               showToast={showToast}
             />
 
@@ -544,11 +627,35 @@ export default function RentalAgreement() {
               agreement={agreements[selectedProp]}
               property={prop}
               saved={saved}
-              readOnly={readOnly}
+              readOnly={false}
               showToast={showToast}
             />
 
-            <MetaDiagnosticsCard form={form} setField={setField} propName={prop?.name} readOnly={readOnly}/>
+            <MetaDiagnosticsCard form={form} setField={setField} propName={prop?.name} readOnly={false}/>
+
+            {/* Past Tenants — a SEPARATE button, not a tab filter, since a
+                property's live tenant can be Active while it separately
+                has historic records on file. Tucked behind a toggle since
+                this is checked rarely, mostly to cross-check old details. */}
+            {!showHistory ? (
+              <button onClick={()=>setShowHistory(true)} style={{
+                width:'100%', marginTop:'4px', padding:'11px', borderRadius:'10px',
+                border:'1px solid var(--border-dim)', background:'transparent',
+                color:'var(--text-dim)', fontWeight:'600', fontSize:'0.82rem', cursor:'pointer',
+              }}>
+                📁 View Past Tenants for {prop?.name}
+              </button>
+            ) : (
+              <>
+                <button onClick={()=>setShowHistory(false)} style={{
+                  background:'none', border:'none', cursor:'pointer', color:'#5C7080',
+                  fontSize:'0.72rem', marginBottom:'8px', textDecoration:'underline',
+                }}>
+                  − Hide Past Tenants
+                </button>
+                <TenancyHistoryCard propId={selectedProp} propCountry={form.country} showToast={showToast}/>
+              </>
+            )}
           </>
         )}
 

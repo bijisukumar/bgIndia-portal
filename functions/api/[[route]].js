@@ -2859,7 +2859,7 @@ export async function onRequest(ctx) {
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
             parseFloat(d.deposit) || 0, parseFloat(d.agreedRent) || 0, parseFloat(d.maintenance) || 0,
-            d.leaseStart || null, d.leaseEnd || null, d.notes || null, d.driveFolderUrl || null, 'Active',
+            d.leaseStart || null, d.leaseEnd || null, d.notes || null, d.driveFolderUrl || null, 'Signed Up',
             nextRenewal, earlyTerminated, earlyTerminationDt,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
             actor, actor, now(), now()
@@ -2867,6 +2867,30 @@ export async function onRequest(ctx) {
         }
 
         return json({ success: true, data: { propId: d.propId } })
+      }
+
+      // Tenant lifecycle stage: 'Signed Up' / 'Active' / 'Notice Given' / 'Completed'.
+      // isDelinquent is a flag that can sit on top of Active/Notice Given (still
+      // living there, behind on rent) — NOT its own stage. endReason is only
+      // meaningful when stage='Completed' (Lease Ended / Early Termination /
+      // Evicted / Runaway / After Delinquency).
+      //
+      // The legacy `status` column is kept in sync alongside `stage` (best
+      // mapping back to the old 6-value vocabulary) rather than left to go
+      // stale, since other screens (e.g. Rev360Home's KPI strip) may read it —
+      // Rev360Home itself has been updated to read `stage`/`is_delinquent`
+      // directly, but anything else relying on `status` keeps working too.
+      if (action === 'updateTenantStage') {
+        const { propId, stage, isDelinquent, endReason } = body
+        if (!propId || !stage) return err('propId and stage required')
+        if (!['Signed Up','Active','Notice Given','Completed'].includes(stage)) return err('Invalid stage')
+        const legacyStatus = stage === 'Completed' ? (endReason || 'Completed')
+          : (isDelinquent ? 'Delinquent' : stage)
+        await DB.prepare(`
+          UPDATE rental_props SET stage = ?, is_delinquent = ?, end_reason = ?, status = ?, updated_by = ?, updated_at = ?
+          WHERE prop_id = ?
+        `).bind(stage, isDelinquent ? 1 : 0, stage === 'Completed' ? (endReason || 'Lease Ended') : null, legacyStatus, actor, now(), propId).run()
+        return json({ success: true, data: { propId, stage, isDelinquent: !!isDelinquent, endReason } })
       }
 
       if (action === 'updateTenantStatus') {
@@ -2996,6 +3020,73 @@ export async function onRequest(ctx) {
           throw e
         }
         return json({ success: true, data: { txnId: id, propId, periodMonth, totalDue: total } })
+      }
+
+      // TENANCY HISTORY — past tenants for a property, kept fully separate
+      // from rental_props' single current-tenant slot. Many rows can exist
+      // per propId (one per past tenancy). Used both for manually
+      // back-filling old records and for archiving a current tenancy when
+      // it ends (see archiveTenancyToHistory below).
+      if (action === 'getTenancyHistory') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(`SELECT * FROM tenancy_history WHERE prop_id = ? ORDER BY lease_end DESC`).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      if (action === 'saveTenancyHistory') {
+        const h = body
+        if (!h.propId) return err('propId required')
+        if (!h.tenantName) return err('tenantName required')
+        const id = h.historyId || ('hist_' + Date.now() + '_' + Math.floor(Math.random()*1000))
+        if (h.historyId) {
+          await DB.prepare(`
+            UPDATE tenancy_history SET
+              tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
+              deposit=?, agreed_rent=?, maintenance_fee=?, lease_start=?, lease_end=?,
+              country=?, currency=?, status=?, end_reason=?, early_terminated=?, early_termination_date=?,
+              notes=?, drive_folder_url=?,
+              doc_contract_signed=?, doc_id_captured=?, doc_move_in=?, doc_move_out=?, doc_damage_report=?,
+              updated_by=?, updated_at=?
+            WHERE history_id=?
+          `).bind(
+            h.tenantName, h.tenantEmail||null, h.tenantPhone||null, h.tenantAddress||null, h.tenantPan||null,
+            parseFloat(h.deposit)||0, parseFloat(h.agreedRent)||0, parseFloat(h.maintenance)||0,
+            h.leaseStart||null, h.leaseEnd||null,
+            h.country||'IN', h.currency||'INR', 'Completed', h.endReason||'Lease Ended',
+            h.earlyTerminated?1:0, h.earlyTerminationDate||null,
+            h.notes||null, h.driveFolderUrl||null,
+            h.docContractSigned?1:0, h.docIdCaptured?1:0, h.docMoveIn?1:0, h.docMoveOut?1:0, h.docDamageReport?1:0,
+            actor, now(), id
+          ).run()
+        } else {
+          await DB.prepare(`
+            INSERT INTO tenancy_history (
+              history_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
+              deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
+              country, currency, status, end_reason, early_terminated, early_termination_date,
+              notes, drive_folder_url,
+              doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              created_by, created_at, updated_by, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            id, h.propId, h.tenantName, h.tenantEmail||null, h.tenantPhone||null, h.tenantAddress||null, h.tenantPan||null,
+            parseFloat(h.deposit)||0, parseFloat(h.agreedRent)||0, parseFloat(h.maintenance)||0,
+            h.leaseStart||null, h.leaseEnd||null,
+            h.country||'IN', h.currency||'INR', 'Completed', h.endReason||'Lease Ended',
+            h.earlyTerminated?1:0, h.earlyTerminationDate||null,
+            h.notes||null, h.driveFolderUrl||null,
+            h.docContractSigned?1:0, h.docIdCaptured?1:0, h.docMoveIn?1:0, h.docMoveOut?1:0, h.docDamageReport?1:0,
+            actor, now(), actor, now()
+          ).run()
+        }
+        return json({ success: true, data: { historyId: id } })
+      }
+
+      if (action === 'deleteTenancyHistory') {
+        const { historyId } = body; if (!historyId) return err('historyId required')
+        await DB.prepare(`DELETE FROM tenancy_history WHERE history_id = ?`).bind(historyId).run()
+        return json({ success: true, data: { historyId, deleted: true } })
       }
 
 

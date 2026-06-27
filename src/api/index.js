@@ -108,9 +108,13 @@ export const api = {
   getRentalAgreements:  ()       => get('getRentalAgreements'),
   saveRentalAgreement:  (data)   => post('saveRentalAgreement', data),
   updateTenantStatus:   (data)   => post('updateTenantStatus', data),
+  updateTenantStage:    (data)   => post('updateTenantStage', data),
   updateRentalDocChecklist: (data) => post('updateRentalDocChecklist', data),
   getRentTransactions: (propId)  => get('getRentTransactions', { propId }),
   postRentPayment:     (data)    => post('postRentPayment', data),
+  getTenancyHistory:    (propId) => get('getTenancyHistory', { propId }),
+  saveTenancyHistory:   (data)   => post('saveTenancyHistory', data),
+  deleteTenancyHistory: (historyId) => post('deleteTenancyHistory', { historyId }),
 
   // ── LEASE LOSSES / CLAIMS ────────────────────────────────
   getLeaseLosses:       (propId) => get('getLeaseLosses', { propId }),

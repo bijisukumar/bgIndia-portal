@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
 
 const STATUS_COLOR = {
-  'Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
+  'Signed Up':'#185FA5','Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
   'Evicted':'#EF4444','Runaway':'#EF4444','Completed':'#5C7080',
 }
 
@@ -27,7 +27,7 @@ function KpiStrip({ props, income, losses, currency }) {
   const totalNOI = income
     .filter(r => props.some(p => p.prop_id === r.prop_id))
     .reduce((s,r) => s+(r.net||0), 0)
-  const activeCount = props.filter(p => p.status === 'Active' || !p.status).length
+  const activeCount = props.filter(p => p.stage === 'Active' || (!p.stage && (p.status === 'Active' || !p.status))).length
   const totalClaimed = losses
     .filter(r => props.some(p => p.prop_id === r.prop_id))
     .reduce((s,r) => s+(r.total_claimed||0), 0)
@@ -89,7 +89,7 @@ export default function Rev360Home() {
   const renewals   = (dash?.renewalAlerts || []).filter(r => r.days_left <= 60)
   const tabRenewals = renewals.filter(r => tabProps.some(p => p.prop_id === r.prop_id))
 
-  const alertProps = tabProps.filter(p => ['Delinquent','Evicted','Runaway'].includes(p.status))
+  const alertProps = tabProps.filter(p => p.is_delinquent || ['Delinquent','Evicted','Runaway'].includes(p.status))
 
   const tabBtn = (t, label, count) => (
     <button onClick={() => setCountryTab(t)} style={{
@@ -128,7 +128,7 @@ export default function Rev360Home() {
             </span>
             {alertProps.map(p => (
               <div key={p.prop_id} style={{fontSize:'0.78rem',color:'#EDF2F7',marginTop:'4px'}}>
-                {p.name} — <span style={{color:STATUS_COLOR[p.status]}}>{p.status}</span>
+                {p.name} — <span style={{color:'#EF4444'}}>{p.is_delinquent ? '⚠️ Delinquent' : (p.end_reason || p.stage || p.status)}</span>
               </div>
             ))}
           </div>
@@ -197,10 +197,10 @@ export default function Rev360Home() {
                   <div style={{textAlign:'right'}}>
                     <div style={{
                       fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',
-                      background:`${STATUS_COLOR[p.status]||'#5C7080'}18`,
-                      color:STATUS_COLOR[p.status]||'#5C7080',
+                      background:`${STATUS_COLOR[p.is_delinquent ? 'Delinquent' : (p.stage||p.status)]||'#5C7080'}18`,
+                      color:STATUS_COLOR[p.is_delinquent ? 'Delinquent' : (p.stage||p.status)]||'#5C7080',
                     }}>
-                      {p.status||'Active'}
+                      {p.is_delinquent ? '⚠️ Delinquent' : (p.stage || p.status || 'Active')}
                     </div>
                     {p.tenant_name && (
                       <div style={{fontSize:'0.68rem',color:'#5C7080',marginTop:'3px'}}>{p.tenant_name}</div>

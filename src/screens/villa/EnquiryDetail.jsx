@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
+import DatePicker from '../../components/DatePicker'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
@@ -493,7 +494,7 @@ export default function EnquiryDetail() {
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
             <div className="field-label">Follow-up due (optional)</div>
-            <input type="date" className="field-input" value={followUpDue} onChange={e2 => setFollowUpDue(e2.target.value)} />
+            <DatePicker value={followUpDue} onChange={setFollowUpDue} placeholder="Select follow-up date" min={localTodayStr()} />
           </div>
           <button onClick={handleLogComm} disabled={busy} className="btn btn-gold" style={{ marginTop: '10px' }}>
             {busy ? 'Logging...' : 'Log entry →'}

@@ -79,6 +79,7 @@ function buildQuote(e) {
     `Secure your dates and enjoy these direct booking benefits here:`,
     `🌐 Book Direct: https://www.luxuryvillasofguruvayur.com`,
     `FAQ: https://luxuryvillasofguruvayur.com/faq.html`,
+    `📸 Villa Photos: https://luxuryvillasofguruvayur.com/villa`,
   )
 
   lines.push(

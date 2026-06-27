@@ -19,6 +19,12 @@ const COMM_TYPES = [
   { id: 'internal_note', label: 'Internal Note' },
 ]
 
+// Statuses settable directly from this screen's dropdown. Deliberately excludes
+// confirmed/lost/cancelled — those go through Confirm Booking / Mark Lost, which
+// do extra work (create a stay record, capture booking value/lost reason) that a
+// plain status change here would silently skip.
+const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
+
 function buildQuote(e) {
   const nights = e.nights || 1
   const nightly = nights > 0 ? Math.round((e.final_offer_amount || e.quote_amount || 0) / nights) : 0
@@ -68,6 +74,7 @@ export default function EnquiryDetail() {
   const [pricingParams, setPricingParams] = useState(null)   // { checkInDate, checkOutDate, adults, children, infants }
   const [pricingNote, setPricingNote] = useState(null)
   const [pricingBusy, setPricingBusy] = useState(false)
+  const [statusBusy, setStatusBusy] = useState(false)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -128,6 +135,27 @@ export default function EnquiryDetail() {
       load()
     } catch { showToast('Failed to update', 'error') }
     finally { setBusy(false) }
+  }
+
+  const handleStatusChange = async (newStatus) => {
+    if (!e || newStatus === e.status) return
+    setStatusBusy(true)
+    try {
+      // saveEnquiry needs the full payload — re-send everything as-is, only status changes.
+      await api.saveEnquiry({
+        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
+        checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
+        adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
+        purpose: e.purpose, quoteAmount: e.quote_amount,
+        repeatDiscountPct: e.discount_category ? 0 : e.repeat_discount_pct,
+        discountCategory: e.discount_category || null, discountPct: e.discount_category ? e.discount_pct : 0,
+        status: newStatus, notes: e.notes,
+      })
+      showToast(`Status updated to ${STATUS_META[newStatus]?.label || newStatus} ✓`)
+      load()
+    } catch { showToast('Failed to update status', 'error') }
+    finally { setStatusBusy(false) }
   }
 
   const handleCopyQuote = () => {
@@ -309,7 +337,14 @@ export default function EnquiryDetail() {
           <>
             <div className="card-section-label" style={{ marginTop: '14px' }}>ACTIONS</div>
             <div className="card">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div className="field">
+                <div className="field-label">Status</div>
+                <select className="field-input" value={e.status} disabled={statusBusy}
+                  onChange={e2 => handleStatusChange(e2.target.value)}>
+                  {MANUAL_STATUSES.map(s => <option key={s} value={s}>{STATUS_META[s]?.label || s}</option>)}
+                </select>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '10px' }}>
                 <button onClick={() => setShowConfirmPicker(s => !s)} className="btn" style={{ background: 'rgba(52,168,83,0.15)', color: '#34A853', border: '1px solid rgba(52,168,83,0.4)' }}>
                   ✓ Confirm Booking
                 </button>

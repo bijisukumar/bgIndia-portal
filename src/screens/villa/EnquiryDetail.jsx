@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
-import { DISCOUNT_CATEGORIES } from '../../utils/villaPricing'
+import { parseLocalDate } from '../../utils/dates'
+import {
+  getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES,
+  OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS,
+} from '../../utils/villaPricing'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 function fmtDateTime(d) { if (!d) return ''; return String(d).replace('T', ' ').slice(0, 16) }
@@ -60,6 +64,10 @@ export default function EnquiryDetail() {
   const [showConfirmPicker, setShowConfirmPicker] = useState(false)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
+  const [rateCard, setRateCard] = useState(FALLBACK_RATE_CARDS.dwarka)
+  const [pricingParams, setPricingParams] = useState(null)   // { checkInDate, checkOutDate, adults, children, infants }
+  const [pricingNote, setPricingNote] = useState(null)
+  const [pricingBusy, setPricingBusy] = useState(false)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -68,9 +76,22 @@ export default function EnquiryDetail() {
     api.getEnquiryDetail(enquiryId).then(d => {
       setData(d)
       setBookingValue(d?.enquiry?.final_offer_amount || d?.enquiry?.quote_amount || '')
+      const en = d?.enquiry
+      if (en) {
+        setPricingParams({
+          checkInDate: en.checkin_date || '', checkOutDate: en.checkout_date || '',
+          adults: en.adults || en.guests_count || 1, children: en.children || 0, infants: en.infants || 0,
+        })
+      }
     }).catch(() => showToast('Failed to load enquiry', 'error')).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [enquiryId])
+
+  useEffect(() => {
+    api.getRateCard('dwarka').then(d => {
+      if (d?.rateCard?.length) setRateCard(d.rateCard)
+    }).catch(() => {})
+  }, [])
 
   const e = data?.enquiry
 
@@ -112,6 +133,53 @@ export default function EnquiryDetail() {
   const handleCopyQuote = () => {
     if (!e) return
     navigator.clipboard.writeText(buildQuote(e)).then(() => showToast('Quote copied — paste into WhatsApp ✓'))
+  }
+
+  const handleGetPricing = async () => {
+    if (!e || !pricingParams) return
+    const adultsNum = parseInt(pricingParams.adults, 10) || 0
+    const childrenNum = parseInt(pricingParams.children, 10) || 0
+    const infantsNum = parseInt(pricingParams.infants, 10) || 0
+    const totalGuests = adultsNum + childrenNum + infantsNum
+    const nights = pricingParams.checkInDate && pricingParams.checkOutDate
+      ? Math.max(0, Math.round((parseLocalDate(pricingParams.checkOutDate) - parseLocalDate(pricingParams.checkInDate)) / 86400000))
+      : 0
+
+    if (totalGuests === 0) { showToast('Add guest counts first', 'error'); return }
+    if (nights === 0) { showToast('Add check-in and check-out dates first', 'error'); return }
+
+    const estimate = getTariffEstimate(rateCard, { adults: adultsNum, children: childrenNum, nights })
+
+    if (estimate.overflowGuests > 0) {
+      const msg = estimate.withinRecommended
+        ? `${estimate.overflowGuests} extra guest${estimate.overflowGuests === 1 ? '' : 's'} beyond ${RATE_CARD_MAX_GUESTS} added at ₹${OVERFLOW_PER_GUEST_PER_NIGHT}/guest/night (floor beds)`
+        : `${estimate.overflowGuests} extra guests beyond ${RATE_CARD_MAX_GUESTS} — exceeds the recommended max of ${OVERFLOW_MAX_RECOMMENDED} extra guests on floor beds`
+      setPricingNote({ msg, level: estimate.withinRecommended ? 'info' : 'warn' })
+    } else {
+      setPricingNote(null)
+    }
+
+    setPricingBusy(true)
+    try {
+      // Re-save the full enquiry with updated dates/guest-counts/quote, preserving
+      // everything else (discount category, notes, status, etc.) exactly as-is.
+      const discountPct = e.discount_category ? (e.discount_pct || 0) : (e.repeat_discount_pct || 0)
+      const discountAmount = Math.round(estimate.total * discountPct) / 100
+      await api.saveEnquiry({
+        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
+        checkInDate: pricingParams.checkInDate, checkOutDate: pricingParams.checkOutDate,
+        adults: adultsNum, children: childrenNum, infants: infantsNum, guestsCount: totalGuests,
+        purpose: e.purpose,
+        quoteAmount: estimate.total,
+        repeatDiscountPct: e.discount_category ? 0 : discountPct,
+        discountCategory: e.discount_category || null, discountPct: e.discount_category ? discountPct : 0,
+        status: e.status, notes: e.notes,
+      })
+      showToast(`Estimated ₹${estimate.tariffPerNight.toLocaleString('en-IN')}/night × ${nights} night${nights === 1 ? '' : 's'} — saved ✓`)
+      load()
+    } catch { showToast('Failed to save pricing', 'error') }
+    finally { setPricingBusy(false) }
   }
 
   if (loading || !e) {
@@ -183,6 +251,58 @@ export default function EnquiryDetail() {
           <button onClick={handleCopyQuote} className="btn btn-teal" style={{ marginTop: '12px' }}>
             📋 Generate & copy WhatsApp quote
           </button>
+
+          {pricingParams && (
+            <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-dim)' }}>
+              <div style={{ color: '#5C7080', fontSize: '0.72rem', fontWeight: '700', marginBottom: '8px', letterSpacing: '0.03em' }}>
+                ADJUST & GET PRICING
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div className="field">
+                  <div className="field-label">Check-in</div>
+                  <input type="date" className="field-input" value={pricingParams.checkInDate}
+                    onChange={e2 => setPricingParams(p => ({ ...p, checkInDate: e2.target.value }))} />
+                </div>
+                <div className="field">
+                  <div className="field-label">Check-out</div>
+                  <input type="date" className="field-input" value={pricingParams.checkOutDate}
+                    onChange={e2 => setPricingParams(p => ({ ...p, checkOutDate: e2.target.value }))} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div className="field">
+                  <div className="field-label">Adults</div>
+                  <input type="number" min="0" className="field-input" value={pricingParams.adults}
+                    onChange={e2 => setPricingParams(p => ({ ...p, adults: parseInt(e2.target.value) || 0 }))} />
+                </div>
+                <div className="field">
+                  <div className="field-label">Children (1–12y)</div>
+                  <input type="number" min="0" className="field-input" value={pricingParams.children}
+                    onChange={e2 => setPricingParams(p => ({ ...p, children: parseInt(e2.target.value) || 0 }))} />
+                </div>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <div className="field-label">Infants (≤1y)</div>
+                  <input type="number" min="0" className="field-input" value={pricingParams.infants}
+                    onChange={e2 => setPricingParams(p => ({ ...p, infants: parseInt(e2.target.value) || 0 }))} />
+                </div>
+              </div>
+
+              {pricingNote && (
+                <div style={{
+                  fontSize: '0.72rem', padding: '8px 10px', borderRadius: '8px', margin: '10px 0 0',
+                  background: pricingNote.level === 'warn' ? 'rgba(239,68,68,0.08)' : 'rgba(59,130,246,0.08)',
+                  border: `1px solid ${pricingNote.level === 'warn' ? 'rgba(239,68,68,0.3)' : 'rgba(59,130,246,0.3)'}`,
+                  color: pricingNote.level === 'warn' ? '#EF4444' : '#3B82F6',
+                }}>
+                  {pricingNote.level === 'warn' ? '⚠️ ' : 'ℹ️ '}{pricingNote.msg}
+                </div>
+              )}
+
+              <button onClick={handleGetPricing} disabled={pricingBusy} className="btn" style={{ marginTop: '10px' }}>
+                {pricingBusy ? 'Calculating...' : '💰 Get pricing'}
+              </button>
+            </div>
+          )}
         </div>
 
         {!isFinal && (

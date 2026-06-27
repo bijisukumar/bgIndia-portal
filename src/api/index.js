@@ -224,6 +224,7 @@ export const api = {
   confirmEnquiry:       (data)        => post('confirmEnquiry', data),
   getEnquiryDashboard:  (vId, year)   => get('getEnquiryDashboard', year ? { villaId: vId, year } : { villaId: vId }),
   getEnquiryFollowUps:  (vId)         => get('getEnquiryFollowUps', { villaId: vId }),
+  getRateCard:          (vId)         => get('getRateCard', { villaId: vId }),
 
   // ── MAINTENANCE / SCHEMA VALIDATION ────────────────────────
   getSchemaSnapshot: () => get('getSchemaSnapshot'),

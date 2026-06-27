@@ -347,6 +347,30 @@ CREATE TABLE IF NOT EXISTS guests (
 CREATE INDEX IF NOT EXISTS idx_guests_phone ON guests(phone);
 CREATE INDEX IF NOT EXISTS idx_guests_email ON guests(email);
 
+-- ── VILLA RATE CARD ──────────────────────────────────────────
+-- Base per-night tariff by villa + billable guest count (adults+children; infants free).
+-- Reusable beyond the enquiry screen — e.g. a future guest-facing quick-pricing page
+-- can read the same table via getRateCard.
+CREATE TABLE IF NOT EXISTS villa_rate_cards (
+  villa_id      TEXT NOT NULL DEFAULT 'dwarka',
+  guest_count   INTEGER NOT NULL,         -- 1..12 today; villa-specific curve, not assumed shared
+  tariff_per_night REAL NOT NULL,
+  -- Audit
+  created_by  TEXT DEFAULT 'owner',
+  created_at  TEXT DEFAULT (datetime('now')),
+  updated_by  TEXT DEFAULT 'owner',
+  updated_at  TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (villa_id, guest_count)
+);
+
+-- Seed: Dwarka rate card, guests 1-12 (per night, INR). Beyond 12 guests, the app
+-- computes guest12Tariff + (extraGuests * 750)/night in code (villaPricing.js) rather
+-- than storing every possible row — floor-bed overflow, recommended max 4 extra guests.
+INSERT OR IGNORE INTO villa_rate_cards (villa_id, guest_count, tariff_per_night) VALUES
+  ('dwarka', 1, 4896), ('dwarka', 2, 4896), ('dwarka', 3, 6037), ('dwarka', 4, 7178),
+  ('dwarka', 5, 8319), ('dwarka', 6, 9460), ('dwarka', 7, 10601), ('dwarka', 8, 11743),
+  ('dwarka', 9, 12884), ('dwarka', 10, 14025), ('dwarka', 11, 15166), ('dwarka', 12, 16307);
+
 -- ── ENQUIRIES ────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS enquiries (
   enquiry_id        TEXT PRIMARY KEY,
@@ -360,13 +384,18 @@ CREATE TABLE IF NOT EXISTS enquiries (
   checkin_date      TEXT,
   checkout_date     TEXT,
   nights            INTEGER DEFAULT 0,                  -- recomputed from dates on save
-  guests_count      INTEGER DEFAULT 1,
+  guests_count      INTEGER DEFAULT 1,                    -- adults + children + infants (kept for back-compat with reporting)
+  adults            INTEGER DEFAULT 0,
+  children          INTEGER DEFAULT 0,                    -- ages 1-12
+  infants           INTEGER DEFAULT 0,                    -- 1 yr and under, free, excluded from pricing lookup
   purpose           TEXT,                                -- vacation|wedding|temple_visit|family_function|other
   quote_amount      REAL DEFAULT 0,
   is_repeat_guest   INTEGER DEFAULT 0,
   previous_stays    INTEGER DEFAULT 0,
-  repeat_discount_pct REAL DEFAULT 0,
-  discount_amount   REAL DEFAULT 0,                      -- = quote_amount * repeat_discount_pct / 100
+  repeat_discount_pct REAL DEFAULT 0,                     -- legacy field, kept as-is; not replaced by discount_category
+  discount_category TEXT,                                 -- loyal_patron|elite_guest|platinum_guest|b2b_india|b2b_intl (mutually exclusive, optional)
+  discount_pct      REAL DEFAULT 0,                       -- % tied to discount_category; defaults on category select, editable
+  discount_amount   REAL DEFAULT 0,                      -- = quote_amount * discount_pct / 100 (falls back to repeat_discount_pct if no category set)
   final_offer_amount REAL DEFAULT 0,                      -- = quote_amount - discount_amount
   status            TEXT NOT NULL DEFAULT 'new',          -- new|quoted|follow_up_needed|negotiating|confirmed|lost|cancelled
   last_contact_date TEXT,

@@ -981,6 +981,18 @@ export async function onRequest(ctx) {
         return json({ success: true, data: prices })
       }
 
+      if (action === 'getRateCard') {
+        // Per-night tariff by villa + billable guest count (1-12). Used by the
+        // "Get pricing" button on the enquiry screen, and reusable later by a
+        // guest-facing quick-pricing screen — same shape either way.
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(
+          `SELECT guest_count, tariff_per_night FROM villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+        ).bind(villaId).all()
+        const rateCard = results.map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night }))
+        return json({ success: true, data: { villaId, rateCard } })
+      }
+
       if (action === 'getInventoryRestockLog') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const limit   = parseInt(url.searchParams.get('limit') || '50', 10)
@@ -1837,9 +1849,21 @@ export async function onRequest(ctx) {
         const nights = body.checkInDate && body.checkOutDate
           ? Math.max(0, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))
           : 0
+        const adults = parseInt(body.adults, 10) || 0
+        const children = parseInt(body.children, 10) || 0
+        const infants = parseInt(body.infants, 10) || 0
+        const guestsCount = body.guestsCount || (adults + children + infants) || 1
+
         const quoteAmount = parseFloat(body.quoteAmount) || 0
         const discountPct = parseFloat(body.repeatDiscountPct) || 0
-        const discountAmount = Math.round(quoteAmount * discountPct) / 100
+        // New discount-category system is additive to the legacy repeat_discount_pct field.
+        // The two are mutually exclusive in the UI per enquiry, but stored independently —
+        // discount_amount/final_offer prefer discount_pct (new system) when a category is set,
+        // otherwise fall back to the legacy repeat_discount_pct, matching what the form shows.
+        const discountCategory = body.discountCategory || null
+        const categoryDiscountPct = parseFloat(body.discountPct) || 0
+        const effectiveDiscountPct = discountCategory ? categoryDiscountPct : discountPct
+        const discountAmount = Math.round(quoteAmount * effectiveDiscountPct) / 100
         const finalOffer = quoteAmount - discountAmount
 
         if (body.enquiryId) {
@@ -1847,16 +1871,20 @@ export async function onRequest(ctx) {
           await DB.prepare(`
             UPDATE enquiries SET
               guest_name = ?, phone = ?, email = ?, source = ?,
-              checkin_date = ?, checkout_date = ?, nights = ?, guests_count = ?, purpose = ?,
-              quote_amount = ?, repeat_discount_pct = ?, discount_amount = ?, final_offer_amount = ?,
+              checkin_date = ?, checkout_date = ?, nights = ?, guests_count = ?,
+              adults = ?, children = ?, infants = ?, purpose = ?,
+              quote_amount = ?, repeat_discount_pct = ?, discount_category = ?, discount_pct = ?,
+              discount_amount = ?, final_offer_amount = ?,
               status = ?, last_contact_date = ?, follow_up_due = ?,
               lost_reason = ?, assigned_to = ?, notes = ?,
               updated_by = ?, updated_at = ?
             WHERE enquiry_id = ?
           `).bind(
             body.guestName, normPhone, normEmail, body.source || 'website',
-            body.checkInDate || null, body.checkOutDate || null, nights, body.guestsCount || 1, body.purpose || null,
-            quoteAmount, discountPct, discountAmount, finalOffer,
+            body.checkInDate || null, body.checkOutDate || null, nights, guestsCount,
+            adults, children, infants, body.purpose || null,
+            quoteAmount, discountPct, discountCategory, categoryDiscountPct,
+            discountAmount, finalOffer,
             body.status || 'new', body.lastContactDate || null, body.followUpDue || null,
             body.lostReason || null, body.assignedTo || 'owner', body.notes || null,
             actor, now(), body.enquiryId
@@ -1867,14 +1895,16 @@ export async function onRequest(ctx) {
         await DB.prepare(`
           INSERT INTO enquiries (
             enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
-            checkin_date, checkout_date, nights, guests_count, purpose,
-            quote_amount, is_repeat_guest, previous_stays, repeat_discount_pct, discount_amount, final_offer_amount,
+            checkin_date, checkout_date, nights, guests_count, adults, children, infants, purpose,
+            quote_amount, is_repeat_guest, previous_stays, repeat_discount_pct,
+            discount_category, discount_pct, discount_amount, final_offer_amount,
             status, assigned_to, notes, created_by, updated_by
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           enquiryId, villaId, guestId, body.guestName || 'Unknown', normPhone, normEmail, body.source || 'website',
-          body.checkInDate || null, body.checkOutDate || null, nights, body.guestsCount || 1, body.purpose || null,
-          quoteAmount, isRepeat ? 1 : 0, previousStays, discountPct, discountAmount, finalOffer,
+          body.checkInDate || null, body.checkOutDate || null, nights, guestsCount, adults, children, infants, body.purpose || null,
+          quoteAmount, isRepeat ? 1 : 0, previousStays, discountPct,
+          discountCategory, categoryDiscountPct, discountAmount, finalOffer,
           body.status || 'new', body.assignedTo || 'owner', body.notes || null, actor, actor
         ).run()
 

@@ -17,7 +17,7 @@ import { CONFIG } from '../config'
 import { localTodayStr } from './dates'
 import { fmtLongDate, fmtCurrency, fmtCurrencyWords, p, r, centerLabel, twoColRow } from './docGenHelpers'
 
-function buildReceiptDocument({ property, tenantName, tenantAddress, amount, currency, paymentDate, paymentMode, referenceNo, purpose, lessorName, executionCity }) {
+function buildReceiptDocument({ property, tenantName, tenantAddress, amount, currency, paymentDate, paymentMode, referenceNo, purpose, lessorName, executionCity, isDeposit }) {
   const today = localTodayStr()
   const children = [
     centerLabel('RECEIPT OF PAYMENT', { size: 28 }),
@@ -38,9 +38,19 @@ function buildReceiptDocument({ property, tenantName, tenantAddress, amount, cur
     twoColRow('Payment Date:', fmtLongDate(paymentDate), { before: 100, after: 80 }),
     twoColRow('Payment Mode:', paymentMode || '—', { before: 0, after: 80 }),
     ...(referenceNo ? [twoColRow('Reference No.:', referenceNo, { before: 0, after: 80 })] : []),
-    twoColRow('Amount Received:', fmtCurrency(amount, currency), { before: 0, after: 400 }),
+    twoColRow('Amount Received:', fmtCurrency(amount, currency), { before: 0, after: isDeposit ? 300 : 400 }),
 
-    p(r('This receipt confirms only that the above payment has been received. It does not by itself constitute a lease agreement or waive any other amount due under the tenancy.', { size: 18 }), { spacing: { after: 600 } }),
+    p(r('This receipt confirms only that the above payment has been received. It does not by itself constitute a lease agreement or waive any other amount due under the tenancy.', { size: 18 }), { spacing: { after: isDeposit ? 200 : 600 } }),
+
+    // Deposit-specific refund/deduction terms — per explicit decision
+    // (2026-06-28), generic and firm rather than itemized-threatening:
+    // states the protective principle (property returned as given) and
+    // names the categories deductions can come from, without dollar
+    // figures or accusatory framing. Only shown on deposit receipts —
+    // this language has no place on a monthly rent receipt.
+    ...(isDeposit ? [
+      p(r('This deposit will be refunded within 30 days of move-out, provided the property is handed back in the same condition it was received. Any deductions — for unpaid rent or dues, unpaid current utility bills, damage to the property, painting not restored as required, or cleaning not completed — will be itemized and adjusted against this deposit before the balance is refunded.', { size: 18 }), { spacing: { after: 600 } }),
+    ] : []),
 
     twoColRow('Place: ' + (executionCity || '—'), '', { before: 200, after: 100 }),
     twoColRow('', '', { before: 0, after: 600 }),
@@ -95,6 +105,7 @@ export async function downloadDepositReceipt(agreement, property) {
     paymentMode: agreement._depositPaymentMode || 'Bank Transfer',
     referenceNo: agreement._depositReferenceNo || '',
     purpose: 'the security deposit',
+    isDeposit: true,
     lessorName: lease?.lessorName || '[LANDLORD NAME]',
     executionCity: lease?.executionCity || property?.city || property?.location || '',
   })

@@ -87,7 +87,18 @@ export default function RentalAgreement() {
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
   const setField = (key, val) => setForm(f => ({...f, [key]: val}))
 
+  const [propertyDetails, setPropertyDetails] = useState({}) // propId -> property_details row (structured address etc)
+
   useEffect(() => { loadAgreements() }, [])
+  useEffect(() => { loadPropertyDetails() }, [selectedProp])
+
+  async function loadPropertyDetails() {
+    if (!selectedProp || propertyDetails[selectedProp]) return // already have it, no need to re-fetch on every render
+    try {
+      const data = await api.getPropertyDetails(selectedProp)
+      if (data) setPropertyDetails(prev => ({ ...prev, [selectedProp]: data }))
+    } catch (e) { console.warn(e) }
+  }
 
   async function loadAgreements() {
     setLoading(true)
@@ -308,7 +319,31 @@ export default function RentalAgreement() {
     finally { setAddingProp(false) }
   }
 
-  const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+  const rawProp = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+  // Merge in the structured address from property_details (Address Line 1/2,
+  // City, State, Postal Code, Country) when it's been filled in — real,
+  // accurate per-property data, vs the old building/city/location
+  // guesswork in CONFIG.rentalProperties. fullAddress is what every
+  // document generator (lease deed, receipts, move-in/move-out) now
+  // prefers; falls back to the old building/city fields if a property
+  // hasn't had its structured address filled in yet on Property Details.
+  const pd = propertyDetails[selectedProp]
+  const prop = rawProp ? {
+    ...rawProp,
+    fullAddress: pd?.address_line1
+      ? [
+          pd.address_line1,
+          pd.address_line2,
+          [pd.city, pd.state_province].filter(Boolean).join(', '),
+          pd.postal_code,
+          pd.country,
+        ].filter(Boolean).join(', ')
+      : null,
+    // city from property_details takes priority for "Place:" on receipts —
+    // same reasoning as fullAddress, real per-property data over the old
+    // static config guess.
+    city: pd?.city || rawProp.city,
+  } : rawProp
   const saved = !!agreements[selectedProp]
   const days = daysUntil(form.leaseEnd)
   const duration = leaseDurationMonths(form.leaseStart, form.leaseEnd)

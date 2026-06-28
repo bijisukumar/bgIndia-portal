@@ -31,7 +31,7 @@ function buildReceiptDocument({ property, tenantName, tenantAddress, amount, cur
       r(fmtCurrency(amount, currency), { bold: true }),
       r(` (${fmtCurrencyWords(amount, currency)}) `),
       r(`towards ${purpose} for the property at `),
-      r(property?.building ? `${property.building}, ${property.city || property.location || ''}` : (property?.name || '[PROPERTY]'), { bold: true }),
+      r(property?.fullAddress || (property?.building ? `${property.building}, ${property.city || property.location || ''}` : (property?.name || '[PROPERTY]')), { bold: true }),
       r('.'),
     ], { spacing: { after: 300 } }),
 

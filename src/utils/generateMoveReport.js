@@ -129,9 +129,9 @@ function termsAndConditionsSection() {
 
 function buildMoveReportDocument({ kind, property, tenantName, eventDate, rooms }) {
   const title = kind === 'move-out' ? 'MOVE-OUT INSPECTION REPORT' : 'MOVE-IN INSPECTION REPORT'
-  const propLabel = property?.building
+  const propLabel = property?.fullAddress || (property?.building
     ? `${property.building}${property.unitNo ? ', Unit ' + property.unitNo : ''}, ${property.city || property.location || ''}`
-    : (property?.name || '[PROPERTY]')
+    : (property?.name || '[PROPERTY]'))
 
   const children = [
     centerLabel(title, { size: 28 }),

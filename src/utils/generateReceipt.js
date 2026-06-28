@@ -108,7 +108,12 @@ export async function downloadDepositReceipt(agreement, property) {
     purpose: 'the security deposit',
     isDeposit: true,
     lessorName: lease?.lessorName || '[LANDLORD NAME]',
-    executionCity: lease?.executionCity || property?.city || property?.location || '',
+    // "Place" on a receipt should reflect the PROPERTY's actual city, not
+    // CONFIG.leaseIndia.executionCity (a single fixed value for every
+    // India property, originally meant for the Lease Deed's "place of
+    // execution" concept). property.city takes priority; executionCity is
+    // only a last-resort fallback if a property somehow has no city set.
+    executionCity: property?.city || property?.location || lease?.executionCity || '',
   })
   await triggerDownload(doc, `Deposit Receipt - ${property.name} - ${agreement.tenant_name}.docx`)
 }
@@ -136,7 +141,7 @@ export async function downloadRentReceipt(rentTxn, agreement, property) {
     referenceNo: rentTxn._referenceNo || '',
     purpose,
     lessorName: lease?.lessorName || '[LANDLORD NAME]',
-    executionCity: lease?.executionCity || property?.city || property?.location || '',
+    executionCity: property?.city || property?.location || lease?.executionCity || '',
   })
   await triggerDownload(doc, `Rent Receipt - ${property.name} - ${rentTxn.period_month}.docx`)
 }

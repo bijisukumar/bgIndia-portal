@@ -49,7 +49,8 @@ function buildReceiptDocument({ property, tenantName, tenantAddress, amount, cur
     // figures or accusatory framing. Only shown on deposit receipts —
     // this language has no place on a monthly rent receipt.
     ...(isDeposit ? [
-      p(r('This deposit will be refunded within 30 days of move-out, provided the property is handed back in the same condition it was received. Any deductions — for unpaid rent or dues, unpaid current utility bills, damage to the property, painting not restored as required, or cleaning not completed — will be itemized and adjusted against this deposit before the balance is refunded.', { size: 18 }), { spacing: { after: 600 } }),
+      p(r('Security Deposit Terms', { bold: true, size: 18 }), { spacing: { after: 80 } }),
+      p(r('This deposit will be refunded within 30 days of move-out. Any deductions needed\u2014such as for unpaid rent, outstanding utility bills, property damage, painting restoration, or required cleaning\u2014will be subtracted and itemized before the balance is refunded.', { size: 18 }), { spacing: { after: 600 } }),
     ] : []),
 
     twoColRow('Place: ' + (executionCity || '—'), '', { before: 200, after: 100 }),

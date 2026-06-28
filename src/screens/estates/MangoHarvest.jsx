@@ -9,6 +9,9 @@ import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
 const TODAY    = localTodayStr()
+const CUR_YEAR = parseInt(TODAY.slice(0, 4), 10)
+const PREV_YEARS = [CUR_YEAR - 1, CUR_YEAR - 2]   // "last 3 years" = current + these 2
+const KG_PER_BOX = 20   // fixed standard weight per box, same across all varieties
 const VARIETIES = ['alphonsa','neelam','malgova','banganapally','kilimooku','sindooram','mix']
 const VAR_LABEL = { alphonsa:'Alphonsa', neelam:'Neelam', malgova:'Malgova', banganapally:'Banganapally', kilimooku:'Kilimooku', sindooram:'Sindooram', mix:'Mix' }
 const VAR_COLOR = { alphonsa:'#F59E0B', neelam:'#34A853', malgova:'#C8903A', banganapally:'#F59E0B', kilimooku:'#8B5CF6', sindooram:'#EF4444', mix:'#5C7080' }
@@ -19,6 +22,20 @@ function fmtDate(d) {
   if (!d) return '—'
   try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
   catch { return d }
+}
+function fmtWeight(boxes) {
+  const kg = boxes * KG_PER_BOX
+  return kg >= 1000 ? `${(kg/1000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} t` : `${kg.toLocaleString('en-IN')} kg`
+}
+function summarizeYear(rows, year) {
+  const totals = { alphonsa:0, neelam:0, malgova:0, banganapally:0, kilimooku:0, sindooram:0, mix:0, total:0, normal:0, small:0 }
+  rows.filter(r => (r.harvest_date||'').slice(0,4) === String(year)).forEach(r => {
+    VARIETIES.forEach(v => { totals[v] += r[v]||0 })
+    totals.total += r.total_boxes||0
+    if (r.box_type==='Normal') totals.normal += r.total_boxes||0
+    else totals.small += r.total_boxes||0
+  })
+  return totals
 }
 
 export default function MangoHarvest({ estate = 'pollachi' }) {
@@ -43,15 +60,7 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
       const d = await api.getMangoHarvests(estate)
       const rows = Array.isArray(d) ? d : []
       setRecords(rows)
-      // Compute summary totals per variety
-      const totals = { alphonsa:0, neelam:0, malgova:0, banganapally:0, kilimooku:0, sindooram:0, mix:0, total:0, normal:0, small:0 }
-      rows.forEach(r => {
-        VARIETIES.forEach(v => { totals[v] += r[v]||0 })
-        totals.total += r.total_boxes||0
-        if (r.box_type==='Normal') totals.normal += r.total_boxes||0
-        else totals.small += r.total_boxes||0
-      })
-      setSummary(totals)
+      setSummary(summarizeYear(rows, CUR_YEAR))
     } catch(e) { setRecords([]) }
     finally { setLoading(false) }
   }
@@ -155,6 +164,7 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                 <div>
                   <div style={{fontSize:'0.62rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'4px'}}>TOTAL BOXES</div>
                   <div style={{fontWeight:'700', color:'#F59E0B', fontSize:'1.4rem'}}>{totalBoxes}</div>
+                  {totalBoxes > 0 && <div style={{fontSize:'0.7rem', color:'#9AA5B4', marginTop:'2px'}}>≈ {fmtWeight(totalBoxes)}</div>}
                 </div>
                 {totalRevenue > 0 && (
                   <div style={{textAlign:'right'}}>
@@ -189,9 +199,9 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
         {tab==='history' && (
           <>
             {/* Season summary */}
-            {summary && summary.total > 0 && (
+            {summary && (
               <div style={{background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)', borderRadius:'12px', padding:'14px', marginBottom:'14px'}}>
-                <div style={{fontSize:'0.62rem', color:'#F59E0B', letterSpacing:'2px', marginBottom:'10px'}}>2026 SEASON TOTALS</div>
+                <div style={{fontSize:'0.62rem', color:'#F59E0B', letterSpacing:'2px', marginBottom:'10px'}}>{CUR_YEAR} SEASON TOTALS</div>
                 <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px', marginBottom:'10px'}}>
                   {[
                     {label:'TOTAL BOXES', val:summary.total, color:'#F59E0B'},
@@ -204,9 +214,12 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                     </div>
                   ))}
                 </div>
+                <div style={{textAlign:'center', fontSize:'0.72rem', color:'#9AA5B4', marginBottom:'10px'}}>
+                  ≈ {fmtWeight(summary.total)} total ({KG_PER_BOX}kg/box)
+                </div>
                 <div style={{display:'flex', gap:'6px', flexWrap:'wrap'}}>
-                  {VARIETIES.filter(v=>summary[v]>0).map(v=>(
-                    <div key={v} style={{textAlign:'center', background:`${VAR_COLOR[v]}10`, border:`1px solid ${VAR_COLOR[v]}30`, borderRadius:'8px', padding:'5px 10px'}}>
+                  {VARIETIES.map(v=>(
+                    <div key={v} style={{textAlign:'center', background:`${VAR_COLOR[v]}10`, border:`1px solid ${VAR_COLOR[v]}30`, borderRadius:'8px', padding:'5px 10px', opacity: summary[v]>0 ? 1 : 0.5}}>
                       <div style={{fontSize:'0.6rem', color:VAR_COLOR[v], letterSpacing:'0.5px'}}>{VAR_LABEL[v]}</div>
                       <div style={{fontWeight:'700', color:VAR_COLOR[v], fontSize:'0.9rem'}}>{summary[v]}</div>
                     </div>
@@ -217,16 +230,16 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
 
             {loading && <div style={{textAlign:'center',color:'#5C7080',padding:'24px',fontSize:'0.82rem'}}>Loading…</div>}
 
-            {!loading && records.length===0 && (
+            {!loading && records.filter(r => (r.harvest_date||'').slice(0,4) === String(CUR_YEAR)).length===0 && (
               <div style={{textAlign:'center',padding:'32px',color:'#5C7080',fontSize:'0.82rem',border:'1px dashed rgba(255,255,255,0.08)',borderRadius:'12px'}}>
-                No records yet. Add entries from the "Add entry" tab.
+                No {CUR_YEAR} records yet. Add entries from the "Add entry" tab.
               </div>
             )}
 
-            {/* Group by date */}
+            {/* Group by date — current year only; previous years get their own summary block below */}
             {!loading && (() => {
               const byDate = {}
-              records.forEach(r => {
+              records.filter(r => (r.harvest_date||'').slice(0,4) === String(CUR_YEAR)).forEach(r => {
                 const k = r.harvest_date
                 if (!byDate[k]) byDate[k] = []
                 byDate[k].push(r)
@@ -238,7 +251,10 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                     <div key={i} style={{background:'var(--dark-card)', border:`1px solid rgba(245,158,11,0.15)`, borderRadius:'10px', padding:'10px 12px', marginBottom:'4px'}}>
                       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px'}}>
                         <span style={{fontSize:'0.8rem', fontWeight:'600', color: r.box_type==='Normal'?'#C8903A':'#5C7080'}}>{r.box_type}</span>
-                        <span style={{fontWeight:'700', color:'#F59E0B', fontSize:'0.9rem'}}>{r.total_boxes} boxes</span>
+                        <div style={{textAlign:'right'}}>
+                          <span style={{fontWeight:'700', color:'#F59E0B', fontSize:'0.9rem'}}>{r.total_boxes} boxes</span>
+                          <span style={{fontSize:'0.68rem', color:'#9AA5B4', marginLeft:'6px'}}>(≈ {fmtWeight(r.total_boxes||0)})</span>
+                        </div>
                       </div>
                       <div style={{display:'flex', gap:'5px', flexWrap:'wrap'}}>
                         {VARIETIES.filter(v=>r[v]>0).map(v=>(
@@ -255,6 +271,48 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                 </div>
               ))
             })()}
+
+            {/* Previous years — compact totals only, no date-by-date entries.
+                Always shown even when a year has zero records (e.g. 2024/2025
+                before this tracker had data) — per explicit decision, "last 3
+                years" means current year + these 2, shown regardless of
+                whether each one has any data yet. */}
+            {!loading && (
+              <div style={{marginTop:'22px'}}>
+                <div style={{fontSize:'0.62rem', color:'#5C7080', letterSpacing:'2px', marginBottom:'10px'}}>PREVIOUS YEARS</div>
+                {PREV_YEARS.map(yr => {
+                  const ys = summarizeYear(records, yr)
+                  return (
+                    <div key={yr} style={{background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'14px', marginBottom:'10px'}}>
+                      <div style={{fontSize:'0.78rem', color:'#9AA5B4', fontWeight:'700', marginBottom:'10px'}}>{yr}</div>
+                      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px', marginBottom:'10px'}}>
+                        {[
+                          {label:'TOTAL BOXES', val:ys.total, color:'#F59E0B'},
+                          {label:'NORMAL',      val:ys.normal, color:'#C8903A'},
+                          {label:'SMALL',       val:ys.small,  color:'#5C7080'},
+                        ].map(k=>(
+                          <div key={k.label} style={{textAlign:'center'}}>
+                            <div style={{fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'3px'}}>{k.label}</div>
+                            <div style={{fontWeight:'700', color:k.color, fontSize:'1.1rem'}}>{k.val}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{textAlign:'center', fontSize:'0.7rem', color:'#5C7080', marginBottom:'10px'}}>
+                        ≈ {fmtWeight(ys.total)} total
+                      </div>
+                      <div style={{display:'flex', gap:'6px', flexWrap:'wrap'}}>
+                        {VARIETIES.map(v=>(
+                          <div key={v} style={{textAlign:'center', background:`${VAR_COLOR[v]}10`, border:`1px solid ${VAR_COLOR[v]}30`, borderRadius:'8px', padding:'5px 10px', opacity: ys[v]>0 ? 1 : 0.5}}>
+                            <div style={{fontSize:'0.6rem', color:VAR_COLOR[v], letterSpacing:'0.5px'}}>{VAR_LABEL[v]}</div>
+                            <div style={{fontWeight:'700', color:VAR_COLOR[v], fontSize:'0.9rem'}}>{ys[v]}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </>
         )}
       </div>

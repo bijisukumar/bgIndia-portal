@@ -161,7 +161,7 @@ function HoaSection({ propId, currency }) {
   useEffect(() => { if (open) load() }, [open, propId])
 
   async function load() {
-    try { const d = await api.getHoaHistory(propId); setHistory(Array.isArray(d?.data)?d.data:[]) }
+    try { const d = await api.getHoaHistory(propId); setHistory(Array.isArray(d)?d:[]) }
     catch(e) { setHistory([]) }
   }
 
@@ -279,7 +279,7 @@ function TaxSection({ propId, currency }) {
   useEffect(() => { if (open) load() }, [open, propId])
 
   async function load() {
-    try { const d = await api.getTaxHistory(propId); setHistory(Array.isArray(d?.data)?d.data:[]) }
+    try { const d = await api.getTaxHistory(propId); setHistory(Array.isArray(d)?d:[]) }
     catch(e) { setHistory([]) }
   }
 
@@ -453,7 +453,7 @@ export default function PropertyDetails() {
     setDirty(false)
     try {
       const d = await api.getPropertyDetails(propId)
-      const data = fromDB(d?.data)
+      const data = fromDB(d)
       setForm(data)
       setCurrency(data.currency || 'INR')
     } catch(e) { setForm({}) }

@@ -56,7 +56,7 @@ export default function ClaimsLedger() {
     setLoading(true)
     try {
       const d = await api.getLeaseLosses(selectedProp)
-      setClaims(Array.isArray(d?.data) ? d.data : [])
+      setClaims(Array.isArray(d) ? d : [])
     } catch(e) { setClaims([]) }
     finally { setLoading(false) }
   }

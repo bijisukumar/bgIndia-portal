@@ -71,8 +71,15 @@ export default function Rev360Home() {
   const [countryTab, setCountryTab] = useState('IN')
 
   useEffect(() => {
+    // api.getRev360Dashboard() already returns the unwrapped {year,
+    // properties, income, ...} object directly -- the api client's
+    // get()/post() helpers extract .data from the {success,data}
+    // envelope before returning. Checking d?.data here was looking for
+    // a second, nonexistent nested .data and was always false, so this
+    // never actually set dash -- exactly why the dashboard showed
+    // "0 of 0 properties" with real data sitting in the database.
     api.getRev360Dashboard()
-      .then(d => { if (d?.data) setDash(d.data) })
+      .then(d => { if (d) setDash(d) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])

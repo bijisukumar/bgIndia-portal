@@ -69,7 +69,7 @@ export default function PropertyDocs({ propId, propName }) {
     setLoading(true)
     try {
       const d = await api.getPropertyDocs(propId)
-      setDocs(Array.isArray(d?.data) ? d.data : [])
+      setDocs(Array.isArray(d) ? d : [])
     } catch(e) { setDocs([]) }
     finally { setLoading(false) }
   }

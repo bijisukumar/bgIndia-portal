@@ -15,6 +15,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { fmtDate, localTodayStr } from '../../utils/dates'
 import { downloadDepositReceipt } from '../../utils/generateReceipt'
+import { downloadMoveReport } from '../../utils/generateMoveReport'
 
 function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
@@ -45,6 +46,7 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
   const [depositMode, setDepositMode] = useState('Bank Transfer')
   const [markingDeposit, setMarkingDeposit] = useState(false)
   const [generatingReceipt, setGeneratingReceipt] = useState(false)
+  const [generatingMoveIn, setGeneratingMoveIn] = useState(false)
 
   useEffect(() => { load() }, [propId])
 
@@ -163,6 +165,21 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
       showToast(`🧾 Deposit receipt generated for ${record.tenant_name}`)
     } catch (e) { showToast(e.message, 'error') }
     finally { setGeneratingReceipt(false) }
+  }
+
+  async function handleGenerateMoveInDoc() {
+    setGeneratingMoveIn(true)
+    try {
+      // record.lease_start is the PLANNED move-in date for this incoming
+      // tenant — using it (rather than today) means the document's
+      // stated Move-In Date, and the 14-day reporting window that legal
+      // clause is anchored to, reflect the real date the tenant actually
+      // takes possession, not whatever day this button happens to be
+      // clicked.
+      await downloadMoveReport('move-in', { tenant_name: record.tenant_name }, property, record.lease_start)
+      showToast(`🔑 Move-in document generated for ${record.tenant_name}`)
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setGeneratingMoveIn(false) }
   }
 
   if (loading || record === null) {
@@ -335,6 +352,14 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
           </div>
         )}
       </div>
+
+      <button onClick={handleGenerateMoveInDoc} disabled={generatingMoveIn} style={{
+        width:'100%', marginBottom:'10px', padding:'10px', borderRadius:'8px', border:'1px solid rgba(52,168,83,0.4)',
+        background:'rgba(52,168,83,0.1)', color:'#34A853', fontWeight:'700', fontSize:'0.8rem',
+        cursor: generatingMoveIn ? 'default' : 'pointer', opacity: generatingMoveIn ? 0.6 : 1,
+      }}>
+        {generatingMoveIn ? 'Generating…' : '🔑 Generate Move-In Document'}
+      </button>
 
       {!confirmingMoveIn ? (
         <button onClick={()=>setConfirmingMoveIn(true)} style={{

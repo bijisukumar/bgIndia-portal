@@ -13,7 +13,8 @@
 // ============================================================
 import { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { fmtDate } from '../../utils/dates'
+import { fmtDate, localTodayStr } from '../../utils/dates'
+import { downloadDepositReceipt } from '../../utils/generateReceipt'
 
 function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
@@ -31,7 +32,7 @@ const F = {
   input: {width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'},
 }
 
-export default function IncomingTenantCard({ propId, propCountry, currentTenantName, showToast, onMovedIn }) {
+export default function IncomingTenantCard({ propId, propCountry, property, currentTenantName, showToast, onMovedIn }) {
   const [record, setRecord] = useState(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -39,6 +40,11 @@ export default function IncomingTenantCard({ propId, propCountry, currentTenantN
   const [saving, setSaving] = useState(false)
   const [confirmingMoveIn, setConfirmingMoveIn] = useState(false)
   const [movingIn, setMovingIn] = useState(false)
+  const [showDepositForm, setShowDepositForm] = useState(false)
+  const [depositDate, setDepositDate] = useState(localTodayStr())
+  const [depositMode, setDepositMode] = useState('Bank Transfer')
+  const [markingDeposit, setMarkingDeposit] = useState(false)
+  const [generatingReceipt, setGeneratingReceipt] = useState(false)
 
   useEffect(() => { load() }, [propId])
 
@@ -117,6 +123,46 @@ export default function IncomingTenantCard({ propId, propCountry, currentTenantN
       if (onMovedIn) onMovedIn()
     } catch (e) { showToast(e.message, 'error') }
     finally { setMovingIn(false) }
+  }
+
+  async function handleMarkDepositPaid() {
+    if (!depositDate) { showToast('Payment date is required', 'error'); return }
+    setMarkingDeposit(true)
+    try {
+      await api.markIncomingDepositPaid({ propId, paid: true, paidDate: depositDate, paymentMode: depositMode })
+      showToast(`✅ Deposit marked paid for ${record.tenant_name}`)
+      setShowDepositForm(false)
+      load()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setMarkingDeposit(false) }
+  }
+
+  async function handleUnmarkDepositPaid() {
+    try {
+      await api.markIncomingDepositPaid({ propId, paid: false })
+      showToast('Deposit payment cleared')
+      load()
+    } catch (e) { showToast(e.message, 'error') }
+  }
+
+  async function handleGenerateDepositReceipt() {
+    setGeneratingReceipt(true)
+    try {
+      // Use the incoming tenant's OWN real data — their actual deposit
+      // amount, address, and recorded payment date/mode — never the
+      // previous tenant's. property is passed through unchanged since
+      // the address/building is the same regardless of who's moving in.
+      await downloadDepositReceipt({
+        tenant_name: record.tenant_name,
+        tenant_address: record.tenant_address,
+        deposit: record.deposit,
+        currency: record.currency || 'INR',
+        _depositPaymentDate: record.deposit_paid_date || depositDate,
+        _depositPaymentMode: record.deposit_payment_mode || depositMode,
+      }, property)
+      showToast(`🧾 Deposit receipt generated for ${record.tenant_name}`)
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setGeneratingReceipt(false) }
   }
 
   if (loading || record === null) {
@@ -228,6 +274,66 @@ export default function IncomingTenantCard({ propId, propCountry, currentTenantN
         <button onClick={handleRemove} style={{flex:1, padding:'9px', borderRadius:'8px', border:'1px solid rgba(229,57,53,0.3)', background:'rgba(229,57,53,0.08)', color:'#E53935', fontSize:'0.78rem', cursor:'pointer'}}>
           🗑️ Remove
         </button>
+      </div>
+
+      {/* Deposit tracking — uses THIS tenant's own deposit amount/address,
+          never the previous tenant's, even though the receipt format is
+          shared via downloadDepositReceipt(). */}
+      <div style={{padding:'10px 12px', borderRadius:'10px', background:'var(--dark-input)', border:'1px solid var(--border-dim)', marginBottom:'10px'}}>
+        <div style={{fontSize:'0.7rem', color:'var(--text-dim)', letterSpacing:'1px', marginBottom:'8px'}}>SECURITY DEPOSIT — {fmt(record.deposit, record.currency)}</div>
+
+        {record.deposit_paid ? (
+          <>
+            <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px'}}>
+              <span style={{color:'#34A853', fontWeight:'700', fontSize:'0.82rem'}}>✓ Paid</span>
+              <span style={{color:'var(--text-dim)', fontSize:'0.74rem'}}>
+                {fmtDate(record.deposit_paid_date)} · {record.deposit_payment_mode}
+              </span>
+              <button onClick={handleUnmarkDepositPaid} style={{
+                marginLeft:'auto', padding:'3px 8px', borderRadius:'6px', border:'1px solid var(--border-dim)',
+                background:'transparent', color:'#5C7080', fontSize:'0.66rem', cursor:'pointer',
+              }}>undo</button>
+            </div>
+            <button onClick={handleGenerateDepositReceipt} disabled={generatingReceipt} style={{
+              width:'100%', padding:'10px', borderRadius:'8px', border:'1px solid rgba(24,95,165,0.4)',
+              background:'rgba(24,95,165,0.1)', color:'#185FA5', fontWeight:'700', fontSize:'0.8rem',
+              cursor: generatingReceipt ? 'default' : 'pointer', opacity: generatingReceipt ? 0.6 : 1,
+            }}>
+              {generatingReceipt ? 'Generating…' : '🧾 Generate Deposit Receipt'}
+            </button>
+          </>
+        ) : !showDepositForm ? (
+          <button onClick={()=>setShowDepositForm(true)} style={{
+            width:'100%', padding:'10px', borderRadius:'8px', border:'1px solid rgba(52,168,83,0.4)',
+            background:'rgba(52,168,83,0.1)', color:'#34A853', fontWeight:'700', fontSize:'0.8rem', cursor:'pointer',
+          }}>
+            Mark Deposit Paid
+          </button>
+        ) : (
+          <div>
+            <label style={{display:'block',fontSize:'0.68rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>PAYMENT DATE</label>
+            <input type="date" value={depositDate} onChange={e=>setDepositDate(e.target.value)}
+              style={{width:'100%',padding:'8px 10px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.85rem'}}/>
+
+            <label style={{display:'block',fontSize:'0.68rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px',marginTop:'8px'}}>PAYMENT MODE</label>
+            <select value={depositMode} onChange={e=>setDepositMode(e.target.value)}
+              style={{width:'100%',padding:'8px 10px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.85rem'}}>
+              <option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Cash</option>
+            </select>
+
+            <div style={{display:'flex', gap:'8px', marginTop:'10px'}}>
+              <button onClick={()=>setShowDepositForm(false)} style={{flex:1, padding:'8px', borderRadius:'8px', border:'1px solid var(--border-dim)', background:'transparent', color:'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer'}}>
+                Cancel
+              </button>
+              <button onClick={handleMarkDepositPaid} disabled={markingDeposit} style={{
+                flex:2, padding:'8px', borderRadius:'8px', border:'none', background:'#34A853', color:'#fff',
+                fontWeight:'700', fontSize:'0.78rem', cursor: markingDeposit ? 'default' : 'pointer', opacity: markingDeposit ? 0.6 : 1,
+              }}>
+                {markingDeposit ? 'Saving…' : 'Confirm Paid'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {!confirmingMoveIn ? (

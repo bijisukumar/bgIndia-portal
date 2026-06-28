@@ -87,7 +87,11 @@ export async function downloadDepositReceipt(agreement, property) {
     tenantAddress: agreement.tenant_address || '',
     amount: agreement.deposit,
     currency,
-    paymentDate: localTodayStr(),
+    // Use the actual recorded payment date if one was given (e.g. the
+    // Incoming Tenant card's "Mark Deposit Paid" date) rather than always
+    // defaulting to today — a receipt should reflect when the money was
+    // really received, not when the document happens to be generated.
+    paymentDate: agreement._depositPaymentDate || localTodayStr(),
     paymentMode: agreement._depositPaymentMode || 'Bank Transfer',
     referenceNo: agreement._depositReferenceNo || '',
     purpose: 'the security deposit',

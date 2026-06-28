@@ -3305,6 +3305,29 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { incomingId: id } })
       }
 
+      // Focused action for the "Mark Deposit Paid" button on the
+      // Incoming Tenant card -- deliberately separate from the general
+      // saveIncomingTenant save above, so marking the deposit paid (or
+      // un-paid, to correct a mistake) never depends on resubmitting the
+      // whole tenant form, and editing other fields never silently
+      // resets this flag.
+      if (action === 'markIncomingDepositPaid') {
+        const { propId, paid, paidDate, paymentMode } = body
+        if (!propId) return err('propId required')
+        await DB.prepare(`
+          UPDATE incoming_tenants SET
+            deposit_paid = ?, deposit_paid_date = ?, deposit_payment_mode = ?,
+            updated_by = ?, updated_at = ?
+          WHERE prop_id = ?
+        `).bind(
+          paid ? 1 : 0,
+          paid ? (paidDate || now().slice(0,10)) : null,
+          paid ? (paymentMode || 'Bank Transfer') : null,
+          actor, now(), propId
+        ).run()
+        return json({ success: true, data: { propId, depositPaid: !!paid } })
+      }
+
       if (action === 'deleteIncomingTenant') {
         const { propId } = body; if (!propId) return err('propId required')
         await DB.prepare(`DELETE FROM incoming_tenants WHERE prop_id = ?`).bind(propId).run()

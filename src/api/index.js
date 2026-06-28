@@ -129,6 +129,7 @@ export const api = {
   saveIncomingTenant:   (data)   => post('saveIncomingTenant', data),
   deleteIncomingTenant: (propId) => post('deleteIncomingTenant', { propId }),
   moveInIncomingTenant: (data)   => post('moveInIncomingTenant', data),
+  markIncomingDepositPaid: (data) => post('markIncomingDepositPaid', data),
 
   // ── LEASE LOSSES / CLAIMS ────────────────────────────────
   getLeaseLosses:       (propId) => get('getLeaseLosses', { propId }),

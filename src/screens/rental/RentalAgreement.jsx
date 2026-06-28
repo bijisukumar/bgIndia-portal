@@ -670,6 +670,7 @@ export default function RentalAgreement() {
             <IncomingTenantCard
               propId={selectedProp}
               propCountry={form.country}
+              property={prop}
               currentTenantName={form.tenantName}
               showToast={showToast}
               onMovedIn={async () => {

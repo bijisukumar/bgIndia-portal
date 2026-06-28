@@ -65,6 +65,7 @@ export default function RubberDashboard() {
   const [dash, setDash]         = useState(null)
   const [plOpen, setPlOpen]             = useState(false)
   const [drillMonth, setDrillMonth]     = useState(null)
+  const [drillCategory, setDrillCategory] = useState(null)   // 'YYYY-MM::Category' currently expanded to line items
   const [harvestLogOpen, setHarvestLogOpen] = useState(false)
 
   useEffect(() => {
@@ -211,15 +212,43 @@ export default function RubberDashboard() {
                                   {monthExpEntries.map(([cat, amt]) => {
                                     const pct = Math.round((amt / m.expense) * 100)
                                     const barColor = pct > 10 ? '#EF4444' : '#F59E0B'
+                                    const catKey = `${m.ym}::${cat}`
+                                    const catOpen = drillCategory === catKey
+                                    const lines = (m.expLines || {})[cat] || []
                                     return (
-                                      <div key={cat} style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'4px' }}>
-                                        <div style={{ fontSize:'0.68rem', color:'#9AA5B4', width:'100px', flexShrink:0 }}>{cat}</div>
-                                        <div style={{ flex:1, height:'3px', background:'rgba(255,255,255,0.06)', borderRadius:'2px' }}>
-                                          <div style={{ height:'3px', width:`${pct}%`, background: barColor, borderRadius:'2px' }}/>
+                                      <div key={cat}>
+                                        <div onClick={()=>setDrillCategory(catOpen ? null : catKey)}
+                                          style={{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'4px', cursor: lines.length ? 'pointer' : 'default' }}>
+                                          <div style={{ fontSize:'0.68rem', color:'#9AA5B4', width:'100px', flexShrink:0 }}>{cat}</div>
+                                          <div style={{ flex:1, height:'3px', background:'rgba(255,255,255,0.06)', borderRadius:'2px' }}>
+                                            <div style={{ height:'3px', width:`${pct}%`, background: barColor, borderRadius:'2px' }}/>
+                                          </div>
+                                          <div style={{ fontSize:'0.66rem', color: barColor, fontWeight:'600', width:'44px', textAlign:'right' }}>
+                                            ₹{amt >= 1000 ? (amt/1000).toFixed(1)+'K' : amt}
+                                          </div>
+                                          {lines.length > 0 && (
+                                            <div style={{ fontSize:'0.6rem', color:'#5C7080', width:'12px', textAlign:'right' }}>{catOpen ? '∧' : '›'}</div>
+                                          )}
                                         </div>
-                                        <div style={{ fontSize:'0.66rem', color: barColor, fontWeight:'600', width:'44px', textAlign:'right' }}>
-                                          ₹{amt >= 1000 ? (amt/1000).toFixed(1)+'K' : amt}
-                                        </div>
+                                        {catOpen && lines.length > 0 && (
+                                          <div style={{ margin:'2px 0 10px 0', padding:'6px 8px', background:'rgba(255,255,255,0.02)', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.05)' }}>
+                                            {lines.map((ln, i) => (
+                                              <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'8px', padding:'3px 0', borderBottom: i < lines.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                                                <div style={{ minWidth:0 }}>
+                                                  <span style={{ fontSize:'0.66rem', color:'#9AA5B4' }}>{fmtDate(ln.date)}</span>
+                                                  {(ln.paidTo || ln.description) && (
+                                                    <span style={{ fontSize:'0.64rem', color:'#5C7080', marginLeft:'6px' }}>
+                                                      {[ln.paidTo, ln.description].filter(Boolean).join(' — ')}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <div style={{ fontSize:'0.68rem', color:'#EDF2F7', fontWeight:'600', flexShrink:0 }}>
+                                                  ₹{Math.round(ln.amount).toLocaleString('en-IN')}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
                                       </div>
                                     )
                                   })}

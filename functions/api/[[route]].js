@@ -1527,7 +1527,7 @@ export async function onRequest(ctx) {
         ).bind(estateId, cutoffStr).all()
 
         const { results: txns } = await ActiveDB.prepare(
-          `SELECT date, type, category, amount FROM estate_transactions WHERE estate = ? AND date >= ? ORDER BY date DESC`
+          `SELECT date, type, category, amount, paid_to, description FROM estate_transactions WHERE estate = ? AND date >= ? ORDER BY date DESC`
         ).bind(estateId, cutoffStr).all()
 
         let mangoRevenue = 0
@@ -1569,8 +1569,16 @@ export async function onRequest(ctx) {
         txns.filter(t => t.type === 'expense').forEach(t => addExp(expBreakdown, t.category, t.amount))
 
         // Per-month aggregation, including a per-month expense category breakdown
+        // (totals, for the bars) AND per-line-item detail (expLines: category ->
+        // [{date, amount, paidTo, description}]) so the UI can drill a clicked
+        // category open into its individual dated entries.
         const monthly = {}
-        const ensureMonth = (ym) => { if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0, expBreakdown:{} } }
+        const ensureMonth = (ym) => { if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0, expBreakdown:{}, expLines:{} } }
+        const addExpLine = (bucket, k, v, extra) => {
+          if (!v) return
+          if (!bucket[k]) bucket[k] = []
+          bucket[k].push({ amount: v, ...extra })
+        }
 
         harvests.forEach(r => {
           const ym = r.harvest_date.slice(0, 7)
@@ -1582,6 +1590,10 @@ export async function onRequest(ctx) {
           addExp(monthly[ym].expBreakdown, 'Dehusking',        r.dehusk_expense)
           addExp(monthly[ym].expBreakdown, 'Tractor / tiling', r.tractor_expense)
           addExp(monthly[ym].expBreakdown, 'Other (harvest)',  r.other_expense)
+          addExpLine(monthly[ym].expLines, 'Harvest labour',  r.harvest_expense, { date: r.harvest_date, description: 'Harvest labour' })
+          addExpLine(monthly[ym].expLines, 'Dehusking',        r.dehusk_expense,  { date: r.harvest_date, description: 'Dehusking' })
+          addExpLine(monthly[ym].expLines, 'Tractor / tiling', r.tractor_expense, { date: r.harvest_date, description: 'Tractor / tiling' })
+          addExpLine(monthly[ym].expLines, 'Other (harvest)',  r.other_expense,   { date: r.harvest_date, description: 'Other harvest expense' })
         })
         rubberHarvests.forEach(r => {
           if (!r.harvest_date) return
@@ -1590,12 +1602,21 @@ export async function onRequest(ctx) {
           monthly[ym].income  += r.gross   || 0
           monthly[ym].expense += r.expense || 0
           addExp(monthly[ym].expBreakdown, 'Rubber tapping', r.expense)
+          addExpLine(monthly[ym].expLines, 'Rubber tapping', r.expense, { date: r.harvest_date, description: 'Rubber tapping' })
         })
         txns.forEach(t => {
           const ym = t.date.slice(0, 7)
           ensureMonth(ym)
           if (t.type === 'income')  monthly[ym].income  += t.amount || 0
-          if (t.type === 'expense') { monthly[ym].expense += t.amount || 0; addExp(monthly[ym].expBreakdown, t.category, t.amount) }
+          if (t.type === 'expense') {
+            monthly[ym].expense += t.amount || 0
+            addExp(monthly[ym].expBreakdown, t.category, t.amount)
+            addExpLine(monthly[ym].expLines, t.category, t.amount, { date: t.date, paidTo: t.paid_to || null, description: t.description || null })
+          }
+        })
+        // Sort each category's line items newest-first, for a sensible default order
+        Object.values(monthly).forEach(m => {
+          Object.values(m.expLines).forEach(lines => lines.sort((a, b) => (b.date || '').localeCompare(a.date || '')))
         })
 
         const monthlyArr = Object.entries(monthly)

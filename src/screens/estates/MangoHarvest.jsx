@@ -9,6 +9,7 @@ import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
 const TODAY    = localTodayStr()
+const KG_PER_BOX = 20   // fixed standard weight per box, same across all varieties
 const VARIETIES = ['alphonsa','neelam','malgova','banganapally','kilimooku','sindooram','mix']
 const VAR_LABEL = { alphonsa:'Alphonsa', neelam:'Neelam', malgova:'Malgova', banganapally:'Banganapally', kilimooku:'Kilimooku', sindooram:'Sindooram', mix:'Mix' }
 const VAR_COLOR = { alphonsa:'#F59E0B', neelam:'#34A853', malgova:'#C8903A', banganapally:'#F59E0B', kilimooku:'#8B5CF6', sindooram:'#EF4444', mix:'#5C7080' }
@@ -19,6 +20,10 @@ function fmtDate(d) {
   if (!d) return '—'
   try { return parseLocalDate(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) }
   catch { return d }
+}
+function fmtWeight(boxes) {
+  const kg = boxes * KG_PER_BOX
+  return kg >= 1000 ? `${(kg/1000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} t` : `${kg.toLocaleString('en-IN')} kg`
 }
 
 export default function MangoHarvest({ estate = 'pollachi' }) {
@@ -155,6 +160,7 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                 <div>
                   <div style={{fontSize:'0.62rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'4px'}}>TOTAL BOXES</div>
                   <div style={{fontWeight:'700', color:'#F59E0B', fontSize:'1.4rem'}}>{totalBoxes}</div>
+                  {totalBoxes > 0 && <div style={{fontSize:'0.7rem', color:'#9AA5B4', marginTop:'2px'}}>≈ {fmtWeight(totalBoxes)}</div>}
                 </div>
                 {totalRevenue > 0 && (
                   <div style={{textAlign:'right'}}>
@@ -204,9 +210,12 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                     </div>
                   ))}
                 </div>
+                <div style={{textAlign:'center', fontSize:'0.72rem', color:'#9AA5B4', marginBottom:'10px'}}>
+                  ≈ {fmtWeight(summary.total)} total ({KG_PER_BOX}kg/box)
+                </div>
                 <div style={{display:'flex', gap:'6px', flexWrap:'wrap'}}>
-                  {VARIETIES.filter(v=>summary[v]>0).map(v=>(
-                    <div key={v} style={{textAlign:'center', background:`${VAR_COLOR[v]}10`, border:`1px solid ${VAR_COLOR[v]}30`, borderRadius:'8px', padding:'5px 10px'}}>
+                  {VARIETIES.map(v=>(
+                    <div key={v} style={{textAlign:'center', background:`${VAR_COLOR[v]}10`, border:`1px solid ${VAR_COLOR[v]}30`, borderRadius:'8px', padding:'5px 10px', opacity: summary[v]>0 ? 1 : 0.5}}>
                       <div style={{fontSize:'0.6rem', color:VAR_COLOR[v], letterSpacing:'0.5px'}}>{VAR_LABEL[v]}</div>
                       <div style={{fontWeight:'700', color:VAR_COLOR[v], fontSize:'0.9rem'}}>{summary[v]}</div>
                     </div>
@@ -238,7 +247,10 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
                     <div key={i} style={{background:'var(--dark-card)', border:`1px solid rgba(245,158,11,0.15)`, borderRadius:'10px', padding:'10px 12px', marginBottom:'4px'}}>
                       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'5px'}}>
                         <span style={{fontSize:'0.8rem', fontWeight:'600', color: r.box_type==='Normal'?'#C8903A':'#5C7080'}}>{r.box_type}</span>
-                        <span style={{fontWeight:'700', color:'#F59E0B', fontSize:'0.9rem'}}>{r.total_boxes} boxes</span>
+                        <div style={{textAlign:'right'}}>
+                          <span style={{fontWeight:'700', color:'#F59E0B', fontSize:'0.9rem'}}>{r.total_boxes} boxes</span>
+                          <span style={{fontSize:'0.68rem', color:'#9AA5B4', marginLeft:'6px'}}>(≈ {fmtWeight(r.total_boxes||0)})</span>
+                        </div>
                       </div>
                       <div style={{display:'flex', gap:'5px', flexWrap:'wrap'}}>
                         {VARIETIES.filter(v=>r[v]>0).map(v=>(

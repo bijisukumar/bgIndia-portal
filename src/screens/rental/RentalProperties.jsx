@@ -1,69 +1,172 @@
+// ============================================================
+//  RentalProperties.jsx — v2: real ledger-backed tracker
+//
+//  TRACKER TAB rebuilt around rent_transactions instead of the old
+//  free-text rental_income fields (per explicit decision, 2026-06-27):
+//    - Income side: one real month at a time (not a bulk multi-month
+//      range -- a real ledger posting needs a real payment date, so
+//      "save the same amount across 6 months" doesn't make sense
+//      anymore). Pre-populated from the property's saved agreement
+//      (agreed_rent/maintenance_fee/currency), with a single
+//      [Paid on Time] button and a [Paid with Fee] exception path
+//      that adds a late-fee field -- same UX pattern as the
+//      Quick-Post component on the Tenant Agreement screen.
+//    - Expenses block: kept exactly as before (free-text fields,
+//      multi-field grid) -- per explicit decision, this is for
+//      vacant-property costs/taxes, not tied to a tenant or a strict
+//      ledger, so the old flexible entry style still fits. Now saves
+//      to property_expenses instead of rental_income.
+//
+//  DASHBOARD TAB and renewal alerts are UNCHANGED -- the backend
+//  queries they call (getRentalDashboard) were rewritten to read
+//  from the new tables but kept the exact same output shape, so no
+//  frontend change was needed there.
+// ============================================================
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
+import { localTodayStr } from '../../utils/dates'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const CUR_MONTH = new Date().getMonth()
 const CUR_YEAR  = new Date().getFullYear()
-const YEAR_OPTIONS = [CUR_YEAR, CUR_YEAR - 1]  // Current year + last year. Add more as needed.
+const YEAR_OPTIONS = [CUR_YEAR, CUR_YEAR - 1]
 
-const INCOME_FIELDS  = [
-  { key: 'rent',       label: 'Rent received', color: 'green' },
-  { key: 'carParking', label: 'Car parking',   color: 'green' },
-]
 const EXPENSE_FIELDS = [
-  { key: 'maintenance',      label: 'Maintenance fee'  },
   { key: 'electricity',      label: 'Electricity'      },
   { key: 'water',            label: 'Water'            },
   { key: 'propertyTax',      label: 'Property tax'     },
   { key: 'landTax',          label: 'Land tax'         },
   { key: 'extraMaintenance', label: 'Add. maintenance' },
 ]
-const ALL_FIELDS = [...INCOME_FIELDS, ...EXPENSE_FIELDS]
 
-function emptyProp()  { return Object.fromEntries(ALL_FIELDS.map(f => [f.key, '0'])) }
-function calcIncome(p)  { return INCOME_FIELDS.reduce((s,f)  => s + (parseFloat(p[f.key])||0), 0) }
-function calcExpense(p) { return EXPENSE_FIELDS.reduce((s,f) => s + (parseFloat(p[f.key])||0), 0) }
-function calcNet(p)     { return calcIncome(p) - calcExpense(p) }
-function fmt(n) {
+function emptyExpense() { return Object.fromEntries(EXPENSE_FIELDS.map(f => [f.key, '0'])) }
+function calcExpenseTotal(e) { return EXPENSE_FIELDS.reduce((s,f) => s + (parseFloat(e[f.key])||0), 0) }
+function fmt(n, currency='INR') {
   if (n === undefined || n === null) return '—'
   const abs = Math.abs(n)
-  const s = abs >= 100000 ? `₹${(abs/100000).toFixed(1)}L` : abs >= 1000 ? `₹${(abs/1000).toFixed(1)}K` : `₹${abs.toLocaleString('en-IN')}`
+  const symbol = currency === 'USD' ? '$' : '₹'
+  const s = abs >= 100000 && currency !== 'USD' ? `${symbol}${(abs/100000).toFixed(1)}L` : abs >= 1000 ? `${symbol}${(abs/1000).toFixed(1)}K` : `${symbol}${abs.toLocaleString('en-IN')}`
   return n < 0 ? `−${s}` : s
 }
 function daysUntil(dateStr) {
   if (!dateStr) return null
   return Math.ceil((new Date(dateStr) - new Date()) / (1000*60*60*24))
 }
+function periodMonthStr(year, monthIdx) { return `${year}-${String(monthIdx+1).padStart(2,'0')}` }
 
 export default function RentalProperties() {
   const navigate = useNavigate()
-  const [tab, setTab]         = useState('tracker')
-  const [monthFrom, setMonthFrom] = useState(CUR_MONTH)
-  const [monthTo,   setMonthTo]   = useState(CUR_MONTH)
+  const [tab, setTab] = useState('tracker')
+  const [selectedMonth, setSelectedMonth] = useState(CUR_MONTH)
   const [selectedYear, setSelectedYear] = useState(CUR_YEAR)
-  const [saving, setSaving]   = useState(false)
-  const [toast, setToast]     = useState(null)
-  const [data, setData]       = useState(CONFIG.rentalProperties.map(() => emptyProp()))
+  const [toast, setToast] = useState(null)
+
+  const [agreements, setAgreements] = useState({})
+  const [loadingAgreements, setLoadingAgreements] = useState(true)
+  const [postedThisMonth, setPostedThisMonth] = useState({}) // propId -> rent_transactions row, for the selected period
+  const [checkingPosted, setCheckingPosted] = useState(true)
+  const [posting, setPosting] = useState(null) // propId currently posting, or null
+  const [exceptionOpenFor, setExceptionOpenFor] = useState(null) // propId with the late-fee drawer open
+  const [lateFeeInputs, setLateFeeInputs] = useState({})
+  const [paidDateInputs, setPaidDateInputs] = useState({})
+
+  const [expenses, setExpenses] = useState(Object.fromEntries(CONFIG.rentalProperties.map(p => [p.id, emptyExpense()])))
+  const [savingExpenses, setSavingExpenses] = useState(false)
+
   const [dashData, setDashData]   = useState(null)
   const [dashLoading, setDashLoading] = useState(false)
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
-  const set = (pi, key, val) => setData(d => d.map((p,i) => i===pi ? {...p,[key]:val} : p))
-  const totalNet = data.reduce((s,p) => s+calcNet(p), 0)
-  const monthCount = monthTo - monthFrom + 1
 
-  const handleSave = async () => {
-    setSaving(true)
+  useEffect(() => { loadAgreements() }, [])
+  useEffect(() => { checkPostedForPeriod() }, [selectedMonth, selectedYear, agreements])
+
+  async function loadAgreements() {
+    setLoadingAgreements(true)
     try {
-      await api.saveRentalIncome({ monthFrom, monthTo, year: selectedYear, properties: data })
-      const label = monthFrom === monthTo
-        ? MONTHS[monthFrom]
-        : `${MONTHS[monthFrom]}–${MONTHS[monthTo]}`
-      showToast(`✓ Saved for ${label} ${selectedYear}${monthCount > 1 ? ` (${monthCount} months)` : ''}`)
-    } catch { showToast('Failed to save','error') }
-    finally { setSaving(false) }
+      const data = await api.getRentalAgreements()
+      const map = {}
+      ;(Array.isArray(data) ? data : []).forEach(a => { map[a.prop_id] = a })
+      setAgreements(map)
+    } catch (e) { console.warn(e) }
+    finally { setLoadingAgreements(false) }
+  }
+
+  async function checkPostedForPeriod() {
+    const period = periodMonthStr(selectedYear, selectedMonth)
+    setCheckingPosted(true)
+    try {
+      const results = {}
+      await Promise.all(CONFIG.rentalProperties.map(async prop => {
+        try {
+          const txns = await api.getRentTransactions(prop.id)
+          const match = (Array.isArray(txns) ? txns : []).find(t => t.period_month === period)
+          if (match) results[prop.id] = match
+        } catch (e) { /* ignore per-property failure, just means unknown/not-posted */ }
+      }))
+      setPostedThisMonth(results)
+    } finally { setCheckingPosted(false) }
+  }
+
+  async function handlePostOnTime(prop) {
+    const a = agreements[prop.id]
+    if (!a) { showToast(`No saved agreement for ${prop.name} yet — fill in rent/maintenance on the Agreements tab first`, 'error'); return }
+    setPosting(prop.id)
+    try {
+      const period = periodMonthStr(selectedYear, selectedMonth)
+      await api.postRentPayment({
+        propId: prop.id, periodMonth: period,
+        baseRent: a.agreed_rent || 0, maintenance: a.maintenance_fee || 0,
+        lateFee: 0, isException: false,
+        paidDate: localTodayStr(), currency: a.currency || 'INR',
+      })
+      showToast(`✓ Posted ${MONTHS[selectedMonth]} ${selectedYear} for ${prop.name}`)
+      checkPostedForPeriod()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setPosting(null) }
+  }
+
+  async function handlePostWithFee(prop) {
+    const a = agreements[prop.id]
+    if (!a) { showToast(`No saved agreement for ${prop.name} yet`, 'error'); return }
+    const lateFee = parseFloat(lateFeeInputs[prop.id]) || 0
+    const paidDate = paidDateInputs[prop.id] || localTodayStr()
+    setPosting(prop.id)
+    try {
+      const period = periodMonthStr(selectedYear, selectedMonth)
+      await api.postRentPayment({
+        propId: prop.id, periodMonth: period,
+        baseRent: a.agreed_rent || 0, maintenance: a.maintenance_fee || 0,
+        lateFee, isException: true,
+        paidDate, currency: a.currency || 'INR',
+      })
+      showToast(`✓ Posted ${MONTHS[selectedMonth]} ${selectedYear} for ${prop.name} (with late fee)`)
+      setExceptionOpenFor(null)
+      checkPostedForPeriod()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setPosting(null) }
+  }
+
+  function setExpenseField(propId, key, val) {
+    setExpenses(e => ({...e, [propId]: {...e[propId], [key]: val}}))
+  }
+
+  async function handleSaveExpenses() {
+    setSavingExpenses(true)
+    try {
+      await Promise.all(CONFIG.rentalProperties.map(prop => {
+        const e = expenses[prop.id]
+        return api.savePropertyExpense({
+          propId: prop.id, month: selectedMonth + 1, year: selectedYear,
+          electricity: e.electricity, water: e.water, propertyTax: e.propertyTax,
+          landTax: e.landTax, extraMaintenance: e.extraMaintenance,
+        })
+      }))
+      showToast(`✓ Expenses saved for ${MONTHS[selectedMonth]} ${selectedYear}`)
+    } catch (e) { showToast('Failed to save expenses', 'error') }
+    finally { setSavingExpenses(false) }
   }
 
   useEffect(() => {
@@ -71,12 +174,17 @@ export default function RentalProperties() {
       setDashLoading(true)
       api.getRentalDashboard(CUR_YEAR)
         .then(d => { setDashData(d); setDashLoading(false) })
-        .catch(() => { setDashData(MOCK_DASH); setDashLoading(false) })
+        .catch(() => { setDashLoading(false) })
     }
   }, [tab])
 
   const renewals = CONFIG.rentalProperties
-    .map((p,i) => ({...p, idx:i, days: p.leaseEnd ? daysUntil(p.leaseEnd) : null}))
+    .map((p) => {
+      const a = agreements[p.id]
+      const leaseEnd = a?.lease_end
+      const isM2M = !!a?.is_month_to_month
+      return { ...p, tenantName: a?.tenant_name, days: (leaseEnd && !isM2M) ? daysUntil(leaseEnd) : null }
+    })
     .filter(p => p.days !== null && p.days <= 60)
 
   const tabStyle = (t) => ({
@@ -87,13 +195,15 @@ export default function RentalProperties() {
     borderBottom: tab===t ? '2px solid #C8903A' : '2px solid transparent',
   })
 
+  const totalExpenseAll = CONFIG.rentalProperties.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()), 0)
+
   return (
     <div className="screen">
       <div className="topbar">
         <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
         <div>
           <div className="topbar-title">Rental properties</div>
-          <div className="topbar-sub">MONTHLY INCOME TRACKER · {selectedYear}</div>
+          <div className="topbar-sub">MONTHLY TRACKER · {selectedYear}</div>
         </div>
       </div>
 
@@ -105,20 +215,15 @@ export default function RentalProperties() {
 
       <div className="screen-body">
 
-        {/* RENEWAL ALERTS */}
         {renewals.length > 0 && (
           <div style={{background:'rgba(198,40,40,0.1)',border:'1px solid rgba(198,40,40,0.3)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'}}>
             <div style={{color:'#EF9A9A',fontWeight:'600',fontSize:'0.82rem',marginBottom:'6px'}}>🔔 Renewal alerts</div>
             {renewals.map(p => (
-              <div key={p.idx} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}}>
+              <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}}>
                 <span style={{color:'#EDF2F7',fontSize:'0.82rem'}}>{p.name}</span>
-                <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
-                  <span style={{color:p.days<0?'#EF9A9A':'#FFCC80',fontSize:'0.78rem'}}>
-                    {p.days<0?`Expired ${Math.abs(p.days)}d ago`:`${p.days}d left`}
-                  </span>
-                  <button style={{background:'rgba(52,168,83,0.15)',border:'1px solid rgba(52,168,83,0.3)',borderRadius:'8px',color:'#34A853',fontSize:'0.72rem',padding:'2px 8px',cursor:'pointer'}}
-                    onClick={()=>showToast(`Renewal email drafted for ${p.name}`)}>📧 Renew</button>
-                </div>
+                <span style={{color:p.days<0?'#EF9A9A':'#FFCC80',fontSize:'0.78rem'}}>
+                  {p.days<0?`Expired ${Math.abs(p.days)}d ago`:`${p.days}d left`}
+                </span>
               </div>
             ))}
           </div>
@@ -127,121 +232,156 @@ export default function RentalProperties() {
         {/* ── TRACKER TAB ──────────────────────────────── */}
         {tab === 'tracker' && (
           <>
-            {/* Year selector */}
-            <div className="card-section-label">SELECT YEAR</div>
-            <div style={{display:'flex',gap:'8px',marginBottom:'4px'}}>
-              {YEAR_OPTIONS.map(yr => (
-                <button key={yr}
-                  onClick={() => setSelectedYear(yr)}
-                  style={{
-                    flex:1, padding:'8px', borderRadius:'20px', cursor:'pointer',
-                    border: selectedYear===yr ? '2px solid var(--gold)' : '1px solid rgba(255,255,255,0.1)',
-                    background: selectedYear===yr ? 'rgba(200,144,58,0.15)' : 'transparent',
-                    color: selectedYear===yr ? 'var(--gold)' : '#5C7080',
-                    fontWeight: selectedYear===yr ? '700' : '400',
-                    fontSize:'0.88rem',
-                  }}>
-                  {yr}
+            {/* Single month/year picker -- replaces the old multi-month
+                bulk range, since a real ledger posting needs one real
+                payment date per month, not a "same amount × N months"
+                shortcut. */}
+            <div className="card-section-label">SELECT MONTH</div>
+            <div className="card" style={{marginBottom:'14px'}}>
+              <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+                <select className="field-input" value={selectedMonth} style={{flex:2}}
+                  onChange={e=>setSelectedMonth(parseInt(e.target.value))}>
+                  {MONTHS.map((m,i)=><option key={m} value={i}>{m}</option>)}
+                </select>
+                <select className="field-input" value={selectedYear} style={{flex:1}}
+                  onChange={e=>setSelectedYear(parseInt(e.target.value))}>
+                  {YEAR_OPTIONS.map(yr=><option key={yr} value={yr}>{yr}</option>)}
+                </select>
+              </div>
+              <div style={{display:'flex',gap:'6px',marginTop:'10px',flexWrap:'wrap'}}>
+                <button onClick={()=>{setSelectedMonth(CUR_MONTH); setSelectedYear(CUR_YEAR)}}
+                  style={{padding:'4px 10px',borderRadius:'16px',cursor:'pointer',fontSize:'0.72rem',fontWeight:'600',
+                    border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#5C7080'}}>
+                  This month
                 </button>
-              ))}
+              </div>
             </div>
 
-            {/* Month range selector */}
-            <div className="card-section-label">SELECT MONTH RANGE TO SAVE</div>
-            <div className="card" style={{marginBottom:'12px'}}>
-              <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'10px'}}>
-                <div style={{flex:1}}>
-                  <div style={{color:'#5C7080',fontSize:'0.68rem',marginBottom:'4px'}}>FROM</div>
-                  <select className="field-input" value={monthFrom}
-                    onChange={e=>{const v=parseInt(e.target.value); setMonthFrom(v); if(v>monthTo) setMonthTo(v)}}>
-                    {MONTHS.map((m,i)=><option key={m} value={i}>{m}</option>)}
-                  </select>
-                </div>
-                <div style={{color:'#5C7080',paddingTop:'18px',fontSize:'0.9rem'}}>→</div>
-                <div style={{flex:1}}>
-                  <div style={{color:'#5C7080',fontSize:'0.68rem',marginBottom:'4px'}}>TO</div>
-                  <select className="field-input" value={monthTo}
-                    onChange={e=>setMonthTo(parseInt(e.target.value))}>
-                    {MONTHS.map((m,i)=><option key={m} value={i} disabled={i<monthFrom}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Quick presets */}
-              <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
-                {[
-                  {label:'This month', f:CUR_MONTH, t:CUR_MONTH},
-                  {label:'Q1', f:0, t:2}, {label:'Q2', f:3, t:5},
-                  {label:'Q3', f:6, t:8}, {label:'Q4', f:9, t:11},
-                  {label:'H1', f:0, t:5}, {label:'H2', f:6, t:11},
-                  {label:'Full year', f:0, t:11},
-                ].map(preset => (
-                  <button key={preset.label}
-                    onClick={()=>{setMonthFrom(preset.f); setMonthTo(preset.t)}}
-                    style={{
-                      padding:'4px 10px', borderRadius:'16px', cursor:'pointer',
-                      fontSize:'0.72rem', fontWeight:'600', border:'1px solid',
-                      borderColor: monthFrom===preset.f && monthTo===preset.t ? 'var(--gold)' : 'rgba(255,255,255,0.1)',
-                      background: monthFrom===preset.f && monthTo===preset.t ? 'rgba(200,144,58,0.15)' : 'transparent',
-                      color: monthFrom===preset.f && monthTo===preset.t ? 'var(--gold)' : '#5C7080',
-                    }}>
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-
-              {monthCount > 1 && (
-                <div style={{marginTop:'8px',background:'rgba(200,144,58,0.06)',borderRadius:'8px',padding:'8px 10px',color:'#C8903A',fontSize:'0.78rem'}}>
-                  💡 Same amounts will be saved for <strong>{monthCount} months</strong> ({MONTHS[monthFrom]}–{MONTHS[monthTo]} {CUR_YEAR})
-                </div>
-              )}
-            </div>
-
-            {/* Property entries */}
-            {CONFIG.rentalProperties.map((prop, pi) => {
-              const p   = data[pi]
-              const inc = calcIncome(p), exp = calcExpense(p), net = inc - exp
+            {/* Rent ledger — one Quick-Post per property for the selected period */}
+            <div className="card-section-label">RENT — {MONTHS[selectedMonth].toUpperCase()} {selectedYear}</div>
+            {(loadingAgreements || checkingPosted) && (
+              <div style={{textAlign:'center', color:'var(--text-dim)', padding:'16px'}}>Loading…</div>
+            )}
+            {!loadingAgreements && !checkingPosted && CONFIG.rentalProperties.map(prop => {
+              const a = agreements[prop.id]
+              const currency = a?.currency || 'INR'
+              const baseRent = a?.agreed_rent || 0
+              const maintenance = a?.maintenance_fee || 0
+              const total = baseRent + maintenance
+              const posted = postedThisMonth[prop.id]
+              const isPostingThis = posting === prop.id
               return (
-                <div key={prop.id}>
+                <div key={prop.id} style={{marginBottom:'14px'}}>
                   <div className="card-section-label" style={{display:'flex',justifyContent:'space-between'}}>
                     <span>{prop.name.toUpperCase()}</span>
-                    <span style={{color:net>=0?'#34A853':'#EF9A9A',fontWeight:'700'}}>{fmt(net)}</span>
+                    {a?.tenant_name && <span style={{color:'var(--text-dim)', fontWeight:'400', fontSize:'0.72rem'}}>{a.tenant_name}</span>}
                   </div>
                   <div className="card">
-                    {prop.tenantName && (
-                      <div style={{color:'#5C7080',fontSize:'0.75rem',marginBottom:'10px'}}>
-                        Tenant: <span style={{color:'#EDF2F7'}}>{prop.tenantName}</span>
-                        {prop.leaseEnd && <span style={{marginLeft:'8px',color:daysUntil(prop.leaseEnd)<30?'#FFCC80':'#5C7080'}}>· Lease ends {prop.leaseEnd}</span>}
+                    {!a ? (
+                      <div style={{color:'#5C7080', fontSize:'0.8rem'}}>
+                        No saved agreement yet — fill in rent on the Agreements tab first.
                       </div>
-                    )}
-                    <div style={{fontSize:'0.7rem',color:'#34A853',letterSpacing:'1px',marginBottom:'6px'}}>INCOME</div>
-                    <div className="grid-2">
-                      {INCOME_FIELDS.map(f=>(
-                        <div key={f.key} className="field">
-                          <label className="field-label">{f.label}</label>
-                          <input className="field-input" type="number" placeholder="0"
-                            style={{color:'#34A853'}} value={p[f.key]}
-                            onChange={e=>set(pi,f.key,e.target.value)}/>
+                    ) : posted ? (
+                      <div style={{
+                        padding:'12px', borderRadius:'10px', background:'rgba(52,168,83,0.12)',
+                        border:'1px solid rgba(52,168,83,0.4)', color:'#34A853',
+                      }}>
+                        <div style={{fontWeight:'700', fontSize:'0.88rem'}}>
+                          ✓ Posted — {fmt(posted.total_due, posted.currency)}
+                          {posted.late_fee > 0 && <span style={{color:'#F59E0B', marginLeft:'8px', fontWeight:'600'}}>(incl. {fmt(posted.late_fee, posted.currency)} late fee)</span>}
                         </div>
-                      ))}
-                    </div>
-                    <div className="divider"/>
-                    <div style={{fontSize:'0.7rem',color:'#EF9A9A',letterSpacing:'1px',marginBottom:'6px'}}>EXPENSES</div>
+                        <div style={{fontSize:'0.72rem', color:'var(--text-dim)', marginTop:'2px'}}>Paid {posted.paid_date}</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{display:'flex', gap:'16px', marginBottom:'12px', fontSize:'0.8rem'}}>
+                          <div><span style={{color:'var(--text-dim)'}}>Rent: </span><span style={{color:'#34A853', fontWeight:'600'}}>{fmt(baseRent, currency)}</span></div>
+                          <div><span style={{color:'var(--text-dim)'}}>Maint: </span><span style={{color:'var(--text)', fontWeight:'600'}}>{fmt(maintenance, currency)}</span></div>
+                          <div><span style={{color:'var(--text-dim)'}}>Total: </span><span style={{color:'#C8903A', fontWeight:'700'}}>{fmt(total, currency)}</span></div>
+                        </div>
+
+                        <button
+                          onClick={()=>handlePostOnTime(prop)}
+                          disabled={isPostingThis}
+                          style={{
+                            width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid rgba(52,168,83,0.5)',
+                            background: isPostingThis ? 'rgba(52,168,83,0.2)' : '#34A853', color:'#fff',
+                            fontWeight:'700', fontSize:'0.85rem', cursor: isPostingThis ? 'default' : 'pointer',
+                            opacity: isPostingThis ? 0.7 : 1,
+                          }}>
+                          {isPostingThis ? 'Posting…' : `✓ Paid on Time — ${fmt(total, currency)}`}
+                        </button>
+
+                        <button
+                          onClick={()=>setExceptionOpenFor(exceptionOpenFor === prop.id ? null : prop.id)}
+                          style={{
+                            width:'100%', marginTop:'8px', padding:'9px', borderRadius:'10px',
+                            border:'1px solid var(--border-dim)', background:'transparent', color:'var(--text-dim)',
+                            fontWeight:'600', fontSize:'0.78rem', cursor:'pointer',
+                          }}>
+                          {exceptionOpenFor === prop.id ? '− Hide' : 'Paid with Late Fee'}
+                        </button>
+
+                        {exceptionOpenFor === prop.id && (
+                          <div style={{marginTop:'10px', padding:'12px', borderRadius:'10px', background:'var(--dark-input)', border:'1px solid var(--border-dim)'}}>
+                            <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>LATE FEE ({currency==='USD'?'$':'₹'})</label>
+                            <input type="number" min="0" value={lateFeeInputs[prop.id]||''}
+                              onChange={e=>setLateFeeInputs(v=>({...v,[prop.id]:e.target.value}))}
+                              placeholder="0" className="field-input" style={{width:'100%'}}/>
+
+                            <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px',marginTop:'10px'}}>ACTUAL PAYMENT DATE</label>
+                            <input type="date" value={paidDateInputs[prop.id]||localTodayStr()}
+                              onChange={e=>setPaidDateInputs(v=>({...v,[prop.id]:e.target.value}))}
+                              className="field-input" style={{width:'100%'}}/>
+
+                            <div style={{marginTop:'10px', padding:'8px 10px', borderRadius:'8px', background:'rgba(200,144,58,0.08)', border:'1px solid rgba(200,144,58,0.25)'}}>
+                              <span style={{fontSize:'0.7rem', color:'var(--text-dim)'}}>Total due: </span>
+                              <span style={{fontSize:'0.9rem', color:'#C8903A', fontWeight:'700'}}>
+                                {fmt(total + (parseFloat(lateFeeInputs[prop.id])||0), currency)}
+                              </span>
+                            </div>
+
+                            <button onClick={()=>handlePostWithFee(prop)} disabled={isPostingThis}
+                              style={{
+                                width:'100%', marginTop:'10px', padding:'10px', borderRadius:'8px', border:'none',
+                                background:'#185FA5', color:'#fff', fontWeight:'700', fontSize:'0.85rem',
+                                cursor: isPostingThis ? 'default' : 'pointer', opacity: isPostingThis ? 0.7 : 1,
+                              }}>
+                              {isPostingThis ? 'Saving…' : 'Save to Ledger'}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Expenses block — kept exactly as before (free-text grid),
+                per explicit decision: this is for vacant-property costs
+                or taxes, not tied to a tenant, so the old flexible entry
+                style still fits. Now saves to property_expenses. */}
+            <div className="card-section-label" style={{marginTop:'8px'}}>EXPENSES — {MONTHS[selectedMonth].toUpperCase()} {selectedYear}</div>
+            {CONFIG.rentalProperties.map(prop => {
+              const e = expenses[prop.id] || emptyExpense()
+              const total = calcExpenseTotal(e)
+              return (
+                <div key={prop.id} style={{marginBottom:'10px'}}>
+                  <div className="card-section-label" style={{display:'flex',justifyContent:'space-between'}}>
+                    <span>{prop.name.toUpperCase()}</span>
+                    <span style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(total)}</span>
+                  </div>
+                  <div className="card">
                     <div className="grid-2">
                       {EXPENSE_FIELDS.map(f=>(
                         <div key={f.key} className="field">
                           <label className="field-label">{f.label}</label>
                           <input className="field-input" type="number" placeholder="0"
-                            style={{color:'#EF9A9A'}} value={p[f.key]}
-                            onChange={e=>set(pi,f.key,e.target.value)}/>
+                            style={{color:'#EF9A9A'}} value={e[f.key]}
+                            onChange={ev=>setExpenseField(prop.id, f.key, ev.target.value)}/>
                         </div>
                       ))}
-                    </div>
-                    <div className="divider"/>
-                    <div style={{display:'flex',gap:'20px',paddingTop:'4px'}}>
-                      <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>INCOME</div><div style={{color:'#34A853',fontWeight:'700'}}>{fmt(inc)}</div></div>
-                      <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>EXPENSE</div><div style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(exp)}</div></div>
-                      <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>NET</div><div style={{color:net>=0?'#34A853':'#EF9A9A',fontWeight:'700'}}>{fmt(net)}</div></div>
                     </div>
                   </div>
                 </div>
@@ -251,28 +391,19 @@ export default function RentalProperties() {
             <div className="net-box" style={{marginTop:'8px'}}>
               <div className="net-row">
                 <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>
-                  Total net · {monthCount > 1 ? `${MONTHS[monthFrom]}–${MONTHS[monthTo]}` : MONTHS[monthFrom]} {selectedYear}
+                  Total expenses · {MONTHS[selectedMonth]} {selectedYear}
                 </span>
-                <span className={`net-val big ${totalNet<0?'neg':''}`}>{fmt(totalNet)}</span>
+                <span className="net-val big neg">{fmt(totalExpenseAll)}</span>
               </div>
-              {monthCount > 1 && (
-                <div className="net-row">
-                  <span className="net-label">{monthCount} months × {fmt(totalNet)} each</span>
-                  <span style={{color:'#85B7EB',fontWeight:'700'}}>{fmt(totalNet * monthCount)}</span>
-                </div>
-              )}
             </div>
 
-            <button className="btn btn-gold" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : monthCount > 1
-                ? `Save for ${MONTHS[monthFrom]}–${MONTHS[monthTo]} (${monthCount} months) →`
-                : `Save ${MONTHS[monthFrom]} ${selectedYear} →`}
+            <button className="btn btn-gold" onClick={handleSaveExpenses} disabled={savingExpenses}>
+              {savingExpenses ? 'Saving…' : `Save Expenses for ${MONTHS[selectedMonth]} ${selectedYear} →`}
             </button>
-            <p className="btn-email-note">📧 Owner notified on save</p>
           </>
         )}
 
-        {/* ── DASHBOARD TAB ─────────────────────────────── */}
+        {/* ── DASHBOARD TAB — unchanged ───────────────────── */}
         {tab === 'dashboard' && (
           dashLoading ? <div className="loading"><div className="spinner"/>Loading...</div> : (
             <>
@@ -320,13 +451,4 @@ export default function RentalProperties() {
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   )
-}
-
-const MOCK_DASH = {
-  totalIncome:312000, totalExpense:48600, netIncome:263400,
-  rows: [
-    ...Array.from({length:5},(_,mi)=>({prop_id:'rental_1',month:mi+1,income:9000,expense:1500,net:7500})),
-    ...Array.from({length:5},(_,mi)=>({prop_id:'rental_2',month:mi+1,income:8000,expense:1400,net:6600})),
-    ...Array.from({length:5},(_,mi)=>({prop_id:'rental_3',month:mi+1,income:9000,expense:1500,net:7500})),
-  ]
 }

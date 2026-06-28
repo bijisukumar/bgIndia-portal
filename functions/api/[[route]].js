@@ -894,15 +894,37 @@ export async function onRequest(ctx) {
 
       if (action === 'getRentalDashboard') {
         const year = url.searchParams.get('year') || new Date().getFullYear()
-        const { results } = await DB.prepare(
-          `SELECT prop_id, month, SUM(rent + car_parking) as income,
-            SUM(maintenance + electricity + water + property_tax + land_tax + extra_maintenance) as expense, SUM(net) as net
-           FROM rental_income WHERE year = ? GROUP BY prop_id, month ORDER BY prop_id, month`
-        ).bind(year).all()
-        const totalIncome  = results.reduce((s, r) => s + (r.income || 0), 0)
-        const totalExpense = results.reduce((s, r) => s + (r.expense || 0), 0)
-        const netIncome    = results.reduce((s, r) => s + (r.net || 0), 0)
-        return json({ success: true, data: { totalIncome, totalExpense, netIncome, rows: results } })
+        // Same migration as getRev360Dashboard: income from rent_transactions
+        // (replaces rental_income's combined rent+car_parking), expense from
+        // property_expenses (replaces rental_income's expense columns).
+        const rentRows = await DB.prepare(`
+          SELECT prop_id, CAST(substr(period_month, 6, 2) AS INTEGER) as month, SUM(total_due) as income
+          FROM rent_transactions
+          WHERE substr(period_month, 1, 4) = ?
+          GROUP BY prop_id, month
+        `).bind(String(year)).all()
+        const expenseRows = await DB.prepare(`
+          SELECT prop_id, month, SUM(total_expense) as expense
+          FROM property_expenses
+          WHERE year = ?
+          GROUP BY prop_id, month
+        `).bind(parseInt(year)).all()
+        // Merge by (prop_id, month) into one row each, same as the
+        // per-property merge in getRev360Dashboard.
+        const byKey = {}
+        rentRows.results.forEach(r => {
+          byKey[`${r.prop_id}|${r.month}`] = { prop_id: r.prop_id, month: r.month, income: r.income || 0, expense: 0 }
+        })
+        expenseRows.results.forEach(r => {
+          const k = `${r.prop_id}|${r.month}`
+          if (!byKey[k]) byKey[k] = { prop_id: r.prop_id, month: r.month, income: 0, expense: 0 }
+          byKey[k].expense = r.expense || 0
+        })
+        const rows = Object.values(byKey).map(r => ({ ...r, net: r.income - r.expense })).sort((a,b) => a.prop_id===b.prop_id ? a.month-b.month : (a.prop_id<b.prop_id?-1:1))
+        const totalIncome  = rows.reduce((s, r) => s + (r.income || 0), 0)
+        const totalExpense = rows.reduce((s, r) => s + (r.expense || 0), 0)
+        const netIncome    = rows.reduce((s, r) => s + (r.net || 0), 0)
+        return json({ success: true, data: { totalIncome, totalExpense, netIncome, rows } })
       }
 
       // COCONUT HARVESTS — Get History List
@@ -1203,10 +1225,42 @@ export async function onRequest(ctx) {
       if (action === 'getRev360Dashboard') {
         const year = new Date().getFullYear()
         const props = await DB.prepare(`SELECT * FROM rental_props ORDER BY prop_id`).all()
-        const income = await DB.prepare(`SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax+extra_maintenance) as expense, SUM(net) as net, COUNT(*) as months_entered FROM rental_income WHERE year = ? GROUP BY prop_id`).bind(year).all()
+        // Income: rent_transactions (base_rent + maintenance + car_parking + late_fee,
+        // i.e. total_due) is the new source of truth, replacing rental_income's
+        // combined rent+car_parking column -- rental_income can't represent a
+        // late fee or an actual payment date, which is the whole reason this
+        // table exists. rental_income itself is left untouched, just no longer
+        // read here.
+        const rentIncome = await DB.prepare(`
+          SELECT prop_id, SUM(total_due) as income, COUNT(*) as months_entered
+          FROM rent_transactions
+          WHERE substr(period_month, 1, 4) = ?
+          GROUP BY prop_id
+        `).bind(String(year)).all()
+        // Expenses: property_expenses replaces rental_income's expense
+        // columns (electricity/water/property_tax/land_tax/extra_maintenance).
+        const propExpense = await DB.prepare(`
+          SELECT prop_id, SUM(total_expense) as expense
+          FROM property_expenses
+          WHERE year = ?
+          GROUP BY prop_id
+        `).bind(year).all()
+        // Merge the two by prop_id into the same {prop_id, income, expense, net,
+        // months_entered} shape the frontend already expects -- a property with
+        // rent postings but no expense rows (or vice versa) still gets a single
+        // combined row rather than two partial ones.
+        const byProp = {}
+        rentIncome.results.forEach(r => {
+          byProp[r.prop_id] = { prop_id: r.prop_id, income: r.income || 0, expense: 0, months_entered: r.months_entered || 0 }
+        })
+        propExpense.results.forEach(r => {
+          if (!byProp[r.prop_id]) byProp[r.prop_id] = { prop_id: r.prop_id, income: 0, expense: 0, months_entered: 0 }
+          byProp[r.prop_id].expense = r.expense || 0
+        })
+        const income = Object.values(byProp).map(r => ({ ...r, net: r.income - r.expense }))
         const losses = await DB.prepare(`SELECT prop_id, SUM(amount) as total_claimed, SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off, SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered, COUNT(*) as claim_count FROM lease_losses GROUP BY prop_id`).all()
         const renewalAlerts = await DB.prepare(`SELECT prop_id, name, tenant_name, lease_end, status, CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left FROM rental_props WHERE lease_end IS NOT NULL AND lease_end != '' AND julianday(lease_end) - julianday('now') <= 90 ORDER BY lease_end ASC`).all()
-        return json({ success: true, data: { year, properties: props.results, income: income.results, losses: losses.results, renewalAlerts: renewalAlerts.results } })
+        return json({ success: true, data: { year, properties: props.results, income, losses: losses.results, renewalAlerts: renewalAlerts.results } })
       }
 
       if (action === 'getGuestDocuments') {
@@ -1829,6 +1883,17 @@ export async function onRequest(ctx) {
         if (!propId) return err('propId required')
         const row = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
         return json({ success: true, data: row || null })
+      }
+
+      // PROPERTY EXPENSES read — backs the Expenses block on the Monthly
+      // Tracker screen. The matching write (savePropertyExpense) is in
+      // the POST block below.
+      if (action === 'getPropertyExpenses') {
+        const propId = url.searchParams.get('propId') || ''
+        const year = url.searchParams.get('year') || ''
+        if (!propId || !year) return err('propId and year required')
+        const { results } = await DB.prepare(`SELECT * FROM property_expenses WHERE prop_id = ? AND year = ? ORDER BY month ASC`).bind(propId, parseInt(year)).all()
+        return json({ success: true, data: results })
       }
 
       return err(`Unknown GET action: ${action}`, 404)
@@ -3062,22 +3127,23 @@ export async function onRequest(ctx) {
       // above — it was originally misplaced here too, which is exactly
       // why it 404'd: GET requests never reach code inside this POST block.)
       if (action === 'postRentPayment') {
-        const { propId, periodMonth, baseRent, maintenance, lateFee, paidDate, currency, isException, notes } = body
+        const { propId, periodMonth, baseRent, maintenance, carParking, lateFee, paidDate, currency, isException, notes } = body
         if (!propId || !periodMonth) return err('propId and periodMonth required')
         if (!/^\d{4}-\d{2}$/.test(periodMonth)) return err('periodMonth must be YYYY-MM')
         const base = parseFloat(baseRent) || 0
         const maint = parseFloat(maintenance) || 0
+        const parking = parseFloat(carParking) || 0
         const late = parseFloat(lateFee) || 0
-        const total = base + maint + late
+        const total = base + maint + parking + late
         const id = 'rtxn_' + Date.now() + '_' + Math.floor(Math.random()*1000)
         try {
           await DB.prepare(`
             INSERT INTO rent_transactions (
-              txn_id, prop_id, period_month, base_rent, maintenance, late_fee,
+              txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee,
               total_due, is_exception, paid_date, currency, notes, created_by, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
-            id, propId, periodMonth, base, maint, late,
+            id, propId, periodMonth, base, maint, parking, late,
             total, isException ? 1 : 0, paidDate || now().slice(0,10), currency || 'INR', notes || null, actor, now()
           ).run()
         } catch (e) {
@@ -3087,6 +3153,34 @@ export async function onRequest(ctx) {
           throw e
         }
         return json({ success: true, data: { txnId: id, propId, periodMonth, totalDue: total } })
+      }
+
+      // PROPERTY EXPENSES — electricity/water/taxes/extra-maintenance,
+      // independent of whether rent was collected that month (vacant
+      // periods, or simply tracking property-level costs). Replaces
+      // rental_income's expense columns going forward; rental_income
+      // itself is left untouched/unwritten-to rather than dropped, so
+      // its historical rows are still there for reference.
+      if (action === 'savePropertyExpense') {
+        const { propId, month, year, electricity, water, propertyTax, landTax, extraMaintenance, notes } = body
+        if (!propId || !month || !year) return err('propId, month, and year required')
+        const e1 = parseFloat(electricity) || 0
+        const e2 = parseFloat(water) || 0
+        const e3 = parseFloat(propertyTax) || 0
+        const e4 = parseFloat(landTax) || 0
+        const e5 = parseFloat(extraMaintenance) || 0
+        const total = e1 + e2 + e3 + e4 + e5
+        const recId = `PE-${propId}-${year}-${month}`
+        await DB.prepare(`
+          INSERT OR REPLACE INTO property_expenses (
+            record_id, prop_id, month, year, electricity, water, property_tax, land_tax,
+            extra_maintenance, total_expense, notes, created_by, updated_by, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).bind(
+          recId, propId, month, year, e1, e2, e3, e4, e5, total, notes || null,
+          actor, actor, now(), now()
+        ).run()
+        return json({ success: true, data: { recordId: recId, totalExpense: total } })
       }
 
       // TENANCY HISTORY write actions (saveTenancyHistory/

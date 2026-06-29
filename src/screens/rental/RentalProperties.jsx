@@ -27,6 +27,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { localTodayStr } from '../../utils/dates'
+import MaintenanceEventsLog from './MaintenanceEventsLog'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const CUR_MONTH = new Date().getMonth()
@@ -38,7 +39,6 @@ const EXPENSE_FIELDS = [
   { key: 'water',            label: 'Water'            },
   { key: 'propertyTax',      label: 'Property tax'     },
   { key: 'landTax',          label: 'Land tax'         },
-  { key: 'extraMaintenance', label: 'Add. maintenance' },
 ]
 
 function emptyExpense() { return Object.fromEntries(EXPENSE_FIELDS.map(f => [f.key, '0'])) }
@@ -73,6 +73,7 @@ export default function RentalProperties() {
   const [paidDateInputs, setPaidDateInputs] = useState({})
 
   const [expenses, setExpenses] = useState(Object.fromEntries(CONFIG.rentalProperties.map(p => [p.id, emptyExpense()])))
+  const [maintenanceTotals, setMaintenanceTotals] = useState({}) // propId -> sum of this month's logged maintenance events
   const [savingExpenses, setSavingExpenses] = useState(false)
 
   const [dashData, setDashData]   = useState(null)
@@ -162,7 +163,7 @@ export default function RentalProperties() {
         return api.savePropertyExpense({
           propId: prop.id, month: selectedMonth + 1, year: selectedYear,
           electricity: e.electricity, water: e.water, propertyTax: e.propertyTax,
-          landTax: e.landTax, extraMaintenance: e.extraMaintenance,
+          landTax: e.landTax,
         })
       }))
       showToast(`✓ Expenses saved for ${MONTHS[selectedMonth]} ${selectedYear}`)
@@ -201,7 +202,7 @@ export default function RentalProperties() {
     borderBottom: tab===t ? '2px solid #C8903A' : '2px solid transparent',
   })
 
-  const totalExpenseAll = CONFIG.rentalProperties.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()), 0)
+  const totalExpenseAll = CONFIG.rentalProperties.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()) + (maintenanceTotals[p.id] || 0), 0)
 
   return (
     <div className="screen">
@@ -371,7 +372,7 @@ export default function RentalProperties() {
             <div className="card-section-label" style={{marginTop:'8px'}}>EXPENSES — {MONTHS[selectedMonth].toUpperCase()} {selectedYear}</div>
             {CONFIG.rentalProperties.map(prop => {
               const e = expenses[prop.id] || emptyExpense()
-              const total = calcExpenseTotal(e)
+              const total = calcExpenseTotal(e) + (maintenanceTotals[prop.id] || 0)
               return (
                 <div key={prop.id} style={{marginBottom:'10px'}}>
                   <div className="card-section-label" style={{display:'flex',justifyContent:'space-between'}}>
@@ -389,6 +390,12 @@ export default function RentalProperties() {
                         </div>
                       ))}
                     </div>
+                    <MaintenanceEventsLog
+                      propId={prop.id}
+                      month={selectedMonth + 1}
+                      year={selectedYear}
+                      onTotalChange={(sum) => setMaintenanceTotals(prev => ({ ...prev, [prop.id]: sum }))}
+                    />
                   </div>
                 </div>
               )

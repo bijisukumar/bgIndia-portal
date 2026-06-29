@@ -1917,6 +1917,21 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // MAINTENANCE EVENTS read — backs the per-property maintenance log
+      // on the Monthly Tracker's Expenses block. A property can have
+      // multiple events in the same month (e.g. a fridge repair AND a
+      // plumbing fix) -- this replaces the old single extra_maintenance
+      // number, which is now auto-computed as SUM(amount) from here
+      // (see savePropertyExpense in the POST block below).
+      if (action === 'getMaintenanceEvents') {
+        const propId = url.searchParams.get('propId') || ''
+        const month = url.searchParams.get('month') || ''
+        const year = url.searchParams.get('year') || ''
+        if (!propId || !month || !year) return err('propId, month, and year required')
+        const { results } = await DB.prepare(`SELECT * FROM maintenance_events WHERE prop_id = ? AND month = ? AND year = ? ORDER BY event_date ASC, created_at ASC`).bind(propId, parseInt(month), parseInt(year)).all()
+        return json({ success: true, data: results })
+      }
+
       return err(`Unknown GET action: ${action}`, 404)
     }
 
@@ -3183,13 +3198,19 @@ export async function onRequest(ctx) {
       // itself is left untouched/unwritten-to rather than dropped, so
       // its historical rows are still there for reference.
       if (action === 'savePropertyExpense') {
-        const { propId, month, year, electricity, water, propertyTax, landTax, extraMaintenance, notes } = body
+        const { propId, month, year, electricity, water, propertyTax, landTax, notes } = body
         if (!propId || !month || !year) return err('propId, month, and year required')
         const e1 = parseFloat(electricity) || 0
         const e2 = parseFloat(water) || 0
         const e3 = parseFloat(propertyTax) || 0
         const e4 = parseFloat(landTax) || 0
-        const e5 = parseFloat(extraMaintenance) || 0
+        // extra_maintenance is no longer a manual input (per explicit
+        // decision, 2026-06-29) -- it's computed here as the sum of
+        // this property/month/year's logged maintenance_events, so the
+        // monthly total always reflects the real itemized log rather
+        // than a hand-typed number that could drift out of sync with it.
+        const maintSum = await DB.prepare(`SELECT COALESCE(SUM(amount),0) as total FROM maintenance_events WHERE prop_id = ? AND month = ? AND year = ?`).bind(propId, month, year).first()
+        const e5 = maintSum?.total || 0
         const total = e1 + e2 + e3 + e4 + e5
         const recId = `PE-${propId}-${year}-${month}`
         await DB.prepare(`
@@ -3201,7 +3222,42 @@ export async function onRequest(ctx) {
           recId, propId, month, year, e1, e2, e3, e4, e5, total, notes || null,
           actor, actor, now(), now()
         ).run()
-        return json({ success: true, data: { recordId: recId, totalExpense: total } })
+        return json({ success: true, data: { recordId: recId, totalExpense: total, maintenanceFromEvents: e5 } })
+      }
+
+      // MAINTENANCE EVENTS write — log a single maintenance/repair event
+      // for a property/month. category is one of a fixed list (Plumbing/
+      // Electrical/Appliance Repair/Painting/Pest Control/Cleaning/
+      // Carpentry/Other), confirmed with owner. Multiple events can
+      // exist for the same property/month (e.g. two separate repairs).
+      if (action === 'saveMaintenanceEvent') {
+        const { eventId, propId, month, year, category, amount, description, eventDate } = body
+        if (!propId || !month || !year) return err('propId, month, and year required')
+        if (!category) return err('category required')
+        const amt = parseFloat(amount) || 0
+        const id = eventId || ('me_' + Date.now() + '_' + Math.floor(Math.random()*1000))
+        if (eventId) {
+          await DB.prepare(`
+            UPDATE maintenance_events SET
+              category = ?, amount = ?, description = ?, event_date = ?,
+              updated_by = ?, updated_at = ?
+            WHERE event_id = ?
+          `).bind(category, amt, description || null, eventDate || null, actor, now(), id).run()
+        } else {
+          await DB.prepare(`
+            INSERT INTO maintenance_events (
+              event_id, prop_id, month, year, category, amount, description, event_date,
+              created_by, created_at, updated_by, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(id, propId, month, year, category, amt, description || null, eventDate || now().slice(0,10), actor, now(), actor, now()).run()
+        }
+        return json({ success: true, data: { eventId: id } })
+      }
+
+      if (action === 'deleteMaintenanceEvent') {
+        const { eventId } = body; if (!eventId) return err('eventId required')
+        await DB.prepare(`DELETE FROM maintenance_events WHERE event_id = ?`).bind(eventId).run()
+        return json({ success: true, data: { eventId, deleted: true } })
       }
 
       // TENANCY HISTORY write actions (saveTenancyHistory/

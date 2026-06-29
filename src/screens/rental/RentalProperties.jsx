@@ -77,6 +77,7 @@ export default function RentalProperties() {
 
   const [dashData, setDashData]   = useState(null)
   const [dashLoading, setDashLoading] = useState(false)
+  const [dashError, setDashError] = useState(null)
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
 
@@ -172,9 +173,14 @@ export default function RentalProperties() {
   useEffect(() => {
     if (tab === 'dashboard' && !dashData) {
       setDashLoading(true)
+      setDashError(null)
       api.getRentalDashboard(CUR_YEAR)
         .then(d => { setDashData(d); setDashLoading(false) })
-        .catch(() => { setDashLoading(false) })
+        .catch(e => {
+          console.error('getRentalDashboard failed:', e)
+          setDashError(e?.message || 'Failed to load dashboard data')
+          setDashLoading(false)
+        })
     }
   }, [tab])
 
@@ -405,7 +411,14 @@ export default function RentalProperties() {
 
         {/* ── DASHBOARD TAB — unchanged ───────────────────── */}
         {tab === 'dashboard' && (
-          dashLoading ? <div className="loading"><div className="spinner"/>Loading...</div> : (
+          dashLoading ? <div className="loading"><div className="spinner"/>Loading...</div> : dashError ? (
+            <div style={{
+              background:'rgba(198,40,40,0.12)', border:'1px solid rgba(198,40,40,0.4)',
+              borderRadius:'10px', padding:'12px 14px', color:'#EF9A9A', fontSize:'0.82rem',
+            }}>
+              ⚠️ Could not load dashboard data: {dashError}
+            </div>
+          ) : (
             <>
               <div className="card-section-label">ANNUAL SUMMARY — {CUR_YEAR}</div>
               <div className="stats-grid">

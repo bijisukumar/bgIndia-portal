@@ -68,6 +68,7 @@ export default function Rev360Home() {
   const navigate = useNavigate()
   const [dash, setDash] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [countryTab, setCountryTab] = useState('IN')
 
   useEffect(() => {
@@ -80,7 +81,17 @@ export default function Rev360Home() {
     // "0 of 0 properties" with real data sitting in the database.
     api.getRev360Dashboard()
       .then(d => { if (d) setDash(d) })
-      .catch(() => {})
+      .catch(e => {
+        // Real incident this guards against: property_expenses table
+        // missing (migration not yet run) made this whole query throw
+        // in the backend, and the dashboard silently showed "0 of 0
+        // properties" with no visible error -- looked like missing
+        // data, was actually a missing table. Surfacing the error
+        // message means a future broken migration is obvious instead
+        // of looking like an empty-data problem again.
+        console.error('getRev360Dashboard failed:', e)
+        setLoadError(e?.message || 'Failed to load dashboard data')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -165,6 +176,15 @@ export default function Rev360Home() {
         </div>
 
         {/* KPI cards — filtered by country */}
+        {!loading && loadError && (
+          <div style={{
+            background:'rgba(198,40,40,0.12)', border:'1px solid rgba(198,40,40,0.4)',
+            borderRadius:'10px', padding:'10px 14px', marginBottom:'12px',
+            color:'#EF9A9A', fontSize:'0.8rem',
+          }}>
+            ⚠️ Could not load dashboard data: {loadError}
+          </div>
+        )}
         {!loading && (
           <KpiStrip
             props={tabProps}

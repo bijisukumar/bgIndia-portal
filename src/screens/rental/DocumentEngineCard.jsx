@@ -2,20 +2,24 @@
 //  DocumentEngineCard.jsx — Module B: Document Generation Engine
 //
 //  [ Generate Lease Template ] reuses the existing, tested
-//  downloadLeaseDeed() for India. For USA there is no equivalent
-//  config (no lessor/bank/late-fee terms have ever been provided for
-//  a US tenancy) — rather than generate a document with invented US
-//  legal terms, the button stays visible but explains the gap and
-//  defers to the owner, matching the standing project rule against
-//  shipping things that look done but produce wrong output.
+//  downloadLeaseDeed()/downloadLeaseDeedPdf() for India. For USA
+//  there is no equivalent config (no lessor/bank/late-fee terms have
+//  ever been provided for a US tenancy) — rather than generate a
+//  document with invented US legal terms, the button stays visible
+//  but explains the gap and defers to the owner.
 //
 //  [ Generate Move-In Document ] / [ Generate Move-Out Document ]
 //  work for both countries today — they're inspection checklists, not
 //  legal documents, so there's nothing India- or US-specific in them.
+//
+//  Format: defaults to PDF (signature included) per explicit decision
+//  2026-06-28; a small checkbox per button switches to the original
+//  .docx generator for cases where the owner needs to hand-edit text
+//  after generating. See formatChoice.js for the centralized wiring.
 // ============================================================
 import { useState } from 'react'
-import { downloadLeaseDeed } from '../../utils/generateLeaseDeed'
-import { downloadMoveReport } from '../../utils/generateMoveReport'
+import { generateMoveReportAny, generateLeaseDeedAny } from '../../utils/formatChoice'
+import FormatToggle from './FormatToggle'
 
 const BTN = {
   base: {
@@ -44,6 +48,9 @@ function GenButton({ label, busyLabel, busy, disabled, onClick, color }) {
 
 export default function DocumentEngineCard({ agreement, property, country, saved, readOnly, showToast }) {
   const [busy, setBusy] = useState(null)
+  const [useDocxLease, setUseDocxLease] = useState(false)
+  const [useDocxMoveIn, setUseDocxMoveIn] = useState(false)
+  const [useDocxMoveOut, setUseDocxMoveOut] = useState(false)
 
   async function run(key, fn, successMsg) {
     if (!saved) { showToast('Save the agreement first', 'error'); return }
@@ -63,14 +70,17 @@ export default function DocumentEngineCard({ agreement, property, country, saved
       <div className="card-section-label">Document Generation</div>
 
       {country === 'IN' ? (
-        <GenButton
-          label="📄 Generate Lease Template (.docx)"
-          busyLabel="Generating…"
-          busy={busy === 'lease'}
-          disabled={readOnly || !saved}
-          color="#185FA5"
-          onClick={() => run('lease', () => downloadLeaseDeed(agreement, property), `📄 Lease deed generated for ${agreement?.tenant_name}`)}
-        />
+        <>
+          <GenButton
+            label={`📄 Generate Lease Template (${useDocxLease ? '.docx' : '.pdf'})`}
+            busyLabel="Generating…"
+            busy={busy === 'lease'}
+            disabled={readOnly || !saved}
+            color="#185FA5"
+            onClick={() => run('lease', () => generateLeaseDeedAny(!useDocxLease, agreement, property), `📄 Lease deed generated for ${agreement?.tenant_name}`)}
+          />
+          <FormatToggle useDocx={useDocxLease} onChange={setUseDocxLease} idSuffix="lease" />
+        </>
       ) : (
         <div style={{
           padding:'12px 14px', borderRadius:'10px', marginTop:'10px',
@@ -82,22 +92,24 @@ export default function DocumentEngineCard({ agreement, property, country, saved
       )}
 
       <GenButton
-        label="🔑 Generate Move-In Document (.docx)"
+        label={`🔑 Generate Move-In Document (${useDocxMoveIn ? '.docx' : '.pdf'})`}
         busyLabel="Generating…"
         busy={busy === 'movein'}
         disabled={readOnly || !saved}
         color="#34A853"
-        onClick={() => run('movein', () => downloadMoveReport('move-in', agreement, property), `🔑 Move-in report generated for ${agreement?.tenant_name}`)}
+        onClick={() => run('movein', () => generateMoveReportAny(!useDocxMoveIn, 'move-in', agreement, property), `🔑 Move-in report generated for ${agreement?.tenant_name}`)}
       />
+      <FormatToggle useDocx={useDocxMoveIn} onChange={setUseDocxMoveIn} idSuffix="movein" />
 
       <GenButton
-        label="📦 Generate Move-Out Document (.docx)"
+        label={`📦 Generate Move-Out Document (${useDocxMoveOut ? '.docx' : '.pdf'})`}
         busyLabel="Generating…"
         busy={busy === 'moveout'}
         disabled={readOnly || !saved}
         color="#5C7080"
-        onClick={() => run('moveout', () => downloadMoveReport('move-out', agreement, property), `📦 Move-out report generated for ${agreement?.tenant_name}`)}
+        onClick={() => run('moveout', () => generateMoveReportAny(!useDocxMoveOut, 'move-out', agreement, property), `📦 Move-out report generated for ${agreement?.tenant_name}`)}
       />
+      <FormatToggle useDocx={useDocxMoveOut} onChange={setUseDocxMoveOut} idSuffix="moveout" />
 
       {!saved && (
         <div style={{fontSize:'0.68rem', color:'#5C7080', marginTop:'8px', textAlign:'center'}}>

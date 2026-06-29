@@ -37,7 +37,7 @@ export default defineConfig({
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ]
       },
-      workbox: { skipWaiting: true, clientsClaim: true }
+      workbox: { skipWaiting: true, clientsClaim: true, maximumFileSizeToCacheInBytes: 4 * 1024 * 1024 }
     })
   ]
 })

@@ -16,6 +16,8 @@ import { api } from '../../api'
 import { fmtDate, localTodayStr } from '../../utils/dates'
 import { downloadDepositReceipt } from '../../utils/generateReceipt'
 import { downloadMoveReport } from '../../utils/generateMoveReport'
+import { generateDepositReceipt, generateMoveReportAny } from '../../utils/formatChoice'
+import FormatToggle from './FormatToggle'
 
 function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
@@ -47,6 +49,8 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
   const [markingDeposit, setMarkingDeposit] = useState(false)
   const [generatingReceipt, setGeneratingReceipt] = useState(false)
   const [generatingMoveIn, setGeneratingMoveIn] = useState(false)
+  const [useDocxDeposit, setUseDocxDeposit] = useState(false)
+  const [useDocxMoveIn, setUseDocxMoveIn] = useState(false)
 
   useEffect(() => { load() }, [propId])
 
@@ -154,7 +158,7 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
       // amount, address, and recorded payment date/mode — never the
       // previous tenant's. property is passed through unchanged since
       // the address/building is the same regardless of who's moving in.
-      await downloadDepositReceipt({
+      await generateDepositReceipt(!useDocxDeposit, {
         tenant_name: record.tenant_name,
         tenant_address: record.tenant_address,
         deposit: record.deposit,
@@ -176,7 +180,7 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
       // clause is anchored to, reflect the real date the tenant actually
       // takes possession, not whatever day this button happens to be
       // clicked.
-      await downloadMoveReport('move-in', { tenant_name: record.tenant_name }, property, record.lease_start)
+      await generateMoveReportAny(!useDocxMoveIn, 'move-in', { tenant_name: record.tenant_name }, property, record.lease_start)
       showToast(`🔑 Move-in document generated for ${record.tenant_name}`)
     } catch (e) { showToast(e.message, 'error') }
     finally { setGeneratingMoveIn(false) }
@@ -318,6 +322,7 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
             }}>
               {generatingReceipt ? 'Generating…' : '🧾 Generate Deposit Receipt'}
             </button>
+            <FormatToggle useDocx={useDocxDeposit} onChange={setUseDocxDeposit} idSuffix="incoming-deposit" />
           </>
         ) : !showDepositForm ? (
           <button onClick={()=>setShowDepositForm(true)} style={{
@@ -354,12 +359,13 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
       </div>
 
       <button onClick={handleGenerateMoveInDoc} disabled={generatingMoveIn} style={{
-        width:'100%', marginBottom:'10px', padding:'10px', borderRadius:'8px', border:'1px solid rgba(52,168,83,0.4)',
+        width:'100%', marginBottom:'4px', padding:'10px', borderRadius:'8px', border:'1px solid rgba(52,168,83,0.4)',
         background:'rgba(52,168,83,0.1)', color:'#34A853', fontWeight:'700', fontSize:'0.8rem',
         cursor: generatingMoveIn ? 'default' : 'pointer', opacity: generatingMoveIn ? 0.6 : 1,
       }}>
         {generatingMoveIn ? 'Generating…' : '🔑 Generate Move-In Document'}
       </button>
+      <FormatToggle useDocx={useDocxMoveIn} onChange={setUseDocxMoveIn} idSuffix="incoming-movein" />
 
       {!confirmingMoveIn ? (
         <button onClick={()=>setConfirmingMoveIn(true)} style={{

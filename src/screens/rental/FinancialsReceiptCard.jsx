@@ -19,6 +19,8 @@ import { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { fmtDate, localTodayStr } from '../../utils/dates'
 import { downloadDepositReceipt, downloadRentReceipt } from '../../utils/generateReceipt'
+import { generateDepositReceipt, generateRentReceipt } from '../../utils/formatChoice'
+import FormatToggle from './FormatToggle'
 
 function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
@@ -70,6 +72,9 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
   const [lateFee, setLateFee] = useState('')
   const [paidDate, setPaidDate] = useState(localTodayStr())
   const [generatingReceipt, setGeneratingReceipt] = useState(null) // 'deposit' | txn_id | null
+  const [useDocxDeposit, setUseDocxDeposit] = useState(false)
+  const [useDocxAdvance, setUseDocxAdvance] = useState(false)
+  const [useDocxRent, setUseDocxRent] = useState(false) // shared toggle for all rent-ledger rows -- per-row toggles would clutter a list that can have many postings
 
   const [advanceAmount, setAdvanceAmount] = useState('')
   const [advanceDate, setAdvanceDate] = useState(localTodayStr())
@@ -114,7 +119,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
     if (!saved) { showToast('Save the agreement first', 'error'); return }
     setGeneratingReceipt('deposit')
     try {
-      await downloadDepositReceipt(agreement, property)
+      await generateDepositReceipt(!useDocxDeposit, agreement, property)
       showToast('🧾 Deposit receipt generated')
     } catch (e) { showToast(e.message, 'error') }
     finally { setGeneratingReceipt(null) }
@@ -123,7 +128,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
   async function handleRentReceipt(txn) {
     setGeneratingReceipt(txn.txn_id)
     try {
-      await downloadRentReceipt(txn, agreement, property)
+      await generateRentReceipt(!useDocxRent, txn, agreement, property)
       showToast(`🧾 Receipt generated for ${txn.period_month}`)
     } catch (e) { showToast(e.message, 'error') }
     finally { setGeneratingReceipt(null) }
@@ -141,7 +146,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
     // separate advances ledger table to post into yet.
     setGeneratingReceipt('advance')
     try {
-      await downloadDepositReceipt({
+      await generateDepositReceipt(!useDocxAdvance, {
         ...agreement,
         deposit: parseFloat(advanceAmount),
         _depositPaymentMode: advanceMode,
@@ -229,6 +234,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
               <div style={{fontSize:'0.62rem', color:'var(--text-dim)', letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:'6px'}}>
                 Recent Postings
               </div>
+              <FormatToggle useDocx={useDocxRent} onChange={setUseDocxRent} idSuffix="rent" />
               {txns.slice(0, 6).map(t => (
                 <div key={t.txn_id} style={{
                   display:'flex', alignItems:'center', justifyContent:'space-between',
@@ -264,6 +270,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
         }}>
         {generatingReceipt === 'deposit' ? 'Generating…' : `🧾 Generate Deposit Receipt — ${fmt(agreement?.deposit, currency)}`}
       </button>
+      <FormatToggle useDocx={useDocxDeposit} onChange={setUseDocxDeposit} idSuffix="deposit" />
 
       {!readOnly && (
         <div style={{marginTop:'12px', padding:'12px', borderRadius:'10px', background:'var(--dark-input)', border:'1px solid var(--border-dim)'}}>
@@ -291,6 +298,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
             }}>
             {generatingReceipt === 'advance' ? 'Generating…' : 'Post Advance & Generate Receipt'}
           </button>
+          <FormatToggle useDocx={useDocxAdvance} onChange={setUseDocxAdvance} idSuffix="advance" />
         </div>
       )}
     </div>

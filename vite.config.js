@@ -43,7 +43,14 @@ export default defineConfig({
       workbox: {
         skipWaiting: true,
         clientsClaim: true,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Raised from the 2MB default: pdf-lib + @pdf-lib/fontkit, plus
+        // the two embedded DejaVu Sans font files needed for Rupee-sign
+        // support in generated PDFs (see pdfGenHelpers.js), pushed the
+        // main bundle past 2MB and the manage app's font assets past
+        // the precache threshold -- this isn't bloat to trim, it's the
+        // real cost of native PDF generation with full Unicode support.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,ttf}'],
         runtimeCaching: [
           {
             urlPattern: /^\/api\/.*/i,

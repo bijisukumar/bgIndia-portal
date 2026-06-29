@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
-import { CONFIG } from '../../config'
+import { usePropertyList } from './usePropertyList'
 
 const CATEGORIES = ['Rent','Damage','Cleaning','Legal','Other']
 const STATUSES   = ['Estimated','Claimed','Recovered','Unrecoverable']
@@ -23,7 +23,8 @@ const EMPTY_ITEM = { itemCategory:'Damage', description:'', amount:'', currency:
 
 export default function ClaimsLedger() {
   const navigate = useNavigate()
-  const [selectedProp, setSelectedProp] = useState(CONFIG.rentalProperties[0]?.id || 'rental_1')
+  const { properties, loading: loadingProperties } = usePropertyList()
+  const [selectedProp, setSelectedProp] = useState(null)
   const [agreements, setAgreements] = useState({})
   const [claims, setClaims] = useState([])
   const [loading, setLoading] = useState(true)
@@ -38,6 +39,9 @@ export default function ClaimsLedger() {
   const setField = (k,v) => setForm(f=>({...f,[k]:v}))
 
   useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    if (!selectedProp && properties.length > 0) setSelectedProp(properties[0].id)
+  }, [properties, selectedProp])
   useEffect(() => { loadClaims() }, [selectedProp])
 
   async function loadAll() {
@@ -129,7 +133,7 @@ export default function ClaimsLedger() {
     } catch(e) { showToast('Status update failed', 'error') }
   }
 
-  const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+  const prop = properties.find(p => p.id === selectedProp)
   const agreement = agreements[selectedProp]
   const currency = agreement?.currency || 'INR'
   const deposit = parseFloat(agreement?.deposit) || 0
@@ -162,7 +166,7 @@ export default function ClaimsLedger() {
       <div className="screen-body">
         {/* Property selector */}
         <div style={{display:'flex',gap:'8px',marginBottom:'16px',flexWrap:'wrap'}}>
-          {CONFIG.rentalProperties.map(p => {
+          {properties.map(p => {
             const a = agreements[p.id]
             return (
               <button key={p.id} onClick={()=>setSelectedProp(p.id)} style={{

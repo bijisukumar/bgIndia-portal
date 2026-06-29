@@ -190,7 +190,7 @@ async function triggerDownload(doc, filename) {
 /**
  * @param {'move-in'|'move-out'} kind
  * @param {object} agreement - saved rental_props row
- * @param {object} property  - matching CONFIG.rentalProperties entry
+ * @param {object} property  - a row from getAllProperties (usePropertyList), same field shape as the old CONFIG.rentalProperties entries
  * @param {string} [eventDate] - defaults to today if not given
  */
 export async function downloadMoveReport(kind, agreement, property, eventDate) {

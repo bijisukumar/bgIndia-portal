@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import PropertyDocs from './PropertyDocs'
-import { CONFIG } from '../../config'
+import { usePropertyList } from './usePropertyList'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
 const toCamel = s => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
@@ -431,8 +431,9 @@ function TaxSection({ propId, currency }) {
 // ── main component ────────────────────────────────────────────
 export default function PropertyDetails() {
   const navigate = useNavigate()
+  const { properties, reload: reloadProperties } = usePropertyList()
   const [tab, setTab] = useState('edit')
-  const [selectedProp, setSelectedProp] = useState(CONFIG.rentalProperties[0]?.id || 'rental_1')
+  const [selectedProp, setSelectedProp] = useState(null)
   const [form, setForm] = useState({})
   const [currency, setCurrency] = useState('INR')
   const [saving, setSaving] = useState(false)
@@ -447,7 +448,11 @@ export default function PropertyDetails() {
   const setField = (k,v) => { setForm(f=>({...f,[k]:v})); setDirty(true) }
   const setAddField = (k,v) => setAddForm(f=>({...f,[k]:v}))
 
-  useEffect(() => { loadDetails(selectedProp) }, [selectedProp])
+  useEffect(() => {
+    if (!selectedProp && properties.length > 0) setSelectedProp(properties[0].id)
+  }, [properties, selectedProp])
+
+  useEffect(() => { if (selectedProp) loadDetails(selectedProp) }, [selectedProp])
 
   async function loadDetails(propId) {
     setDirty(false)
@@ -473,7 +478,7 @@ export default function PropertyDetails() {
     try {
       await api.savePropertyDetails(buildPayload(form, selectedProp, currency))
       setDirty(false)
-      showToast(`✅ Saved — ${CONFIG.rentalProperties.find(p=>p.id===selectedProp)?.name}`)
+      showToast(`✅ Saved — ${properties.find(p=>p.id===selectedProp)?.name}`)
     } catch(e) { showToast('Save failed: '+e.message, 'error') }
     finally { setSaving(false) }
   }
@@ -485,7 +490,7 @@ export default function PropertyDetails() {
       const id = 'rental_' + Date.now()
       await api.saveRentalAgreement({ propId:id, propName:newProp.name.trim(), location:newProp.location.trim(), country:newProp.country, currency:newProp.currency, tenantName:'', deposit:0, agreedRent:0, maintenance:0, leaseStart:'', leaseEnd:'', notes:'' })
       await api.savePropertyDetails(buildPayload(addForm, id, newProp.currency))
-      CONFIG.rentalProperties.push({ id, name:newProp.name.trim(), location:newProp.location.trim() })
+      await reloadProperties()
       setAddDone(true)
       showToast(`✅ ${newProp.name} added`)
       setTimeout(() => { setSelectedProp(id); setTab('edit'); setAddDone(false); setNewProp({name:'',location:'',country:'IN',currency:'INR'}); setAddForm({}) }, 1500)
@@ -493,7 +498,7 @@ export default function PropertyDetails() {
     finally { setAddSaving(false) }
   }
 
-  const prop = CONFIG.rentalProperties.find(p=>p.id===selectedProp)
+  const prop = properties.find(p=>p.id===selectedProp)
   const equity = (parseFloat(form.estimatedValue)||0) - (parseFloat(form.loanOutstanding)||0)
   const monthlyFixed = ['elecMonthlyAvg','waterMonthlyAvg','gasMonthlyAvg','internetMonthly','otherUtilityMonthly','loanMonthlyEmi']
     .reduce((s,k)=>s+(parseFloat(form[k])||0),0) + (parseFloat(form.insuranceAnnual)||0)/12
@@ -528,7 +533,7 @@ export default function PropertyDetails() {
         <div className="screen-body">
           {/* Property picker */}
           <div style={{display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'}}>
-            {CONFIG.rentalProperties.map(p=>(
+            {properties.map(p=>(
               <button key={p.id} onClick={()=>setSelectedProp(p.id)} style={{flex:1,minWidth:'70px',padding:'10px 6px',borderRadius:'10px',cursor:'pointer',textAlign:'center',border:selectedProp===p.id?'2px solid #185FA5':'1px solid var(--border-dim)',background:selectedProp===p.id?'rgba(24,95,165,0.12)':'var(--dark-card)',color:'var(--text)'}}>
                 <div style={{fontWeight:'700',fontSize:'0.82rem'}}>{p.name}</div>
                 <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'2px'}}>{p.location}</div>

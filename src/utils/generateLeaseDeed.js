@@ -147,7 +147,7 @@ function lateFeeTable(tiers, rentAmount) {
 /**
  * Builds the lease deed Document object for a given agreement + property.
  * @param {object} agreement - the saved rental_props row (snake_case fields)
- * @param {object} property  - the matching CONFIG.rentalProperties entry
+ * @param {object} property  - a row from getAllProperties (usePropertyList), same field shape as the old CONFIG.rentalProperties entries
  * @returns {Document}
  */
 export function buildLeaseDeedDocument(agreement, property) {

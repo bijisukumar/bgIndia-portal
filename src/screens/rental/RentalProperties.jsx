@@ -28,6 +28,7 @@ import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { localTodayStr } from '../../utils/dates'
 import MaintenanceEventsLog from './MaintenanceEventsLog'
+import { usePropertyList } from './usePropertyList'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const CUR_MONTH = new Date().getMonth()
@@ -58,6 +59,7 @@ function periodMonthStr(year, monthIdx) { return `${year}-${String(monthIdx+1).p
 
 export default function RentalProperties() {
   const navigate = useNavigate()
+  const { properties, loading: loadingProperties, reload: reloadProperties } = usePropertyList()
   const [tab, setTab] = useState('tracker')
   const [selectedMonth, setSelectedMonth] = useState(CUR_MONTH)
   const [selectedYear, setSelectedYear] = useState(CUR_YEAR)
@@ -72,9 +74,26 @@ export default function RentalProperties() {
   const [lateFeeInputs, setLateFeeInputs] = useState({})
   const [paidDateInputs, setPaidDateInputs] = useState({})
 
-  const [expenses, setExpenses] = useState(Object.fromEntries(CONFIG.rentalProperties.map(p => [p.id, emptyExpense()])))
+  // Initialized empty rather than from CONFIG.rentalProperties (the
+  // static array that caused properties to vanish on reload, see
+  // usePropertyList.js) -- populated once the live property list
+  // loads, in the effect below.
+  const [expenses, setExpenses] = useState({})
   const [maintenanceTotals, setMaintenanceTotals] = useState({}) // propId -> sum of this month's logged maintenance events
   const [savingExpenses, setSavingExpenses] = useState(false)
+
+  // Fill in any property that doesn't have an expenses entry yet
+  // (newly loaded, or a property added after this screen first
+  // rendered) without clobbering whatever's already been typed into
+  // an existing one.
+  useEffect(() => {
+    setExpenses(prev => {
+      const next = { ...prev }
+      let changed = false
+      properties.forEach(p => { if (!next[p.id]) { next[p.id] = emptyExpense(); changed = true } })
+      return changed ? next : prev
+    })
+  }, [properties])
 
   const [dashData, setDashData]   = useState(null)
   const [dashLoading, setDashLoading] = useState(false)
@@ -83,7 +102,7 @@ export default function RentalProperties() {
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
 
   useEffect(() => { loadAgreements() }, [])
-  useEffect(() => { checkPostedForPeriod() }, [selectedMonth, selectedYear, agreements])
+  useEffect(() => { checkPostedForPeriod() }, [selectedMonth, selectedYear, agreements, properties])
 
   async function loadAgreements() {
     setLoadingAgreements(true)
@@ -101,7 +120,7 @@ export default function RentalProperties() {
     setCheckingPosted(true)
     try {
       const results = {}
-      await Promise.all(CONFIG.rentalProperties.map(async prop => {
+      await Promise.all(properties.map(async prop => {
         try {
           const txns = await api.getRentTransactions(prop.id)
           const match = (Array.isArray(txns) ? txns : []).find(t => t.period_month === period)
@@ -158,8 +177,8 @@ export default function RentalProperties() {
   async function handleSaveExpenses() {
     setSavingExpenses(true)
     try {
-      await Promise.all(CONFIG.rentalProperties.map(prop => {
-        const e = expenses[prop.id]
+      await Promise.all(properties.map(prop => {
+        const e = expenses[prop.id] || emptyExpense()
         return api.savePropertyExpense({
           propId: prop.id, month: selectedMonth + 1, year: selectedYear,
           electricity: e.electricity, water: e.water, propertyTax: e.propertyTax,
@@ -185,7 +204,7 @@ export default function RentalProperties() {
     }
   }, [tab])
 
-  const renewals = CONFIG.rentalProperties
+  const renewals = properties
     .map((p) => {
       const a = agreements[p.id]
       const leaseEnd = a?.lease_end
@@ -202,7 +221,7 @@ export default function RentalProperties() {
     borderBottom: tab===t ? '2px solid #C8903A' : '2px solid transparent',
   })
 
-  const totalExpenseAll = CONFIG.rentalProperties.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()) + (maintenanceTotals[p.id] || 0), 0)
+  const totalExpenseAll = properties.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()) + (maintenanceTotals[p.id] || 0), 0)
 
   return (
     <div className="screen">
@@ -266,10 +285,10 @@ export default function RentalProperties() {
 
             {/* Rent ledger — one Quick-Post per property for the selected period */}
             <div className="card-section-label">RENT — {MONTHS[selectedMonth].toUpperCase()} {selectedYear}</div>
-            {(loadingAgreements || checkingPosted) && (
+            {(loadingProperties || loadingAgreements || checkingPosted) && (
               <div style={{textAlign:'center', color:'var(--text-dim)', padding:'16px'}}>Loading…</div>
             )}
-            {!loadingAgreements && !checkingPosted && CONFIG.rentalProperties.map(prop => {
+            {!loadingProperties && !loadingAgreements && !checkingPosted && properties.map(prop => {
               const a = agreements[prop.id]
               const currency = a?.currency || 'INR'
               const baseRent = a?.agreed_rent || 0
@@ -370,7 +389,7 @@ export default function RentalProperties() {
                 or taxes, not tied to a tenant, so the old flexible entry
                 style still fits. Now saves to property_expenses. */}
             <div className="card-section-label" style={{marginTop:'8px'}}>EXPENSES — {MONTHS[selectedMonth].toUpperCase()} {selectedYear}</div>
-            {CONFIG.rentalProperties.map(prop => {
+            {properties.map(prop => {
               const e = expenses[prop.id] || emptyExpense()
               const total = calcExpenseTotal(e) + (maintenanceTotals[prop.id] || 0)
               return (
@@ -433,7 +452,7 @@ export default function RentalProperties() {
                 <div className="stat-card"><div className="stat-label">Total expenses</div><div className="stat-val" style={{color:'#EF9A9A'}}>{fmt(dashData?.totalExpense)}</div><div className="stat-sub">All properties</div></div>
                 <div className="stat-card"><div className="stat-label">Net income</div><div className="stat-val green">{fmt(dashData?.netIncome)}</div><div className="stat-sub">After expenses</div></div>
               </div>
-              {CONFIG.rentalProperties.map((prop,i) => {
+              {properties.map((prop,i) => {
                 const rows = (dashData?.rows||[]).filter(r=>r.prop_id===prop.id)
                 const ytdIncome  = rows.reduce((s,r)=>s+(r.income||0),0)
                 const ytdExpense = rows.reduce((s,r)=>s+(r.expense||0),0)

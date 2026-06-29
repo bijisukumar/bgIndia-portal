@@ -1187,6 +1187,48 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // ALL PROPERTIES — the real fix for a long-standing bug: 5
+      // screens (RentalProperties, RentalAgreement, PropertyDetails,
+      // ClaimsLedger, ClaimsReport) used to read property lists from
+      // CONFIG.rentalProperties, a hardcoded array in config.js. Every
+      // "Add Property" flow did CONFIG.rentalProperties.push(...),
+      // which only mutates the in-memory object for that page load --
+      // never persisted, so a newly added property vanished from every
+      // screen on reload even though it WAS correctly saved to
+      // rental_props. This action gives every screen ONE live,
+      // database-backed source of truth instead. Joins rental_props
+      // (tenancy/lease state) with property_details (unit/floor/
+      // building/parking/furnishing/address -- added in
+      // migrate-property-details-characteristics.sql specifically to
+      // make this join possible) so the shape matches what
+      // CONFIG.rentalProperties used to provide.
+      if (action === 'getAllProperties') {
+        const { results } = await DB.prepare(`
+          SELECT
+            rp.prop_id as id, rp.name, rp.location, rp.country, rp.tenant_name as tenantName,
+            rp.lease_end as leaseEnd, rp.stage,
+            pd.unit_no as unitNo, pd.floor, pd.building_name as building,
+            pd.has_parking as hasParking, pd.furnishing,
+            pd.elec_consumer_id as electricityConsumerNo,
+            pd.address_line1, pd.address_line2, pd.city, pd.state_province, pd.postal_code, pd.country as detailsCountry
+          FROM rental_props rp
+          LEFT JOIN property_details pd ON pd.prop_id = rp.prop_id
+          ORDER BY rp.prop_id
+        `).all()
+        // Build the same fullAddress convenience field RentalAgreement.jsx
+        // already computes client-side for documents, so every screen
+        // gets it for free without re-deriving the same logic.
+        const withFullAddress = results.map(r => ({
+          ...r,
+          hasParking: !!r.hasParking,
+          fullAddress: r.address_line1
+            ? [r.address_line1, r.address_line2, [r.city, r.state_province].filter(Boolean).join(', '), r.postal_code, r.detailsCountry]
+                .filter(Boolean).join(', ')
+            : null,
+        }))
+        return json({ success: true, data: withFullAddress })
+      }
+
       if (action === 'getPropertyDetails') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')

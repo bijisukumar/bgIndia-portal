@@ -30,6 +30,7 @@ import TenantProfileCard from './TenantProfileCard'
 import DocumentEngineCard from './DocumentEngineCard'
 import FinancialsReceiptCard from './FinancialsReceiptCard'
 import MetaDiagnosticsCard from './MetaDiagnosticsCard'
+import { usePropertyList } from './usePropertyList'
 import TenancyHistoryCard from './TenancyHistoryCard'
 import IncomingTenantCard from './IncomingTenantCard'
 
@@ -69,6 +70,7 @@ const EMPTY_FORM = {
 
 export default function RentalAgreement() {
   const navigate = useNavigate()
+  const { properties, reload: reloadProperties } = usePropertyList()
   const [country, setCountry] = useState('IN')
   const [showSignedUp, setShowSignedUp] = useState(false)   // tucked-away toggle
   const [showCompleted, setShowCompleted] = useState(false) // tucked-away toggle
@@ -87,18 +89,7 @@ export default function RentalAgreement() {
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
   const setField = (key, val) => setForm(f => ({...f, [key]: val}))
 
-  const [propertyDetails, setPropertyDetails] = useState({}) // propId -> property_details row (structured address etc)
-
   useEffect(() => { loadAgreements() }, [])
-  useEffect(() => { loadPropertyDetails() }, [selectedProp])
-
-  async function loadPropertyDetails() {
-    if (!selectedProp || propertyDetails[selectedProp]) return // already have it, no need to re-fetch on every render
-    try {
-      const data = await api.getPropertyDetails(selectedProp)
-      if (data) setPropertyDetails(prev => ({ ...prev, [selectedProp]: data }))
-    } catch (e) { console.warn(e) }
-  }
 
   async function loadAgreements() {
     setLoading(true)
@@ -107,15 +98,24 @@ export default function RentalAgreement() {
       const map = {}
       ;(Array.isArray(data) ? data : []).forEach(a => { map[a.prop_id] = a })
       setAgreements(map)
-      const inDayToDay = CONFIG.rentalProperties.find(p => matchesDayToDay(p, map, 'IN'))
-        || CONFIG.rentalProperties[0]
-      if (inDayToDay) {
-        setSelectedProp(inDayToDay.id)
-        if (map[inDayToDay.id]) prefill(map[inDayToDay.id])
-      }
     } catch(e) { console.warn(e) }
     finally { setLoading(false) }
   }
+
+  // Pick the initial selected property once BOTH agreements and the
+  // live property list have loaded -- these are two independent
+  // fetches (getRentalAgreements + usePropertyList's getAllProperties)
+  // that can resolve in either order, so this can't safely live inside
+  // loadAgreements() itself.
+  useEffect(() => {
+    if (selectedProp || properties.length === 0 || loading) return
+    const inDayToDay = properties.find(p => matchesDayToDay(p, agreements, 'IN'))
+      || properties[0]
+    if (inDayToDay) {
+      setSelectedProp(inDayToDay.id)
+      if (agreements[inDayToDay.id]) prefill(agreements[inDayToDay.id])
+    }
+  }, [properties, agreements, loading])
 
   function getStage(propId, agreementsMap) {
     const a = agreementsMap[propId]
@@ -176,14 +176,14 @@ export default function RentalAgreement() {
   function handleCountryChange(newCountry) {
     setCountry(newCountry)
     setShowSignedUp(false); setShowCompleted(false)
-    const visible = CONFIG.rentalProperties.filter(p => matchesDayToDay(p, agreements, newCountry))
+    const visible = properties.filter(p => matchesDayToDay(p, agreements, newCountry))
     if (visible[0]) handlePropChange(visible[0].id)
     else setSelectedProp(null)
   }
 
   function handleTenantNameChange(val) {
     setField('tenantName', val)
-    const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+    const prop = properties.find(p => p.id === selectedProp)
     if (val && prop && !form.driveFolderUrl) {
       setField('driveFolderUrl', DRIVE_FOLDER_TEMPLATE(val.replace(/\s+/g,'-'), prop.name))
     }
@@ -248,7 +248,7 @@ export default function RentalAgreement() {
     if (form.isMonthToMonth && !form.monthToMonthSince) { setError('Month-to-month start date is required when marked month-to-month'); return }
     setSaving(true)
     try {
-      const prop = CONFIG.rentalProperties.find(p => p.id === selectedProp)
+      const prop = properties.find(p => p.id === selectedProp)
       await api.saveRentalAgreement({
         propId:       selectedProp,
         propName:     prop?.name || selectedProp,
@@ -310,7 +310,12 @@ export default function RentalAgreement() {
         tenantName:'', deposit:0, agreedRent:0, maintenance:0,
         leaseStart:'', leaseEnd:'', notes:'',
       })
-      CONFIG.rentalProperties.push({ id, name:newProp.name.trim(), location:newProp.location.trim(), country:newProp.country })
+      // Re-fetch from the database rather than mutating the old static
+      // CONFIG.rentalProperties array -- that mutation never persisted
+      // across a page reload, which is the exact bug being fixed here
+      // (a property added this way would vanish from every screen the
+      // moment the page reloaded, even though it WAS correctly saved).
+      await reloadProperties()
       setCountry(newProp.country)
       setSelectedProp(id); setForm({...EMPTY_FORM, country:newProp.country, currency:newProp.currency})
       setNewProp({name:'',location:'',country:'IN',currency:'INR'}); setShowAddProp(false)
@@ -319,31 +324,11 @@ export default function RentalAgreement() {
     finally { setAddingProp(false) }
   }
 
-  const rawProp = CONFIG.rentalProperties.find(p => p.id === selectedProp)
-  // Merge in the structured address from property_details (Address Line 1/2,
-  // City, State, Postal Code, Country) when it's been filled in — real,
-  // accurate per-property data, vs the old building/city/location
-  // guesswork in CONFIG.rentalProperties. fullAddress is what every
-  // document generator (lease deed, receipts, move-in/move-out) now
-  // prefers; falls back to the old building/city fields if a property
-  // hasn't had its structured address filled in yet on Property Details.
-  const pd = propertyDetails[selectedProp]
-  const prop = rawProp ? {
-    ...rawProp,
-    fullAddress: pd?.address_line1
-      ? [
-          pd.address_line1,
-          pd.address_line2,
-          [pd.city, pd.state_province].filter(Boolean).join(', '),
-          pd.postal_code,
-          pd.country,
-        ].filter(Boolean).join(', ')
-      : null,
-    // city from property_details takes priority for "Place:" on receipts —
-    // same reasoning as fullAddress, real per-property data over the old
-    // static config guess.
-    city: pd?.city || rawProp.city,
-  } : rawProp
+  // getAllProperties (usePropertyList) already computes fullAddress
+  // server-side via a JOIN with property_details, and already prefers
+  // the real property_details.city over the static location guess --
+  // no client-side re-merge needed here anymore.
+  const prop = properties.find(p => p.id === selectedProp)
   const saved = !!agreements[selectedProp]
   const days = daysUntil(form.leaseEnd)
   const duration = leaseDurationMonths(form.leaseStart, form.leaseEnd)
@@ -364,7 +349,7 @@ export default function RentalAgreement() {
   // only if their respective tucked-away toggle is on. Past Tenants is
   // NOT a tab filter at all -- see TenancyHistoryCard, reached via its
   // own button per selected property regardless of that property's stage.
-  const visibleProps = CONFIG.rentalProperties.filter(p => {
+  const visibleProps = properties.filter(p => {
     if (getCountry(p, agreements) !== country) return false
     const stage = getStage(p.id, agreements)
     if (stage === 'Active' || stage === 'Notice Given') return true
@@ -372,8 +357,8 @@ export default function RentalAgreement() {
     if (stage === 'Completed') return showCompleted
     return false
   })
-  const signedUpCount  = CONFIG.rentalProperties.filter(p => getCountry(p,agreements)===country && getStage(p.id,agreements)==='Signed Up').length
-  const completedCount = CONFIG.rentalProperties.filter(p => getCountry(p,agreements)===country && getStage(p.id,agreements)==='Completed').length
+  const signedUpCount  = properties.filter(p => getCountry(p,agreements)===country && getStage(p.id,agreements)==='Signed Up').length
+  const completedCount = properties.filter(p => getCountry(p,agreements)===country && getStage(p.id,agreements)==='Completed').length
 
   return (
     <div className="screen">

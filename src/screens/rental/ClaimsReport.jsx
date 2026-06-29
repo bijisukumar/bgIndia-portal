@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
-import { CONFIG } from '../../config'
+import { usePropertyList } from './usePropertyList'
 import { parseLocalDate } from '../../utils/dates'
 
 const CAT_ICON = { 'Rent':'💸','Damage':'🔨','Cleaning':'🧹','Legal':'⚖️','Other':'📌' }
@@ -24,13 +24,18 @@ function fmtAmt(amount, currency='INR') {
 export default function ClaimsReport() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const propId = params.get('prop') || CONFIG.rentalProperties[0]?.id
+  const { properties } = usePropertyList()
+  // If ?prop= is given, use it directly (works immediately, no need to
+  // wait for the property list). Only the fallback (no prop param at
+  // all) needs the live list, since CONFIG.rentalProperties[0] is no
+  // longer a valid fallback source.
+  const propId = params.get('prop') || properties[0]?.id
   const [agreement, setAgreement] = useState(null)
   const [claims, setClaims] = useState([])
   const [loading, setLoading] = useState(true)
   const reportRef = useRef(null)
 
-  const prop = CONFIG.rentalProperties.find(p => p.id === propId)
+  const prop = properties.find(p => p.id === propId)
 
   useEffect(() => {
     Promise.all([
@@ -39,7 +44,7 @@ export default function ClaimsReport() {
     ]).then(([agrData, claimsData]) => {
       const agrs = Array.isArray(agrData) ? agrData : []
       setAgreement(agrs.find(a => a.prop_id === propId) || null)
-      setClaims(Array.isArray(claimsData?.data) ? claimsData.data : [])
+      setClaims(Array.isArray(claimsData) ? claimsData : [])
     }).catch(console.warn)
     .finally(()=>setLoading(false))
   }, [propId])

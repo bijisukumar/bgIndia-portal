@@ -114,6 +114,7 @@ export const api = {
   getRentalIncome:      (m, y)   => get('getRentalIncome', { month: m, year: y }),
   getRentalDashboard:   (year)   => get('getRentalDashboard', { year }),
   getRentalAgreements:  ()       => get('getRentalAgreements'),
+  getAllProperties:     ()       => get('getAllProperties'),
   saveRentalAgreement:  (data)   => post('saveRentalAgreement', data),
   updateTenantStatus:   (data)   => post('updateTenantStatus', data),
   updateTenantStage:    (data)   => post('updateTenantStage', data),

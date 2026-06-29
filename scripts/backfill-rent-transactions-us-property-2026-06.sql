@@ -1,0 +1,10 @@
+-- One-time backfill: rent_transactions for US property (309 N Main, Randolph, TX 75475)
+-- Confirmed with owner (2026-06-29): paid in full on the 10th of each month since lease start
+-- (2026-03-13), no proration needed for the first month. Currency: USD.
+-- INSERT OR IGNORE so re-running this script never creates duplicates or clobbers
+-- anything already posted (UNIQUE(prop_id, period_month) makes this safe).
+
+INSERT OR IGNORE INTO rent_transactions (txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee, total_due, is_exception, paid_date, currency, notes, created_by, created_at) VALUES ('rtxn_backfill_rental_1782751858127_2026-03', 'rental_1782751858127', '2026-03', 1500, 0, 0, 0, 1500, 0, '2026-03-10', 'USD', 'Backfilled 2026-06-29 -- paid on time per owner confirmation', 'owner', datetime('now'));
+INSERT OR IGNORE INTO rent_transactions (txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee, total_due, is_exception, paid_date, currency, notes, created_by, created_at) VALUES ('rtxn_backfill_rental_1782751858127_2026-04', 'rental_1782751858127', '2026-04', 1500, 0, 0, 0, 1500, 0, '2026-04-10', 'USD', 'Backfilled 2026-06-29 -- paid on time per owner confirmation', 'owner', datetime('now'));
+INSERT OR IGNORE INTO rent_transactions (txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee, total_due, is_exception, paid_date, currency, notes, created_by, created_at) VALUES ('rtxn_backfill_rental_1782751858127_2026-05', 'rental_1782751858127', '2026-05', 1500, 0, 0, 0, 1500, 0, '2026-05-10', 'USD', 'Backfilled 2026-06-29 -- paid on time per owner confirmation', 'owner', datetime('now'));
+INSERT OR IGNORE INTO rent_transactions (txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee, total_due, is_exception, paid_date, currency, notes, created_by, created_at) VALUES ('rtxn_backfill_rental_1782751858127_2026-06', 'rental_1782751858127', '2026-06', 1500, 0, 0, 0, 1500, 0, '2026-06-10', 'USD', 'Backfilled 2026-06-29 -- paid on time per owner confirmation', 'owner', datetime('now'));

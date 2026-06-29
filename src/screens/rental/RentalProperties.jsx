@@ -61,8 +61,11 @@ export default function RentalProperties() {
   const navigate = useNavigate()
   const { properties, loading: loadingProperties, reload: reloadProperties } = usePropertyList()
   const [tab, setTab] = useState('tracker')
-  const [selectedMonth, setSelectedMonth] = useState(CUR_MONTH)
+  const [trackerCountry, setTrackerCountry] = useState('IN') // shared by Rent + Expenses sections
+  const [selectedMonth, setSelectedMonth] = useState(CUR_MONTH) // Rent only
   const [selectedYear, setSelectedYear] = useState(CUR_YEAR)
+  const [expenseMonth, setExpenseMonth] = useState(CUR_MONTH) // separate from Rent's month, per explicit decision -- Expenses gets its own control
+  const [expenseYear, setExpenseYear] = useState(CUR_YEAR)
   const [toast, setToast] = useState(null)
 
   const [agreements, setAgreements] = useState({})
@@ -96,6 +99,7 @@ export default function RentalProperties() {
   }, [properties])
 
   const [dashData, setDashData]   = useState(null)
+  const [dashCountry, setDashCountry] = useState('IN')
   const [dashLoading, setDashLoading] = useState(false)
   const [dashError, setDashError] = useState(null)
 
@@ -141,7 +145,7 @@ export default function RentalProperties() {
         propId: prop.id, periodMonth: period,
         baseRent: a.agreed_rent || 0, maintenance: a.maintenance_fee || 0,
         lateFee: 0, isException: false,
-        paidDate: localTodayStr(), currency: a.currency || 'INR',
+        paidDate: paidDateInputs[prop.id] || localTodayStr(), currency: a.currency || 'INR',
       })
       showToast(`✓ Posted ${MONTHS[selectedMonth]} ${selectedYear} for ${prop.name}`)
       checkPostedForPeriod()
@@ -177,15 +181,16 @@ export default function RentalProperties() {
   async function handleSaveExpenses() {
     setSavingExpenses(true)
     try {
-      await Promise.all(properties.map(prop => {
+      const targetProps = properties.filter(p => (p.country || 'IN') === trackerCountry)
+      await Promise.all(targetProps.map(prop => {
         const e = expenses[prop.id] || emptyExpense()
         return api.savePropertyExpense({
-          propId: prop.id, month: selectedMonth + 1, year: selectedYear,
+          propId: prop.id, month: expenseMonth + 1, year: expenseYear,
           electricity: e.electricity, water: e.water, propertyTax: e.propertyTax,
           landTax: e.landTax,
         })
       }))
-      showToast(`✓ Expenses saved for ${MONTHS[selectedMonth]} ${selectedYear}`)
+      showToast(`✓ Expenses saved for ${MONTHS[expenseMonth]} ${expenseYear}`)
     } catch (e) { showToast('Failed to save expenses', 'error') }
     finally { setSavingExpenses(false) }
   }
@@ -221,7 +226,9 @@ export default function RentalProperties() {
     borderBottom: tab===t ? '2px solid #C8903A' : '2px solid transparent',
   })
 
-  const totalExpenseAll = properties.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()) + (maintenanceTotals[p.id] || 0), 0)
+  const trackerProps = properties.filter(p => (p.country || 'IN') === trackerCountry)
+  const trackerCurrency = trackerCountry === 'US' ? 'USD' : 'INR'
+  const totalExpenseAll = trackerProps.reduce((s,p) => s + calcExpenseTotal(expenses[p.id] || emptyExpense()) + (maintenanceTotals[p.id] || 0), 0)
 
   return (
     <div className="screen">
@@ -258,11 +265,26 @@ export default function RentalProperties() {
         {/* ── TRACKER TAB ──────────────────────────────── */}
         {tab === 'tracker' && (
           <>
+            {/* Country toggle — shared by Rent and Expenses below, per
+                explicit decision (2026-06-29): keeps India and US
+                properties visually grouped rather than interleaved. */}
+            <div style={{display:'flex', gap:'8px', marginBottom:'14px'}}>
+              {[{key:'IN',label:'🇮🇳 India'},{key:'US',label:'🇺🇸 USA'}].map(c => (
+                <button key={c.key} onClick={()=>setTrackerCountry(c.key)} style={{
+                  flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer', fontWeight:'700', fontSize:'0.85rem',
+                  border: trackerCountry===c.key ? '2px solid #34A853' : '1px solid var(--border-dim)',
+                  background: trackerCountry===c.key ? 'rgba(52,168,83,0.12)' : 'var(--dark-card)',
+                  color: trackerCountry===c.key ? '#34A853' : 'var(--text-dim)',
+                }}>{c.label}</button>
+              ))}
+            </div>
+
             {/* Single month/year picker -- replaces the old multi-month
                 bulk range, since a real ledger posting needs one real
                 payment date per month, not a "same amount × N months"
-                shortcut. */}
-            <div className="card-section-label">SELECT MONTH</div>
+                shortcut. This controls RENT ONLY, per explicit decision
+                -- Expenses has its own separate month control below. */}
+            <div className="card-section-label">SELECT MONTH (RENT)</div>
             <div className="card" style={{marginBottom:'14px'}}>
               <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
                 <select className="field-input" value={selectedMonth} style={{flex:2}}
@@ -288,7 +310,12 @@ export default function RentalProperties() {
             {(loadingProperties || loadingAgreements || checkingPosted) && (
               <div style={{textAlign:'center', color:'var(--text-dim)', padding:'16px'}}>Loading…</div>
             )}
-            {!loadingProperties && !loadingAgreements && !checkingPosted && properties.map(prop => {
+            {!loadingProperties && !loadingAgreements && !checkingPosted && trackerProps.length === 0 && (
+              <div style={{textAlign:'center', color:'var(--text-dim)', padding:'24px', fontSize:'0.85rem'}}>
+                No {trackerCountry==='US'?'USA':'India'} properties yet.
+              </div>
+            )}
+            {!loadingProperties && !loadingAgreements && !checkingPosted && trackerProps.map(prop => {
               const a = agreements[prop.id]
               const currency = a?.currency || 'INR'
               const baseRent = a?.agreed_rent || 0
@@ -325,6 +352,11 @@ export default function RentalProperties() {
                           <div><span style={{color:'var(--text-dim)'}}>Maint: </span><span style={{color:'var(--text)', fontWeight:'600'}}>{fmt(maintenance, currency)}</span></div>
                           <div><span style={{color:'var(--text-dim)'}}>Total: </span><span style={{color:'#C8903A', fontWeight:'700'}}>{fmt(total, currency)}</span></div>
                         </div>
+
+                        <label style={{display:'block',fontSize:'0.68rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>PAYMENT DATE</label>
+                        <input type="date" value={paidDateInputs[prop.id]||localTodayStr()}
+                          onChange={e=>setPaidDateInputs(v=>({...v,[prop.id]:e.target.value}))}
+                          className="field-input" style={{width:'100%', marginBottom:'10px'}}/>
 
                         <button
                           onClick={()=>handlePostOnTime(prop)}
@@ -387,22 +419,49 @@ export default function RentalProperties() {
             {/* Expenses block — kept exactly as before (free-text grid),
                 per explicit decision: this is for vacant-property costs
                 or taxes, not tied to a tenant, so the old flexible entry
-                style still fits. Now saves to property_expenses. */}
-            <div className="card-section-label" style={{marginTop:'8px'}}>EXPENSES — {MONTHS[selectedMonth].toUpperCase()} {selectedYear}</div>
-            {properties.map(prop => {
+                style still fits. Now saves to property_expenses.
+                Has its OWN month/year control (expenseMonth/expenseYear),
+                separate from Rent's selectedMonth/selectedYear, per
+                explicit decision -- the owner plans to backfill past
+                expense months independently of whatever month Rent is
+                currently showing. */}
+            <div className="card-section-label" style={{marginTop:'24px'}}>EXPENSES</div>
+            <div className="card" style={{marginBottom:'14px'}}>
+              <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+                <select className="field-input" value={expenseMonth} style={{flex:2}}
+                  onChange={e=>setExpenseMonth(parseInt(e.target.value))}>
+                  {MONTHS.map((m,i)=><option key={m} value={i}>{m}</option>)}
+                </select>
+                <select className="field-input" value={expenseYear} style={{flex:1}}
+                  onChange={e=>setExpenseYear(parseInt(e.target.value))}>
+                  {YEAR_OPTIONS.map(yr=><option key={yr} value={yr}>{yr}</option>)}
+                </select>
+              </div>
+              <div style={{display:'flex',gap:'6px',marginTop:'10px',flexWrap:'wrap'}}>
+                <button onClick={()=>{setExpenseMonth(CUR_MONTH); setExpenseYear(CUR_YEAR)}}
+                  style={{padding:'4px 10px',borderRadius:'16px',cursor:'pointer',fontSize:'0.72rem',fontWeight:'600',
+                    border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#5C7080'}}>
+                  This month
+                </button>
+              </div>
+            </div>
+            <div className="card-section-label">{MONTHS[expenseMonth].toUpperCase()} {expenseYear}</div>
+            {trackerProps.map(prop => {
               const e = expenses[prop.id] || emptyExpense()
               const total = calcExpenseTotal(e) + (maintenanceTotals[prop.id] || 0)
+              const expCurrency = prop.currency || (trackerCountry === 'US' ? 'USD' : 'INR')
+              const expSymbol = expCurrency === 'USD' ? '$' : '₹'
               return (
                 <div key={prop.id} style={{marginBottom:'10px'}}>
                   <div className="card-section-label" style={{display:'flex',justifyContent:'space-between'}}>
                     <span>{prop.name.toUpperCase()}</span>
-                    <span style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(total)}</span>
+                    <span style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(total, expCurrency)}</span>
                   </div>
                   <div className="card">
                     <div className="grid-2">
                       {EXPENSE_FIELDS.map(f=>(
                         <div key={f.key} className="field">
-                          <label className="field-label">{f.label}</label>
+                          <label className="field-label">{f.label} ({expSymbol})</label>
                           <input className="field-input" type="number" placeholder="0"
                             style={{color:'#EF9A9A'}} value={e[f.key]}
                             onChange={ev=>setExpenseField(prop.id, f.key, ev.target.value)}/>
@@ -411,8 +470,9 @@ export default function RentalProperties() {
                     </div>
                     <MaintenanceEventsLog
                       propId={prop.id}
-                      month={selectedMonth + 1}
-                      year={selectedYear}
+                      month={expenseMonth + 1}
+                      year={expenseYear}
+                      currency={expCurrency}
                       onTotalChange={(sum) => setMaintenanceTotals(prev => ({ ...prev, [prop.id]: sum }))}
                     />
                   </div>
@@ -423,19 +483,19 @@ export default function RentalProperties() {
             <div className="net-box" style={{marginTop:'8px'}}>
               <div className="net-row">
                 <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>
-                  Total expenses · {MONTHS[selectedMonth]} {selectedYear}
+                  Total expenses · {MONTHS[expenseMonth]} {expenseYear}
                 </span>
-                <span className="net-val big neg">{fmt(totalExpenseAll)}</span>
+                <span className="net-val big neg">{fmt(totalExpenseAll, trackerCurrency)}</span>
               </div>
             </div>
 
             <button className="btn btn-gold" onClick={handleSaveExpenses} disabled={savingExpenses}>
-              {savingExpenses ? 'Saving…' : `Save Expenses for ${MONTHS[selectedMonth]} ${selectedYear} →`}
+              {savingExpenses ? 'Saving…' : `Save Expenses for ${MONTHS[expenseMonth]} ${expenseYear} →`}
             </button>
           </>
         )}
 
-        {/* ── DASHBOARD TAB — unchanged ───────────────────── */}
+        {/* ── DASHBOARD TAB — country-separated, per explicit decision 2026-06-29 ── */}
         {tab === 'dashboard' && (
           dashLoading ? <div className="loading"><div className="spinner"/>Loading...</div> : dashError ? (
             <div style={{
@@ -444,47 +504,82 @@ export default function RentalProperties() {
             }}>
               ⚠️ Could not load dashboard data: {dashError}
             </div>
-          ) : (
-            <>
-              <div className="card-section-label">ANNUAL SUMMARY — {CUR_YEAR}</div>
-              <div className="stats-grid">
-                <div className="stat-card"><div className="stat-label">Total income</div><div className="stat-val green">{fmt(dashData?.totalIncome)}</div><div className="stat-sub">All properties</div></div>
-                <div className="stat-card"><div className="stat-label">Total expenses</div><div className="stat-val" style={{color:'#EF9A9A'}}>{fmt(dashData?.totalExpense)}</div><div className="stat-sub">All properties</div></div>
-                <div className="stat-card"><div className="stat-label">Net income</div><div className="stat-val green">{fmt(dashData?.netIncome)}</div><div className="stat-sub">After expenses</div></div>
-              </div>
-              {properties.map((prop,i) => {
-                const rows = (dashData?.rows||[]).filter(r=>r.prop_id===prop.id)
-                const ytdIncome  = rows.reduce((s,r)=>s+(r.income||0),0)
-                const ytdExpense = rows.reduce((s,r)=>s+(r.expense||0),0)
-                const ytdNet     = rows.reduce((s,r)=>s+(r.net||0),0)
-                const monthly    = Array(12).fill(0).map((_,mi)=>{const r=rows.find(r=>r.month===mi+1); return r?.net||0})
-                const maxAbs     = Math.max(...monthly.map(Math.abs), 1)
-                return (
-                  <div key={prop.id}>
-                    <div className="card-section-label">{prop.name.toUpperCase()}</div>
-                    <div className="card">
-                      <div style={{display:'flex',gap:'20px',marginBottom:'12px'}}>
-                        <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>YTD INCOME</div><div style={{color:'#34A853',fontWeight:'700'}}>{fmt(ytdIncome)}</div></div>
-                        <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>YTD EXPENSE</div><div style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(ytdExpense)}</div></div>
-                        <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>YTD NET</div><div style={{color:ytdNet>=0?'#34A853':'#EF9A9A',fontWeight:'700'}}>{fmt(ytdNet)}</div></div>
-                      </div>
-                      <div style={{display:'flex',gap:'3px',alignItems:'flex-end',height:'48px'}}>
-                        {monthly.map((net,mi)=>{
-                          const h = Math.max(2,(Math.abs(net)/maxAbs)*44)
-                          return (
-                            <div key={mi} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center'}}>
-                              <div style={{width:'100%',height:`${h}px`,background:net>=0?'#0F6E56':'#c62828',borderRadius:'2px',opacity:mi>CUR_MONTH?0.3:0.9}}/>
-                              <div style={{color:'#3C5060',fontSize:'6px',marginTop:'2px'}}>{MONTHS[mi][0]}</div>
-                            </div>
-                          )
-                        })}
+          ) : (() => {
+            // dashData.rows has no currency of its own -- joined against
+            // `properties` (which has the real country/currency from
+            // rental_props) so totals are computed PER COUNTRY rather than
+            // blending ₹ and $ together into one meaningless sum. Real bug
+            // fixed here: every fmt() call in this section used to omit
+            // currency entirely, defaulting to INR -- so a US property's
+            // $6,000 YTD income was displayed as "₹6.0K".
+            const dashProps = properties.filter(p => (p.country || 'IN') === dashCountry)
+            const dashCur = dashCountry === 'US' ? 'USD' : 'INR'
+            const dashPropIds = new Set(dashProps.map(p => p.id))
+            const countryRows = (dashData?.rows || []).filter(r => dashPropIds.has(r.prop_id))
+            const countryTotalIncome  = countryRows.reduce((s,r)=>s+(r.income||0),0)
+            const countryTotalExpense = countryRows.reduce((s,r)=>s+(r.expense||0),0)
+            const countryNetIncome    = countryTotalIncome - countryTotalExpense
+            return (
+              <>
+                <div style={{display:'flex', gap:'8px', marginBottom:'14px'}}>
+                  {[{key:'IN',label:'🇮🇳 India'},{key:'US',label:'🇺🇸 USA'}].map(c => (
+                    <button key={c.key} onClick={()=>setDashCountry(c.key)} style={{
+                      flex:1, padding:'10px', borderRadius:'10px', cursor:'pointer', fontWeight:'700', fontSize:'0.85rem',
+                      border: dashCountry===c.key ? '2px solid #34A853' : '1px solid var(--border-dim)',
+                      background: dashCountry===c.key ? 'rgba(52,168,83,0.12)' : 'var(--dark-card)',
+                      color: dashCountry===c.key ? '#34A853' : 'var(--text-dim)',
+                    }}>{c.label}</button>
+                  ))}
+                </div>
+
+                <div className="card-section-label">ANNUAL SUMMARY — {CUR_YEAR}</div>
+                <div className="stats-grid">
+                  <div className="stat-card"><div className="stat-label">Total income</div><div className="stat-val green">{fmt(countryTotalIncome, dashCur)}</div><div className="stat-sub">{dashCountry==='US'?'USA':'India'} properties</div></div>
+                  <div className="stat-card"><div className="stat-label">Total expenses</div><div className="stat-val" style={{color:'#EF9A9A'}}>{fmt(countryTotalExpense, dashCur)}</div><div className="stat-sub">{dashCountry==='US'?'USA':'India'} properties</div></div>
+                  <div className="stat-card"><div className="stat-label">Net income</div><div className="stat-val green">{fmt(countryNetIncome, dashCur)}</div><div className="stat-sub">After expenses</div></div>
+                </div>
+
+                {dashProps.length === 0 && (
+                  <div style={{textAlign:'center', color:'var(--text-dim)', padding:'24px', fontSize:'0.85rem'}}>
+                    No {dashCountry==='US'?'USA':'India'} properties yet.
+                  </div>
+                )}
+
+                {dashProps.map((prop,i) => {
+                  const rows = (dashData?.rows||[]).filter(r=>r.prop_id===prop.id)
+                  const ytdIncome  = rows.reduce((s,r)=>s+(r.income||0),0)
+                  const ytdExpense = rows.reduce((s,r)=>s+(r.expense||0),0)
+                  const ytdNet     = rows.reduce((s,r)=>s+(r.net||0),0)
+                  const monthly    = Array(12).fill(0).map((_,mi)=>{const r=rows.find(r=>r.month===mi+1); return r?.net||0})
+                  const maxAbs     = Math.max(...monthly.map(Math.abs), 1)
+                  const propCur    = prop.currency || dashCur
+                  return (
+                    <div key={prop.id}>
+                      <div className="card-section-label">{prop.name.toUpperCase()}</div>
+                      <div className="card">
+                        <div style={{display:'flex',gap:'20px',marginBottom:'12px'}}>
+                          <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>YTD INCOME</div><div style={{color:'#34A853',fontWeight:'700'}}>{fmt(ytdIncome, propCur)}</div></div>
+                          <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>YTD EXPENSE</div><div style={{color:'#EF9A9A',fontWeight:'700'}}>{fmt(ytdExpense, propCur)}</div></div>
+                          <div><div style={{color:'#5C7080',fontSize:'0.68rem'}}>YTD NET</div><div style={{color:ytdNet>=0?'#34A853':'#EF9A9A',fontWeight:'700'}}>{fmt(ytdNet, propCur)}</div></div>
+                        </div>
+                        <div style={{display:'flex',gap:'3px',alignItems:'flex-end',height:'48px'}}>
+                          {monthly.map((net,mi)=>{
+                            const h = Math.max(2,(Math.abs(net)/maxAbs)*44)
+                            return (
+                              <div key={mi} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center'}}>
+                                <div style={{width:'100%',height:`${h}px`,background:net>=0?'#0F6E56':'#c62828',borderRadius:'2px',opacity:mi>CUR_MONTH?0.3:0.9}}/>
+                                <div style={{color:'#3C5060',fontSize:'6px',marginTop:'2px'}}>{MONTHS[mi][0]}</div>
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )
-              })}
-            </>
-          )
+                  )
+                })}
+              </>
+            )
+          })()
         )}
       </div>
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}

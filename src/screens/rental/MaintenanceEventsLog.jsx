@@ -19,12 +19,12 @@ import { localTodayStr } from '../../utils/dates'
 
 const CATEGORIES = ['Plumbing', 'Electrical', 'Appliance Repair', 'Painting', 'Pest Control', 'Cleaning', 'Carpentry', 'Other']
 
-function fmt(n) {
+function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
-  return `₹${Number(n).toLocaleString('en-IN')}`
+  return currency === 'USD' ? `$${Number(n).toLocaleString('en-US')}` : `₹${Number(n).toLocaleString('en-IN')}`
 }
 
-export default function MaintenanceEventsLog({ propId, month, year, onTotalChange }) {
+export default function MaintenanceEventsLog({ propId, month, year, currency = 'INR', onTotalChange }) {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -87,7 +87,7 @@ export default function MaintenanceEventsLog({ propId, month, year, onTotalChang
         <label style={{ fontSize: '0.72rem', color: 'var(--text-dim)', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
           Maintenance / Repairs
         </label>
-        <span style={{ fontSize: '0.78rem', color: '#EF9A9A', fontWeight: '600' }}>{fmt(total)}</span>
+        <span style={{ fontSize: '0.78rem', color: '#EF9A9A', fontWeight: '600' }}>{fmt(total, currency)}</span>
       </div>
 
       {loading && <div style={{ fontSize: '0.74rem', color: 'var(--text-dim)' }}>Loading…</div>}
@@ -100,7 +100,7 @@ export default function MaintenanceEventsLog({ propId, month, year, onTotalChang
         }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '0.74rem', color: 'var(--text)', fontWeight: '600' }}>
-              {ev.category} — {fmt(ev.amount)}
+              {ev.category} — {fmt(ev.amount, currency)}
             </div>
             {ev.description && <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '1px' }}>{ev.description}</div>}
           </div>
@@ -125,7 +125,7 @@ export default function MaintenanceEventsLog({ propId, month, year, onTotalChang
             style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', boxSizing: 'border-box', background: 'var(--dark)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.78rem', marginBottom: '6px' }}>
             {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <input type="number" min="0" placeholder="Amount (₹)" value={amount} onChange={e => setAmount(e.target.value)}
+          <input type="number" min="0" placeholder={`Amount (${currency === 'USD' ? '$' : '₹'})`} value={amount} onChange={e => setAmount(e.target.value)}
             style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', boxSizing: 'border-box', background: 'var(--dark)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.78rem', marginBottom: '6px' }} />
           <input type="text" placeholder="What was done (e.g. Fridge fan repair by Bob)" value={description} onChange={e => setDescription(e.target.value)}
             style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', boxSizing: 'border-box', background: 'var(--dark)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.78rem', marginBottom: '6px' }} />

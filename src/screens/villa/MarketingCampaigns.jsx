@@ -20,35 +20,61 @@ function QRCode({ value, size = 160 }) {
 }
 
 // ── Flyer component (printable / canvas-exportable) ───────────
+const VILLA_IMG_BASE = 'https://www.luxuryvillasofguruvayur.com/images'
+const LOGO_URL = 'https://manage.luxuryvillasofguruvayur.com/icons/logo-dark.png'
+
 function VillaFlyer({ campaign, flyerRef }) {
   const trackUrl = `${LANDING}?ref=${campaign.unique_token}`
   return (
     <div ref={flyerRef} style={{
-      width: '420px', minHeight: '594px', background: '#FAF7F2',
+      width: '420px', minHeight: '700px', background: '#FAF7F2',
       fontFamily: "'Georgia', serif", position: 'relative',
       border: '1px solid #D4B483', overflow: 'hidden',
     }}>
-      {/* Gold top bar */}
-      <div style={{ background: 'linear-gradient(135deg, #B3924A, #8B6914)', padding: '18px 24px 14px' }}>
-        <div style={{ color: '#FAF7F2', fontSize: '0.62rem', letterSpacing: '3px', marginBottom: '4px' }}>
-          LUXURY VILLAS OF GURUVAYUR
-        </div>
-        <div style={{ color: '#FAF7F2', fontSize: '1.4rem', fontWeight: '700', letterSpacing: '0.5px' }}>
-          Dwarka — Sacred Stay
-        </div>
-        <div style={{ color: '#F0D99A', fontSize: '0.72rem', marginTop: '4px', letterSpacing: '1px' }}>
-          GURUVAYUR, KERALA · INDIA
+      {/* Hero: real villa exterior photo, full-bleed with a dark gradient for legible text on top */}
+      <div style={{ height: '260px', position: 'relative', overflow: 'hidden' }}>
+        <img src={`${VILLA_IMG_BASE}/Home.jpg`} crossOrigin="anonymous" alt="Villa Exterior"
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(10,8,2,0.55) 0%, rgba(10,8,2,0.15) 38%, rgba(10,8,2,0.1) 60%, rgba(250,247,242,1) 100%)' }} />
+        {/* Logo, top-left, on top of the photo */}
+        <img src={LOGO_URL} crossOrigin="anonymous" alt="Guruvayur Estates"
+          style={{ position: 'absolute', top: '14px', left: '16px', width: '52px', height: 'auto', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.5))' }} />
+        {/* Title, bottom of hero, over the photo */}
+        <div style={{ position: 'absolute', bottom: '14px', left: '20px', right: '20px' }}>
+          <div style={{ color: '#F0D99A', fontSize: '0.62rem', letterSpacing: '3px', marginBottom: '4px', textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
+            LUXURY VILLAS OF GURUVAYUR
+          </div>
+          <div style={{ color: '#FFFFFF', fontSize: '1.55rem', fontWeight: '700', letterSpacing: '0.5px', textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>
+            Dwarka — Sacred Stay
+          </div>
+          <div style={{ color: '#F0D99A', fontSize: '0.72rem', marginTop: '4px', letterSpacing: '1px', textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
+            GURUVAYUR, KERALA · INDIA
+          </div>
         </div>
       </div>
 
-      {/* Villa image placeholder / hero */}
-      <div style={{ height: '160px', background: 'linear-gradient(160deg, #1A2B1A 0%, #2D4A2D 50%, #1A3320 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '3rem' }}>🏡</div>
-          <div style={{ color: '#F0D99A', fontSize: '0.72rem', letterSpacing: '2px', marginTop: '6px' }}>LUXURY VILLA EXPERIENCE</div>
+      {/* Photo strip: bedroom, kitchen, dining, living, garden — the spaces, not just icons */}
+      <div style={{ padding: '14px 20px 0' }}>
+        <div style={{ color: '#8B6914', fontSize: '0.62rem', letterSpacing: '2px', marginBottom: '8px', textAlign: 'center' }}>
+          STEP INSIDE
         </div>
-        {/* Overlay gradient */}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '60px', background: 'linear-gradient(transparent, #FAF7F2)' }}/>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '5px' }}>
+          {[
+            { src: 'bedroom.jpg', label: 'Bedroom' },
+            { src: 'ModernKitchen.jpg', label: 'Kitchen' },
+            { src: 'Dining.jpg', label: 'Dining' },
+            { src: 'Living.jpg', label: 'Living' },
+            { src: 'garden.jpg', label: 'Garden' },
+          ].map(p => (
+            <div key={p.src} style={{ textAlign: 'center' }}>
+              <div style={{ height: '52px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #E8D5A3' }}>
+                <img src={`${VILLA_IMG_BASE}/${p.src}`} crossOrigin="anonymous" alt={p.label}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+              </div>
+              <div style={{ fontSize: '0.5rem', color: '#8B6914', marginTop: '3px', letterSpacing: '0.3px' }}>{p.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Feature grid */}
@@ -97,7 +123,7 @@ function VillaFlyer({ campaign, flyerRef }) {
               ENQUIRE / BOOK NOW
             </a>
             <div style={{ fontSize: '0.58rem', color: '#8B6914', marginTop: '6px', textAlign: 'center' }}>
-              +91 98765 43210 · luxuryvillasofguruvayur.com
+              +91 99950 43283 · luxuryvillasofguruvayur.com
             </div>
           </div>
         </div>
@@ -210,9 +236,12 @@ export default function MarketingCampaigns() {
   async function handleDownload(campaign) {
     setDownloading(true)
     setFlyerCampaign(campaign)
+    // Let the flyer mount, then wait for every <img> inside it (hero, logo, 5
+    // photo-strip thumbnails) to actually finish loading before capturing —
+    // a fixed timeout isn't reliable now that the flyer pulls in 6 external
+    // images instead of 0, especially on a slower connection.
     setTimeout(async () => {
       try {
-        // Use html2canvas via CDN
         if (!window.html2canvas) {
           await new Promise((res, rej) => {
             const s = document.createElement('script')
@@ -221,6 +250,11 @@ export default function MarketingCampaigns() {
             document.head.appendChild(s)
           })
         }
+        const imgs = Array.from(flyerRef.current.querySelectorAll('img'))
+        await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(res => {
+          img.onload = res; img.onerror = res   // resolve even on error so one bad image doesn't hang the download forever
+          setTimeout(res, 8000)                  // hard cap per image so a stalled load can't block the export indefinitely
+        })))
         const canvas = await window.html2canvas(flyerRef.current, { scale: 2, useCORS: true, backgroundColor: '#FAF7F2' })
         const link = document.createElement('a')
         link.download = `LVG-${campaign.unique_token}.png`
@@ -229,7 +263,7 @@ export default function MarketingCampaigns() {
         showToast('✅ Flyer downloaded!')
       } catch(e) { showToast('Download failed — try again', 'error') }
       finally { setDownloading(false) }
-    }, 600) // let flyer render first
+    }, 300)
   }
 
   const totalClicks = campaigns.reduce((s,c) => s+(c.clicks||0), 0)

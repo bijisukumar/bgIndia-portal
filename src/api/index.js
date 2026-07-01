@@ -88,6 +88,7 @@ export const api = {
   getDuplicateBookings:     (p)      => get('getDuplicateBookings', p),
   createProvisionalBooking: (data)   => post('createProvisionalBooking', data),
   approvePendingBooking:    (data)   => post('approvePendingBooking', data),
+  setReadyForCheckIn:       (data)   => post('setReadyForCheckIn', data),
 
   // ── STAY / CHECK-IN ──────────────────────────────────────
   getPendingCheckIns:   ()       => get('getPendingCheckIns'),

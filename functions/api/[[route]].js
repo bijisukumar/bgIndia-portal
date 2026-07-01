@@ -2925,7 +2925,7 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, rating, source } })
       }
 
-      if (action === 'setReadyForCheckIn') {
+      if (action === 'setReadyForCheckIn' || action === 'approvePendingBooking') {
         const { stayId } = body; if (!stayId) return err('stayId required')
         const stay = await DB.prepare(`SELECT status FROM stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return json({ success: true, data: { changed: false, reason: 'stay not found' }})

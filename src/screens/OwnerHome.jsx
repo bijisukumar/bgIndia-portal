@@ -125,7 +125,7 @@ function PendingReviewBlock() {
     if (!selected) return
     setSaving(true)
     try {
-      await api.approvePendingBooking({ stayId: selected.stayId })
+      await api.setReadyForCheckIn({ stayId: selected.stayId })
       showToast('✅ Approved — Raman can now check in ' + selected.guestName)
       const updated = pending.filter(p => p.stayId !== selected.stayId)
       setPending(updated)

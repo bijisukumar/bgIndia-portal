@@ -108,6 +108,8 @@ export const api = {
   saveBreakfastEntry:   (data)   => post('saveBreakfastEntry', data),
   saveCarRental:        (data)   => post('saveCarRental', data),
   saveVillaExpense:     (data)   => post('saveVillaExpense', data),
+  getVillaExpenses:     (villaId) => get('getVillaExpenses', { villaId }),
+  deleteVillaExpense:   (data)   => post('deleteVillaExpense', data),
 
   // ── RENTAL PROPERTIES ────────────────────────────────────
   saveRentalIncome:     (data)   => post('saveRentalIncome', data),

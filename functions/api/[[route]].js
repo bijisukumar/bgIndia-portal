@@ -1502,6 +1502,15 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      if (action === 'getVillaExpenses') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(
+          `SELECT txn_id, villa_id, date, category, amount, paid_to, description, created_at
+           FROM villa_expenses WHERE villa_id = ? ORDER BY date DESC, created_at DESC LIMIT 500`
+        ).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
@@ -2605,6 +2614,18 @@ export async function onRequest(ctx) {
             }
           }
         }
+        sendAlert(env, `🛒 bgIndia — Kitchen incidentals logged: ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`, [
+          `Kitchen incidentals were logged for ${body.guestName || 'a guest'}.`,
+          '',
+          `Guest:  ${body.guestName || '—'}`,
+          `Total:  ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`,
+          `Items:  ${items.map(i => `${i.name} x${i.qty || 1}`).join(', ') || '—'}`,
+          `Notes:  ${body.notes || '—'}`,
+          '',
+          `Logged by: ${currentActor}`,
+          `Logged at: ${timestamp}`,
+        ])
+
         return json({ success: true, data: { lowStockAlerts } });
       }
 
@@ -2863,10 +2884,65 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { id } })
       }
 
+      // VILLA EXPENSES — recurring operating costs (electricity, maintenance,
+      // repairs, laundry, deep cleaning, pest control, landscaping, etc.)
+      // Available to owner and Raman. Emails the owner on every save.
       if (action === 'saveVillaExpense') {
+        const { txnId, villaId, date, category, amount, paidTo, description } = body
+        if (!date || !category || !amount) return err('date, category and amount are required', 400)
+        const amt = parseFloat(amount) || 0
+        const vId = villaId || 'dwarka'
+
+        if (txnId) {
+          await DB.prepare(`
+            UPDATE villa_expenses SET date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=?
+            WHERE txn_id = ?
+          `).bind(date, category, amt, paidTo || null, description || null, actor, now(), txnId).run()
+
+          sendAlert(env, `🧾 bgIndia — Villa expense updated: ₹${amt.toLocaleString('en-IN')} (${category})`, [
+            `A villa expense entry was UPDATED.`,
+            '',
+            `Category:    ${category}`,
+            `Date:        ${date}`,
+            `Amount:      ₹${amt.toLocaleString('en-IN')}`,
+            `Paid to:     ${paidTo || '—'}`,
+            `Description: ${description || '—'}`,
+            `Txn ID:      ${txnId}`,
+            '',
+            `Updated by: ${actor}`,
+            `Updated at: ${now()}`,
+          ])
+
+          return json({ success: true, data: { txnId } })
+        }
+
         const id = genId('VE')
-        await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId || null, 'villa_expense', JSON.stringify({ villaId: body.villaId || 'dwarka', date: body.date, category: body.category || '', amount: body.amount || 0, paidTo: body.paidTo || '', description: body.description|| '' }), 'done', actor, actor, now(), now()).run()
-        return json({ success: true, data: { id } })
+        await DB.prepare(`
+          INSERT INTO villa_expenses (txn_id, villa_id, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        `).bind(id, vId, date, category, amt, paidTo || null, description || null, actor, actor, now(), now()).run()
+
+        sendAlert(env, `🧾 bgIndia — New villa expense: ₹${amt.toLocaleString('en-IN')} (${category})`, [
+          `A new villa expense entry was logged.`,
+          '',
+          `Category:    ${category}`,
+          `Date:        ${date}`,
+          `Amount:      ₹${amt.toLocaleString('en-IN')}`,
+          `Paid to:     ${paidTo || '—'}`,
+          `Description: ${description || '—'}`,
+          `Txn ID:      ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ])
+
+        return json({ success: true, data: { txnId: id } })
+      }
+
+      if (action === 'deleteVillaExpense') {
+        const { txnId } = body; if (!txnId) return err('txnId required')
+        await DB.prepare(`DELETE FROM villa_expenses WHERE txn_id = ?`).bind(txnId).run()
+        return json({ success: true, data: { txnId, deleted: true } })
       }
 
       // LEDGER TRANSACTIONS — Create/Update entries

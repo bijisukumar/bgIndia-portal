@@ -22,6 +22,7 @@ import BreakfastEntry    from './screens/villa/BreakfastEntry'
 import CarRentalEntry    from './screens/villa/CarRentalEntry'
 import GuestRepository   from './screens/villa/GuestRepository'
 import Inventory         from './screens/villa/Inventory'
+import VillaExpenses     from './screens/villa/VillaExpenses'
 
 // Rental screens
 import RentalProperties from './screens/rental/RentalProperties'
@@ -56,6 +57,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
+        <Route path="/owner/villa/expenses"   element={<VillaExpenses />} />
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         {/* Rental */}
@@ -90,6 +92,7 @@ function ProtectedRoutes() {
         <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />
+        <Route path="/raman/expenses"         element={<VillaExpenses />} />
         <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />

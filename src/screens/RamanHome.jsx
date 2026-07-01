@@ -228,6 +228,13 @@ export default function RamanHome() {
       lockReason: 'Guest must be checked in to record car rental',
     },
     {
+      icon: '🧾', bg: 'rgba(239,68,68,0.08)', arrow: '#EF4444',
+      title: 'Villa expenses',
+      sub: 'Log electricity, maintenance, repairs & recurring costs',
+      path: '/raman/expenses',
+      disabled: false,
+    },
+    {
       icon: '💰', bg: 'rgba(52,168,83,0.08)', arrow: '#34A853',
       title: 'My earnings',
       sub: 'Commission snapshot · paid & outstanding',

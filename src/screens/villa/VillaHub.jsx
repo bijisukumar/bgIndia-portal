@@ -89,6 +89,7 @@ export default function VillaHub() {
                 { icon: '🏨', bg: 'rgba(200,144,58,0.08)',   arrow: '#C8903A', title: 'Complete booking', sub: 'Financials · docs · ready for check-in',              path: `/owner/villa/income` },
                 { icon: '📊', bg: 'rgba(24,95,165,0.08)',    arrow: '#185FA5', title: 'Villa dashboard',    sub: 'Revenue · profit · breakdown',                          path: `/owner/villa/dashboard` },
             { icon: '📦', bg: 'rgba(15,110,86,0.08)',    arrow: '#0F6E56', title: 'Inventory',          sub: 'Stock levels · sell prices · restock log',               path: `/owner/villa/inventory` },
+                { icon: '🧾', bg: 'rgba(239,68,68,0.08)',    arrow: '#EF4444', title: 'Villa expenses',      sub: 'Electricity · maintenance · repairs · recurring costs', path: `/owner/villa/expenses` },
                 { icon: '🔧', bg: 'rgba(92,112,128,0.08)', arrow: '#5C7080', title: 'Maintenance',         sub: 'Schema validation · alert settings · system health',       path: `/owner/maintenance` },
               ].map((row, i, arr) => (
                 <div key={row.title}

@@ -23,3 +23,6 @@ CREATE UNIQUE INDEX idx_rent_txn_unique_period ON rent_transactions(prop_id, per
 -- PRAGMA table_info(rental_props);
 -- PRAGMA table_info(rent_transactions);
 -- SELECT name FROM sqlite_master WHERE type='index' AND name='idx_rent_txn_unique_period';
+
+-- 4. Track whether parking was paid in full for the term
+ALTER TABLE rental_props ADD COLUMN parking_paid_in_full INTEGER DEFAULT 0;

@@ -3067,6 +3067,7 @@ export async function onRequest(ctx) {
               parking_tenant_name = ?, parking_tenant_phone = ?,
               parking_fee = ?, parking_deposit = ?,
               parking_lease_start = ?, parking_lease_end = ?, parking_currency = ?,
+              parking_paid_in_full = ?,
               updated_by = ?, updated_at = ?
             WHERE prop_id = ?
           `).bind(
@@ -3083,6 +3084,7 @@ export async function onRequest(ctx) {
             d.parkingTenantName || null, d.parkingTenantPhone || null,
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
             d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
+            d.parkingPaidInFull ? 1 : 0,
             actor, now(), d.propId
           ).run()
         } else {
@@ -3097,8 +3099,9 @@ export async function onRequest(ctx) {
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
               has_separate_parking, parking_tenant_name, parking_tenant_phone,
               parking_fee, parking_deposit, parking_lease_start, parking_lease_end, parking_currency,
+              parking_paid_in_full,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
@@ -3111,6 +3114,7 @@ export async function onRequest(ctx) {
             d.parkingTenantName || null, d.parkingTenantPhone || null,
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
             d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
+            d.parkingPaidInFull ? 1 : 0,
             actor, actor, now(), now()
           ).run()
         }

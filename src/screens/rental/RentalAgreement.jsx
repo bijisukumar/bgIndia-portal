@@ -70,6 +70,7 @@ const EMPTY_FORM = {
   parkingTenantName:'', parkingTenantPhone:'',
   parkingFee:'', parkingDeposit:'',
   parkingLeaseStart:'', parkingLeaseEnd:'', parkingCurrency:'INR',
+  parkingPaidInFull:false,
 }
 
 export default function RentalAgreement() {
@@ -174,6 +175,7 @@ export default function RentalAgreement() {
       parkingLeaseStart:  a.parking_lease_start  || '',
       parkingLeaseEnd:    a.parking_lease_end    || '',
       parkingCurrency:    a.parking_currency     || a.currency || 'INR',
+      parkingPaidInFull:  !!a.parking_paid_in_full,
     })
   }
 
@@ -297,6 +299,7 @@ export default function RentalAgreement() {
         parkingLeaseStart:  form.hasSeparateParking ? form.parkingLeaseStart || null : null,
         parkingLeaseEnd:    form.hasSeparateParking ? form.parkingLeaseEnd || null : null,
         parkingCurrency:    form.parkingCurrency || form.currency || 'INR',
+        parkingPaidInFull:  form.hasSeparateParking ? form.parkingPaidInFull : false,
       })
       // saveRentalAgreement never touches stage/is_delinquent/end_reason
       // (confirmed in the backend) -- those are only ever changed via
@@ -318,8 +321,46 @@ export default function RentalAgreement() {
         parking_fee:parseFloat(form.parkingFee)||0, parking_deposit:parseFloat(form.parkingDeposit)||0,
         parking_lease_start:form.parkingLeaseStart, parking_lease_end:form.parkingLeaseEnd,
         parking_currency:form.parkingCurrency,
+        parking_paid_in_full:form.parkingPaidInFull?1:0,
       }}))
-      showToast(`✅ Agreement saved for ${prop?.name}`)
+
+      // If paid in full — bulk-post one rent_transaction row per month
+      // of the parking lease term. Uses INSERT OR IGNORE so re-saving
+      // the agreement never creates duplicates.
+      if (form.hasSeparateParking && form.parkingPaidInFull && form.parkingLeaseStart && form.parkingLeaseEnd && form.parkingFee) {
+        const start = new Date(form.parkingLeaseStart)
+        const end   = new Date(form.parkingLeaseEnd)
+        const months = []
+        const cur = new Date(start.getFullYear(), start.getMonth(), 1)
+        while (cur <= end) {
+          months.push(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`)
+          cur.setMonth(cur.getMonth() + 1)
+        }
+        const fee = parseFloat(form.parkingFee) || 0
+        const cur2 = new Date()
+        const paidDate = form.parkingLeaseStart.slice(0,10) // treat lease start as payment date
+        let posted = 0, skipped = 0
+        await Promise.allSettled(months.map(async period => {
+          try {
+            await api.postRentPayment({
+              propId: selectedProp, periodMonth: period,
+              baseRent: fee, maintenance: 0, carParking: 0, lateFee: 0,
+              isException: false, unitType: 'parking',
+              paidDate, currency: form.parkingCurrency || form.currency || 'INR',
+            })
+            posted++
+          } catch(e) {
+            if (String(e.message||'').includes('already been posted')) skipped++
+            else throw e
+          }
+        }))
+        const msg = skipped > 0
+          ? `✅ Agreement saved · ${posted} parking months posted (${skipped} already existed)`
+          : `✅ Agreement saved · ${posted} parking months posted (${months[0]} → ${months[months.length-1]})`
+        showToast(msg)
+      } else {
+        showToast(`✅ Agreement saved for ${prop?.name}`)
+      }
     } catch(e) { setError(`Save failed: ${e.message}`) }
     finally { setSaving(false) }
   }
@@ -740,7 +781,45 @@ export default function RentalAgreement() {
                       onChange={e=>setField('parkingLeaseEnd',e.target.value)}/>
                   </div>
                 </div>
-                <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'6px'}}>
+
+                {/* Paid in full toggle */}
+                <div style={{marginTop:'12px',padding:'10px 12px',borderRadius:'8px',
+                  background: form.parkingPaidInFull ? 'rgba(52,168,83,0.08)' : 'var(--dark-input)',
+                  border:`1px solid ${form.parkingPaidInFull ? 'rgba(52,168,83,0.3)' : 'var(--border-dim)'}`}}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',cursor:'pointer'}}>
+                    <input type="checkbox" checked={form.parkingPaidInFull}
+                      onChange={e=>setField('parkingPaidInFull', e.target.checked)}
+                      style={{width:16,height:16,flexShrink:0}}/>
+                    <div>
+                      <div style={{fontSize:'0.82rem',fontWeight:'600',color: form.parkingPaidInFull ? '#34A853' : 'var(--text)'}}>
+                        Paid full term in advance
+                      </div>
+                      <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'2px'}}>
+                        All months will be posted as paid when you save
+                      </div>
+                    </div>
+                  </label>
+                  {form.parkingPaidInFull && form.parkingFee && form.parkingLeaseStart && form.parkingLeaseEnd && (() => {
+                    const start = new Date(form.parkingLeaseStart)
+                    const end   = new Date(form.parkingLeaseEnd)
+                    const months = Math.max(1, (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1)
+                    const total  = (parseFloat(form.parkingFee) || 0) * months
+                    const sym    = form.parkingCurrency === 'USD' ? '$' : '₹'
+                    return (
+                      <div style={{marginTop:'8px',paddingTop:'8px',borderTop:'1px solid rgba(52,168,83,0.2)',
+                        display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <span style={{fontSize:'0.75rem',color:'var(--text-dim)'}}>
+                          {sym}{parseFloat(form.parkingFee).toLocaleString()} × {months} months
+                        </span>
+                        <span style={{fontSize:'0.88rem',fontWeight:'700',color:'#34A853'}}>
+                          {sym}{total.toLocaleString()} total
+                        </span>
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'8px'}}>
                   🔔 You'll get a renewal alert 30 days before the parking lease ends.
                 </div>
               </>)}

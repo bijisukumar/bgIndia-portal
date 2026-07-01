@@ -61,7 +61,7 @@ async function sendAlert(env, subject, lines, toEmail) {
   try {
     const body = {
       personalizations: [{ to: [{ email: toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com' }] }],
-      from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Security' },
+      from: { email: 'alerts@luxuryvillasofguruvayur.com', name: 'bgIndia Security' },
       subject,
       content: [{ type: 'text/plain', value: lines.join('\n') }],
     }
@@ -2393,10 +2393,20 @@ export async function onRequest(ctx) {
 
         if (conflict) {
           const alertSubject = '🚨 URGENT — Double booking detected! ' + (body.checkInDate || '')
-          const alertBody = ['🚨 DOUBLE BOOKING DETECTED — IMMEDIATE ACTION REQUIRED', '='.repeat(60), '', 'A new booking was BLOCKED because the villa is already booked overlapping.', '', `EXISTING: ${conflict.stay_id} | ${conflict.guest_name} | ${conflict.checkin_date} -> ${conflict.checkout_date}`, `NEW ATTEMPT: ${body.guestName} | ${body.checkInDate} -> ${body.checkOutDate}`].join('\n')
-          try {
-            await fetch('https://api.mailchannels.net/tx/v1/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ personalizations: [{ to: [{ email: env.OWNER_EMAIL || 'kerala.luxuryvillas@gmail.com' }], cc: [{ email: 'bijisukumar@gmail.com' }] }], from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Portal — URGENT' }, subject: alertSubject, content: [{ type: 'text/plain', value: alertBody }] }) })
-          } catch(emailErr) {}
+          const alertVillaId = body.villaId || 'dwarka'
+          const alertLines = [
+            'Source: New Booking screen (createBooking)',
+            'Action: New booking BLOCKED — overlapping dates detected',
+            '',
+            'IMMEDIATE ACTION REQUIRED — the villa is already booked for these dates.',
+            '',
+            `EXISTING: ${conflict.stay_id} | ${conflict.guest_name} | ${conflict.checkin_date} -> ${conflict.checkout_date}`,
+            `NEW ATTEMPT: ${body.guestName} | ${body.checkInDate} -> ${body.checkOutDate}`,
+            '',
+            `Attempted by: ${actor}`,
+            `Time:         ${now()}`,
+          ]
+          await sendAlert(env, alertSubject, alertLines, await getOwnerAlertEmail(DB, env, alertVillaId))
 
           try {
             const overlapNights = body.checkInDate && body.checkOutDate ? Math.max(0, Math.round((Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) - Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000)) : 0

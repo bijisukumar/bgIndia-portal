@@ -49,7 +49,7 @@ export function buildArrivalMessage(stay = {}) {
     ``,
     `📅 Check-in: ${ci || '—'}`,
     `📅 Check-out: ${co || '—'}`,
-    `👥 Guests: ${adults} adult${adults !== 1 ? 's' : ''}${children > 0 ? ` + ${children} child${children !== 1 ? 'ren' : ''}` : ''}`,
+    `👥 Max Guests: ${adults} adult${adults !== 1 ? 's' : ''}${children > 0 ? ` + ${children} child${children !== 1 ? 'ren' : ''}` : ''}`,
   ]
 
   if (extended.length) lines.push(`⏳ ${extended.join(' · ')}`)

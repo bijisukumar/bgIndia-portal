@@ -54,10 +54,12 @@ async function verifyJwt(token, secret) {
 }
 
 // ── EMAIL ALERT via Resend ───────────────────────────────────
-// Redeploy trigger: RESEND_API_KEY was re-added via the Cloudflare
-// dashboard UI (not CLI) on 2026-07-01 after the CLI-set version wasn't
-// reaching the running Function's env — forcing a fresh deploy to test
-// whether the dashboard-set value is picked up.
+// Forced full rebuild #2 (2026-07-01, post RESEND_API_KEY dashboard
+// re-add) — testing whether Cloudflare Pages was reusing a warm Functions
+// container with stale secret bindings despite the deployment ID/commit
+// SHA changing. If this rebuild still doesn't pick up RESEND_API_KEY,
+// that rules out container staleness as the cause too.
+const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // Previously used MailChannels' free anonymous API (api.mailchannels.net) —
 // that endpoint was permanently shut down 2024-08-31 and every failure this
 // whole time was actually that dead endpoint, not a DNS/domain-lockdown

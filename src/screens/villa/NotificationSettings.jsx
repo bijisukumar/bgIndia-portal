@@ -2,6 +2,21 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
+// alert_log.created_at is stored as 'YYYY-MM-DD HH:MM:SS' in UTC (server
+// time), with no timezone marker. Browsers parse a bare string like that
+// as LOCAL time by default, which is wrong — explicitly mark it UTC first,
+// then let the browser render it in whatever timezone the viewer is in.
+function fmtLocalTime(utcStr) {
+  if (!utcStr) return '—'
+  try {
+    const d = new Date(utcStr.replace(' ', 'T') + 'Z')
+    return d.toLocaleString(undefined, {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+    })
+  } catch { return utcStr }
+}
+
 // This screen edits rows in villa_settings - a generic key/value store.
 // To add a new configurable item later (for this villa or a newly onboarded
 // one), add a field block here bound to a new key; no schema change or
@@ -102,7 +117,7 @@ export default function NotificationSettings() {
                 {row.success ? '✓ Sent' : '✕ Failed'}
               </span>
               {row.status_code && <span style={{ fontSize: '0.68rem', color: '#5C7080' }}>HTTP {row.status_code}</span>}
-              <span style={{ fontSize: '0.68rem', color: '#5C7080', marginLeft: 'auto' }}>{row.created_at}</span>
+              <span style={{ fontSize: '0.68rem', color: '#5C7080', marginLeft: 'auto' }}>{fmtLocalTime(row.created_at)}</span>
             </div>
             <div style={{ fontSize: '0.78rem', color: '#9AA5B4', marginBottom: row.error_detail ? '3px' : 0 }}>
               {row.subject} → {row.to_email}

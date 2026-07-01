@@ -99,7 +99,15 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
     if (!res.ok) {
       // Common causes: unverified sending domain in Resend, bad/expired
       // API key, or recipient on Resend's testing-mode allowlist only.
+      // Include a masked preview of the key actually used (never the
+      // full value) so a bad/corrupted/mismatched key is visible without
+      // exposing the secret in alert_log or the UI.
+      const masked = apiKey.length > 12
+        ? `${apiKey.slice(0, 6)}...${apiKey.slice(-4)} (len ${apiKey.length})`
+        : `(len ${apiKey.length}, too short to preview safely)`
+      const keySource = env.RESEND_API_KEY ? 'env secret' : 'DB fallback'
       detail = await res.text().catch(() => '')
+      detail = `[key used: ${masked}, source: ${keySource}] ${detail}`
       console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
     }
   } catch (e) {

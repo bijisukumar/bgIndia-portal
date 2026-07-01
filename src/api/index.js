@@ -111,6 +111,7 @@ export const api = {
   getVillaExpenses:     (villaId) => get('getVillaExpenses', { villaId }),
   deleteVillaExpense:   (data)   => post('deleteVillaExpense', data),
   getVillaSettings:     (villaId) => get('getVillaSettings', { villaId }),
+  getAlertLog:          (limit)   => get('getAlertLog', limit ? { limit } : {}),
   saveVillaSetting:     (data)   => post('saveVillaSetting', data),
 
   // ── RENTAL PROPERTIES ────────────────────────────────────

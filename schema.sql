@@ -299,6 +299,23 @@ VALUES
 -- or code deploy. First use: 'owner_email_alert' — where notification
 -- emails for that villa get sent. Add more keys freely (e.g.
 -- 'alert_from_name', 'whatsapp_host_number') as they come up.
+-- Persistent record of every outbound owner-alert email attempt (success or
+-- failure), so failures are visible without needing wrangler tail / live
+-- Cloudflare Logs access — queryable via the D1 Explorer screen like any
+-- other table.
+CREATE TABLE IF NOT EXISTS alert_log (
+  log_id       TEXT PRIMARY KEY,
+  villa_id     TEXT,
+  subject      TEXT,
+  to_email     TEXT,
+  success      INTEGER NOT NULL,          -- 1 = MailChannels accepted it, 0 = rejected/threw
+  status_code  INTEGER,                   -- HTTP status from MailChannels, if we got one
+  error_detail TEXT,                      -- response body / exception message, truncated
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_log_created ON alert_log(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS villa_settings (
   villa_id     TEXT NOT NULL,
   key          TEXT NOT NULL,

@@ -57,10 +57,15 @@ async function verifyJwt(token, secret) {
 // toEmail overrides the recipient (used for per-villa OwnerEmailAlert —
 // see getOwnerAlertEmail below); falls back to the env-level OWNER_EMAIL
 // secret, then to a hardcoded last-resort address.
-async function sendAlert(env, subject, lines, toEmail) {
+// DB/villaId are optional — when passed, every attempt (success or failure)
+// is logged to alert_log so you can check delivery without live Cloudflare
+// Logs access. Browse it via D1 Explorer like any other table.
+async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
+  const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
+  let ok = false, statusCode = null, detail = ''
   try {
     const body = {
-      personalizations: [{ to: [{ email: toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com' }] }],
+      personalizations: [{ to: [{ email: recipient }] }],
       from: { email: 'alerts@luxuryvillasofguruvayur.com', name: 'bgIndia Security' },
       subject,
       content: [{ type: 'text/plain', value: lines.join('\n') }],
@@ -70,15 +75,28 @@ async function sendAlert(env, subject, lines, toEmail) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
     })
+    ok = res.ok
+    statusCode = res.status
     if (!res.ok) {
       // MailChannels returns 401/403 if the domain's Domain Lockdown TXT
       // record (_mailchannels.<domain>) isn't set up for this Worker — this
       // was previously swallowed completely with no trace anywhere. Now at
-      // least visible in `wrangler tail` / the Cloudflare dashboard logs.
-      const detail = await res.text().catch(() => '')
+      // least visible in `wrangler tail` / the Cloudflare dashboard logs
+      // and in alert_log.
+      detail = await res.text().catch(() => '')
       console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
     }
-  } catch (e) { console.error('sendAlert threw:', e?.message || e) }
+  } catch (e) {
+    detail = e?.message || String(e)
+    console.error('sendAlert threw:', detail)
+  }
+  if (DB) {
+    try {
+      await DB.prepare(`INSERT INTO alert_log (log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at) VALUES (?,?,?,?,?,?,?,?)`)
+        .bind(genId('AL'), villaId || null, subject, recipient, ok ? 1 : 0, statusCode, detail ? detail.slice(0, 500) : null, new Date().toISOString().slice(0, 19).replace('T', ' '))
+        .run()
+    } catch (e) { console.error('alert_log insert failed:', e?.message || e) }
+  }
 }
 
 // ── PER-VILLA OWNER ALERT EMAIL ─────────────────────────────
@@ -260,7 +278,7 @@ export async function onRequest(ctx) {
         '',
         'If this was you — wait and try again.',
         'If this was not you — consider changing your PIN.',
-      ])
+      ], undefined, DB, null)
       return json({ success: false, error: 'Too many attempts', retryAfter: rl.retryAfter }, 429)
     }
 
@@ -287,7 +305,7 @@ export async function onRequest(ctx) {
         `PIN tried:  ${String(pin).length} digits (not shown for security)`,
         '',
         'No action needed unless you see many of these.',
-      ])
+      ], undefined, DB, null)
       return json({ success: false, error: 'Invalid PIN' }, 401)
     }
 
@@ -1540,6 +1558,16 @@ export async function onRequest(ctx) {
         return json({ success: true, data: settings })
       }
 
+      // Recent alert-email attempts (success + failure) — see sendAlert().
+      if (action === 'getAlertLog') {
+        const limit = Math.min(parseInt(url.searchParams.get('limit')) || 50, 200)
+        const { results } = await DB.prepare(
+          `SELECT log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at
+           FROM alert_log ORDER BY created_at DESC LIMIT ?`
+        ).bind(limit).all()
+        return json({ success: true, data: results })
+      }
+
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
@@ -2406,7 +2434,7 @@ export async function onRequest(ctx) {
             `Attempted by: ${actor}`,
             `Time:         ${now()}`,
           ]
-          await sendAlert(env, alertSubject, alertLines, await getOwnerAlertEmail(DB, env, alertVillaId))
+          await sendAlert(env, alertSubject, alertLines, await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId)
 
           try {
             const overlapNights = body.checkInDate && body.checkOutDate ? Math.max(0, Math.round((Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) - Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000)) : 0
@@ -2446,7 +2474,7 @@ export async function onRequest(ctx) {
           '',
           `Checked in by: ${actor}`,
           `Time:          ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, alertVillaId))
+        ], await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId)
 
         return json({ success: true, data: { stayId } })
       }
@@ -2475,7 +2503,7 @@ export async function onRequest(ctx) {
               '',
               `Checked out by: ${actor}`,
               `Time:           ${now()}`,
-            ], await getOwnerAlertEmail(DB, env, coVillaId))
+            ], await getOwnerAlertEmail(DB, env, coVillaId), DB, coVillaId)
 
             return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
           }
@@ -2491,7 +2519,7 @@ export async function onRequest(ctx) {
           '',
           `Checked out by: ${actor}`,
           `Time:           ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, coVillaId))
+        ], await getOwnerAlertEmail(DB, env, coVillaId), DB, coVillaId)
 
         return json({ success: true, data: { stayId, commissionCreated: false } })
       }
@@ -2673,7 +2701,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${currentActor}`,
           `Logged at: ${timestamp}`,
-        ], await getOwnerAlertEmail(DB, env, villaId))
+        ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId)
 
         return json({ success: true, data: { lowStockAlerts } });
       }
@@ -2962,7 +2990,7 @@ export async function onRequest(ctx) {
             '',
             `Updated by: ${actor}`,
             `Updated at: ${now()}`,
-          ], await getOwnerAlertEmail(DB, env, vId))
+          ], await getOwnerAlertEmail(DB, env, vId), DB, vId)
 
           return json({ success: true, data: { txnId } })
         }
@@ -2987,7 +3015,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, vId))
+        ], await getOwnerAlertEmail(DB, env, vId), DB, vId)
 
         return json({ success: true, data: { txnId: id } })
       }

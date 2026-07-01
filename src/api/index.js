@@ -110,6 +110,8 @@ export const api = {
   saveVillaExpense:     (data)   => post('saveVillaExpense', data),
   getVillaExpenses:     (villaId) => get('getVillaExpenses', { villaId }),
   deleteVillaExpense:   (data)   => post('deleteVillaExpense', data),
+  getVillaSettings:     (villaId) => get('getVillaSettings', { villaId }),
+  saveVillaSetting:     (data)   => post('saveVillaSetting', data),
 
   // ── RENTAL PROPERTIES ────────────────────────────────────
   saveRentalIncome:     (data)   => post('saveRentalIncome', data),

@@ -54,10 +54,13 @@ async function verifyJwt(token, secret) {
 }
 
 // ── EMAIL ALERT via MailChannels (free on Cloudflare Workers) ──
-async function sendAlert(env, subject, lines) {
+// toEmail overrides the recipient (used for per-villa OwnerEmailAlert —
+// see getOwnerAlertEmail below); falls back to the env-level OWNER_EMAIL
+// secret, then to a hardcoded last-resort address.
+async function sendAlert(env, subject, lines, toEmail) {
   try {
     const body = {
-      personalizations: [{ to: [{ email: env.OWNER_EMAIL || 'bijisukumar@gmail.com' }] }],
+      personalizations: [{ to: [{ email: toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com' }] }],
       from: { email: 'alerts@bgindia-portal.com', name: 'bgIndia Security' },
       subject,
       content: [{ type: 'text/plain', value: lines.join('\n') }],
@@ -76,6 +79,20 @@ async function sendAlert(env, subject, lines) {
       console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
     }
   } catch (e) { console.error('sendAlert threw:', e?.message || e) }
+}
+
+// ── PER-VILLA OWNER ALERT EMAIL ─────────────────────────────
+// SaaS-ready config lookup: each villa (tenant) can have its own alert
+// recipient stored in villa_settings (key='owner_email_alert'), settable
+// from the owner's Notification Settings screen — no code change or
+// redeploy needed to onboard a new villa/owner. Falls back to the global
+// OWNER_EMAIL env secret, then a hardcoded last resort.
+async function getOwnerAlertEmail(DB, env, villaId) {
+  try {
+    const row = await DB.prepare(`SELECT value FROM villa_settings WHERE villa_id = ? AND key = 'owner_email_alert'`).bind(villaId || 'dwarka').first()
+    if (row?.value) return row.value
+  } catch (e) { console.error('getOwnerAlertEmail lookup failed:', e?.message || e) }
+  return env.OWNER_EMAIL || 'bijits@hotmail.com'
 }
 
 // ── RATE LIMITER — 5 attempts per IP per 15 min ──────────────
@@ -230,7 +247,8 @@ export async function onRequest(ctx) {
     const rl = checkRateLimit(ip)
     if (rl.limited) {
       await sendAlert(env, '🔒 bgIndia — Login LOCKED (rate limit hit)', [
-        'A login has been LOCKED after too many failed attempts.',
+        'Source: Login screen (rate limiter)',
+        'Action: Login LOCKED after too many failed attempts',
         '',
         `Time:       ${timestamp}`,
         `IP Address: ${ip}`,
@@ -258,7 +276,8 @@ export async function onRequest(ctx) {
 
     if (!found) {
       await sendAlert(env, '⚠️ bgIndia — Failed login attempt', [
-        'Someone entered a wrong PIN.',
+        'Source: Login screen',
+        'Action: Wrong PIN entered',
         '',
         `Time:       ${timestamp}`,
         `IP Address: ${ip}`,
@@ -1511,6 +1530,16 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // Per-villa configurable settings (SaaS onboarding) — key/value pairs,
+      // e.g. 'owner_email_alert'. Returned as a flat object for easy form binding.
+      if (action === 'getVillaSettings') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(`SELECT key, value FROM villa_settings WHERE villa_id = ?`).bind(villaId).all()
+        const settings = {}
+        for (const row of results) settings[row.key] = row.value
+        return json({ success: true, data: settings })
+      }
+
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
@@ -2394,17 +2423,20 @@ export async function onRequest(ctx) {
           await DB.prepare(`UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
         }
 
+        const alertVillaId = body.villaId || 'dwarka'
         sendAlert(env, `🔑 bgIndia — Guest checked in: ${body.guestName || body.bookerName || 'Guest'}`, [
-          `A guest was checked in at ${body.villaId || 'dwarka'}.`,
+          `Source: Raman > Check-in screen`,
+          `Action: Guest checked in`,
           '',
           `Guest:      ${body.guestName || body.bookerName || '—'}`,
           `Check-in:   ${body.checkInDate || '—'}`,
           `Check-out:  ${body.checkOutDate || '—'}`,
           `Stay ID:    ${stayId}`,
+          `Villa:      ${alertVillaId}`,
           '',
           `Checked in by: ${actor}`,
           `Time:          ${now()}`,
-        ])
+        ], await getOwnerAlertEmail(DB, env, alertVillaId))
 
         return json({ success: true, data: { stayId } })
       }
@@ -2412,7 +2444,8 @@ export async function onRequest(ctx) {
       if (action === 'checkOut') {
         const { stayId } = body
         await DB.prepare(`UPDATE stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
-        const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights, villa_id FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        const coVillaId = stay?.villa_id || 'dwarka'
         if (stay) {
           const existing = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
@@ -2420,31 +2453,35 @@ export async function onRequest(ctx) {
             await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
 
             sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
-              `A guest was checked out.`,
+              `Source: Raman > Check-in screen (check-out)`,
+              `Action: Guest checked out`,
               '',
               `Guest:            ${stay.guest_name || '—'}`,
               `Check-in date:    ${stay.checkin_date || '—'}`,
               `Nights:           ${nights}`,
               `Stay ID:          ${stayId}`,
+              `Villa:            ${coVillaId}`,
               `Raman commission: ₹${ramanComm.toLocaleString('en-IN')}`,
               '',
               `Checked out by: ${actor}`,
               `Time:           ${now()}`,
-            ])
+            ], await getOwnerAlertEmail(DB, env, coVillaId))
 
             return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
           }
         }
 
         sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay?.guest_name || 'Guest'}`, [
-          `A guest was checked out.`,
+          `Source: Raman > Check-in screen (check-out)`,
+          `Action: Guest checked out`,
           '',
           `Guest:         ${stay?.guest_name || '—'}`,
           `Stay ID:       ${stayId}`,
+          `Villa:         ${coVillaId}`,
           '',
           `Checked out by: ${actor}`,
           `Time:           ${now()}`,
-        ])
+        ], await getOwnerAlertEmail(DB, env, coVillaId))
 
         return json({ success: true, data: { stayId, commissionCreated: false } })
       }
@@ -2615,16 +2652,18 @@ export async function onRequest(ctx) {
           }
         }
         sendAlert(env, `🛒 bgIndia — Kitchen incidentals logged: ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`, [
-          `Kitchen incidentals were logged for ${body.guestName || 'a guest'}.`,
+          `Source: Raman > Kitchen incidentals screen`,
+          `Action: Kitchen incidentals logged`,
           '',
           `Guest:  ${body.guestName || '—'}`,
           `Total:  ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`,
           `Items:  ${items.map(i => `${i.name} x${i.qty || 1}`).join(', ') || '—'}`,
           `Notes:  ${body.notes || '—'}`,
+          `Villa:  ${villaId}`,
           '',
           `Logged by: ${currentActor}`,
           `Logged at: ${timestamp}`,
-        ])
+        ], await getOwnerAlertEmail(DB, env, villaId))
 
         return json({ success: true, data: { lowStockAlerts } });
       }
@@ -2900,18 +2939,20 @@ export async function onRequest(ctx) {
           `).bind(date, category, amt, paidTo || null, description || null, actor, now(), txnId).run()
 
           sendAlert(env, `🧾 bgIndia — Villa expense updated: ₹${amt.toLocaleString('en-IN')} (${category})`, [
-            `A villa expense entry was UPDATED.`,
+            `Source: Owner/Raman > Villa Expenses screen`,
+            `Action: Expense entry updated`,
             '',
             `Category:    ${category}`,
             `Date:        ${date}`,
             `Amount:      ₹${amt.toLocaleString('en-IN')}`,
             `Paid to:     ${paidTo || '—'}`,
             `Description: ${description || '—'}`,
+            `Villa:       ${vId}`,
             `Txn ID:      ${txnId}`,
             '',
             `Updated by: ${actor}`,
             `Updated at: ${now()}`,
-          ])
+          ], await getOwnerAlertEmail(DB, env, vId))
 
           return json({ success: true, data: { txnId } })
         }
@@ -2923,18 +2964,20 @@ export async function onRequest(ctx) {
         `).bind(id, vId, date, category, amt, paidTo || null, description || null, actor, actor, now(), now()).run()
 
         sendAlert(env, `🧾 bgIndia — New villa expense: ₹${amt.toLocaleString('en-IN')} (${category})`, [
-          `A new villa expense entry was logged.`,
+          `Source: Owner/Raman > Villa Expenses screen`,
+          `Action: New expense entry logged`,
           '',
           `Category:    ${category}`,
           `Date:        ${date}`,
           `Amount:      ₹${amt.toLocaleString('en-IN')}`,
           `Paid to:     ${paidTo || '—'}`,
           `Description: ${description || '—'}`,
+          `Villa:       ${vId}`,
           `Txn ID:      ${id}`,
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ])
+        ], await getOwnerAlertEmail(DB, env, vId))
 
         return json({ success: true, data: { txnId: id } })
       }
@@ -2943,6 +2986,19 @@ export async function onRequest(ctx) {
         const { txnId } = body; if (!txnId) return err('txnId required')
         await DB.prepare(`DELETE FROM villa_expenses WHERE txn_id = ?`).bind(txnId).run()
         return json({ success: true, data: { txnId, deleted: true } })
+      }
+
+      // Per-villa configurable settings (SaaS onboarding) — upsert one key/value.
+      // New tenants are onboarded by adding rows here, never by touching code.
+      if (action === 'saveVillaSetting') {
+        const { villaId, key, value } = body
+        if (!key) return err('key required')
+        const vId = villaId || 'dwarka'
+        await DB.prepare(`
+          INSERT INTO villa_settings (villa_id, key, value, updated_by, updated_at) VALUES (?,?,?,?,?)
+          ON CONFLICT(villa_id, key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+        `).bind(vId, key, value ?? null, actor, now()).run()
+        return json({ success: true, data: { villaId: vId, key, value } })
       }
 
       // LEDGER TRANSACTIONS — Create/Update entries

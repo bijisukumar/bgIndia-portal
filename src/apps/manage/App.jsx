@@ -24,6 +24,8 @@ import GuestRepository      from '../../screens/villa/GuestRepository'
 import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
 import Inventory         from '../../screens/villa/Inventory'
 import PreferredStock    from '../../screens/villa/PreferredStock'
+import VillaExpenses     from '../../screens/villa/VillaExpenses'
+import NotificationSettings from '../../screens/villa/NotificationSettings'
 import EnquiryTracker    from '../../screens/villa/EnquiryTracker'
 import NewEnquiry        from '../../screens/villa/NewEnquiry'
 import EnquiryDetail     from '../../screens/villa/EnquiryDetail'
@@ -67,6 +69,8 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
+        <Route path="/owner/villa/expenses"   element={<VillaExpenses />} />
+        <Route path="/owner/villa/notifications" element={<NotificationSettings />} />
         <Route path="/owner/villa/inventory/preferred-stock"  element={<PreferredStock />} />
         <Route path="/owner/villa/enquiries"                  element={<EnquiryTracker />} />
         <Route path="/owner/villa/enquiries/new"               element={<NewEnquiry />} />
@@ -113,6 +117,7 @@ function ProtectedRoutes() {
         <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />
+        <Route path="/raman/expenses"         element={<VillaExpenses />} />
         <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />

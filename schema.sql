@@ -294,6 +294,20 @@ VALUES
 -- painting, water systems, bulk supplies, etc.) — separate from the
 -- per-stay extra_lines/extra_charges on `stays`, which are guest-billed.
 -- Logged by owner or Raman; emails the owner on save (see sendAlert).
+-- Per-villa configurable settings — key/value so new settings can be added
+-- for future SaaS tenants (new villa onboarding) without any schema change
+-- or code deploy. First use: 'owner_email_alert' — where notification
+-- emails for that villa get sent. Add more keys freely (e.g.
+-- 'alert_from_name', 'whatsapp_host_number') as they come up.
+CREATE TABLE IF NOT EXISTS villa_settings (
+  villa_id     TEXT NOT NULL,
+  key          TEXT NOT NULL,
+  value        TEXT,
+  updated_by   TEXT,
+  updated_at   TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (villa_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS villa_expenses (
   txn_id       TEXT PRIMARY KEY,
   villa_id     TEXT NOT NULL DEFAULT 'dwarka',

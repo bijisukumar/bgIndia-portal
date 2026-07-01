@@ -2462,7 +2462,7 @@ export async function onRequest(ctx) {
         }
 
         const alertVillaId = body.villaId || 'dwarka'
-        sendAlert(env, `🔑 bgIndia — Guest checked in: ${body.guestName || body.bookerName || 'Guest'}`, [
+        ctx.waitUntil(sendAlert(env, `🔑 bgIndia — Guest checked in: ${body.guestName || body.bookerName || 'Guest'}`, [
           `Source: Raman > Check-in screen`,
           `Action: Guest checked in`,
           '',
@@ -2474,7 +2474,7 @@ export async function onRequest(ctx) {
           '',
           `Checked in by: ${actor}`,
           `Time:          ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId)
+        ], await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId))
 
         return json({ success: true, data: { stayId } })
       }
@@ -2490,7 +2490,7 @@ export async function onRequest(ctx) {
             const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
             await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
 
-            sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
+            ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
               `Source: Raman > Check-in screen (check-out)`,
               `Action: Guest checked out`,
               '',
@@ -2503,13 +2503,13 @@ export async function onRequest(ctx) {
               '',
               `Checked out by: ${actor}`,
               `Time:           ${now()}`,
-            ], await getOwnerAlertEmail(DB, env, coVillaId), DB, coVillaId)
+            ], await getOwnerAlertEmail(DB, env, coVillaId), DB, coVillaId))
 
             return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
           }
         }
 
-        sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay?.guest_name || 'Guest'}`, [
+        ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay?.guest_name || 'Guest'}`, [
           `Source: Raman > Check-in screen (check-out)`,
           `Action: Guest checked out`,
           '',
@@ -2519,7 +2519,7 @@ export async function onRequest(ctx) {
           '',
           `Checked out by: ${actor}`,
           `Time:           ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, coVillaId), DB, coVillaId)
+        ], await getOwnerAlertEmail(DB, env, coVillaId), DB, coVillaId))
 
         return json({ success: true, data: { stayId, commissionCreated: false } })
       }
@@ -2689,7 +2689,7 @@ export async function onRequest(ctx) {
             }
           }
         }
-        sendAlert(env, `🛒 bgIndia — Kitchen incidentals logged: ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`, [
+        ctx.waitUntil(sendAlert(env, `🛒 bgIndia — Kitchen incidentals logged: ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`, [
           `Source: Raman > Kitchen incidentals screen`,
           `Action: Kitchen incidentals logged`,
           '',
@@ -2701,7 +2701,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${currentActor}`,
           `Logged at: ${timestamp}`,
-        ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId)
+        ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId))
 
         return json({ success: true, data: { lowStockAlerts } });
       }
@@ -2797,7 +2797,7 @@ export async function onRequest(ctx) {
         `).bind(id, estateId, harvestDate, weightKg, pricePerKg, gross, expense, net, body.notes||null, actor, now(), actor, now()).run()
 
         const rubberEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
-        sendAlert(env, `🌳 Estate360 — New rubber harvest: ₹${net.toLocaleString('en-IN')} net (${rubberEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, `🌳 Estate360 — New rubber harvest: ₹${net.toLocaleString('en-IN')} net (${rubberEstateLabel})`, [
           'A new rubber harvest entry was logged.',
           '',
           `Estate:       ${rubberEstateLabel}`,
@@ -2813,7 +2813,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ])
+        ]))
 
         return json({ success: true, data: { harvestId: id } })
       }
@@ -2833,7 +2833,7 @@ export async function onRequest(ctx) {
 
         const mangoEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
         const mangoRevenue = parseFloat(totalRevenue) || 0
-        sendAlert(env, `🥭 Estate360 — New mango harvest: ₹${mangoRevenue.toLocaleString('en-IN')} (${mangoEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, `🥭 Estate360 — New mango harvest: ₹${mangoRevenue.toLocaleString('en-IN')} (${mangoEstateLabel})`, [
           'A new mango harvest entry was logged.',
           '',
           `Estate:       ${mangoEstateLabel}`,
@@ -2848,7 +2848,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ])
+        ]))
 
         return json({ success:true, data:{ harvestId:id } })
       }
@@ -2976,7 +2976,7 @@ export async function onRequest(ctx) {
             WHERE txn_id = ?
           `).bind(date, category, amt, paidTo || null, description || null, actor, now(), txnId).run()
 
-          sendAlert(env, `🧾 bgIndia — Villa expense updated: ₹${amt.toLocaleString('en-IN')} (${category})`, [
+          ctx.waitUntil(sendAlert(env, `🧾 bgIndia — Villa expense updated: ₹${amt.toLocaleString('en-IN')} (${category})`, [
             `Source: Owner/Raman > Villa Expenses screen`,
             `Action: Expense entry updated`,
             '',
@@ -2990,7 +2990,7 @@ export async function onRequest(ctx) {
             '',
             `Updated by: ${actor}`,
             `Updated at: ${now()}`,
-          ], await getOwnerAlertEmail(DB, env, vId), DB, vId)
+          ], await getOwnerAlertEmail(DB, env, vId), DB, vId))
 
           return json({ success: true, data: { txnId } })
         }
@@ -3001,7 +3001,7 @@ export async function onRequest(ctx) {
           VALUES (?,?,?,?,?,?,?,?,?,?,?)
         `).bind(id, vId, date, category, amt, paidTo || null, description || null, actor, actor, now(), now()).run()
 
-        sendAlert(env, `🧾 bgIndia — New villa expense: ₹${amt.toLocaleString('en-IN')} (${category})`, [
+        ctx.waitUntil(sendAlert(env, `🧾 bgIndia — New villa expense: ₹${amt.toLocaleString('en-IN')} (${category})`, [
           `Source: Owner/Raman > Villa Expenses screen`,
           `Action: New expense entry logged`,
           '',
@@ -3015,7 +3015,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, vId), DB, vId)
+        ], await getOwnerAlertEmail(DB, env, vId), DB, vId))
 
         return json({ success: true, data: { txnId: id } })
       }
@@ -3052,7 +3052,7 @@ export async function onRequest(ctx) {
         if (txnId) {
           await ActiveDB.prepare(`UPDATE estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, amt, paidTo||null, description||null, actor, now(), txnId).run()
 
-          sendAlert(env, `${emoji} Estate360 — ${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
+          ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — ${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
             `An estate ${typeLabel.toLowerCase()} entry was UPDATED.`,
             '',
             `Estate:      ${estateLabel}`,
@@ -3066,14 +3066,14 @@ export async function onRequest(ctx) {
             '',
             `Updated by: ${actor}`,
             `Updated at: ${now()}`,
-          ])
+          ]))
 
           return json({ success: true, data: { txnId } })
         } else {
           const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
           await ActiveDB.prepare(`INSERT INTO estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, amt, paidTo||null, description||null, actor, actor, now(), now()).run()
 
-          sendAlert(env, `${emoji} Estate360 — New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
+          ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
             `A new estate ${typeLabel.toLowerCase()} entry was logged.`,
             '',
             `Estate:      ${estateLabel}`,
@@ -3087,7 +3087,7 @@ export async function onRequest(ctx) {
             '',
             `Logged by: ${actor}`,
             `Logged at: ${now()}`,
-          ])
+          ]))
 
           return json({ success: true, data: { txnId: id } })
         }
@@ -3143,7 +3143,7 @@ export async function onRequest(ctx) {
         ).bind(id, estate, loggedDate, notes||null, actor, now(), parseInt(durationMins)||0).run()
 
         const irrEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
-        sendAlert(env, `💧 Estate360 — Irrigation logged (${irrEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, `💧 Estate360 — Irrigation logged (${irrEstateLabel})`, [
           'An irrigation entry was logged.',
           '',
           `Estate:    ${irrEstateLabel}`,
@@ -3154,7 +3154,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ])
+        ]))
 
         return json({ success: true, data: { logId: id } })
       }
@@ -3170,7 +3170,7 @@ export async function onRequest(ctx) {
         ).bind(id, estate, loggedDate, notes||null, actor, now(), zoneId, zoneName||null, parseInt(durationMins)||0).run()
 
         const zoneEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
-        sendAlert(env, `💧 Estate360 — Irrigation logged: ${zoneName || zoneId} (${zoneEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, `💧 Estate360 — Irrigation logged: ${zoneName || zoneId} (${zoneEstateLabel})`, [
           'An irrigation zone entry was logged.',
           '',
           `Estate:    ${zoneEstateLabel}`,
@@ -3182,7 +3182,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ])
+        ]))
 
         return json({ success: true, data: { logId: id } })
       }
@@ -3210,7 +3210,7 @@ export async function onRequest(ctx) {
         ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null, parseFloat(quantityKg)||0, parseFloat(cost)||0, doneBy||null, notes||null, actor, now()).run()
 
         const fertEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
-        sendAlert(env, `🌱 Estate360 — Fertilization logged (${fertEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, `🌱 Estate360 — Fertilization logged (${fertEstateLabel})`, [
           'A fertilization entry was logged.',
           '',
           `Estate:        ${fertEstateLabel}`,
@@ -3225,7 +3225,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ])
+        ]))
 
         return json({ success: true, data: { id } })
       }

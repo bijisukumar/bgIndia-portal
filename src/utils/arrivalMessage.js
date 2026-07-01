@@ -18,7 +18,7 @@ const VILLA_FULL_NAME = 'Dvaraka - Luxury Villas of Guruvayur'
 const VILLA_ADDRESS   = 'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680506, India'
 // Host (Biji) WhatsApp — for any change requests only. Guest should NOT contact
 // Raman for date/guest-count/request changes, only Biji can approve those.
-const HOST_WA_NUMBER  = '+1 972.876.101'
+const HOST_WA_NUMBER  = '+1 972.876.5101'
 
 function fmtLong(d) {
   const parsed = parseLocalDate(d)

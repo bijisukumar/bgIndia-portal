@@ -103,7 +103,7 @@ function MenuSection({ section }) {
 }
 
 // ── PENDING REVIEW BLOCK ─────────────────────────────────────────────────
-function PendingReviewBlock() {
+function PendingReviewBlock({ onApproved }) {
   const [pending, setPending] = useState([])
   const [selected, setSelected] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -130,6 +130,7 @@ function PendingReviewBlock() {
       const updated = pending.filter(p => p.stayId !== selected.stayId)
       setPending(updated)
       setSelected(updated[0] || null)
+      onApproved?.()
     } catch (e) {
       showToast('Failed: ' + e.message, 'error')
     } finally { setSaving(false) }
@@ -649,17 +650,15 @@ function ReviewChaseBlock() {
   )
 }
 
-function NeedsAttentionBlock() {
+function NeedsAttentionBlock({ refreshKey }) {
   const [items, setItems] = useState([])
   const navigate = useNavigate()
 
   useEffect(() => {
     api.getPendingReviewStays().then(data => {
-      if (Array.isArray(data) && data.length > 0) {
-        setItems(data)
-      }
+      setItems(Array.isArray(data) ? data : [])
     }).catch(() => {})
-  }, [])
+  }, [refreshKey])
 
   if (items.length === 0) return null
 
@@ -777,6 +776,11 @@ function DuplicateBookingsBlock() {
 export default function OwnerHome() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  // Bumped whenever PendingReviewBlock approves a guest, so
+  // NeedsAttentionBlock (a separate component hitting the same
+  // getPendingReviewStays endpoint) re-fetches instead of staying stale
+  // until a manual page reload.
+  const [pendingRefreshKey, setPendingRefreshKey] = useState(0)
 
   return (
     <div className="screen">
@@ -794,13 +798,13 @@ export default function OwnerHome() {
 
       <div className="screen-body">
         {/* Needs Attention — urgent items at top of page */}
-        <NeedsAttentionBlock />
+        <NeedsAttentionBlock refreshKey={pendingRefreshKey} />
 
         {/* Duplicate Bookings — channel sync health check */}
         <DuplicateBookingsBlock />
 
         {/* Pending Review — provisional bookings awaiting approval */}
-        <PendingReviewBlock />
+        <PendingReviewBlock onApproved={() => setPendingRefreshKey(k => k + 1)} />
 
         {/* Review Chase — past-checkout stays with no review yet */}
         <ReviewChaseBlock />

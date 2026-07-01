@@ -271,6 +271,8 @@ export async function onRequest(ctx) {
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest',
     'getRubberHarvests',  'saveRubberHarvest',
+    'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction',
+    'getManagerSettlements', 'saveManagerSettlement', 'deleteManagerSettlement',
     'getEstateTransactions', 'saveEstateTransaction', 'deleteEstateTransaction',
     'getEstateDashboard',
     'getManagerQuickInfo',   
@@ -2861,6 +2863,172 @@ export async function onRequest(ctx) {
         ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
 
         return json({ success: true, data: { harvestId: id } })
+      }
+
+      // ── DAILY RUBBER PRODUCTION — bulk upsert a week of counts ──
+      if (action === 'saveRubberProduction') {
+        const estateId = body.estate || body.estateId || 'pavutumuri'
+        // Accept either the multi-worker flat shape:
+        //   rows: [{ workerName, date, treeCount, sheetCount, ottupalCount, notes }]
+        // or the legacy single-worker shape: { workerName, days:[{date,...}] }
+        let entries = []
+        if (Array.isArray(body.rows)) {
+          entries = body.rows.map(r => ({
+            workerName: (r.workerName || '').trim(),
+            date: r.date,
+            treeCount: parseInt(r.treeCount) || 0,
+            sheetCount: parseInt(r.sheetCount) || 0,
+            ottupalCount: parseInt(r.ottupalCount) || 0,
+            notes: r.notes || body.notes || null,
+            force: !!r.force,
+          }))
+        } else {
+          const workerName = (body.workerName || '').trim()
+          const days = Array.isArray(body.days) ? body.days : []
+          entries = days.map(d => ({
+            workerName, date: d.date,
+            treeCount: parseInt(d.treeCount) || 0,
+            sheetCount: parseInt(d.sheetCount) || 0,
+            ottupalCount: parseInt(d.ottupalCount) || 0,
+            notes: d.notes || body.notes || null,
+            force: !!d.force,
+          }))
+        }
+        if (!entries.length) return err('no rows provided', 400)
+
+        let saved = 0, sumTree = 0, sumSheet = 0, sumOttupal = 0
+        const workerSet = new Set()
+        for (const e of entries) {
+          if (!e.workerName || !e.date) continue
+          if (e.treeCount === 0 && e.sheetCount === 0 && e.ottupalCount === 0 && !e.force) continue
+          const id = genId('RP')
+          await ActiveDB.prepare(`
+            INSERT INTO rubber_production
+              (prod_id, estate_id, worker_name, prod_date, tree_count, sheet_count, ottupal_count, notes, created_by, created_at, updated_by, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(estate_id, worker_name, prod_date) DO UPDATE SET
+              tree_count    = excluded.tree_count,
+              sheet_count   = excluded.sheet_count,
+              ottupal_count = excluded.ottupal_count,
+              notes         = excluded.notes,
+              updated_by    = excluded.updated_by,
+              updated_at    = excluded.updated_at
+          `).bind(id, estateId, e.workerName, e.date, e.treeCount, e.sheetCount, e.ottupalCount, e.notes, actor, now(), actor, now()).run()
+          saved++; sumTree += e.treeCount; sumSheet += e.sheetCount; sumOttupal += e.ottupalCount
+          workerSet.add(e.workerName)
+        }
+
+        const prodEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
+        ctx.waitUntil(sendAlert(env, `🌳 Estate360 — Rubber production: ${sumSheet} sheets, ${sumTree} trees (${prodEstateLabel})`, [
+          'Source: Estate360 > Rubber Tracker (daily production)',
+          `Action: Saved ${saved} worker-day record(s)`,
+          '',
+          `Estate:        ${prodEstateLabel}`,
+          `Workers:       ${[...workerSet].join(', ') || '—'}`,
+          `Week starting: ${body.weekStart || entries[0]?.date || '—'}`,
+          `Total trees:   ${sumTree}`,
+          `Total sheets:  ${sumSheet}`,
+          `Total ottupal: ${sumOttupal}`,
+          `Records saved: ${saved}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
+
+        return json({ success: true, data: { saved, sumTree, sumSheet, sumOttupal } })
+      }
+
+      if (action === 'getRubberProduction') {
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        const month    = url.searchParams.get('month')      // 'YYYY-MM' optional
+        const weekStart= url.searchParams.get('weekStart')  // 'YYYY-MM-DD' optional
+        let query = `SELECT * FROM rubber_production WHERE estate_id = ?`
+        const binds = [estateId]
+        if (weekStart) {
+          // week window: weekStart .. weekStart+6
+          const ws = new Date(weekStart + 'T00:00:00')
+          const we = new Date(ws); we.setDate(we.getDate() + 6)
+          query += ` AND prod_date BETWEEN ? AND ?`
+          binds.push(weekStart, we.toISOString().slice(0, 10))
+        } else if (month) {
+          query += ` AND prod_date LIKE ?`; binds.push(`${month}%`)
+        }
+        query += ` ORDER BY prod_date DESC LIMIT 400`
+        const { results } = await ActiveDB.prepare(query).bind(...binds).all()
+        const { results: workerRows } = await ActiveDB.prepare(
+          `SELECT DISTINCT worker_name FROM rubber_production WHERE estate_id = ? ORDER BY worker_name`
+        ).bind(estateId).all()
+        const totalTrees   = results.reduce((s, r) => s + (r.tree_count    || 0), 0)
+        const totalSheets  = results.reduce((s, r) => s + (r.sheet_count   || 0), 0)
+        const totalOttupal = results.reduce((s, r) => s + (r.ottupal_count || 0), 0)
+        return json({ success: true, data: {
+          rows: results, totalTrees, totalSheets, totalOttupal,
+          workers: workerRows.map(w => w.worker_name).filter(Boolean),
+        }})
+      }
+
+      if (action === 'deleteRubberProduction') {
+        const { prodId } = body
+        if (!prodId) return err('prodId required', 400)
+        await ActiveDB.prepare(`DELETE FROM rubber_production WHERE prod_id = ?`).bind(prodId).run()
+        return json({ success: true })
+      }
+
+      // ── MANAGER SETTLEMENTS — Raman → Madhavan payments ──
+      if (action === 'saveManagerSettlement') {
+        const estateId    = body.estate || body.estateId || 'pavutumuri'
+        const managerName = (body.managerName || 'Madhavan').trim()
+        const payerName   = (body.payerName || 'Raman').trim()
+        const paymentDate = body.paymentDate
+        const amount      = parseFloat(body.amount) || 0
+        if (!paymentDate || !amount) return err('paymentDate and amount required', 400)
+        const id = genId('MS')
+        await ActiveDB.prepare(`
+          INSERT INTO manager_settlements
+            (settlement_id, estate_id, manager_name, payer_name, payment_date, amount, method, note, created_by, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
+        `).bind(id, estateId, managerName, payerName, paymentDate, amount, body.method || 'cash', body.note || null, actor, now()).run()
+
+        const settleLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
+        ctx.waitUntil(sendAlert(env, `💸 Estate360 — ${payerName} paid ${managerName} ₹${amount.toLocaleString('en-IN')} (${settleLabel})`, [
+          'Source: Estate360 > Manager Settlement',
+          `Action: ${payerName} → ${managerName} payment recorded`,
+          '',
+          `Estate:       ${settleLabel}`,
+          `Payment date: ${paymentDate}`,
+          `Amount:       ₹${amount.toLocaleString('en-IN')}`,
+          `Method:       ${body.method || 'cash'}`,
+          `Note:         ${body.note || '—'}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
+
+        return json({ success: true, data: { settlementId: id } })
+      }
+
+      if (action === 'getManagerSettlements') {
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        const { results: payments } = await ActiveDB.prepare(
+          `SELECT * FROM manager_settlements WHERE estate_id = ? ORDER BY payment_date DESC, created_at DESC LIMIT 500`
+        ).bind(estateId).all()
+        // Balance owed to the manager = total estate expenses − total paid to manager.
+        const expRow = await ActiveDB.prepare(
+          `SELECT COALESCE(SUM(amount),0) AS total FROM estate_transactions WHERE estate = ? AND type = 'expense'`
+        ).bind(estateId).first()
+        const totalExpenses = expRow?.total || 0
+        const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0)
+        return json({ success: true, data: {
+          payments, totalExpenses, totalPaid,
+          balance: totalExpenses - totalPaid,
+        }})
+      }
+
+      if (action === 'deleteManagerSettlement') {
+        const { settlementId } = body
+        if (!settlementId) return err('settlementId required', 400)
+        await ActiveDB.prepare(`DELETE FROM manager_settlements WHERE settlement_id = ?`).bind(settlementId).run()
+        return json({ success: true })
       }
 
       // MANGO HARVEST — Mirroring exact production db layout indices 0 to 17

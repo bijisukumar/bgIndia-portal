@@ -16,6 +16,7 @@ import CoconutDashboard from '../../screens/estates/CoconutDashboard'
 import PavutumuriHub   from '../../screens/estates/PavutumuriHub'
 import RubberTracker   from '../../screens/estates/RubberTracker'
 import RubberDashboard from '../../screens/estates/RubberDashboard'
+import ManagerSettlement from '../../screens/estates/ManagerSettlement'
 import EstateLedger    from '../../screens/estates/EstateLedger'
 import IrrigationLog   from '../../screens/estates/IrrigationLog'
 import MangoHarvest    from '../../screens/estates/MangoHarvest'
@@ -39,6 +40,7 @@ function ProtectedRoutes() {
         <Route path="/owner/pavutumuri"       element={<PavutumuriHub />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
         <Route path="/pavutumuri/dashboard"   element={<RubberDashboard />} />
+        <Route path="/pavutumuri/settlement"  element={<ManagerSettlement estate="pavutumuri" />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
       </>}

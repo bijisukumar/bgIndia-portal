@@ -4,10 +4,22 @@ import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
 
 const TODAY = localTodayStr()
+
+// Pollachi (coconut) — original lists
 const INCOME_CATS  = ['Mango Harvest Income','Lease income','Govt subsidy','Other income']
 const EXPENSE_CATS = ['Labour wages','Salary','Fertilizer','Pesticide','Tractor / Land tiling',
   'JCB work','Fencing','Irrigation','Water pump','Electricity bill','Land tax','Transport',
   'Housing expenses','Soil evaluation & testing','Tree / plant purchase','Maintenance & repairs','Other expense']
+
+// Pavutumuri (rubber) — matches the estate's actual income/sales and expense lines
+const PAVUTUMURI_INCOME_CATS  = ['Rubber Sheet','Ottupal','Coconut','Lease income','Govt subsidy','Other income']
+const PAVUTUMURI_EXPENSE_CATS = ['Rubber Labour','Formic Acid','Fertilizer','Tree waterproofing',
+  'Smoke house repair','Coconut Labour','House maintenance','Transport','Land tax','Other expense']
+
+function catsFor(estate, type) {
+  if (estate === 'pavutumuri') return type === 'income' ? PAVUTUMURI_INCOME_CATS : PAVUTUMURI_EXPENSE_CATS
+  return type === 'income' ? INCOME_CATS : EXPENSE_CATS
+}
 
 function fmt(n) { return isNaN(n)||n==='' ? '—' : `₹${Number(n).toLocaleString('en-IN')}` }
 
@@ -30,7 +42,7 @@ export default function EstateLedger({ estate }) {
 
   const set = (k, v) => setForm(f => ({...f, [k]: v}))
   const showToast = (msg, t='success') => { setToast({msg,t}); setTimeout(()=>setToast(null), 3000) }
-  const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS
+  const cats = catsFor(estate, type)
   const estateLabel = estate === 'pollachi' ? 'Pollachi Estate' : 'Pavutumuri Estate'
 
   useEffect(() => { if (tab === 'history') loadTxns() }, [tab, estate])

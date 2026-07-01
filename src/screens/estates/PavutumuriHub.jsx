@@ -2,9 +2,10 @@ import { useNavigate } from 'react-router-dom'
 export default function PavutumuriHub() {
   const navigate=useNavigate()
   const rows=[
-    {icon:'🌿',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Income / expense',sub:'Monthly ledger',action:()=>navigate('/pavutumuri/ledger')},
-    {icon:'🌳',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Rubber tracker',sub:'Harvest · tapping log',action:()=>navigate('/pavutumuri/rubber')},
-    {icon:'📊',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Dashboard',sub:'Harvest history · income · P&L',action:()=>navigate('/pavutumuri/dashboard')},
+    {icon:'🌳',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Rubber tracker',sub:'Daily production · sheet & ottupal',action:()=>navigate('/pavutumuri/rubber')},
+    {icon:'🌿',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Income / expense',sub:'Sales · expenses · monthly ledger',action:()=>navigate('/pavutumuri/ledger')},
+    {icon:'🤝',bg:'rgba(200,144,58,0.08)',arrow:'#C8903A',title:'Manager settlement',sub:'Madhavan balance · part payments',action:()=>navigate('/pavutumuri/settlement')},
+    {icon:'📊',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Dashboard',sub:'Production · income · P&L',action:()=>navigate('/pavutumuri/dashboard')},
   ]
   return (
     <div className="screen">

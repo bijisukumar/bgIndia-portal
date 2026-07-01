@@ -1,113 +1,183 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
-import { localTodayStr } from '../../utils/dates'
+import { localTodayStr, parseLocalDate } from '../../utils/dates'
 
-const TODAY=localTodayStr()
-function fmt(n){return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}`}
+function mondayOf(dateStr) {
+  const d = parseLocalDate(dateStr) || new Date()
+  const day = (d.getDay() + 6) % 7
+  d.setDate(d.getDate() - day)
+  return d.toISOString().slice(0, 10)
+}
+function addDays(dateStr, n) {
+  const d = parseLocalDate(dateStr); d.setDate(d.getDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+function dayLabel(dateStr) {
+  const d = parseLocalDate(dateStr)
+  return d ? d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' }) : dateStr
+}
+function emptyDays(weekStart) {
+  return Array.from({ length: 7 }, (_, i) => ({ date: addDays(weekStart, i), treeCount: '', sheetCount: '', ottupalCount: '' }))
+}
+function wkTotals(w) {
+  return w.days.reduce((a, c) => ({
+    tree: a.tree + (parseInt(c.treeCount) || 0),
+    sheet: a.sheet + (parseInt(c.sheetCount) || 0),
+    ottupal: a.ottupal + (parseInt(c.ottupalCount) || 0),
+  }), { tree: 0, sheet: 0, ottupal: 0 })
+}
 
 export default function RubberTracker() {
-  const navigate=useNavigate()
-  const [saving,setSaving]=useState(false)
-  const [toast,setToast]=useState(null)
-  const [form,setForm]=useState({
-    tappingDate:TODAY,paymentDate:'',tapperName:'',
-    latexKg:'',pricePerKg:'',rejectionKg:'0',rejectionRevenue:'0',
-    tapperWages:'',transport:'',otherCharges:'',notes:''
-  })
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}))
-  const showToast=(msg,type='success')=>{setToast({msg,type});setTimeout(()=>setToast(null),3000)}
+  const navigate = useNavigate()
+  const [weekStart, setWeekStart] = useState(mondayOf(localTodayStr()))
+  const [workers, setWorkers] = useState([{ name: 'Satishan', days: emptyDays(mondayOf(localTodayStr())) }])
+  const [active, setActive] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [toast, setToast] = useState(null)
+  const rosterRef = useRef(['Satishan'])
 
-  const latexKg=parseFloat(form.latexKg)||0
-  const pricePerKg=parseFloat(form.pricePerKg)||0
-  const rejKg=parseFloat(form.rejectionKg)||0
-  const netKg=Math.max(0,latexKg-rejKg)
-  const totalAmount=netKg*pricePerKg
-  const rejRevenue=parseFloat(form.rejectionRevenue)||0
-  const tapperWages=parseFloat(form.tapperWages)||0
-  const transport=parseFloat(form.transport)||0
-  const otherCharges=parseFloat(form.otherCharges)||0
-  const totalExpenses=tapperWages+transport+otherCharges
-  const netIncome=totalAmount+rejRevenue-totalExpenses
+  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+  useEffect(() => { rosterRef.current = workers.map(w => w.name) }, [workers])
 
-  const handleSave=async()=>{
-    if(!form.tappingDate||!form.latexKg||!form.pricePerKg){
-      showToast('Fill tapping date, latex kg and price','error');return
-    }
+  function buildWorkers(weekStart, rows) {
+    const dbNames = [...new Set(rows.map(r => r.worker_name))]
+    let names = [...new Set([...rosterRef.current.filter(Boolean), ...dbNames])]
+    if (!names.length) names = ['Satishan']
+    return names.map(name => ({
+      name,
+      days: emptyDays(weekStart).map(cell => {
+        const hit = rows.find(r => r.prod_date === cell.date && r.worker_name === name)
+        return hit
+          ? { ...cell, treeCount: String(hit.tree_count || ''), sheetCount: String(hit.sheet_count || ''), ottupalCount: String(hit.ottupal_count || '') }
+          : cell
+      }),
+    }))
+  }
+
+  function fetchWeek(ws) {
+    setLoading(true)
+    return api.getRubberProduction({ weekStart: ws })
+      .then(d => { setWorkers(buildWorkers(ws, d?.rows || [])); setActive(0) })
+      .catch(() => setWorkers(buildWorkers(ws, [])))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { let alive = true; fetchWeek(weekStart); return () => { alive = false } }, [weekStart]) // eslint-disable-line
+
+  const setName = (i, val) => setWorkers(ws => ws.map((w, idx) => idx === i ? { ...w, name: val } : w))
+  const setCell = (di, key, val) => setWorkers(ws => ws.map((w, idx) => idx === active ? { ...w, days: w.days.map((c, j) => j === di ? { ...c, [key]: val } : c) } : w))
+  const addWorker = () => { setWorkers(ws => { setActive(ws.length); return [...ws, { name: '', days: emptyDays(weekStart) }] }) }
+  const removeWorker = (i) => { if (workers.length <= 1) return; setWorkers(ws => ws.filter((_, idx) => idx !== i)); setActive(0) }
+  const shiftWeek = (n) => setWeekStart(ws => addDays(ws, n * 7))
+
+  const cur = workers[active] || workers[0]
+  const curT = cur ? wkTotals(cur) : { tree: 0, sheet: 0, ottupal: 0 }
+  const grand = workers.reduce((a, w) => { const t = wkTotals(w); return { tree: a.tree + t.tree, sheet: a.sheet + t.sheet, ottupal: a.ottupal + t.ottupal } }, { tree: 0, sheet: 0, ottupal: 0 })
+
+  async function handleSave() {
+    const rows = []
+    workers.forEach(w => {
+      const name = (w.name || '').trim(); if (!name) return
+      w.days.forEach(c => {
+        const t = parseInt(c.treeCount) || 0, s = parseInt(c.sheetCount) || 0, o = parseInt(c.ottupalCount) || 0
+        if (t || s || o) rows.push({ workerName: name, date: c.date, treeCount: t, sheetCount: s, ottupalCount: o })
+      })
+    })
+    if (!rows.length) { showToast('Enter at least one entry', 'error'); return }
     setSaving(true)
     try {
-      await api.saveRubberHarvest({...form,netKg,totalAmount,totalExpenses,netIncome,estate:'pavutumuri'})
-      showToast('Harvest record saved ✓')
-      setTimeout(()=>navigate(-1),1500)
-    } catch { showToast('Failed to save','error') }
+      const r = await api.saveRubberProduction({ estate: 'pavutumuri', weekStart, rows })
+      showToast(`Saved ${r?.saved ?? rows.length} record(s) ✓`)
+      fetchWeek(weekStart)
+    } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
   }
+
+  const cellInput = { width: '100%', padding: '9px 4px', textAlign: 'center', borderRadius: '8px', border: '1px solid var(--border-dim)', background: 'var(--dark-input)', color: '#EDF2F7', fontSize: '0.9rem', fontFamily: "'DM Sans',sans-serif" }
+  const isToday = (d) => d === localTodayStr()
 
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
-        <div><div className="topbar-title">Rubber tracker</div><div className="topbar-sub">PAVUTUMURI ESTATE · HARVEST LOG</div></div>
+        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <div><div className="topbar-title">Rubber tracker</div><div className="topbar-sub">PAVUTUMURI ESTATE · DAILY PRODUCTION</div></div>
       </div>
+
       <div className="screen-body">
-        <div className="card-section-label">TAPPING DETAILS</div>
+        <div className="card-section-label">WEEK</div>
         <div className="card">
-          <div className="grid-2">
-            <div className="field"><label className="field-label">Tapping date</label>
-              <input className="field-input gold" type="date" value={form.tappingDate} onChange={e=>set('tappingDate',e.target.value)}/></div>
-            <div className="field"><label className="field-label">Payment date</label>
-              <input className="field-input gold" type="date" value={form.paymentDate} onChange={e=>set('paymentDate',e.target.value)}/></div>
-          </div>
-          <div className="field"><label className="field-label">Tapper name</label>
-            <input className="field-input" placeholder="e.g. Rajan" value={form.tapperName} onChange={e=>set('tapperName',e.target.value)}/></div>
-          <div className="grid-2">
-            <div className="field"><label className="field-label">Latex collected (kg)</label>
-              <input className="field-input gold" type="number" placeholder="0" value={form.latexKg} onChange={e=>set('latexKg',e.target.value)}/></div>
-            <div className="field"><label className="field-label">Rejection (kg)</label>
-              <input className="field-input" type="number" placeholder="0" style={{color:'#EF9A9A'}} value={form.rejectionKg} onChange={e=>set('rejectionKg',e.target.value)}/></div>
-            <div className="field"><label className="field-label">Net kg (billable)</label>
-              <div className="field-input" style={{color:'#85B7EB',fontWeight:'600'}}>{netKg.toLocaleString('en-IN')}</div></div>
-            <div className="field"><label className="field-label">Price / kg (₹)</label>
-              <input className="field-input gold" type="number" placeholder="0" value={form.pricePerKg} onChange={e=>set('pricePerKg',e.target.value)}/></div>
-            <div className="field"><label className="field-label">Total amount</label>
-              <div className="field-input" style={{color:'var(--green)',fontWeight:'700'}}>{fmt(totalAmount)}</div></div>
-            <div className="field"><label className="field-label">Rejection revenue (₹)</label>
-              <input className="field-input" type="number" placeholder="0" style={{color:'var(--green)'}} value={form.rejectionRevenue} onChange={e=>set('rejectionRevenue',e.target.value)}/></div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label className="field-label">Week starting (Mon)</label>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button className="btn" style={{ padding: '9px 14px', flex: '0 0 auto', background: 'var(--dark-input)', color: '#9AA5B4', border: '1px solid var(--border-dim)' }} onClick={() => shiftWeek(-1)}>‹</button>
+              <input className="field-input gold" type="date" style={{ flex: 1 }} value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
+              <button className="btn" style={{ padding: '9px 14px', flex: '0 0 auto', background: 'var(--dark-input)', color: '#9AA5B4', border: '1px solid var(--border-dim)' }} onClick={() => shiftWeek(1)}>›</button>
+            </div>
           </div>
         </div>
 
-        <div className="card-section-label">EXPENSES</div>
+        <div className="card-section-label">TAPPERS {loading && '· loading…'}</div>
+        {/* Worker pills */}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+          {workers.map((w, i) => {
+            const t = wkTotals(w)
+            return (
+              <button key={i} onClick={() => setActive(i)} style={{
+                padding: '6px 12px', borderRadius: '16px', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600,
+                border: `1px solid ${active === i ? '#0F6E56' : 'rgba(255,255,255,0.12)'}`,
+                background: active === i ? 'rgba(15,110,86,0.18)' : 'transparent',
+                color: active === i ? '#5FD0AE' : '#9AA5B4',
+              }}>{w.name || `Tapper ${i + 1}`}{(t.sheet || t.tree) ? ` · ${t.sheet}s/${t.tree}t` : ''}</button>
+            )
+          })}
+          <button onClick={addWorker} style={{ padding: '6px 12px', borderRadius: '16px', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600, border: '1px dashed rgba(200,144,58,0.5)', background: 'transparent', color: '#C8903A' }}>+ Tapper</button>
+        </div>
+
+        {/* Active worker name editor */}
         <div className="card">
-          <div className="grid-2">
-            <div className="field"><label className="field-label">Tapper wages (₹)</label>
-              <input className="field-input" type="number" placeholder="0" value={form.tapperWages} onChange={e=>set('tapperWages',e.target.value)}/></div>
-            <div className="field"><label className="field-label">Transportation (₹)</label>
-              <input className="field-input" type="number" placeholder="0" value={form.transport} onChange={e=>set('transport',e.target.value)}/></div>
-            <div className="field"><label className="field-label">Other charges (₹)</label>
-              <input className="field-input" type="number" placeholder="0" value={form.otherCharges} onChange={e=>set('otherCharges',e.target.value)}/></div>
+          <div className="field" style={{ marginBottom: '10px' }}>
+            <label className="field-label">Tapper name</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input className="field-input" style={{ flex: 1 }} placeholder="e.g. Satishan" value={cur?.name || ''} onChange={e => setName(active, e.target.value)} />
+              {workers.length > 1 && (
+                <button onClick={() => removeWorker(active)} style={{ padding: '0 14px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#EF4444', cursor: 'pointer' }}>Remove</button>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr 1fr 1fr', gap: '6px', marginBottom: '8px', fontSize: '0.62rem', color: '#5C7080', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+            <div>Day</div><div style={{ textAlign: 'center' }}>Trees</div><div style={{ textAlign: 'center' }}>Sheets</div><div style={{ textAlign: 'center' }}>Ottupal</div>
+          </div>
+          {(cur?.days || []).map((c, di) => (
+            <div key={c.date} style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr 1fr 1fr', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
+              <div style={{ fontSize: '0.75rem', color: isToday(c.date) ? '#C8903A' : '#9AA5B4', fontWeight: isToday(c.date) ? 700 : 500 }}>{dayLabel(c.date)}</div>
+              <input style={cellInput} type="number" inputMode="numeric" placeholder="0" value={c.treeCount} onChange={e => setCell(di, 'treeCount', e.target.value)} />
+              <input style={cellInput} type="number" inputMode="numeric" placeholder="0" value={c.sheetCount} onChange={e => setCell(di, 'sheetCount', e.target.value)} />
+              <input style={cellInput} type="number" inputMode="numeric" placeholder="0" value={c.ottupalCount} onChange={e => setCell(di, 'ottupalCount', e.target.value)} />
+            </div>
+          ))}
+          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.76rem', color: '#9AA5B4', display: 'flex', justifyContent: 'space-between' }}>
+            <span>{cur?.name || 'This tapper'} · week</span>
+            <span style={{ color: '#EDF2F7', fontWeight: 600 }}>{curT.tree} trees · {curT.sheet} sheets · {curT.ottupal} ottupal</span>
           </div>
         </div>
 
-        <div className="card-section-label">NET HARVEST INCOME</div>
         <div className="net-box">
-          <div className="net-row"><span className="net-label">Total amount</span><span className="net-val pos">{fmt(totalAmount)}</span></div>
-          {rejRevenue>0&&<div className="net-row"><span className="net-label">Rejection revenue</span><span className="net-val pos">+{fmt(rejRevenue)}</span></div>}
-          {tapperWages>0&&<div className="net-row"><span className="net-label">Tapper wages</span><span className="net-val neg">−{fmt(tapperWages)}</span></div>}
-          {transport>0&&<div className="net-row"><span className="net-label">Transportation</span><span className="net-val neg">−{fmt(transport)}</span></div>}
-          {otherCharges>0&&<div className="net-row"><span className="net-label">Other charges</span><span className="net-val neg">−{fmt(otherCharges)}</span></div>}
-          <div className="net-divider"/>
+          <div className="net-row"><span className="net-label">All tappers · trees</span><span className="net-val">{grand.tree.toLocaleString('en-IN')}</span></div>
+          <div className="net-row"><span className="net-label">All tappers · rubber sheets</span><span className="net-val pos">{grand.sheet.toLocaleString('en-IN')}</span></div>
+          <div className="net-divider" />
           <div className="net-row">
-            <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>Net income</span>
-            <span className={`net-val big${netIncome<0?' neg':''}`}>{fmt(netIncome)}</span>
+            <span style={{ color: '#EDF2F7', fontWeight: 600, fontSize: '1rem' }}>All tappers · ottupal</span>
+            <span className="net-val big pos">{grand.ottupal.toLocaleString('en-IN')}</span>
           </div>
         </div>
 
-        <button className="btn btn-teal" onClick={handleSave} disabled={saving}>
-          {saving?'Saving...':'Save harvest record →'}
-        </button>
-        <p className="btn-email-note">📧 Email notification sent to owner on save</p>
+        <button className="btn btn-teal" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save week (all tappers) →'}</button>
+        <p className="btn-email-note">📧 Sales &amp; wages are recorded under Income / Expense · owner emailed on save</p>
       </div>
-      {toast&&<div className={`toast ${toast.type}`}>{toast.msg}</div>}
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   )
 }

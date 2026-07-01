@@ -44,6 +44,7 @@ import MangoHarvest   from '../../screens/estates/MangoHarvest'
 import PavutumuriHub  from '../../screens/estates/PavutumuriHub'
 import RubberTracker  from '../../screens/estates/RubberTracker'
 import RubberDashboard from '../../screens/estates/RubberDashboard'
+import ManagerSettlement from '../../screens/estates/ManagerSettlement'
 import EstateLedger   from '../../screens/estates/EstateLedger'
 
 // Infra / ops screens
@@ -92,6 +93,7 @@ function ProtectedRoutes() {
         <Route path="/owner/pavutumuri"       element={<PavutumuriHub />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
         <Route path="/pavutumuri/dashboard"   element={<RubberDashboard />} />
+        <Route path="/pavutumuri/settlement"  element={<ManagerSettlement estate="pavutumuri" />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
         {/* Infra */}
         <Route path="/debug"                  element={<DebugPanel />} />
@@ -120,6 +122,7 @@ function ProtectedRoutes() {
         <Route path="/raman/expenses"         element={<VillaExpenses />} />
         <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
         <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
+        <Route path="/pavutumuri/settlement"  element={<ManagerSettlement estate="pavutumuri" />} />
         <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
       </>}
 

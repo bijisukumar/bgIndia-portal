@@ -330,8 +330,9 @@ export default function CompleteBooking() {
       return
     }
     try {
-      await api.linkBookedBy({ stayId: stayToUpdate, guestId: contactGuest.guest_id })
-      showToast('Linked ✓')
+      const res = await api.linkBookedBy({ stayId: stayToUpdate, guestId: contactGuest.guest_id })
+      const otherName = stays.find(s => s.stay_id === stayToUpdate)?.guest_name || 'the other guest'
+      showToast(res?.backfilledGuestId ? `Linked ✓ — ${otherName} added to guest history for next time` : 'Linked ✓')
       exitMergeMode()
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }

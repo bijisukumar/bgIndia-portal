@@ -2978,7 +2978,39 @@ export async function onRequest(ctx) {
         await DB.prepare(
           `UPDATE stays SET booked_by_guest_id = ?, booked_by_name = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
         ).bind(guestId || null, guestName, actor, now(), stayId).run()
-        return json({ success: true, data: { stayId, guestId: guestId || null, guestName } })
+
+        // Linking "who's paying" (e.g. a B2B agency like Detrip) is
+        // separate from tracking the person who actually stayed (e.g.
+        // Akhilna). Without this, someone who arrived via a linked/agency
+        // booking would have zero footprint in `guests` and could never
+        // be recognized as a repeat guest on a future direct booking —
+        // backfill a guests row for THIS stay's own guest here, matched
+        // by phone/email exactly like saveEnquiry does, so that gap
+        // doesn't silently persist.
+        let backfilledGuestId = null
+        try {
+          const stay = await DB.prepare(`SELECT guest_name, guest_phone, guest_email FROM stays WHERE stay_id = ?`).bind(stayId).first()
+          if (stay?.guest_name) {
+            const normPhone = (stay.guest_phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+            const normEmail = (stay.guest_email || '').trim().toLowerCase()
+            if (normPhone || normEmail) {
+              const existing = await DB.prepare(
+                `SELECT guest_id FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+              ).bind(normPhone, normEmail).first()
+              if (existing) {
+                backfilledGuestId = existing.guest_id
+              } else {
+                backfilledGuestId = genId('GST')
+                await DB.prepare(`
+                  INSERT INTO guests (guest_id, name, phone, email, total_stays, last_seen_at, created_by, updated_by)
+                  VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                `).bind(backfilledGuestId, stay.guest_name, normPhone, normEmail, now(), actor, actor).run()
+              }
+            }
+          }
+        } catch (e) { console.error('linkBookedBy guest backfill failed:', e?.message || e) }
+
+        return json({ success: true, data: { stayId, guestId: guestId || null, guestName, backfilledGuestId } })
       }
 
       if (action === 'closeStayWithReview') {

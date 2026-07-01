@@ -54,6 +54,10 @@ async function verifyJwt(token, secret) {
 }
 
 // ── EMAIL ALERT via Resend ───────────────────────────────────
+// Redeploy trigger: RESEND_API_KEY was re-added via the Cloudflare
+// dashboard UI (not CLI) on 2026-07-01 after the CLI-set version wasn't
+// reaching the running Function's env — forcing a fresh deploy to test
+// whether the dashboard-set value is picked up.
 // Previously used MailChannels' free anonymous API (api.mailchannels.net) —
 // that endpoint was permanently shut down 2024-08-31 and every failure this
 // whole time was actually that dead endpoint, not a DNS/domain-lockdown

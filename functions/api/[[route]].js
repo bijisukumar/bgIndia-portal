@@ -53,7 +53,13 @@ async function verifyJwt(token, secret) {
   } catch { return null }
 }
 
-// ── EMAIL ALERT via MailChannels (free on Cloudflare Workers) ──
+// ── EMAIL ALERT via Resend ───────────────────────────────────
+// Previously used MailChannels' free anonymous API (api.mailchannels.net) —
+// that endpoint was permanently shut down 2024-08-31 and every failure this
+// whole time was actually that dead endpoint, not a DNS/domain-lockdown
+// issue. Switched to Resend (resend.com): requires a RESEND_API_KEY secret
+// (wrangler pages secret put RESEND_API_KEY) and a verified sending domain
+// in the Resend dashboard.
 // toEmail overrides the recipient (used for per-villa OwnerEmailAlert —
 // see getOwnerAlertEmail below); falls back to the env-level OWNER_EMAIL
 // secret, then to a hardcoded last-resort address.
@@ -64,25 +70,28 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
-    const body = {
-      personalizations: [{ to: [{ email: recipient }] }],
-      from: { email: 'alerts@luxuryvillasofguruvayur.com', name: 'bgIndia Security' },
-      subject,
-      content: [{ type: 'text/plain', value: lines.join('\n') }],
+    if (!env.RESEND_API_KEY) {
+      throw new Error('RESEND_API_KEY not configured — run: wrangler pages secret put RESEND_API_KEY')
     }
-    const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
+    const body = {
+      from: 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
+      to: [recipient],
+      subject,
+      text: lines.join('\n'),
+    }
+    const res = await fetch('https://api.resend.com/emails', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+      },
+      body: JSON.stringify(body),
     })
     ok = res.ok
     statusCode = res.status
     if (!res.ok) {
-      // MailChannels returns 401/403 if the domain's Domain Lockdown TXT
-      // record (_mailchannels.<domain>) isn't set up for this Worker — this
-      // was previously swallowed completely with no trace anywhere. Now at
-      // least visible in `wrangler tail` / the Cloudflare dashboard logs
-      // and in alert_log.
+      // Common causes: unverified sending domain in Resend, bad/expired
+      // API key, or recipient on Resend's testing-mode allowlist only.
       detail = await res.text().catch(() => '')
       console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
     }

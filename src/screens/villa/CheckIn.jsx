@@ -17,6 +17,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
+import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 
 function formatDate(d) {
   if (!d) return '—'
@@ -281,6 +282,27 @@ export default function CheckIn() {
                         </div>
                       )}
                     </div>
+
+                    {/* Directions & arrival steps — send a day or two before arrival */}
+                    {selected.guest_phone ? (
+                      <a href={buildArrivalWaLink(selected)} target="_blank" rel="noreferrer"
+                        style={{
+                          display:'block', padding:'12px', borderRadius:'10px', textAlign:'center',
+                          background:'rgba(37,211,102,0.1)', border:'1px solid rgba(37,211,102,0.3)',
+                          color:'#25D366', fontWeight:'700', fontSize:'0.85rem',
+                          textDecoration:'none', marginBottom:'12px',
+                        }}>
+                        📍 Send directions & arrival steps to guest
+                      </a>
+                    ) : (
+                      <div style={{
+                        padding:'10px 14px', borderRadius:'10px', marginBottom:'12px',
+                        background:'rgba(37,211,102,0.05)', border:'1px dashed rgba(37,211,102,0.2)',
+                        color:'rgba(37,211,102,0.45)', fontSize:'0.78rem', textAlign:'center',
+                      }}>
+                        📍 Directions & arrival steps available once guest phone is captured
+                      </div>
+                    )}
 
                     {/* Extra services requested — from booking */}
                     {(() => {

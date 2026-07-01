@@ -17,6 +17,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
+import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
 
@@ -549,6 +550,32 @@ export default function CompleteBooking() {
                     </div>
                   </div>
                 )}
+
+                {/* Directions & arrival steps — WhatsApp, framed as from Raman */}
+                {s.status === 'ready_for_checkin' && (() => {
+                  const phone = selected?.guest_phone || selected?.phone
+                  if (!phone) return (
+                    <div style={{
+                      padding:'10px 14px', borderRadius:'10px', marginBottom:'14px',
+                      background:'rgba(37,211,102,0.05)', border:'1px dashed rgba(37,211,102,0.2)',
+                      color:'rgba(37,211,102,0.45)', fontSize:'0.78rem', textAlign:'center',
+                    }}>
+                      📍 Directions & arrival steps available once guest phone is captured
+                    </div>
+                  )
+                  const link = buildArrivalWaLink(selected)
+                  return (
+                    <a href={link} target="_blank" rel="noreferrer"
+                      style={{
+                        display:'block', padding:'12px', borderRadius:'10px', textAlign:'center',
+                        background:'rgba(37,211,102,0.1)', border:'1px solid rgba(37,211,102,0.3)',
+                        color:'#25D366', fontWeight:'700', fontSize:'0.85rem',
+                        textDecoration:'none', marginBottom:'14px',
+                      }}>
+                      📍 Send directions & arrival steps (from Raman)
+                    </a>
+                  )
+                })()}
 
                 {/* Guest Info */}
                 <div className="card-section-label">GUEST INFO</div>

@@ -262,6 +262,11 @@ export function buildLeaseDeedDocument(agreement, property) {
     ]),
     signatureRow(), signatureNames(lease.lessorName, tenantName),
 
+    // Clause 4A — car parking exclusion (only when property has separate parking)
+    ...(agreement.has_separate_parking ? [
+      p(r('4A. Car parking is not included in this lease. The above rent covers the residential flat only. Should the LESSEE require a car parking space, it is available on request at an additional charge, subject to availability, and will be governed by a separate agreement between the parties.')),
+    ] : []),
+
     // Clause 5
     p(r('5.\u2003The LESSEE shall keep the said residence in good condition and shall not sub-let, assign or otherwise part with possession of the same in part or whole. The LESSEE has to abide by the rules and regulations applicable to the LESSEE under respective laws. It is hereby expressly agreed and declared that the LESSEE shall use and occupy the said Flat as LESSEE only and shall not claim any interest in the said premises. The LESSEE shall not claim possession of the said premises or keep any outside party in the said premises or any part thereof, it being clearly understood that the rights are purely, temporarily, personal and on contract basis and are non-transferable; the LESSEE shall not be entitled to transfer the benefit of this agreement to anybody else. The Second Party hereby agrees to preserve the building neat and tidy and fixtures and fittings thereto in good condition and intact, and agrees to return them intact at the expiry/termination of this agreement or if and when it is otherwise revoked. The Second Party agrees that they shall not do any act or activities which are antisocial, obnoxious, illegal, or prejudicial, which may cause nuisance to neighbours or constitute breach of relevant standard rules. The First Party shall not have any liability or obligation in any matter arising due to negligence of the Second Party during its occupancy. The Second Party shall not store or cause to be stored any hazardous, combustible, dangerous, or contraband goods in the scheduled premises. The garbage and domestic waste from the said premises shall be disposed of by the Second Party at their own responsibility and expense, and waste shall not be disposed of within the property.')),
 

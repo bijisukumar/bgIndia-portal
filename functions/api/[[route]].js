@@ -76,14 +76,9 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
-    if (!env.RESEND_API_KEY) {
-      // Diagnostic: list what IS bound, plus which exact deployment/commit
-      // Cloudflare says is serving this request. PIN_PRADOSH being absent
-      // too (a secret set well before RESEND_API_KEY) suggests this isn't
-      // about RESEND_API_KEY specifically — likely a stale/cached
-      // deployment still answering requests instead of the latest one.
-      const available = Object.keys(env).filter(k => !['DB', 'DB_ESTATES'].includes(k)).join(', ') || '(none)'
-      throw new Error(`RESEND_API_KEY not configured. Env keys: ${available}. Serving commit: ${env.CF_PAGES_COMMIT_SHA || '?'} branch: ${env.CF_PAGES_BRANCH || '?'}`)
+    const apiKey = await getResendApiKey(DB, env)
+    if (!apiKey) {
+      throw new Error(`RESEND_API_KEY not configured (checked env and DB fallback). Run: wrangler pages secret put RESEND_API_KEY, or save it to villa_settings key '_resend_api_key'.`)
     }
     const body = {
       from: 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
@@ -95,7 +90,7 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
-        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
     })
@@ -132,6 +127,24 @@ async function getOwnerAlertEmail(DB, env, villaId) {
     if (row?.value) return row.value
   } catch (e) { console.error('getOwnerAlertEmail lookup failed:', e?.message || e) }
   return env.OWNER_EMAIL || 'bijits@hotmail.com'
+}
+
+// ── STOPGAP: Resend API key via DB, bypassing a broken Cloudflare secret ──
+// env.RESEND_API_KEY has been confirmed, repeatedly, bound in the
+// Cloudflare dashboard but absent from the live Function's runtime env —
+// a platform-side issue outside app control (support ticket filed
+// 2026-07-01). Falls back to a DB-stored copy so email sending isn't
+// blocked on that ticket. Stored under a key never returned by the
+// general getVillaSettings endpoint (see the exclusion filter there) so
+// it's not exposed to the browser. Once Cloudflare fixes secret
+// propagation, remove this fallback and delete the DB row.
+async function getResendApiKey(DB, env) {
+  if (env.RESEND_API_KEY) return env.RESEND_API_KEY
+  try {
+    const row = await DB.prepare(`SELECT value FROM villa_settings WHERE villa_id = 'dwarka' AND key = '_resend_api_key'`).first()
+    if (row?.value) return row.value
+  } catch (e) { console.error('getResendApiKey DB lookup failed:', e?.message || e) }
+  return null
 }
 
 // ── RATE LIMITER — 5 attempts per IP per 15 min ──────────────
@@ -1575,7 +1588,9 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(`SELECT key, value FROM villa_settings WHERE villa_id = ?`).bind(villaId).all()
         const settings = {}
-        for (const row of results) settings[row.key] = row.value
+        // Keys prefixed with '_' are internal/sensitive (e.g. _resend_api_key)
+        // and are never returned to the browser via this general endpoint.
+        for (const row of results) if (!row.key.startsWith('_')) settings[row.key] = row.value
         return json({ success: true, data: settings })
       }
 

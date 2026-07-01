@@ -62,12 +62,20 @@ async function sendAlert(env, subject, lines) {
       subject,
       content: [{ type: 'text/plain', value: lines.join('\n') }],
     }
-    await fetch('https://api.mailchannels.net/tx/v1/send', {
+    const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
     })
-  } catch (_) { /* silent — never block the response for email */ }
+    if (!res.ok) {
+      // MailChannels returns 401/403 if the domain's Domain Lockdown TXT
+      // record (_mailchannels.<domain>) isn't set up for this Worker — this
+      // was previously swallowed completely with no trace anywhere. Now at
+      // least visible in `wrangler tail` / the Cloudflare dashboard logs.
+      const detail = await res.text().catch(() => '')
+      console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
+    }
+  } catch (e) { console.error('sendAlert threw:', e?.message || e) }
 }
 
 // ── RATE LIMITER — 5 attempts per IP per 15 min ──────────────
@@ -2376,6 +2384,19 @@ export async function onRequest(ctx) {
         } else {
           await DB.prepare(`UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
         }
+
+        sendAlert(env, `🔑 bgIndia — Guest checked in: ${body.guestName || body.bookerName || 'Guest'}`, [
+          `A guest was checked in at ${body.villaId || 'dwarka'}.`,
+          '',
+          `Guest:      ${body.guestName || body.bookerName || '—'}`,
+          `Check-in:   ${body.checkInDate || '—'}`,
+          `Check-out:  ${body.checkOutDate || '—'}`,
+          `Stay ID:    ${stayId}`,
+          '',
+          `Checked in by: ${actor}`,
+          `Time:          ${now()}`,
+        ])
+
         return json({ success: true, data: { stayId } })
       }
 
@@ -2388,9 +2409,34 @@ export async function onRequest(ctx) {
           if (!existing) {
             const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
             await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
+
+            sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
+              `A guest was checked out.`,
+              '',
+              `Guest:            ${stay.guest_name || '—'}`,
+              `Check-in date:    ${stay.checkin_date || '—'}`,
+              `Nights:           ${nights}`,
+              `Stay ID:          ${stayId}`,
+              `Raman commission: ₹${ramanComm.toLocaleString('en-IN')}`,
+              '',
+              `Checked out by: ${actor}`,
+              `Time:           ${now()}`,
+            ])
+
             return json({ success: true, data: { stayId, ramanComm, commissionCreated: true } })
           }
         }
+
+        sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay?.guest_name || 'Guest'}`, [
+          `A guest was checked out.`,
+          '',
+          `Guest:         ${stay?.guest_name || '—'}`,
+          `Stay ID:       ${stayId}`,
+          '',
+          `Checked out by: ${actor}`,
+          `Time:           ${now()}`,
+        ])
+
         return json({ success: true, data: { stayId, commissionCreated: false } })
       }
 

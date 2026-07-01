@@ -18,6 +18,7 @@ export const LOST_REASONS = [
   { id: 'price',             label: 'Price' },
   { id: 'dates_unavailable', label: 'Dates Unavailable' },
   { id: 'chose_another',     label: 'Chose Another Property' },
+  { id: 'change_of_plans',   label: 'Change of Plans' },
   { id: 'no_response',       label: 'No Response' },
   { id: 'other',             label: 'Other' },
 ]

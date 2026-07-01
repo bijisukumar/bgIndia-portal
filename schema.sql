@@ -404,7 +404,7 @@ CREATE TABLE IF NOT EXISTS enquiries (
   follow_up_due     TEXT,
   booking_confirmed INTEGER DEFAULT 0,
   booking_value     REAL DEFAULT 0,
-  lost_reason       TEXT,                                 -- price|dates_unavailable|chose_another|no_response|other
+  lost_reason       TEXT,                                 -- price|dates_unavailable|chose_another|change_of_plans|no_response|other
   assigned_to       TEXT DEFAULT 'owner',
   notes             TEXT,
   -- Audit

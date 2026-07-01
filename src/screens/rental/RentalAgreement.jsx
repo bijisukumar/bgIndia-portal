@@ -802,7 +802,10 @@ export default function RentalAgreement() {
                   {form.parkingPaidInFull && form.parkingFee && form.parkingLeaseStart && form.parkingLeaseEnd && (() => {
                     const start = new Date(form.parkingLeaseStart)
                     const end   = new Date(form.parkingLeaseEnd)
-                    const months = Math.max(1, (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1)
+                    const endYM = end.getFullYear() * 12 + end.getMonth()
+                    let count = 0, cur2 = new Date(start.getFullYear(), start.getMonth(), 1)
+                    while (cur2.getFullYear() * 12 + cur2.getMonth() <= endYM) { count++; cur2.setMonth(cur2.getMonth() + 1) }
+                    const months = count
                     const total  = (parseFloat(form.parkingFee) || 0) * months
                     const sym    = form.parkingCurrency === 'USD' ? '$' : '₹'
                     return (

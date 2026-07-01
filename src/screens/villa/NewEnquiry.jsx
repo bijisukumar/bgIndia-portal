@@ -240,8 +240,8 @@ export default function NewEnquiry() {
           <div className="field">
             <div className="field-label">Quote amount (₹)</div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <input type="number" className="field-input" value={form.quoteAmount} onChange={e => { set('quoteAmount', e.target.value); setPricingNote(null) }} placeholder="0" style={{ flex: 1 }} />
-              <button type="button" className="btn" onClick={handleGetPricing} style={{ whiteSpace: 'nowrap', padding: '0 14px' }}>
+              <input type="number" className="field-input" value={form.quoteAmount} onChange={e => { set('quoteAmount', e.target.value); setPricingNote(null) }} placeholder="0" style={{ flex: 1, minWidth: 0 }} />
+              <button type="button" className="btn" onClick={handleGetPricing} style={{ width: 'auto', flex: '0 0 auto', whiteSpace: 'nowrap', padding: '0 14px' }}>
                 Get pricing
               </button>
             </div>

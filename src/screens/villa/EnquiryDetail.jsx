@@ -371,16 +371,19 @@ export default function EnquiryDetail() {
               <div className="field">
                 <div className="field-label">Discount type</div>
                 <select className="field-input" value={discountParams.discountCategory} onChange={e2 => handleDiscountCategoryChange(e2.target.value)}>
-                  <option value="">None / Repeat guest (legacy)</option>
+                  <option value="">No category — use Repeat Guest % below</option>
                   {DISCOUNT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
               </div>
               <div className="field" style={{ marginBottom: 0 }}>
-                <div className="field-label">{discountParams.discountCategory ? 'Discount %' : 'Repeat guest discount %'}</div>
+                <div className="field-label">
+                  {discountParams.discountCategory ? 'Discount %' : 'Repeat guest discount % (0 = no discount)'}
+                </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input type="number" min="0" max="100" className="field-input" value={discountParams.discountPct}
-                    onChange={e2 => setDiscountParams(p => ({ ...p, discountPct: e2.target.value }))} style={{ flex: 1 }} />
-                  <button type="button" className="btn" onClick={handleSaveDiscount} disabled={discountBusy} style={{ whiteSpace: 'nowrap', padding: '0 14px' }}>
+                    onChange={e2 => setDiscountParams(p => ({ ...p, discountPct: e2.target.value }))} style={{ flex: 1, minWidth: 0 }} />
+                  <button type="button" className="btn" onClick={handleSaveDiscount} disabled={discountBusy}
+                    style={{ width: 'auto', flex: '0 0 auto', whiteSpace: 'nowrap', padding: '0 16px' }}>
                     {discountBusy ? 'Saving...' : 'Apply'}
                   </button>
                 </div>

@@ -390,6 +390,8 @@ CREATE TABLE IF NOT EXISTS enquiries (
   infants           INTEGER DEFAULT 0,                    -- 1 yr and under, free, excluded from pricing lookup
   purpose           TEXT,                                -- vacation|wedding|temple_visit|family_function|other
   quote_amount      REAL DEFAULT 0,
+  extra_charges     REAL DEFAULT 0,                      -- sum of extra_lines; added on top of quote_amount, not discounted
+  extra_lines       TEXT,                                -- JSON: [{label, amount}] e.g. Additional Guest, Floor Bed
   is_repeat_guest   INTEGER DEFAULT 0,
   previous_stays    INTEGER DEFAULT 0,
   repeat_discount_pct REAL DEFAULT 0,                     -- legacy field, kept as-is; not replaced by discount_category

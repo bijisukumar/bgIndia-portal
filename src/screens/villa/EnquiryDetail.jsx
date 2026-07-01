@@ -7,6 +7,7 @@ import DatePicker from '../../components/DatePicker'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
+  EXTRA_ITEMS,
 } from '../../utils/villaPricing'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
@@ -64,10 +65,16 @@ function buildQuote(e) {
     } else if (e.repeat_discount_pct > 0) {
       lines.push(`🎁 Repeat Guest Discount (${e.repeat_discount_pct}%): −₹${Math.round(discountAmount).toLocaleString('en-IN')}`)
     }
-    lines.push(`💰 Total Tariff: ₹${Math.round(finalTotal).toLocaleString('en-IN')}`)
-  } else {
-    lines.push(`💰 Total Tariff: ₹${Math.round(finalTotal).toLocaleString('en-IN')}`)
+  } else if (e.extra_charges > 0) {
+    lines.push(`💰 Tariff: ₹${Number(e.quote_amount || 0).toLocaleString('en-IN')}`)
   }
+  let extraLinesArr = []
+  try { extraLinesArr = e.extra_lines ? JSON.parse(e.extra_lines) : [] } catch { extraLinesArr = [] }
+  extraLinesArr.forEach(l => {
+    const amt = parseFloat(l.amount) || 0
+    if (amt > 0) lines.push(`➕ ${l.label}: ₹${Math.round(amt).toLocaleString('en-IN')}`)
+  })
+  lines.push(`💰 Total Tariff: ₹${Math.round(finalTotal).toLocaleString('en-IN')}`)
 
   lines.push(
     `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
@@ -114,6 +121,8 @@ export default function EnquiryDetail() {
   const [statusBusy, setStatusBusy] = useState(false)
   const [discountParams, setDiscountParams] = useState(null)   // { discountCategory, discountPct }
   const [discountBusy, setDiscountBusy] = useState(false)
+  const [extraLines, setExtraLines] = useState([])             // [{label, amount}]
+  const [extraBusy, setExtraBusy] = useState(false)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -132,6 +141,8 @@ export default function EnquiryDetail() {
           discountCategory: en.discount_category || '',
           discountPct: en.discount_category ? (en.discount_pct || 0) : (en.repeat_discount_pct || 0),
         })
+        try { setExtraLines(en.extra_lines ? JSON.parse(en.extra_lines) : []) }
+        catch { setExtraLines([]) }
       }
     }).catch(() => showToast('Failed to load enquiry', 'error')).finally(() => setLoading(false))
   }
@@ -144,6 +155,7 @@ export default function EnquiryDetail() {
   }, [])
 
   const e = data?.enquiry
+  const extraTotal = extraLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
 
   const handleLogComm = async () => {
     if (!commNote.trim()) { showToast('Add a note', 'error'); return }
@@ -201,12 +213,34 @@ export default function EnquiryDetail() {
         repeatDiscountPct: isCategory ? 0 : (discountParams.discountPct || 0),
         discountCategory: discountParams.discountCategory || null,
         discountPct: isCategory ? (discountParams.discountPct || 0) : 0,
+        extraCharges: e.extra_charges || 0, extraLines: e.extra_lines || null,
         status: e.status, notes: e.notes,
       })
       showToast('Discount updated ✓')
       load()
     } catch { showToast('Failed to update discount', 'error') }
     finally { setDiscountBusy(false) }
+  }
+
+  const handleSaveExtras = async () => {
+    if (!e) return
+    setExtraBusy(true)
+    try {
+      await api.saveEnquiry({
+        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
+        checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
+        adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
+        purpose: e.purpose, quoteAmount: e.quote_amount,
+        repeatDiscountPct: e.discount_category ? 0 : e.repeat_discount_pct,
+        discountCategory: e.discount_category || null, discountPct: e.discount_category ? e.discount_pct : 0,
+        extraCharges: extraTotal, extraLines: JSON.stringify(extraLines),
+        status: e.status, notes: e.notes,
+      })
+      showToast('Extra charges updated ✓')
+      load()
+    } catch { showToast('Failed to update extra charges', 'error') }
+    finally { setExtraBusy(false) }
   }
 
   const handleStatusChange = async (newStatus) => {
@@ -222,6 +256,7 @@ export default function EnquiryDetail() {
         purpose: e.purpose, quoteAmount: e.quote_amount,
         repeatDiscountPct: e.discount_category ? 0 : e.repeat_discount_pct,
         discountCategory: e.discount_category || null, discountPct: e.discount_category ? e.discount_pct : 0,
+        extraCharges: e.extra_charges || 0, extraLines: e.extra_lines || null,
         status: newStatus, notes: e.notes,
       })
       showToast(`Status updated to ${STATUS_META[newStatus]?.label || newStatus} ✓`)
@@ -274,6 +309,7 @@ export default function EnquiryDetail() {
         quoteAmount: estimate.total,
         repeatDiscountPct: e.discount_category ? 0 : discountPct,
         discountCategory: e.discount_category || null, discountPct: e.discount_category ? discountPct : 0,
+        extraCharges: e.extra_charges || 0, extraLines: e.extra_lines || null,
         status: e.status, notes: e.notes,
       })
       showToast(`Estimated ₹${estimate.tariffPerNight.toLocaleString('en-IN')}/night × ${nights} night${nights === 1 ? '' : 's'} — saved ✓`)
@@ -351,6 +387,40 @@ export default function EnquiryDetail() {
               </div>
             </div>
           )}
+
+          {/* Extra charge line items — e.g. Additional Guest, added on top of quote, not discounted */}
+          <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border-dim)' }}>
+            <div className="field" style={{ marginBottom: extraLines.length ? '8px' : 0 }}>
+              <div className="field-label">Add extra charge</div>
+              <select className="field-input" value="" onChange={e2 => {
+                if (!e2.target.value) return
+                const item = EXTRA_ITEMS.find(x => x.label === e2.target.value)
+                setExtraLines(prev => [...prev, { label: item.label, amount: item.amount }])
+                e2.target.value = ''
+              }}>
+                <option value="">+ Add item… (e.g. Additional Guest)</option>
+                {EXTRA_ITEMS.map(x => <option key={x.label} value={x.label}>{x.label}</option>)}
+              </select>
+            </div>
+            {extraLines.map((line, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text)' }}>{line.label}</span>
+                <input type="number" value={line.amount} placeholder="0"
+                  onChange={e2 => setExtraLines(prev => prev.map((l, j) => j === i ? { ...l, amount: e2.target.value } : l))}
+                  style={{ width: '90px', padding: '5px 8px', borderRadius: '6px',
+                    background: 'var(--dark-input)', border: '1px solid var(--border-dim)',
+                    color: 'var(--gold)', fontWeight: '600', fontSize: '0.85rem', textAlign: 'right' }} />
+                <button onClick={() => setExtraLines(prev => prev.filter((_, j) => j !== i))}
+                  style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+              </div>
+            ))}
+            {extraLines.length > 0 && (
+              <button type="button" className="btn" onClick={handleSaveExtras} disabled={extraBusy} style={{ width: '100%', marginTop: '4px' }}>
+                {extraBusy ? 'Saving...' : `Save extra charges (₹${extraTotal.toLocaleString('en-IN')})`}
+              </button>
+            )}
+          </div>
+
           <div className="net-box" style={{ margin: 0 }}>
             <div className="net-row"><span className="net-label">Quote amount</span><span className="net-val">{fmt(e.quote_amount)}</span></div>
             {e.discount_amount > 0 && (
@@ -363,6 +433,16 @@ export default function EnquiryDetail() {
                 <span className="net-val">−{fmt(e.discount_amount)}</span>
               </div>
             )}
+            {e.extra_charges > 0 && (() => {
+              let savedLines = []
+              try { savedLines = e.extra_lines ? JSON.parse(e.extra_lines) : [] } catch { savedLines = [] }
+              return savedLines.filter(l => (parseFloat(l.amount) || 0) > 0).map((l, i) => (
+                <div key={i} className="net-row">
+                  <span className="net-label">{l.label}</span>
+                  <span className="net-val pos">+{fmt(l.amount)}</span>
+                </div>
+              ))
+            })()}
             <div className="net-divider" />
             <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(e.final_offer_amount)}</span></div>
             {(e.nights || 0) > 0 && (

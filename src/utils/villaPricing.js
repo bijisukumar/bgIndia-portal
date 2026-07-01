@@ -109,3 +109,20 @@ export const DISCOUNT_CATEGORIES = [
 export function getDefaultDiscountPct(categoryId) {
   return DISCOUNT_CATEGORIES.find(c => c.id === categoryId)?.defaultPct ?? 0
 }
+
+// ── EXTRA CHARGE LINE ITEMS ────────────────────────────────────
+// Shared preset list for ad-hoc priced line items (e.g. "Additional Guest"),
+// used both on confirmed stays (CompleteBooking.jsx) and on enquiry quotes
+// (EnquiryDetail.jsx) before a booking is confirmed.
+export const EXTRA_ITEMS = [
+  { label: 'Early Check-in',              amount: 500  },
+  { label: 'Late Check-out',              amount: 500  },
+  { label: 'Early Check-in + Late Check-out', amount: 1000 },
+  { label: 'Breakfast',                   amount: 0    },
+  { label: 'Floor Bed',                   amount: 750  },
+  { label: 'Additional Guest',            amount: 0    },
+  { label: 'Taxi Pick-up',                amount: 0    },
+  { label: 'Drop-off & Pick-up',          amount: 0    },
+  { label: 'Cleaning Fee',                amount: 1000 },
+  { label: 'Other',                       amount: 0    },
+]

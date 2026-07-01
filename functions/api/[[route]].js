@@ -71,11 +71,13 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
   let ok = false, statusCode = null, detail = ''
   try {
     if (!env.RESEND_API_KEY) {
-      // Diagnostic: list what IS bound, so if the secret exists under a
-      // different name, on a different project, or isn't bound at all,
-      // that's visible right here instead of requiring wrangler tail.
+      // Diagnostic: list what IS bound, plus which exact deployment/commit
+      // Cloudflare says is serving this request. PIN_PRADOSH being absent
+      // too (a secret set well before RESEND_API_KEY) suggests this isn't
+      // about RESEND_API_KEY specifically — likely a stale/cached
+      // deployment still answering requests instead of the latest one.
       const available = Object.keys(env).filter(k => !['DB', 'DB_ESTATES'].includes(k)).join(', ') || '(none)'
-      throw new Error(`RESEND_API_KEY not configured — run: wrangler pages secret put RESEND_API_KEY. Other env keys bound here: ${available}`)
+      throw new Error(`RESEND_API_KEY not configured. Env keys: ${available}. Serving commit: ${env.CF_PAGES_COMMIT_SHA || '?'} branch: ${env.CF_PAGES_BRANCH || '?'}`)
     }
     const body = {
       from: 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',

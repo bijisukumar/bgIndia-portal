@@ -66,6 +66,10 @@ const EMPTY_FORM = {
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
   isMonthToMonth:false, monthToMonthSince:'',
   docContractSigned:false, docIdCaptured:false, docMoveIn:false, docMoveOut:false, docDamageReport:false,
+  hasSeparateParking:false,
+  parkingTenantName:'', parkingTenantPhone:'',
+  parkingFee:'', parkingDeposit:'',
+  parkingLeaseStart:'', parkingLeaseEnd:'', parkingCurrency:'INR',
 }
 
 export default function RentalAgreement() {
@@ -162,6 +166,14 @@ export default function RentalAgreement() {
       docMoveIn:         !!a.doc_move_in,
       docMoveOut:        !!a.doc_move_out,
       docDamageReport:   !!a.doc_damage_report,
+      hasSeparateParking:   !!a.has_separate_parking,
+      parkingTenantName:  a.parking_tenant_name  || '',
+      parkingTenantPhone: a.parking_tenant_phone || '',
+      parkingFee:         a.parking_fee          || '',
+      parkingDeposit:     a.parking_deposit      || '',
+      parkingLeaseStart:  a.parking_lease_start  || '',
+      parkingLeaseEnd:    a.parking_lease_end    || '',
+      parkingCurrency:    a.parking_currency     || a.currency || 'INR',
     })
   }
 
@@ -277,6 +289,14 @@ export default function RentalAgreement() {
         docMoveIn:         form.docMoveIn,
         docMoveOut:        form.docMoveOut,
         docDamageReport:   form.docDamageReport,
+        hasSeparateParking:   form.hasSeparateParking,
+        parkingTenantName:  form.parkingTenantName.trim(),
+        parkingTenantPhone: form.parkingTenantPhone.trim(),
+        parkingFee:         form.hasSeparateParking ? parseFloat(form.parkingFee) || 0 : 0,
+        parkingDeposit:     form.hasSeparateParking ? parseFloat(form.parkingDeposit) || 0 : 0,
+        parkingLeaseStart:  form.hasSeparateParking ? form.parkingLeaseStart || null : null,
+        parkingLeaseEnd:    form.hasSeparateParking ? form.parkingLeaseEnd || null : null,
+        parkingCurrency:    form.parkingCurrency || form.currency || 'INR',
       })
       // saveRentalAgreement never touches stage/is_delinquent/end_reason
       // (confirmed in the backend) -- those are only ever changed via
@@ -293,6 +313,11 @@ export default function RentalAgreement() {
         is_month_to_month:form.isMonthToMonth?1:0, month_to_month_since:form.monthToMonthSince,
         doc_contract_signed:form.docContractSigned?1:0, doc_id_captured:form.docIdCaptured?1:0,
         doc_move_in:form.docMoveIn?1:0, doc_move_out:form.docMoveOut?1:0, doc_damage_report:form.docDamageReport?1:0,
+        has_separate_parking:form.hasSeparateParking?1:0,
+        parking_tenant_name:form.parkingTenantName, parking_tenant_phone:form.parkingTenantPhone,
+        parking_fee:parseFloat(form.parkingFee)||0, parking_deposit:parseFloat(form.parkingDeposit)||0,
+        parking_lease_start:form.parkingLeaseStart, parking_lease_end:form.parkingLeaseEnd,
+        parking_currency:form.parkingCurrency,
       }}))
       showToast(`✅ Agreement saved for ${prop?.name}`)
     } catch(e) { setError(`Save failed: ${e.message}`) }
@@ -656,6 +681,69 @@ export default function RentalAgreement() {
               </div>
 
               {error && <div style={{color:'#EF9A9A',fontSize:'0.82rem',marginTop:'10px',background:'rgba(198,40,40,0.1)',padding:'8px 10px',borderRadius:'8px'}}>❌ {error}</div>}
+            </div>
+
+            {/* ── CAR PARKING SUB-TENANCY ─────────────────────────────── */}
+            <div className="card" style={{marginTop:'12px'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'2px'}}>
+                <span style={{fontSize:'0.82rem',fontWeight:'700',color:'var(--text)',letterSpacing:'0.3px'}}>🅿️ Separate Car Parking Tenancy</span>
+                <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer'}}>
+                  <input type="checkbox" checked={form.hasSeparateParking}
+                    onChange={e=>setField('hasSeparateParking', e.target.checked)}
+                    style={{width:16,height:16}}/>
+                  <span style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>Enabled</span>
+                </label>
+              </div>
+              <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'10px'}}>
+                Car park rented to a different person than the apartment tenant.
+              </div>
+
+              {form.hasSeparateParking && (<>
+                <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>PARKING TENANT NAME</label>
+                <input className="field-input" style={{width:'100%',marginBottom:'10px'}}
+                  value={form.parkingTenantName} placeholder="Tenant name"
+                  onChange={e=>setField('parkingTenantName',e.target.value)}/>
+
+                <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>PARKING TENANT PHONE</label>
+                <input className="field-input" style={{width:'100%',marginBottom:'10px'}}
+                  value={form.parkingTenantPhone} placeholder="+91 XXXXX XXXXX"
+                  onChange={e=>setField('parkingTenantPhone',e.target.value)}/>
+
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'10px'}}>
+                  <div>
+                    <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>
+                      MONTHLY FEE ({form.parkingCurrency === 'USD' ? '$' : '₹'})
+                    </label>
+                    <input className="field-input" style={{width:'100%'}} type="number" min="0"
+                      value={form.parkingFee} placeholder="0"
+                      onChange={e=>setField('parkingFee',e.target.value)}/>
+                  </div>
+                  <div>
+                    <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>DEPOSIT</label>
+                    <input className="field-input" style={{width:'100%'}} type="number" min="0"
+                      value={form.parkingDeposit} placeholder="0"
+                      onChange={e=>setField('parkingDeposit',e.target.value)}/>
+                  </div>
+                </div>
+
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'4px'}}>
+                  <div>
+                    <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>LEASE START</label>
+                    <input className="field-input" style={{width:'100%'}} type="date"
+                      value={form.parkingLeaseStart}
+                      onChange={e=>setField('parkingLeaseStart',e.target.value)}/>
+                  </div>
+                  <div>
+                    <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>LEASE END</label>
+                    <input className="field-input" style={{width:'100%'}} type="date"
+                      value={form.parkingLeaseEnd}
+                      onChange={e=>setField('parkingLeaseEnd',e.target.value)}/>
+                  </div>
+                </div>
+                <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'6px'}}>
+                  🔔 You'll get a renewal alert 30 days before the parking lease ends.
+                </div>
+              </>)}
             </div>
 
             <button className="btn btn-gold" onClick={handleSave} disabled={saving}>

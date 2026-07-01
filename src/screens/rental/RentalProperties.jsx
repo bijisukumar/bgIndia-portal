@@ -71,11 +71,14 @@ export default function RentalProperties() {
   const [agreements, setAgreements] = useState({})
   const [loadingAgreements, setLoadingAgreements] = useState(true)
   const [postedThisMonth, setPostedThisMonth] = useState({}) // propId -> rent_transactions row, for the selected period
+  const [parkingPostedThisMonth, setParkingPostedThisMonth] = useState({}) // propId -> parking rent_transactions row
   const [checkingPosted, setCheckingPosted] = useState(true)
   const [posting, setPosting] = useState(null) // propId currently posting, or null
+  const [postingParking, setPostingParking] = useState(null) // propId posting parking, or null
   const [exceptionOpenFor, setExceptionOpenFor] = useState(null) // propId with the late-fee drawer open
   const [lateFeeInputs, setLateFeeInputs] = useState({})
   const [paidDateInputs, setPaidDateInputs] = useState({})
+  const [parkingPaidDateInputs, setParkingPaidDateInputs] = useState({})
 
   // Initialized empty rather than from CONFIG.rentalProperties (the
   // static array that caused properties to vanish on reload, see
@@ -124,14 +127,19 @@ export default function RentalProperties() {
     setCheckingPosted(true)
     try {
       const results = {}
+      const parkingResults = {}
       await Promise.all(properties.map(async prop => {
         try {
           const txns = await api.getRentTransactions(prop.id)
-          const match = (Array.isArray(txns) ? txns : []).find(t => t.period_month === period)
+          const list = Array.isArray(txns) ? txns : []
+          const match = list.find(t => t.period_month === period && (t.unit_type === 'main' || !t.unit_type))
+          const parkingMatch = list.find(t => t.period_month === period && t.unit_type === 'parking')
           if (match) results[prop.id] = match
-        } catch (e) { /* ignore per-property failure, just means unknown/not-posted */ }
+          if (parkingMatch) parkingResults[prop.id] = parkingMatch
+        } catch (e) { /* ignore per-property failure */ }
       }))
       setPostedThisMonth(results)
+      setParkingPostedThisMonth(parkingResults)
     } finally { setCheckingPosted(false) }
   }
 
@@ -174,6 +182,26 @@ export default function RentalProperties() {
     finally { setPosting(null) }
   }
 
+  async function handlePostParking(prop) {
+    const a = agreements[prop.id]
+    if (!a?.has_separate_parking) return
+    if (!a.parking_fee) { showToast('Set parking fee in Agreements tab first', 'error'); return }
+    setPostingParking(prop.id)
+    try {
+      const period = periodMonthStr(selectedYear, selectedMonth)
+      await api.postRentPayment({
+        propId: prop.id, periodMonth: period,
+        baseRent: a.parking_fee, maintenance: 0, carParking: 0, lateFee: 0,
+        isException: false, unitType: 'parking',
+        paidDate: parkingPaidDateInputs[prop.id] || localTodayStr(),
+        currency: a.parking_currency || a.currency || 'INR',
+      })
+      showToast(`✓ Parking posted for ${MONTHS[selectedMonth]} ${selectedYear} — ${prop.name}`)
+      checkPostedForPeriod()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setPostingParking(null) }
+  }
+
   function setExpenseField(propId, key, val) {
     setExpenses(e => ({...e, [propId]: {...e[propId], [key]: val}}))
   }
@@ -209,14 +237,23 @@ export default function RentalProperties() {
     }
   }, [tab])
 
-  const renewals = properties
-    .map((p) => {
-      const a = agreements[p.id]
-      const leaseEnd = a?.lease_end
-      const isM2M = !!a?.is_month_to_month
-      return { ...p, tenantName: a?.tenant_name, days: (leaseEnd && !isM2M) ? daysUntil(leaseEnd) : null }
-    })
-    .filter(p => p.days !== null && p.days <= 60)
+  const renewals = [
+    ...properties
+      .map((p) => {
+        const a = agreements[p.id]
+        const leaseEnd = a?.lease_end
+        const isM2M = !!a?.is_month_to_month
+        return { ...p, tenantName: a?.tenant_name, days: (leaseEnd && !isM2M) ? daysUntil(leaseEnd) : null, unitType: 'main' }
+      })
+      .filter(p => p.days !== null && p.days <= 60),
+    ...properties
+      .filter(p => agreements[p.id]?.has_separate_parking && agreements[p.id]?.parking_lease_end)
+      .map((p) => {
+        const a = agreements[p.id]
+        return { ...p, tenantName: a.parking_tenant_name, days: daysUntil(a.parking_lease_end), unitType: 'parking' }
+      })
+      .filter(p => p.days !== null && p.days <= 30),
+  ]
 
   const tabStyle = (t) => ({
     flex:1, padding:'10px 4px', border:'none', cursor:'pointer',
@@ -251,9 +288,15 @@ export default function RentalProperties() {
         {renewals.length > 0 && (
           <div style={{background:'rgba(198,40,40,0.1)',border:'1px solid rgba(198,40,40,0.3)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'}}>
             <div style={{color:'#EF9A9A',fontWeight:'600',fontSize:'0.82rem',marginBottom:'6px'}}>🔔 Renewal alerts</div>
-            {renewals.map(p => (
-              <div key={p.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}}>
-                <span style={{color:'#EDF2F7',fontSize:'0.82rem'}}>{p.name}</span>
+            {renewals.map((p, i) => (
+              <div key={p.id + (p.unitType||'')} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}}>
+                <span style={{color:'#EDF2F7',fontSize:'0.82rem'}}>
+                  {p.name}
+                  {p.unitType === 'parking' && (
+                    <span style={{marginLeft:'6px',fontSize:'0.68rem',background:'rgba(200,144,58,0.2)',color:'#C8903A',padding:'1px 6px',borderRadius:'4px',fontWeight:'600'}}>🅿️ PARKING</span>
+                  )}
+                  {p.tenantName && <span style={{color:'var(--text-dim)',fontSize:'0.72rem',marginLeft:'6px'}}>· {p.tenantName}</span>}
+                </span>
                 <span style={{color:p.days<0?'#EF9A9A':'#FFCC80',fontSize:'0.78rem'}}>
                   {p.days<0?`Expired ${Math.abs(p.days)}d ago`:`${p.days}d left`}
                 </span>
@@ -412,6 +455,49 @@ export default function RentalProperties() {
                       </>
                     )}
                   </div>
+
+                  {/* 🅿️ Parking sub-card — only for properties with separate parking */}
+                  {a?.has_separate_parking && (() => {
+                    const parkingPosted = parkingPostedThisMonth[prop.id]
+                    const isPostingPark = postingParking === prop.id
+                    const parkCurrency = a.parking_currency || a.currency || 'INR'
+                    const parkFee = a.parking_fee || 0
+                    return (
+                      <div style={{marginTop:'10px', padding:'12px', borderRadius:'10px',
+                        background:'rgba(200,144,58,0.05)', border:'1px solid rgba(200,144,58,0.2)'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
+                          <span style={{fontSize:'0.72rem',fontWeight:'700',letterSpacing:'1px',color:'#C8903A'}}>🅿️ CAR PARKING</span>
+                          {a.parking_tenant_name && <span style={{fontSize:'0.7rem',color:'var(--text-dim)'}}>{a.parking_tenant_name}</span>}
+                        </div>
+                        {parkingPosted ? (
+                          <div style={{padding:'8px 10px',borderRadius:'8px',background:'rgba(52,168,83,0.1)',
+                            border:'1px solid rgba(52,168,83,0.3)',color:'#34A853'}}>
+                            <div style={{fontWeight:'700',fontSize:'0.82rem'}}>✓ Posted — {fmt(parkingPosted.total_due, parkingPosted.currency)}</div>
+                            <div style={{fontSize:'0.7rem',color:'var(--text-dim)',marginTop:'2px'}}>Paid {parkingPosted.paid_date}</div>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:'8px'}}>
+                              Monthly fee: <span style={{color:'#C8903A',fontWeight:'600'}}>{fmt(parkFee, parkCurrency)}</span>
+                            </div>
+                            <label style={{display:'block',fontSize:'0.68rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>PAYMENT DATE</label>
+                            <input type="date" value={parkingPaidDateInputs[prop.id] || localTodayStr()}
+                              onChange={e=>setParkingPaidDateInputs(v=>({...v,[prop.id]:e.target.value}))}
+                              className="field-input" style={{width:'100%',marginBottom:'8px'}}/>
+                            <button onClick={()=>handlePostParking(prop)} disabled={isPostingPark}
+                              style={{width:'100%',padding:'9px',borderRadius:'8px',
+                                border:'1px solid rgba(200,144,58,0.5)',
+                                background: isPostingPark ? 'rgba(200,144,58,0.2)' : 'rgba(200,144,58,0.15)',
+                                color:'#C8903A',fontWeight:'700',fontSize:'0.8rem',
+                                cursor: isPostingPark ? 'default' : 'pointer',
+                                opacity: isPostingPark ? 0.7 : 1}}>
+                              {isPostingPark ? 'Posting…' : `✓ Parking Paid — ${fmt(parkFee, parkCurrency)}`}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })}

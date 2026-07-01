@@ -1301,7 +1301,23 @@ export async function onRequest(ctx) {
         })
         const income = Object.values(byProp).map(r => ({ ...r, net: r.income - r.expense }))
         const losses = await DB.prepare(`SELECT prop_id, SUM(amount) as total_claimed, SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off, SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered, COUNT(*) as claim_count FROM lease_losses GROUP BY prop_id`).all()
-        const renewalAlerts = await DB.prepare(`SELECT prop_id, name, tenant_name, lease_end, status, CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left FROM rental_props WHERE lease_end IS NOT NULL AND lease_end != '' AND julianday(lease_end) - julianday('now') <= 90 ORDER BY lease_end ASC`).all()
+        const renewalAlerts = await DB.prepare(`
+          SELECT prop_id, name, tenant_name, lease_end, status,
+            CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left,
+            'main' as unit_type
+          FROM rental_props
+          WHERE lease_end IS NOT NULL AND lease_end != ''
+            AND julianday(lease_end) - julianday('now') <= 90
+          UNION ALL
+          SELECT prop_id, name, parking_tenant_name as tenant_name, parking_lease_end as lease_end, status,
+            CAST((julianday(parking_lease_end) - julianday('now')) AS INTEGER) as days_left,
+            'parking' as unit_type
+          FROM rental_props
+          WHERE has_separate_parking = 1
+            AND parking_lease_end IS NOT NULL AND parking_lease_end != ''
+            AND julianday(parking_lease_end) - julianday('now') <= 30
+          ORDER BY days_left ASC
+        `).all()
         return json({ success: true, data: { year, properties: props.results, income, losses: losses.results, renewalAlerts: renewalAlerts.results } })
       }
 
@@ -1930,7 +1946,7 @@ export async function onRequest(ctx) {
       if (action === 'getRentTransactions') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM rent_transactions WHERE prop_id = ? ORDER BY period_month DESC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rent_transactions WHERE prop_id = ? ORDER BY period_month DESC, unit_type ASC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
@@ -3047,6 +3063,10 @@ export async function onRequest(ctx) {
               early_terminated = ?, early_termination_date = ?,
               is_month_to_month = ?, month_to_month_since = ?,
               doc_contract_signed = ?, doc_id_captured = ?, doc_move_in = ?, doc_move_out = ?, doc_damage_report = ?,
+              has_separate_parking = ?,
+              parking_tenant_name = ?, parking_tenant_phone = ?,
+              parking_fee = ?, parking_deposit = ?,
+              parking_lease_start = ?, parking_lease_end = ?, parking_currency = ?,
               updated_by = ?, updated_at = ?
             WHERE prop_id = ?
           `).bind(
@@ -3059,6 +3079,10 @@ export async function onRequest(ctx) {
             earlyTerminated, earlyTerminationDt,
             isMonthToMonth, monthToMonthSince,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
+            d.hasSeparateParking ? 1 : 0,
+            d.parkingTenantName || null, d.parkingTenantPhone || null,
+            parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
+            d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
             actor, now(), d.propId
           ).run()
         } else {
@@ -3071,8 +3095,10 @@ export async function onRequest(ctx) {
               next_renewal_date, early_terminated, early_termination_date,
               is_month_to_month, month_to_month_since,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              has_separate_parking, parking_tenant_name, parking_tenant_phone,
+              parking_fee, parking_deposit, parking_lease_start, parking_lease_end, parking_currency,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
@@ -3081,6 +3107,10 @@ export async function onRequest(ctx) {
             nextRenewal, earlyTerminated, earlyTerminationDt,
             isMonthToMonth, monthToMonthSince,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
+            d.hasSeparateParking ? 1 : 0,
+            d.parkingTenantName || null, d.parkingTenantPhone || null,
+            parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
+            d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
             actor, actor, now(), now()
           ).run()
         }
@@ -3205,7 +3235,7 @@ export async function onRequest(ctx) {
       // above — it was originally misplaced here too, which is exactly
       // why it 404'd: GET requests never reach code inside this POST block.)
       if (action === 'postRentPayment') {
-        const { propId, periodMonth, baseRent, maintenance, carParking, lateFee, paidDate, currency, isException, notes } = body
+        const { propId, periodMonth, baseRent, maintenance, carParking, lateFee, paidDate, currency, isException, notes, unitType } = body
         if (!propId || !periodMonth) return err('propId and periodMonth required')
         if (!/^\d{4}-\d{2}$/.test(periodMonth)) return err('periodMonth must be YYYY-MM')
         const base = parseFloat(baseRent) || 0
@@ -3213,24 +3243,26 @@ export async function onRequest(ctx) {
         const parking = parseFloat(carParking) || 0
         const late = parseFloat(lateFee) || 0
         const total = base + maint + parking + late
+        const utype = unitType || 'main'
         const id = 'rtxn_' + Date.now() + '_' + Math.floor(Math.random()*1000)
         try {
           await DB.prepare(`
             INSERT INTO rent_transactions (
               txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee,
-              total_due, is_exception, paid_date, currency, notes, created_by, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              total_due, is_exception, paid_date, currency, notes, unit_type, created_by, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             id, propId, periodMonth, base, maint, parking, late,
-            total, isException ? 1 : 0, paidDate || now().slice(0,10), currency || 'INR', notes || null, actor, now()
+            total, isException ? 1 : 0, paidDate || now().slice(0,10), currency || 'INR', notes || null, utype, actor, now()
           ).run()
         } catch (e) {
           if (String(e.message || '').includes('UNIQUE')) {
-            return err(`Rent for ${periodMonth} has already been posted for this property.`, 409)
+            const label = utype === 'parking' ? 'Car parking rent' : 'Rent'
+            return err(`${label} for ${periodMonth} has already been posted for this property.`, 409)
           }
           throw e
         }
-        return json({ success: true, data: { txnId: id, propId, periodMonth, totalDue: total } })
+        return json({ success: true, data: { txnId: id, propId, periodMonth, totalDue: total, unitType: utype } })
       }
 
       // PROPERTY EXPENSES — electricity/water/taxes/extra-maintenance,

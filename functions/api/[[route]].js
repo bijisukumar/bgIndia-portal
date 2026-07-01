@@ -2834,7 +2834,8 @@ export async function onRequest(ctx) {
 
         const rubberEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
         ctx.waitUntil(sendAlert(env, `🌳 Estate360 — New rubber harvest: ₹${net.toLocaleString('en-IN')} net (${rubberEstateLabel})`, [
-          'A new rubber harvest entry was logged.',
+          'Source: Estate360 > Rubber Tracker',
+          'Action: New rubber harvest logged',
           '',
           `Estate:       ${rubberEstateLabel}`,
           `Tapping date: ${harvestDate}`,
@@ -2849,7 +2850,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ]))
+        ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
 
         return json({ success: true, data: { harvestId: id } })
       }
@@ -2870,7 +2871,8 @@ export async function onRequest(ctx) {
         const mangoEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
         const mangoRevenue = parseFloat(totalRevenue) || 0
         ctx.waitUntil(sendAlert(env, `🥭 Estate360 — New mango harvest: ₹${mangoRevenue.toLocaleString('en-IN')} (${mangoEstateLabel})`, [
-          'A new mango harvest entry was logged.',
+          'Source: Estate360 > Mango Harvest',
+          'Action: New mango harvest logged',
           '',
           `Estate:       ${mangoEstateLabel}`,
           `Harvest date: ${harvestDate}`,
@@ -2884,7 +2886,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ]))
+        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success:true, data:{ harvestId:id } })
       }
@@ -3089,7 +3091,8 @@ export async function onRequest(ctx) {
           await ActiveDB.prepare(`UPDATE estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, amt, paidTo||null, description||null, actor, now(), txnId).run()
 
           ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — ${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
-            `An estate ${typeLabel.toLowerCase()} entry was UPDATED.`,
+            `Source: Estate360 > ${estateLabel} > Income/Expense screen`,
+            `Action: ${typeLabel} entry updated`,
             '',
             `Estate:      ${estateLabel}`,
             `Type:        ${typeLabel}`,
@@ -3102,7 +3105,7 @@ export async function onRequest(ctx) {
             '',
             `Updated by: ${actor}`,
             `Updated at: ${now()}`,
-          ]))
+          ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
 
           return json({ success: true, data: { txnId } })
         } else {
@@ -3110,7 +3113,8 @@ export async function onRequest(ctx) {
           await ActiveDB.prepare(`INSERT INTO estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, amt, paidTo||null, description||null, actor, actor, now(), now()).run()
 
           ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
-            `A new estate ${typeLabel.toLowerCase()} entry was logged.`,
+            `Source: Estate360 > ${estateLabel} > Income/Expense screen`,
+            `Action: New ${typeLabel.toLowerCase()} entry logged`,
             '',
             `Estate:      ${estateLabel}`,
             `Type:        ${typeLabel}`,
@@ -3123,7 +3127,7 @@ export async function onRequest(ctx) {
             '',
             `Logged by: ${actor}`,
             `Logged at: ${now()}`,
-          ]))
+          ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
 
           return json({ success: true, data: { txnId: id } })
         }
@@ -3180,7 +3184,8 @@ export async function onRequest(ctx) {
 
         const irrEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
         ctx.waitUntil(sendAlert(env, `💧 Estate360 — Irrigation logged (${irrEstateLabel})`, [
-          'An irrigation entry was logged.',
+          'Source: Estate360 > Irrigation Log',
+          'Action: Irrigation entry logged',
           '',
           `Estate:    ${irrEstateLabel}`,
           `Date:      ${loggedDate}`,
@@ -3190,7 +3195,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ]))
+        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { logId: id } })
       }
@@ -3207,7 +3212,8 @@ export async function onRequest(ctx) {
 
         const zoneEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
         ctx.waitUntil(sendAlert(env, `💧 Estate360 — Irrigation logged: ${zoneName || zoneId} (${zoneEstateLabel})`, [
-          'An irrigation zone entry was logged.',
+          'Source: Estate360 > Irrigation Log (zone)',
+          'Action: Irrigation zone entry logged',
           '',
           `Estate:    ${zoneEstateLabel}`,
           `Zone:      ${zoneName || zoneId}`,
@@ -3218,7 +3224,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ]))
+        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { logId: id } })
       }
@@ -3247,7 +3253,8 @@ export async function onRequest(ctx) {
 
         const fertEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
         ctx.waitUntil(sendAlert(env, `🌱 Estate360 — Fertilization logged (${fertEstateLabel})`, [
-          'A fertilization entry was logged.',
+          'Source: Estate360 > Fertilization Log',
+          'Action: Fertilization entry logged',
           '',
           `Estate:        ${fertEstateLabel}`,
           `Planned date:  ${plannedDate}`,
@@ -3261,7 +3268,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ]))
+        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { id } })
       }

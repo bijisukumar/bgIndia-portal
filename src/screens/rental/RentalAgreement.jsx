@@ -328,13 +328,13 @@ export default function RentalAgreement() {
       // of the parking lease term. Uses INSERT OR IGNORE so re-saving
       // the agreement never creates duplicates.
       if (form.hasSeparateParking && form.parkingPaidInFull && form.parkingLeaseStart && form.parkingLeaseEnd && form.parkingFee) {
-        const start = new Date(form.parkingLeaseStart)
-        const end   = new Date(form.parkingLeaseEnd)
+        const [sy, sm] = form.parkingLeaseStart.split('-').map(Number)
+        const [ey, em] = form.parkingLeaseEnd.split('-').map(Number)
         const months = []
-        const cur = new Date(start.getFullYear(), start.getMonth(), 1)
-        while (cur <= end) {
-          months.push(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`)
-          cur.setMonth(cur.getMonth() + 1)
+        let cy = sy, cm = sm
+        while (cy * 12 + cm <= ey * 12 + em) {
+          months.push(`${cy}-${String(cm).padStart(2,'0')}`)
+          cm++; if (cm > 12) { cm = 1; cy++ }
         }
         const fee = parseFloat(form.parkingFee) || 0
         const cur2 = new Date()
@@ -800,11 +800,10 @@ export default function RentalAgreement() {
                     </div>
                   </label>
                   {form.parkingPaidInFull && form.parkingFee && form.parkingLeaseStart && form.parkingLeaseEnd && (() => {
-                    const start = new Date(form.parkingLeaseStart)
-                    const end   = new Date(form.parkingLeaseEnd)
-                    const endYM = end.getFullYear() * 12 + end.getMonth()
-                    let count = 0, cur2 = new Date(start.getFullYear(), start.getMonth(), 1)
-                    while (cur2.getFullYear() * 12 + cur2.getMonth() <= endYM) { count++; cur2.setMonth(cur2.getMonth() + 1) }
+                    const [sy, sm] = form.parkingLeaseStart.split('-').map(Number)
+                    const [ey, em] = form.parkingLeaseEnd.split('-').map(Number)
+                    let count = 0, cy = sy, cm = sm
+                    while (cy * 12 + cm <= ey * 12 + em) { count++; cm++; if (cm > 12) { cm=1; cy++ } }
                     const months = count
                     const total  = (parseFloat(form.parkingFee) || 0) * months
                     const sym    = form.parkingCurrency === 'USD' ? '$' : '₹'

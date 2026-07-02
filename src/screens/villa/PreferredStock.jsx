@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
-import { INVENTORY_MASTER } from './Inventory'
 
 // Preferred Stock Settings — lets the owner set a target stock level per item.
 // The Inventory Stock tab and dashboard flag an item as "low" once
 // qty_in_stock falls to <= 10% of this preferred level.
+//
+// Item list now comes from getInventory (active=1 rows) instead of the old
+// hardcoded INVENTORY_MASTER import — so archived items disappear here too,
+// and newly-added items show up automatically with no code change.
 export default function PreferredStock() {
   const navigate = useNavigate()
-  const [levels, setLevels] = useState(() =>
-    Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, 10]))
-  )
+  const [items, setItems] = useState([])     // [{id, name, unit}]
+  const [levels, setLevels] = useState({})
   const [current, setCurrent] = useState({})  // item_id -> qty_in_stock, for context while editing
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -22,11 +24,8 @@ export default function PreferredStock() {
     let cancelled = false
     api.getInventory('dwarka').then(rows => {
       if (cancelled || !Array.isArray(rows)) return
-      setLevels(l => {
-        const next = { ...l }
-        rows.forEach(r => { if (r.preferred_stock != null) next[r.item_id] = r.preferred_stock })
-        return next
-      })
+      setItems(rows.map(r => ({ id: r.item_id, name: r.name, unit: r.unit || 'unit' })))
+      setLevels(Object.fromEntries(rows.map(r => [r.item_id, r.preferred_stock ?? 10])))
       setCurrent(Object.fromEntries(rows.map(r => [r.item_id, r.qty_in_stock ?? 0])))
     }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -69,7 +68,7 @@ export default function PreferredStock() {
 
         <div className="card-section-label">ITEMS</div>
         <div className="card">
-          {INVENTORY_MASTER.map((item, i) => {
+          {items.map((item, i) => {
             const preferred = levels[item.id] ?? 10
             const have      = current[item.id] ?? 0
             const threshold = Math.ceil(preferred * 0.1)
@@ -78,7 +77,7 @@ export default function PreferredStock() {
               <div key={item.id} style={{
                 display: 'grid', gridTemplateColumns: '1fr 90px', alignItems: 'center', gap: '10px',
                 paddingBottom: '12px', marginBottom: '12px',
-                borderBottom: i < INVENTORY_MASTER.length - 1 ? '1px solid var(--border-dim)' : 'none',
+                borderBottom: i < items.length - 1 ? '1px solid var(--border-dim)' : 'none',
               }}>
                 <div>
                   <div style={{ color: 'var(--text)', fontSize: '0.88rem', fontWeight: '500' }}>{item.name}</div>

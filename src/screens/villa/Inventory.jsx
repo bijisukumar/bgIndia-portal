@@ -2,32 +2,39 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 
-// Master inventory with sell prices — these are the prices used at checkout
-// category: 'kitchen' | 'bathroom' | 'bedroom' | 'other'
-export const INVENTORY_MASTER = [
-  // Kitchen incidentals
-  { id: 'water_bottle',   name: 'Water bottles',     unit: 'bottle',  category: 'kitchen',  costPrice: 18, sellPrice: 30,  defaultQty: 10 },
-  { id: 'soft_drink',     name: 'Soft drinks',        unit: 'can',     category: 'kitchen',  costPrice: 40, sellPrice: 60,  defaultQty: 10 },
-  { id: 'chocolate',      name: 'Chocolates',         unit: 'bar',     category: 'kitchen',  costPrice: 45, sellPrice: 70,  defaultQty: 10 },
-  { id: 'chips',          name: 'Chips',              unit: 'packet',  category: 'kitchen',  costPrice: 30, sellPrice: 50,  defaultQty: 10 },
-  { id: 'milk_packet',    name: 'Milk packets',       unit: 'packet',  category: 'kitchen',  costPrice: 30, sellPrice: 45,  defaultQty: 10 },
-  { id: 'tea_coffee',     name: 'Tea / Coffee',       unit: 'cup',     category: 'kitchen',  costPrice: 15, sellPrice: 25,  defaultQty: 10 },
-  { id: 'eggs',           name: 'Eggs',               unit: 'egg',     category: 'kitchen',  costPrice: 8,  sellPrice: 12,  defaultQty: 10 },
-  { id: 'bread',          name: 'Bread',              unit: 'loaf',    category: 'kitchen',  costPrice: 35, sellPrice: 45,  defaultQty: 10 },
-  // Bathroom
-  { id: 'shampoo',        name: 'Shampoo',            unit: 'bottle',  category: 'bathroom', costPrice: 80, sellPrice: 0,   defaultQty: 10 },
-  { id: 'body_wash',      name: 'Body wash',          unit: 'bottle',  category: 'bathroom', costPrice: 90, sellPrice: 0,   defaultQty: 10 },
-  { id: 'bathroom_cleaner', name: 'Bathroom cleaner', unit: 'bottle',  category: 'bathroom', costPrice: 60, sellPrice: 0,   defaultQty: 10 },
-  { id: 'tissue',         name: 'Tissue / toilet paper', unit: 'roll', category: 'bathroom', costPrice: 25, sellPrice: 0,  defaultQty: 10 },
-  // Bedroom
-  { id: 'bed_essential',  name: 'Bedroom essentials', unit: 'set',    category: 'bedroom',  costPrice: 0,  sellPrice: 0,   defaultQty: 10 },
+// Legacy default catalog — used ONLY as first-paint scaffolding before the
+// real DB-driven catalog loads (avoids an empty-screen flash), and as the
+// one-time seed in scripts/migrate-inventory-catalog.sql. The actual
+// source of truth for "what items exist" is the `inventory` table now
+// (active=1 rows), fetched via getInventory. Adding/archiving items here
+// does nothing — use the in-app "+ Add new item" / archive controls.
+const INVENTORY_SEED_FALLBACK = [
+  { id: 'water_bottle',   name: 'Water bottles',     unit: 'bottle',  category: 'kitchen',  costPrice: 18, sellPrice: 30 },
+  { id: 'soft_drink',     name: 'Soft drinks',        unit: 'can',     category: 'kitchen',  costPrice: 40, sellPrice: 60 },
+  { id: 'chocolate',      name: 'Chocolates',         unit: 'bar',     category: 'kitchen',  costPrice: 45, sellPrice: 70 },
+  { id: 'chips',          name: 'Chips',              unit: 'packet',  category: 'kitchen',  costPrice: 30, sellPrice: 50 },
+  { id: 'milk_packet',    name: 'Milk packets',       unit: 'packet',  category: 'kitchen',  costPrice: 30, sellPrice: 45 },
+  { id: 'tea_coffee',     name: 'Tea / Coffee',       unit: 'cup',     category: 'kitchen',  costPrice: 15, sellPrice: 25 },
+  { id: 'eggs',           name: 'Eggs',               unit: 'egg',     category: 'kitchen',  costPrice: 8,  sellPrice: 12 },
+  { id: 'bread',          name: 'Bread',              unit: 'loaf',    category: 'kitchen',  costPrice: 35, sellPrice: 45 },
+  { id: 'shampoo',        name: 'Shampoo',            unit: 'bottle',  category: 'bathroom', costPrice: 80, sellPrice: 0  },
+  { id: 'body_wash',      name: 'Body wash',          unit: 'bottle',  category: 'bathroom', costPrice: 90, sellPrice: 0  },
+  { id: 'bathroom_cleaner', name: 'Bathroom cleaner', unit: 'bottle',  category: 'bathroom', costPrice: 60, sellPrice: 0  },
+  { id: 'tissue',         name: 'Tissue / toilet paper', unit: 'roll', category: 'bathroom', costPrice: 25, sellPrice: 0  },
+  { id: 'bed_essential',  name: 'Bedroom essentials', unit: 'set',     category: 'bedroom',  costPrice: 0,  sellPrice: 0  },
 ]
+
+// Kept exported for PreferredStock.jsx during the transition — it now
+// fetches its own live catalog the same way, so this is unused there too,
+// but left in case anything else still imports it.
+export const INVENTORY_MASTER = INVENTORY_SEED_FALLBACK
 
 const CATEGORIES = [
   { id: 'all',      label: 'All' },
   { id: 'kitchen',  label: '🍳 Kitchen' },
   { id: 'bathroom', label: '🚿 Bathroom' },
   { id: 'bedroom',  label: '🛏 Bedroom' },
+  { id: 'other',    label: 'Other' },
 ]
 
 function fmt(n) { return n ? `₹${Number(n).toLocaleString('en-IN')}` : '₹0' }
@@ -40,78 +47,58 @@ export default function Inventory() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [addNew, setAddNew] = useState(false)
+  const [addingItem, setAddingItem] = useState(false)
   const [restockLog, setRestockLog] = useState([])
 
-  // Stock levels + prices — loaded from DB on mount; fall back to
-  // INVENTORY_MASTER defaults for any item not yet in the DB for this villa.
-  const [stock, setStock] = useState(() =>
-    Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { qty: i.defaultQty, costPrice: i.costPrice, sellPrice: i.sellPrice, preferredStock: 10 }]))
-  )
-  const [prices, setPrices] = useState(() =>
-    Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { costPrice: i.costPrice, sellPrice: i.sellPrice }]))
-  )
-  // Restock entries
-  const [restock, setRestock] = useState(() =>
-    Object.fromEntries(INVENTORY_MASTER.map(i => [i.id, { qty: '', totalCost: '' }]))
-  )
+  // The live, DB-driven catalog (active items only). Starts from the
+  // fallback list so the screen isn't empty during the first fetch.
+  const [catalog, setCatalog] = useState(INVENTORY_SEED_FALLBACK)
+  const [stock, setStock] = useState({})
+  const [prices, setPrices] = useState({})
+  const [restock, setRestock] = useState({})
   const [newItem, setNewItem] = useState({ name: '', unit: '', category: 'kitchen', costPrice: '', sellPrice: '' })
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
-  // Load live data from D1 on mount — without this, the screen always showed
-  // hardcoded INVENTORY_MASTER defaults regardless of what was actually saved.
-  useEffect(() => {
+  const load = () => {
+    setLoading(true)
     let cancelled = false
-    async function load() {
-      setLoading(true)
+    ;(async () => {
       try {
         const rows = await api.getInventory('dwarka')
         if (!cancelled && Array.isArray(rows) && rows.length) {
-          setStock(s => {
-            const next = { ...s }
-            rows.forEach(r => {
-              next[r.item_id] = {
-                qty: r.qty_in_stock ?? next[r.item_id]?.qty ?? 0,
-                costPrice: r.cost_price ?? next[r.item_id]?.costPrice ?? 0,
-                sellPrice: r.sell_price ?? next[r.item_id]?.sellPrice ?? 0,
-                preferredStock: r.preferred_stock ?? next[r.item_id]?.preferredStock ?? 10,
-              }
-            })
-            return next
-          })
-          setPrices(p => {
-            const next = { ...p }
-            rows.forEach(r => {
-              next[r.item_id] = {
-                costPrice: r.cost_price ?? next[r.item_id]?.costPrice ?? 0,
-                sellPrice: r.sell_price ?? next[r.item_id]?.sellPrice ?? 0,
-              }
-            })
-            return next
-          })
+          setCatalog(rows.map(r => ({
+            id: r.item_id, name: r.name, unit: r.unit || 'unit', category: r.category || 'other',
+          })))
+          setStock(Object.fromEntries(rows.map(r => [r.item_id, {
+            qty: r.qty_in_stock ?? 0, preferredStock: r.preferred_stock ?? 10,
+          }])))
+          setPrices(Object.fromEntries(rows.map(r => [r.item_id, {
+            costPrice: r.cost_price ?? 0, sellPrice: r.sell_price ?? 0,
+          }])))
+          setRestock(Object.fromEntries(rows.map(r => [r.item_id, { qty: '', totalCost: '' }])))
         }
       } catch {
-        // DB read failed — keep hardcoded defaults, no need to alarm the user on load
+        // DB read failed — keep the fallback catalog + empty state, no need to alarm the user on load
       }
       try {
         const log = await api.getInventoryRestockLog?.('dwarka')
         if (!cancelled && Array.isArray(log)) setRestockLog(log)
       } catch { /* non-critical */ }
       if (!cancelled) setLoading(false)
-    }
-    load()
+    })()
     return () => { cancelled = true }
-  }, [])
+  }
 
+  useEffect(() => load(), [])
 
-  const filtered = cat === 'all' ? INVENTORY_MASTER : INVENTORY_MASTER.filter(i => i.category === cat)
+  const filtered = cat === 'all' ? catalog : catalog.filter(i => i.category === cat)
 
   const setStockQty = (id, qty) => setStock(s => ({ ...s, [id]: { ...s[id], qty: Math.max(0, parseInt(qty) || 0) } }))
   const setPrice    = (id, field, val) => setPrices(p => ({ ...p, [id]: { ...p[id], [field]: parseFloat(val) || 0 } }))
   const setRestockField = (id, field, val) => {
     setRestock(r => {
       const next = { ...r[id], [field]: val }
-      // Auto calc price/unit when both qty and cost filled
       if (next.qty && next.totalCost) {
         next.pricePerUnit = (parseFloat(next.totalCost) / parseFloat(next.qty)).toFixed(2)
       }
@@ -123,7 +110,7 @@ export default function Inventory() {
     setSaving(true)
     try {
       const payload = Object.fromEntries(
-        INVENTORY_MASTER.map(i => [i.id, { qty: stock[i.id]?.qty ?? 0, name: i.name }])
+        catalog.map(i => [i.id, { qty: stock[i.id]?.qty ?? 0, name: i.name }])
       )
       const res = await api.saveInventoryStock({ villaId: 'dwarka', stock: payload })
       if (res?.errors?.length > 0) {
@@ -146,7 +133,7 @@ export default function Inventory() {
   }
 
   const handleSaveRestock = async () => {
-    const entries = INVENTORY_MASTER
+    const entries = catalog
       .filter(i => restock[i.id]?.qty && parseFloat(restock[i.id].qty) > 0)
       .map(i => ({ id: i.id, name: i.name, ...restock[i.id] }))
     if (!entries.length) { showToast('Enter qty for at least one item', 'error'); return }
@@ -154,8 +141,6 @@ export default function Inventory() {
     try {
       const res = await api.saveInventoryRestock({ villaId: 'dwarka', entries })
       const failedIds = new Set((res?.errors || []).map(e2 => e2.itemId))
-      // Only reflect items that actually saved in local state — an item
-      // that failed shouldn't show as restocked in the UI when it wasn't.
       entries.forEach(e => {
         if (failedIds.has(e.id)) return
         setStock(s => ({ ...s, [e.id]: { ...s[e.id], qty: (s[e.id]?.qty || 0) + parseFloat(e.qty) } }))
@@ -167,13 +152,38 @@ export default function Inventory() {
       } else {
         showToast('Restock recorded ✓')
       }
-      // Pull the fresh log so the new entries show up immediately
       try {
         const log = await api.getInventoryRestockLog?.('dwarka')
         if (Array.isArray(log)) setRestockLog(log)
       } catch { /* non-critical */ }
     } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
+  }
+
+  const handleAddItem = async () => {
+    const name = newItem.name.trim()
+    if (!name) { showToast('Enter an item name', 'error'); return }
+    setAddingItem(true)
+    try {
+      await api.addInventoryItem({
+        villaId: 'dwarka', name, unit: newItem.unit.trim() || 'unit',
+        category: newItem.category, costPrice: newItem.costPrice, sellPrice: newItem.sellPrice,
+      })
+      showToast(`${name} added ✓`)
+      setAddNew(false)
+      setNewItem({ name: '', unit: '', category: 'kitchen', costPrice: '', sellPrice: '' })
+      load()
+    } catch (e) { showToast(e?.message || 'Failed to add item', 'error') }
+    finally { setAddingItem(false) }
+  }
+
+  const handleArchiveItem = async (item) => {
+    if (!confirm(`Remove "${item.name}" from inventory? Past restock and expense history stays intact — you can restore it later from D1 Explorer if needed.`)) return
+    try {
+      await api.archiveInventoryItem({ villaId: 'dwarka', itemId: item.id })
+      showToast(`${item.name} removed`)
+      setCatalog(c => c.filter(i => i.id !== item.id))
+    } catch (e) { showToast(e?.message || 'Failed to remove item', 'error') }
   }
 
   const tabBar = { display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', background: '#111', marginBottom: 0 }
@@ -252,7 +262,7 @@ export default function Inventory() {
                         {prices[item.id]?.sellPrice > 0 && ` · sell ₹${prices[item.id].sellPrice}`}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <button onClick={() => setStockQty(item.id, s.qty - 1)}
                         style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>−</button>
                       <input
@@ -263,6 +273,8 @@ export default function Inventory() {
                       />
                       <button onClick={() => setStockQty(item.id, s.qty + 1)}
                         style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid var(--border-dim)', background: 'transparent', color: 'var(--text)', fontSize: '1.1rem', cursor: 'pointer' }}>+</button>
+                      <button onClick={() => handleArchiveItem(item)} title="Remove from inventory"
+                        style={{ width: 26, height: 26, marginLeft: '4px', borderRadius: '50%', border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#EF4444', fontSize: '0.9rem', cursor: 'pointer', lineHeight: '24px' }}>×</button>
                     </div>
                   </div>
                 )
@@ -392,9 +404,8 @@ export default function Inventory() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="btn btn-gold" style={{ flex: 1 }}
-                    onClick={() => { showToast(`${newItem.name} added ✓`); setAddNew(false); setNewItem({ name: '', unit: '', category: 'kitchen', costPrice: '', sellPrice: '' }) }}>
-                    Add item
+                  <button className="btn btn-gold" style={{ flex: 1 }} onClick={handleAddItem} disabled={addingItem}>
+                    {addingItem ? 'Adding...' : 'Add item'}
                   </button>
                   <button onClick={() => setAddNew(false)}
                     style={{ padding: '14px 18px', borderRadius: '12px', border: '1px solid var(--border-dim)', background: 'transparent', color: '#5C7080', cursor: 'pointer' }}>

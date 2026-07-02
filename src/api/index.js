@@ -240,6 +240,9 @@ export const api = {
   getInventory:                (vId)    => get('getInventory', { villaId: vId }),
   saveInventoryStock:          (data)   => post('saveInventoryStock', data),
   saveInventoryPreferredStock: (data)   => post('saveInventoryPreferredStock', data),
+  addInventoryItem:            (data)   => post('addInventoryItem', data),
+  archiveInventoryItem:        (data)   => post('archiveInventoryItem', data),
+  restoreInventoryItem:        (data)   => post('restoreInventoryItem', data),
   getLowStockItems:            (vId)    => get('getLowStockItems', { villaId: vId }),
 
   // ── GUEST ENQUIRY MANAGEMENT (CRM) ───────────────────────

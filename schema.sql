@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS inventory (
   cost_price     REAL DEFAULT 0,
   sell_price     REAL DEFAULT 0,
   last_restocked TEXT,
+  active         INTEGER DEFAULT 1,    -- 0 = archived/no longer stocked; hidden from all screens, history preserved
   -- Audit
   created_by  TEXT DEFAULT 'system',
   created_at  TEXT DEFAULT (datetime('now')),

@@ -1081,7 +1081,12 @@ export async function onRequest(ctx) {
 
       if (action === 'getInventory') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`SELECT * FROM inventory WHERE villa_id = ? ORDER BY category, name`).bind(villaId).all()
+        const includeInactive = url.searchParams.get('includeInactive') === '1'
+        const { results } = await DB.prepare(
+          includeInactive
+            ? `SELECT * FROM inventory WHERE villa_id = ? ORDER BY category, name`
+            : `SELECT * FROM inventory WHERE villa_id = ? AND (active IS NULL OR active = 1) ORDER BY category, name`
+        ).bind(villaId).all()
         return json({ success: true, data: results })
       }
 
@@ -2672,6 +2677,50 @@ export async function onRequest(ctx) {
       }
 
       // INVENTORY — set preferred (target) stock levels per item; used to flag low stock
+      // INVENTORY — add a brand-new catalog item (persisted, not the old
+      // fake 'Add item' button that only showed a toast and forgot it).
+      if (action === 'addInventoryItem') {
+        const villaId = body.villaId || 'dwarka'
+        const name = (body.name || '').trim()
+        if (!name) return err('name required')
+        const unit = (body.unit || '').trim() || 'unit'
+        const category = body.category || 'other'
+        const sellPrice = parseFloat(body.sellPrice) || 0
+        const costPrice = parseFloat(body.costPrice) || 0
+        // Slugify the name into an item_id, de-duping against any existing
+        // id (including archived ones — item_id is a bare PK, so reusing
+        // an archived item's id would collide on INSERT).
+        let baseId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'item'
+        let itemId = baseId
+        let suffix = 2
+        while (await DB.prepare(`SELECT 1 FROM inventory WHERE item_id = ?`).bind(itemId).first()) {
+          itemId = `${baseId}_${suffix}`; suffix++
+        }
+        await DB.prepare(`
+          INSERT INTO inventory (item_id, villa_id, name, unit, category, cost_price, sell_price, qty_in_stock, preferred_stock, active, created_by, updated_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 10, 1, ?, ?, ?, ?)
+        `).bind(itemId, villaId, name, unit, category, costPrice, sellPrice, actor, actor, now(), now()).run()
+        return json({ success: true, data: { itemId } })
+      }
+
+      // INVENTORY — archive (soft-delete): hidden from all screens, restock
+      // log and financial history for this item_id stay intact.
+      if (action === 'archiveInventoryItem') {
+        const { itemId, villaId } = body
+        if (!itemId) return err('itemId required')
+        await DB.prepare(`UPDATE inventory SET active = 0, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
+          .bind(actor, now(), itemId, villaId || 'dwarka').run()
+        return json({ success: true, data: { itemId } })
+      }
+
+      if (action === 'restoreInventoryItem') {
+        const { itemId, villaId } = body
+        if (!itemId) return err('itemId required')
+        await DB.prepare(`UPDATE inventory SET active = 1, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
+          .bind(actor, now(), itemId, villaId || 'dwarka').run()
+        return json({ success: true, data: { itemId } })
+      }
+
       if (action === 'saveInventoryPreferredStock') {
         const villaId = body.villaId || 'dwarka'
         const levels  = body.levels || {}

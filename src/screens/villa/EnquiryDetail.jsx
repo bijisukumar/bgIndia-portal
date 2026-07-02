@@ -29,12 +29,14 @@ const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
 
 // Builds a wa.me deep-link pre-filled with the quote text, so the owner can
 // open the guest's WhatsApp chat with it ready to send (not auto-sent).
+// Uses the emoji-safe version — WhatsApp Desktop/Windows renders 4-byte
+// (astral-plane) emoji as '�' when text arrives via this URI path.
 function buildQuoteWaLink(e) {
   const phone = e.phone
   if (!phone) return null
   const raw = String(phone).replace(/\D/g, '')
   const num = raw.startsWith('91') ? raw : (raw.length === 10 ? `91${raw}` : raw)
-  return `https://wa.me/${num}?text=${encodeURIComponent(buildQuote(e))}`
+  return `https://wa.me/${num}?text=${encodeURIComponent(buildQuote(e, false))}`
 }
 
 function fmtQuoteDate(d) {
@@ -60,62 +62,93 @@ function quoteCore(e) {
   }
 }
 
-const FAMILIES_BLOCK = [
-  `Why families choose us in Guruvayur`,
-  `Luxury Villas of Guruvayur is designed specifically for families who want:`,
-  ``,
-  `* A peaceful, private villa close to the temple`,
-  `* Comfortable shared spaces for large family groups`,
-  `* A safe, homely environment (not a hotel crowd setup)`,
-  `* Support for smooth local travel and Kerala experience planning`,
-  ``,
-  `We also help many families plan their Kerala stay beyond Guruvayur — including Cochin, Guruvayur temple visits, and curated local experiences through our trusted network.`,
-]
+// rich=true (Generate & copy): full colorful emoji — safe for copy/paste,
+// which doesn't go through the URI-decode path that corrupts them on
+// WhatsApp Desktop/Windows. rich=false (Send quote in WhatsApp button):
+// only BMP-safe symbols (❓ ✨ ✅ ☎), confirmed not to corrupt.
+function icons(rich) {
+  return {
+    pray:      rich ? '🙏 ' : '',
+    calendar:  rich ? '📅 ' : '',
+    link:      rich ? '🔗 ' : '',
+    villa:     rich ? '🏡 ' : '',
+    guests:    rich ? '👨‍👩‍👧‍👦 ' : '',
+    money:     rich ? '💰 ' : '',
+    leaf:      rich ? '🌿 ' : '',
+    camera:    rich ? '📸 ' : '',
+    gift:      rich ? '🎁 ' : '',
+    handshake: rich ? '🤝 ' : '',
+    phone:     rich ? '📞 ' : '☎ ',
+    sparkle:   '✨ ',
+    check:     '✅ ',
+    question:  '❓ ',
+  }
+}
 
-const LINKS_BLOCK = [
-  `Villa details: https://luxuryvillasofguruvayur.com/villa`,
-  `❓ FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
-]
+function familiesBlock(ic) {
+  return [
+    `${ic.leaf}Why families choose us in Guruvayur`,
+    `Luxury Villas of Guruvayur is designed specifically for families who want:`,
+    ``,
+    `* A peaceful, private villa close to the temple`,
+    `* Comfortable shared spaces for large family groups`,
+    `* A safe, homely environment (not a hotel crowd setup)`,
+    `* Support for smooth local travel and Kerala experience planning`,
+    ``,
+    `We also help many families plan their Kerala stay beyond Guruvayur — including Cochin, Guruvayur temple visits, and curated local experiences through our trusted network.`,
+  ]
+}
 
-const SIGNOFF_BLOCK = (closingLine) => [
-  ``,
-  closingLine,
-  ``,
-  `സസ്നേഹം (Sasneham)`,
-  `Biji Sukumar`,
-  `Luxury Villas of Guruvayur`,
-  `☎ +91 99950 43283  (GPay available)`,
-]
+function linksBlock(ic) {
+  return [
+    `${ic.camera}Villa details: https://luxuryvillasofguruvayur.com/villa`,
+    `${ic.question}FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
+  ]
+}
+
+function signoffBlock(ic, closingLine) {
+  return [
+    ``,
+    closingLine,
+    ``,
+    `സസ്നേഹം (Sasneham)`,
+    `Biji Sukumar`,
+    `Luxury Villas of Guruvayur`,
+    `${ic.phone}+91 99950 43283  (GPay available)`,
+  ]
+}
 
 // ── Default: no discount, no B2B — standard first-contact quote ──
-function buildQuoteDefault(e) {
+function buildQuoteDefault(e, rich) {
   const c = quoteCore(e)
+  const ic = icons(rich)
   return [
     `Namaskaram ${c.firstName},`,
     ``,
     `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out — we would be truly happy to host your family during your visit to Guruvayur.`,
     ``,
     `We have checked your dates and the villa is available:`,
-    `Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-    `Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `Guests: ${c.guestCount}`,
-    `Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `${ic.guests}Guests: ${c.guestCount}`,
+    `${ic.money}Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
-    ...FAMILIES_BLOCK,
+    ...familiesBlock(ic),
     ``,
-    ...LINKS_BLOCK,
-    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you. We make every effort to respond to you with the best experience throughout your journey, so please respond to us with whatever decision you may make. We look forward to making your stay a memorable one.`),
+    ...linksBlock(ic),
+    ...signoffBlock(ic, `If this works for your plans, I can go ahead and block the dates for you. We make every effort to respond to you with the best experience throughout your journey, so please respond to us with whatever decision you may make. We look forward to making your stay a memorable one.${rich ? ' 🙏' : ''}`),
   ].join('\n')
 }
 
 // ── Repeat / loyalty guest — lead with the discount, make it feel special ──
-function buildQuoteRepeatDiscount(e) {
+function buildQuoteRepeatDiscount(e, rich) {
   const c = quoteCore(e)
+  const ic = icons(rich)
   const label = e.discount_category
     ? (DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Valued Guest')
     : 'Returning Guest'
@@ -126,30 +159,31 @@ function buildQuoteRepeatDiscount(e) {
     `This is Biji from Luxury Villas of Guruvayur. Wonderful to hear from you again — it's always a pleasure to welcome back our guests!`,
     ``,
     `We have checked your dates and the villa is available:`,
-    `Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-    `Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `Guests: ${c.guestCount}`,
+    `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `${ic.guests}Guests: ${c.guestCount}`,
     ``,
-    `As a ${label}, we're delighted to offer you a special discounted rate this time!`,
-    `Regular Tariff: ${fmt(c.quoteAmount)}`,
-    `${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
-    `✨ Your Special Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    `${ic.gift}As a ${label}, we're delighted to offer you a special discounted rate this time!`,
+    `${ic.money}Regular Tariff: ${fmt(c.quoteAmount)}`,
+    `${ic.gift}${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
+    `${ic.sparkle}Your Special Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
-    `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again.`,
+    `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again.${rich ? ' 🌿' : ''}`,
     ``,
-    ...LINKS_BLOCK,
-    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you.`),
+    ...linksBlock(ic),
+    ...signoffBlock(ic, `If this works for your plans, I can go ahead and block the dates for you.`),
   ].join('\n')
 }
 
 // ── B2B / travel partner — call out the commission clearly and positively ──
-function buildQuoteB2B(e) {
+function buildQuoteB2B(e, rich) {
   const c = quoteCore(e)
+  const ic = icons(rich)
   const label = DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Partner'
   return [
     `Namaskaram ${c.fullName},`,
@@ -157,35 +191,38 @@ function buildQuoteB2B(e) {
     `This is Biji from Luxury Villas of Guruvayur. Thank you for checking availability with us for your guest's stay in Guruvayur.`,
     ``,
     `We have checked the dates and the villa is available:`,
-    `Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-    `Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `Guests: ${c.guestCount}`,
+    `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `${ic.guests}Guests: ${c.guestCount}`,
     ``,
-    `As our valued ${label}, here's your special partner pricing:`,
-    `Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
-    `Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
-    `✅ Net Payable to Us: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    `${ic.handshake}As our valued ${label}, here's your special partner pricing:`,
+    `${ic.money}Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
+    `${ic.handshake}Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
+    `${ic.check}Net Payable to Us: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     ``,
-    `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking!`,
+    `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking!${rich ? ' 🌿' : ''}`,
     ``,
-    ...LINKS_BLOCK,
-    ...SIGNOFF_BLOCK(`If this works, let me know and I'll go ahead and block the dates.`),
+    ...linksBlock(ic),
+    ...signoffBlock(ic, `If this works, let me know and I'll go ahead and block the dates.`),
   ].join('\n')
 }
 
-function buildQuote(e) {
+// rich=true for "Generate & copy" (colorful, safe for copy/paste),
+// rich=false for the "Send quote in WhatsApp" wa.me link (BMP-safe only —
+// see buildQuoteWaLink).
+function buildQuote(e, rich = true) {
   const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
   const isRepeatDiscount = !isB2B && (
     ['loyal_patron', 'elite_guest', 'platinum_guest'].includes(e.discount_category) ||
     (!e.discount_category && (e.repeat_discount_pct || 0) > 0)
   )
-  if (isB2B) return buildQuoteB2B(e)
-  if (isRepeatDiscount) return buildQuoteRepeatDiscount(e)
-  return buildQuoteDefault(e)
+  if (isB2B) return buildQuoteB2B(e, rich)
+  if (isRepeatDiscount) return buildQuoteRepeatDiscount(e, rich)
+  return buildQuoteDefault(e, rich)
 }
 
 export default function EnquiryDetail() {

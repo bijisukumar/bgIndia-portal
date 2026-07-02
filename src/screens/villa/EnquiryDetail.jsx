@@ -103,13 +103,13 @@ function buildQuoteDefault(e) {
     ``,
     `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
-    `🏷️ Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    `💰 Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
     ...FAMILIES_BLOCK,
     ``,
     ...LINKS_BLOCK,
-    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you. As we do get frequent enquiries for these dates, I'd really appreciate hearing back either way at your earliest convenience — even a quick "not this time" helps us plan better. 🙏`),
+    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you. We make every effort to respond to you with the best experience throughout your journey, so please respond to us with whatever decision you may make. We look forward to making your stay a memorable one. 🙏`),
   ].join('\n')
 }
 

@@ -37,77 +37,56 @@ function buildQuoteWaLink(e) {
   return `https://wa.me/${num}?text=${encodeURIComponent(buildQuote(e))}`
 }
 
+function fmtQuoteDate(d) {
+  const parsed = parseLocalDate(d)
+  if (!parsed) return '—'
+  return parsed.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 function buildQuote(e) {
   const nights = e.nights || 1
   const finalTotal = e.final_offer_amount || e.quote_amount || 0
-  const nightly = nights > 0 ? Math.round(finalTotal / nights) : 0
   const billableGuests = (e.adults || 0) + (e.children || 0)
-  const overflowGuests = Math.max(0, billableGuests - RATE_CARD_MAX_GUESTS)
-  const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
-
-  const guestLine = overflowGuests > 0
-    ? `${e.guests_count || 1} (${RATE_CARD_MAX_GUESTS} + ${overflowGuests} on floor beds)`
-    : `${e.guests_count || 1}`
   const bedroomCount = getBedroomEstimate(e.villa_id || 'dwarka', billableGuests)
+  const firstName = (e.guest_name || '').trim().split(' ')[0] || 'there'
+  const nightsLabel = nights === 1 ? 'the night' : `${nights} nights`
 
-  const lines = [
-    `🙏 Namaskaram ${e.guest_name}!`,
+  return [
+    `Namaskaram ${firstName},`,
     ``,
-    `Thank you for choosing Luxury Villas of Guruvayur. We would be delighted to host your family.`,
+    `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out — we would be truly happy to host your family during your visit to Guruvayur.`,
     ``,
-    `📅 Check-in: ${e.checkin_date || '—'} - check-in after 4:00 PM`,
-    `📅 Check-out: ${e.checkout_date || '—'} - check-out by 11:00 AM`,
-    `Check-in/Check-out timings for Villa - https://luxuryvillasofguruvayur.com/faq.html`,
+    `We have checked your dates and the villa is available:`,
+    `📅 Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `📅 Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-  ]
-
-  // Show the pre-discount quote, the saved amount (labeled by what it actually is —
-  // a guest-facing discount for repeat guests, or a partner commission for B2B), and
-  // the resulting total — rather than only the final number, so it's clear at a
-  // glance what was reduced and why.
-  const discountAmount = e.discount_amount || 0
-  if (discountAmount > 0) {
-    lines.push(`💰 Tariff: ₹${Number(e.quote_amount || 0).toLocaleString('en-IN')}`)
-    if (e.discount_category) {
-      const label = DISCOUNT_CATEGORIES.find(c => c.id === e.discount_category)?.label || e.discount_category
-      const savedLabel = isB2B ? `${label} Commission` : `${label} Discount`
-      lines.push(`${isB2B ? '🤝' : '🎁'} ${savedLabel} (${e.discount_pct}%): −₹${Math.round(discountAmount).toLocaleString('en-IN')}`)
-    } else if (e.repeat_discount_pct > 0) {
-      lines.push(`🎁 Repeat Guest Discount (${e.repeat_discount_pct}%): −₹${Math.round(discountAmount).toLocaleString('en-IN')}`)
-    }
-  } else if (e.extra_charges > 0) {
-    lines.push(`💰 Tariff: ₹${Number(e.quote_amount || 0).toLocaleString('en-IN')}`)
-  }
-  let extraLinesArr = []
-  try { extraLinesArr = e.extra_lines ? JSON.parse(e.extra_lines) : [] } catch { extraLinesArr = [] }
-  extraLinesArr.forEach(l => {
-    const amt = parseFloat(l.amount) || 0
-    if (amt > 0) lines.push(`➕ ${l.label}: ₹${Math.round(amt).toLocaleString('en-IN')}`)
-  })
-  lines.push(`💰 Total Tariff: ₹${Math.round(finalTotal).toLocaleString('en-IN')}`)
-
-  lines.push(
-    `🏡 Rate: ₹${nightly.toLocaleString('en-IN')} per night`,
-    `👥 Guests: ${guestLine}`,
-    `🛏 Bedrooms: ${bedroomCount}`,
+    `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `💡 Why book directly with us?`,
-    `When you book through our official portal, we can offer flexible options like early check-in or late check-out to better suit your travel plans—a premium perk we cannot offer through third-party major channel partners.`,
-    `Plus, direct booking ensures you get the most cost-effective rates!`,
-    `Secure your dates and enjoy these direct booking benefits here:`,
-    `🌐 Book Direct: https://www.luxuryvillasofguruvayur.com`,
-    `FAQ: https://luxuryvillasofguruvayur.com/faq.html`,
-    `📸 Villa Photos: https://luxuryvillasofguruvayur.com/villa`,
-  )
-
-  lines.push(
+    `🏡 Villa: ${bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `👨‍👩‍👧‍👦 Guests: ${e.guests_count || billableGuests || 1}`,
+    `💰 Total Stay Cost: ${fmt(finalTotal)} (all inclusive for ${nightsLabel})`,
+    `(includes early check-in / late check-out flexibility where possible)`,
     ``,
-    `If you would like to proceed, please confirm at your earliest convenience.`,
+    `🌿 Why families choose us in Guruvayur`,
+    `Luxury Villas of Guruvayur is designed specifically for families who want:`,
     ``,
-    `💳 GPay: +91 99950 43283`,
-    `👤 Biji Sukumar – Luxury Villas of Guruvayur`,
-  )
-  return lines.join('\n')
+    `* A peaceful, private villa close to the temple`,
+    `* Comfortable shared spaces for large family groups`,
+    `* A safe, homely environment (not a hotel crowd setup)`,
+    `* Support for smooth local travel and Kerala experience planning`,
+    ``,
+    `We also help many families plan their Kerala stay beyond Guruvayur — including Cochin, Guruvayur temple visits, and curated local experiences through our trusted network.`,
+    ``,
+    `📸 Villa details: https://luxuryvillasofguruvayur.com/villa`,
+    `❓ FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
+    ``,
+    `If this works for your plans, I can go ahead and block the dates for you.`,
+    ``,
+    `സസ്നേഹം (Sasneham)`,
+    `Biji Sukumar`,
+    `Luxury Villas of Guruvayur`,
+    `📞 +91 99950 43283  (GPay available)`,
+  ].join('\n')
 }
 
 export default function EnquiryDetail() {

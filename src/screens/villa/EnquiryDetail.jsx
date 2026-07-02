@@ -61,7 +61,7 @@ function quoteCore(e) {
 }
 
 const FAMILIES_BLOCK = [
-  `🌿 Why families choose us in Guruvayur`,
+  `Why families choose us in Guruvayur`,
   `Luxury Villas of Guruvayur is designed specifically for families who want:`,
   ``,
   `* A peaceful, private villa close to the temple`,
@@ -73,7 +73,7 @@ const FAMILIES_BLOCK = [
 ]
 
 const LINKS_BLOCK = [
-  `📸 Villa details: https://luxuryvillasofguruvayur.com/villa`,
+  `Villa details: https://luxuryvillasofguruvayur.com/villa`,
   `❓ FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
 ]
 
@@ -84,7 +84,7 @@ const SIGNOFF_BLOCK = (closingLine) => [
   `സസ്നേഹം (Sasneham)`,
   `Biji Sukumar`,
   `Luxury Villas of Guruvayur`,
-  `📞 +91 99950 43283  (GPay available)`,
+  `☎ +91 99950 43283  (GPay available)`,
 ]
 
 // ── Default: no discount, no B2B — standard first-contact quote ──
@@ -96,20 +96,20 @@ function buildQuoteDefault(e) {
     `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out — we would be truly happy to host your family during your visit to Guruvayur.`,
     ``,
     `We have checked your dates and the villa is available:`,
-    `📅 Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `📅 Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-    `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    `Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
-    `💰 Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    `Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `Guests: ${c.guestCount}`,
+    `Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
     ...FAMILIES_BLOCK,
     ``,
     ...LINKS_BLOCK,
-    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you. We make every effort to respond to you with the best experience throughout your journey, so please respond to us with whatever decision you may make. We look forward to making your stay a memorable one. 🙏`),
+    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you. We make every effort to respond to you with the best experience throughout your journey, so please respond to us with whatever decision you may make. We look forward to making your stay a memorable one.`),
   ].join('\n')
 }
 
@@ -121,26 +121,26 @@ function buildQuoteRepeatDiscount(e) {
     : 'Returning Guest'
   const pct = e.discount_category ? e.discount_pct : e.repeat_discount_pct
   return [
-    `Namaskaram ${c.firstName} 🙏`,
+    `Namaskaram ${c.firstName},`,
     ``,
     `This is Biji from Luxury Villas of Guruvayur. Wonderful to hear from you again — it's always a pleasure to welcome back our guests!`,
     ``,
     `We have checked your dates and the villa is available:`,
-    `📅 Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `📅 Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-    `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    `Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
+    `Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `Guests: ${c.guestCount}`,
     ``,
-    `🎁 As a ${label}, we're delighted to offer you a special discounted rate this time!`,
-    `💰 Regular Tariff: ${fmt(c.quoteAmount)}`,
-    `🎁 ${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
+    `As a ${label}, we're delighted to offer you a special discounted rate this time!`,
+    `Regular Tariff: ${fmt(c.quoteAmount)}`,
+    `${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
     `✨ Your Special Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
-    `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again. 🌿`,
+    `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again.`,
     ``,
     ...LINKS_BLOCK,
     ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you.`),
@@ -152,25 +152,25 @@ function buildQuoteB2B(e) {
   const c = quoteCore(e)
   const label = DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Partner'
   return [
-    `Namaskaram ${c.fullName} 🙏`,
+    `Namaskaram ${c.fullName},`,
     ``,
     `This is Biji from Luxury Villas of Guruvayur. Thank you for checking availability with us for your guest's stay in Guruvayur.`,
     ``,
     `We have checked the dates and the villa is available:`,
-    `📅 Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `📅 Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
     ``,
-    `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    `Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
+    `Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `Guests: ${c.guestCount}`,
     ``,
-    `🤝 As our valued ${label}, here's your special partner pricing:`,
-    `💰 Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
-    `🤝 Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
+    `As our valued ${label}, here's your special partner pricing:`,
+    `Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
+    `Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
     `✅ Net Payable to Us: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     ``,
-    `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking! 🌿`,
+    `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking!`,
     ``,
     ...LINKS_BLOCK,
     ...SIGNOFF_BLOCK(`If this works, let me know and I'll go ahead and block the dates.`),

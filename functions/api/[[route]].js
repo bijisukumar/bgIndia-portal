@@ -655,7 +655,7 @@ export async function onRequest(ctx) {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
            FROM stays WHERE villa_id = ?
-           AND status NOT IN ('confirmed','pending_review','checked_in','ready_for_checkout','cancelled')
+           AND status IN ('checked_out', 'closed')
            ORDER BY checkout_date DESC LIMIT 2`
         ).bind(villaId).all()
         return json({ success: true, data: results })

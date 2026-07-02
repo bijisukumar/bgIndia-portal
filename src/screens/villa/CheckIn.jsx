@@ -73,25 +73,42 @@ export default function CheckIn() {
     try {
       // Load ready_for_checkin stays
       const pending = await api.getPendingCheckIns()
+      const allReadyForCheckin = Array.isArray(pending) ? pending : []
+
+      // Only show a guest as actionable in the Check-in tab once their
+      // check-in date is within the next 4 days — prevents accidentally
+      // confirming someone whose actual arrival is months out (this is
+      // exactly what happened with a guest whose real check-in was in
+      // October getting checked in during July, because there was no
+      // date guardrail on this list at all).
+      const fourDaysOut = new Date()
+      fourDaysOut.setHours(23, 59, 59, 999)
+      fourDaysOut.setDate(fourDaysOut.getDate() + 4)
+      const nearTermReady = allReadyForCheckin.filter(s => parseLocalDate(s.checkin_date) <= fourDaysOut)
+      const farFutureReady = allReadyForCheckin.filter(s => parseLocalDate(s.checkin_date) > fourDaysOut)
+
       // Load all upcoming stays (any non-closed/cancelled status, checkin >= today)
       const active = await api.getUpcomingStays('dwarka')
       const allUpcoming = Array.isArray(active) ? active : []
       const inhouse = allUpcoming.filter(s => ['checked_in','ready_for_checkout'].includes(s.status))
 
-      // Future guests block: anyone upcoming who isn't already ready-for-checkin
-      // or in-house, within the next 2 months — gives Raman visibility of the
-      // pipeline without affecting his check-in/checkout workflow.
+      // Future guests block: anyone upcoming who isn't already actionable
+      // (near-term ready-for-checkin) or in-house, within the next 2
+      // months — gives Raman visibility of the pipeline (including a
+      // far-future ready_for_checkin guest, informationally, without
+      // letting him check them in early) without affecting his actual
+      // check-in/checkout workflow.
       const twoMonthsOut = new Date()
       twoMonthsOut.setMonth(twoMonthsOut.getMonth() + 2)
       const future = allUpcoming
-        .filter(s => !['ready_for_checkin','checked_in','ready_for_checkout'].includes(s.status))
+        .filter(s => !['checked_in','ready_for_checkout'].includes(s.status))
+        .filter(s => !nearTermReady.some(p => p.stay_id === s.stay_id))
         .filter(s => parseLocalDate(s.checkin_date) <= twoMonthsOut)
         .sort((a,b) => parseLocalDate(a.checkin_date) - parseLocalDate(b.checkin_date))
 
-      setStays({ pending: Array.isArray(pending) ? pending : [], inhouse })
+      setStays({ pending: nearTermReady, inhouse })
       setFutureGuests(future)
-      const allReady = Array.isArray(pending) ? pending : []
-      if (allReady.length > 0) setSelected(allReady[0])
+      if (nearTermReady.length > 0) setSelected(nearTermReady[0])
       else if (inhouse.length > 0) { setSelected(inhouse[0]); setTab('inhouse') }
     } catch(e) {
       showToast('Could not load stays: ' + e.message, 'error')

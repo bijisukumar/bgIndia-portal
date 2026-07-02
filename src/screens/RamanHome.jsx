@@ -204,28 +204,25 @@ export default function RamanHome() {
     {
       icon: '🛒', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Kitchen incidentals',
-      sub: activeLabel,
+      sub: activeStay ? activeLabel : 'Log for active stay or a recent checkout',
       path: '/raman/kitchen',
-      disabled: !activeStay,
-      lockReason: 'Guest must be checked in to record kitchen charges',
+      disabled: false,
     },
     {
       icon: '🍳', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Breakfast',
       sub: activeStay
         ? `${adultCount} guests · ₹${CONFIG.breakfastRate}/person`
-        : activeLabel,
+        : 'Log for active stay or a recent checkout',
       path: '/raman/breakfast',
-      disabled: !activeStay,
-      lockReason: 'Guest must be checked in to record breakfast',
+      disabled: false,
     },
     {
       icon: '🚗', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Car rental',
-      sub: activeStay ? `Linked to ${guestName}` : activeLabel,
+      sub: activeStay ? `Linked to ${guestName}` : 'Log for active stay or a recent checkout',
       path: '/raman/carrental',
-      disabled: !activeStay,
-      lockReason: 'Guest must be checked in to record car rental',
+      disabled: false,
     },
     {
       icon: '🧾', bg: 'rgba(239,68,68,0.08)', arrow: '#EF4444',

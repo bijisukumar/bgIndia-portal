@@ -2657,21 +2657,35 @@ export async function onRequest(ctx) {
       if (action === 'saveInventoryPreferredStock') {
         const villaId = body.villaId || 'dwarka'
         const levels  = body.levels || {}
+        const errors = []
+        let savedCount = 0
         for (const [itemId, val] of Object.entries(levels)) {
           const preferred = Math.max(0, parseInt(val, 10) || 0)
-          const result = await DB.prepare(`
-            UPDATE inventory
-            SET preferred_stock = ?, updated_by = ?, updated_at = ?
-            WHERE item_id = ? AND villa_id = ?
-          `).bind(preferred, actor, now(), itemId, villaId).run()
-          if (!result.meta?.changes) {
-            await DB.prepare(`
-              INSERT INTO inventory (item_id, villa_id, name, preferred_stock, created_by, updated_by, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(itemId, villaId, itemId, preferred, actor, actor, now(), now()).run()
+          try {
+            const result = await DB.prepare(`
+              UPDATE inventory
+              SET preferred_stock = ?, updated_by = ?, updated_at = ?
+              WHERE item_id = ? AND villa_id = ?
+            `).bind(preferred, actor, now(), itemId, villaId).run()
+            if (!result.meta?.changes) {
+              await DB.prepare(`
+                INSERT INTO inventory (item_id, villa_id, name, preferred_stock, created_by, updated_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              `).bind(itemId, villaId, itemId, preferred, actor, actor, now(), now()).run()
+            }
+            savedCount++
+          } catch (e) {
+            // One bad item (e.g. an item_id collision from an earlier test
+            // insert under a different villa_id — item_id is a plain PK,
+            // not composite with villa_id) was silently failing the ENTIRE
+            // batch with a generic 'Failed to save', with zero indication
+            // of which of ~15 items or why. Now every other item still
+            // saves, and the real DB error comes back per-item.
+            console.error(`saveInventoryPreferredStock failed for item ${itemId}:`, e?.message || e)
+            errors.push({ itemId, error: e?.message || String(e) })
           }
         }
-        return json({ success: true })
+        return json({ success: true, data: { savedCount, total: Object.keys(levels).length, errors } })
       }
 
       // INVENTORY — low-stock items (qty_in_stock <= 10% of preferred_stock), for dashboard alerts

@@ -37,9 +37,14 @@ export default function PreferredStock() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await api.saveInventoryPreferredStock({ villaId: 'dwarka', levels })
-      showToast('Preferred stock levels saved ✓')
-    } catch { showToast('Failed to save', 'error') }
+      const res = await api.saveInventoryPreferredStock({ villaId: 'dwarka', levels })
+      if (res?.errors?.length > 0) {
+        const first = res.errors[0]
+        showToast(`Saved ${res.savedCount}/${res.total} — "${first.itemId}" failed: ${first.error}`, 'error')
+      } else {
+        showToast('Preferred stock levels saved ✓')
+      }
+    } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
   }
 

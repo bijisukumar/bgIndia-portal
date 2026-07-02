@@ -11,3 +11,6 @@ database_id = "6047aa03-9893-4fd9-8ba2-b3d7f5264ed1"
 binding = "DB_ESTATES"
 database_name = "bgindiadb-estates"
 database_id = "6e23cb84-d341-4b2e-8062-e8244844309d"
+
+[ai]
+binding = "AI"

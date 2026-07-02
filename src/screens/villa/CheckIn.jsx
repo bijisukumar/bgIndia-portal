@@ -103,6 +103,9 @@ export default function CheckIn() {
   const [carNumber, setCarNumber] = useState('')
   const [carPhoto,  setCarPhoto]  = useState(null)
   const [platePhoto,setPlatePhoto]= useState(null)
+  const [ocrBusy,   setOcrBusy]   = useState(false)   // reading plate photo
+  const [ocrHint,   setOcrHint]   = useState('')      // status line under the field
+  const [ocrSuggestion, setOcrSuggestion] = useState('') // read value when field already has manual text
   const [saving,  setSaving]    = useState(false)
   const [loading, setLoading]   = useState(true)
   const [toast,   setToast]     = useState(null)
@@ -171,9 +174,44 @@ export default function CheckIn() {
     const reader = new FileReader()
     reader.onload = ev => {
       if (type==='car')   setCarPhoto({file, preview:ev.target.result})
-      if (type==='plate') setPlatePhoto({file, preview:ev.target.result})
+      if (type==='plate') {
+        setPlatePhoto({file, preview:ev.target.result})
+        // Kick off plate OCR to pre-fill the car number. Fire-and-forget:
+        // it never blocks the photo capture or the check-in itself.
+        const b64 = ev.target.result.split(',')[1]
+        runPlateOcr(b64)
+      }
     }
     reader.readAsDataURL(file)
+  }
+
+  // Read the number-plate photo via Workers AI and pre-fill "Car number".
+  // Advisory only — Raman verifies/corrects. Any failure just leaves the
+  // field for manual entry with a gentle hint; nothing here can break the
+  // check-in flow.
+  async function runPlateOcr(platePhotoB64) {
+    if (!platePhotoB64) return
+    setOcrBusy(true); setOcrHint(''); setOcrSuggestion('')
+    try {
+      const res = await api.ocrPlate({ platePhotoB64 })
+      const plate = res?.plate || ''
+      if (!plate) {
+        setOcrHint("Couldn't read the plate — please type it in")
+        return
+      }
+      // Don't clobber a number Raman already typed; offer it instead.
+      if (carNumber.trim() && carNumber.trim() !== plate) {
+        setOcrSuggestion(plate)
+        setOcrHint('')
+      } else {
+        setCarNumber(plate)
+        setOcrHint('✨ Auto-read from the plate photo — please check it')
+      }
+    } catch (e) {
+      setOcrHint("Couldn't read the plate — please type it in")
+    } finally {
+      setOcrBusy(false)
+    }
   }
 
   // Confirm check-in (ready_for_checkin → checked_in)
@@ -198,6 +236,7 @@ export default function CheckIn() {
       })
       showToast('✅ Check-in confirmed! ' + selected.stay_id)
       setCarPhoto(null); setPlatePhoto(null); setCarNumber('')
+      setOcrBusy(false); setOcrHint(''); setOcrSuggestion('')
       await loadStays()
     } catch(e) {
       showToast('Failed: ' + e.message, 'error')
@@ -430,10 +469,25 @@ export default function CheckIn() {
                       </div>
                       <div className="divider"/>
                       <div className="field" style={{marginBottom:0}}>
-                        <div className="field-label">Car number</div>
+                        <div className="field-label">
+                          Car number
+                          {ocrBusy && <span style={{marginLeft:8,fontWeight:400,color:'#8a94a6'}}>· reading plate photo…</span>}
+                        </div>
                         <input className="field-input" placeholder="e.g. KL 07 AB 1234"
-                          value={carNumber} onChange={e=>setCarNumber(e.target.value.toUpperCase())}
+                          value={carNumber}
+                          onChange={e=>{ setCarNumber(e.target.value.toUpperCase()); setOcrHint(''); setOcrSuggestion('') }}
                           style={{textTransform:'uppercase'}}/>
+                        {ocrHint && (
+                          <div style={{marginTop:6,fontSize:12,color:'#8a94a6'}}>{ocrHint}</div>
+                        )}
+                        {ocrSuggestion && (
+                          <div style={{marginTop:6,fontSize:12,color:'#8a94a6'}}>
+                            Photo reads “{ocrSuggestion}” ·{' '}
+                            <span
+                              onClick={()=>{ setCarNumber(ocrSuggestion); setOcrSuggestion(''); setOcrHint('✨ Using the plate photo reading — please check it') }}
+                              style={{color:'#c9a24b',fontWeight:600,cursor:'pointer'}}>use this</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 

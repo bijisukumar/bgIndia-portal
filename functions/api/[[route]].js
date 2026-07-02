@@ -19,6 +19,24 @@ function err(msg, status = 400) {
   return json({ success: false, error: msg }, status)
 }
 
+// ── PLATE NORMALIZER ──────────────────────────────────────────
+// Cleans an OCR'd plate string into a tidy, spaced Indian-format plate
+// when it matches (e.g. "KL07AB1234" -> "KL 07 AB 1234"), otherwise returns
+// the stripped uppercase characters. Purely cosmetic + advisory — Raman can
+// always overwrite whatever this produces, so it never rejects input.
+function normalizePlate(s) {
+  if (!s) return ''
+  const t = String(s).toUpperCase().replace(/[^A-Z0-9]/g, '')
+  if (!t) return ''
+  // Standard series: 2 letters (state) + 1-2 digits (RTO) + 1-3 letters + 4 digits
+  const std = t.match(/^([A-Z]{2})(\d{1,2})([A-Z]{1,3})(\d{1,4})$/)
+  if (std) return `${std[1]} ${std[2]} ${std[3]} ${std[4]}`
+  // BH (Bharat) series: 2 digits (year) + BH + 4 digits + 1-2 letters
+  const bh = t.match(/^(\d{2})(BH)(\d{4})([A-Z]{1,2})$/)
+  if (bh) return `${bh[1]} ${bh[2]} ${bh[3]} ${bh[4]}`
+  return t
+}
+
 // ── JWT HELPERS (Web Crypto API — available in all CF Workers) ──
 async function signJwt(payload, secret) {
   const enc     = new TextEncoder()
@@ -2538,6 +2556,67 @@ export async function onRequest(ctx) {
 
         await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', body.source || 'direct', body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
         return json({ success: true, data: { stayId } })
+      }
+
+      // ── LICENSE-PLATE OCR (Raman check-in pre-fill) ──────────────────
+      // Reads the number-plate photo with a Cloudflare-hosted vision model
+      // (Workers AI) and returns a best-guess plate string to PRE-FILL the
+      // "Car number" field on Raman's screen. Strictly advisory: Raman always
+      // verifies/corrects, and this never blocks or is required for check-in.
+      // Every failure path returns { plate: '' } with success:true so the UI
+      // just falls back to manual entry — it must never throw the screen.
+      if (action === 'ocrPlate') {
+        const b64 = body.platePhotoB64
+        if (!b64) return json({ success: true, data: { plate: '', raw: '', reason: 'no_image' } })
+        // AI binding not attached to this Pages project yet — degrade quietly
+        // rather than error, so the check-in screen keeps working as-is.
+        if (!env.AI) {
+          console.error('ocrPlate: env.AI binding missing on this deployment')
+          return json({ success: true, data: { plate: '', raw: '', reason: 'ai_unbound' } })
+        }
+
+        const OCR_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct'  // hosted → free-neuron tier; swap to llama-4-scout if accuracy needs a bump
+        const OCR_PROMPT = 'This is a photo of an Indian vehicle number plate. Read the registration number exactly. Respond with ONLY the plate characters in capital letters, no spaces and no other words. If no plate is legible, respond with exactly NONE.'
+
+        // base64 → raw image bytes (the vision model expects a byte array)
+        let bytes
+        try {
+          const bin = atob(b64)
+          const arr = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+          bytes = [...arr]
+        } catch (e) {
+          console.error('ocrPlate: bad base64:', e?.message || e)
+          return json({ success: true, data: { plate: '', raw: '', reason: 'bad_b64' } })
+        }
+
+        const runOcr = async () => {
+          const out = await env.AI.run(OCR_MODEL, { prompt: OCR_PROMPT, image: bytes, max_tokens: 24, temperature: 0 })
+          return (out && out.response ? String(out.response) : '').trim()
+        }
+
+        let raw = ''
+        try {
+          raw = await runOcr()
+        } catch (e1) {
+          // Meta's first-use license gate requires a one-time { prompt: 'agree' }
+          // per account. Self-heal it here so the owner never runs a manual
+          // activation step, then retry once. If it still fails, fall back to
+          // manual entry.
+          console.error('ocrPlate: first attempt failed, trying license agree:', e1?.message || e1)
+          try {
+            await env.AI.run(OCR_MODEL, { prompt: 'agree' })
+            raw = await runOcr()
+          } catch (e2) {
+            console.error('ocrPlate: retry failed:', e2?.message || e2)
+            return json({ success: true, data: { plate: '', raw: '', reason: 'ocr_error' } })
+          }
+        }
+
+        const cleaned = raw.replace(/["'`.\r\n]/g, ' ').trim()
+        const noPlate = !cleaned || /^none$/i.test(cleaned)
+        const plate = noPlate ? '' : normalizePlate(cleaned)
+        return json({ success: true, data: { plate, raw: cleaned } })
       }
 
       if (action === 'confirmCheckIn') {

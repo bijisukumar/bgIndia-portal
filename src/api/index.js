@@ -93,6 +93,7 @@ export const api = {
   // ── STAY / CHECK-IN ──────────────────────────────────────
   getPendingCheckIns:   ()       => get('getPendingCheckIns'),
   createBooking:        (data)   => post('createBooking', data),
+  ocrPlate:             (data)   => post('ocrPlate', data),
   confirmCheckIn:       (data)   => post('confirmCheckIn', data),
   checkOut:             (data)   => post('checkOut', data),
   cancelStay:           (data)   => post('cancelStay', data),

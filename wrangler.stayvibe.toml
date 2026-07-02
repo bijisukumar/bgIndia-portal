@@ -6,3 +6,6 @@ pages_build_output_dir = "dist/stayvibe"
 binding = "DB"
 database_name = "bgindia-db"
 database_id = "6047aa03-9893-4fd9-8ba2-b3d7f5264ed1"
+
+[ai]
+binding = "AI"

@@ -317,6 +317,29 @@ CREATE TABLE IF NOT EXISTS alert_log (
 
 CREATE INDEX IF NOT EXISTS idx_alert_log_created ON alert_log(created_at DESC);
 
+-- Temporary staging for guest-submitted / Raman-captured documents (ID,
+-- passport, car photo, plate photo) before GuestFormScript.gs uploads them
+-- to the guest's Drive folder and deletes the D1 copy. folder_created=0
+-- means still pending upload; cleanupExpiredDocuments sweeps anything
+-- left after 14 days as a failure backstop, not the normal path.
+-- NOTE: this table already exists on the live DB (predates this schema.sql
+-- entry) — this is documentation, not a migration. See
+-- scripts/migrate-folder-flag.sql and
+-- scripts/migrate-guest-documents-updated-at.sql for its actual history.
+CREATE TABLE IF NOT EXISTS guest_documents (
+  doc_id         TEXT PRIMARY KEY,
+  stay_id        TEXT NOT NULL,
+  doc_type       TEXT NOT NULL,        -- 'govt_id' | 'passport' | 'car_photo' | 'plate_photo'
+  file_name      TEXT,
+  file_b64       TEXT,
+  folder_created INTEGER DEFAULT 0,
+  expires_at     TEXT,
+  created_at     TEXT DEFAULT (datetime('now')),
+  updated_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_guest_documents_stay ON guest_documents(stay_id);
+
 CREATE TABLE IF NOT EXISTS villa_settings (
   villa_id     TEXT NOT NULL,
   key          TEXT NOT NULL,

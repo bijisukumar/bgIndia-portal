@@ -1,12 +1,41 @@
 // ============================================================
-// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.1
+// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.2
 // ============================================================
 // Paste into Apps Script editor of:
 //   "GVR Registration-Check-In form (Responses)"
 //
-// v2.1 change: CLIENT config now loaded from D1 tenants table
-// via getTenantConfig API call. No more hardcoded values.
-// Only WORKER_URL and TENANT_ID need to be set here.
+// Only WORKER_URL and TENANT_ID need to be set here per client —
+// everything else loads dynamically from the tenants table in D1
+// via getTenantConfig (see v2.1 below).
+//
+// ── VERSION HISTORY (newest first) — bump on every change ──
+// v2.2  2026-07-02  Car/plate check-in photos: added
+//                    processPendingDocumentUploads() to upload them
+//                    to the guest's Drive folder; left in D1 for 5
+//                    days (in-app viewing) instead of immediate
+//                    delete, unlike ID/passport docs.
+// v2.1  2026-06-01  Multi-app split + tenant config foundation —
+//                    CLIENT now loaded dynamically from D1 tenants
+//                    table via getTenantConfig, replacing the
+//                    hardcoded CLIENT block. Only WORKER_URL/
+//                    TENANT_ID stay hardcoded per client.
+// —     2026-06-12  Fix: guest_documents lifecycle — verification,
+//                    14-day cleanup, status update.
+// —     2026-05-31  Fix: guest confirmation email — check-in after
+//                    4pm / check-out by 11am wording.
+// —     2026-05-28  Feat: include extra floor beds in TXT + emails.
+// —     2026-05-26  Fix: clean filename + mark doc uploaded after
+//                    Drive upload; upload docs even if folder
+//                    already existed.
+// —     2026-05-25  Several fixes/feats same day: email owner
+//                    immediately on processing error; add
+//                    guestContactPhone to CLIENT + ETA in guest
+//                    email; clean up TXT/email formats;
+//                    getOrCreateGuestFolder passes folderCreated:1;
+//                    cleanup expired guest_documents at end of each
+//                    run; folder_created flag + timestamped doc
+//                    uploads; pass processingNote to
+//                    updateDriveFolder for audit log.
 // ============================================================
 
 // ── ONLY THESE TWO VALUES CHANGE PER CLIENT ───────────────

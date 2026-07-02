@@ -439,6 +439,8 @@ function processPendingCheckInForms() {
     }
   });
 
+  processPendingDocumentUploads();
+
   try {
     var cleanResp = callWorker('POST', 'cleanupExpiredDocuments', {});
     if (cleanResp && cleanResp.success) {
@@ -456,6 +458,87 @@ function processPendingCheckInForms() {
   } catch(e) { Logger.log('Cleanup error: ' + e.message); }
 
   Logger.log('=== processPendingCheckInForms END ===');
+}
+
+// ── PROCESS PENDING DOCUMENT UPLOADS (car/plate photos, etc.) ──────────
+// Catches docs attached to stays that are already past pending_review
+// (e.g. car/plate photos Raman takes at check-in, when status is already
+// 'checked_in') — getPendingReviewStays alone would never surface these,
+// since it's scoped to pending_review only. Self-contained: doesn't touch
+// the pending_review guest-info-txt / confirmation-email flow above.
+function processPendingDocumentUploads() {
+  Logger.log('=== processPendingDocumentUploads START ===');
+  var CLIENT = getClient();
+  DRIVE_ROOT = CLIENT.driveRootId;
+
+  var resp = callWorker('GET', 'getStaysWithPendingDocuments', {});
+  if (!resp || !resp.success || !resp.data) {
+    Logger.log('No stays with pending docs or error: ' + JSON.stringify(resp));
+    return;
+  }
+
+  resp.data.forEach(function(stay) {
+    Logger.log('Processing pending docs for: ' + stay.stayId + ' (' + stay.guestName + ')');
+    try {
+      var folder = null;
+      if (stay.driveFolderUrl && stay.folderCreated) {
+        try {
+          var m = stay.driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
+          if (m) folder = DriveApp.getFolderById(m[1]);
+        } catch(fe) { Logger.log('Could not open existing folder: ' + fe.message); }
+      }
+      if (!folder) folder = getOrCreateGuestFolder(stay.guestName, stay.stayId, stay.checkIn);
+      if (!folder) {
+        Logger.log('Folder creation failed for ' + stay.stayId); return;
+      }
+
+      var dr = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
+      if (!dr || !dr.success || !dr.data || dr.data.length === 0) return;
+
+      var uploaded = 0, failed = 0;
+      dr.data.forEach(function(doc) {
+        if (!doc.file_b64) return;
+        try {
+          var decoded = Utilities.base64Decode(doc.file_b64);
+          var ts      = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
+          var label   = doc.doc_type === 'car_photo' ? 'CarPhoto'
+                      : doc.doc_type === 'plate_photo' ? 'PlatePhoto'
+                      : doc.doc_type === 'govt_id' ? 'ID'
+                      : doc.doc_type === 'passport' ? 'Passport' : doc.doc_type;
+          folder.createFile(Utilities.newBlob(decoded, 'image/jpeg', label + '-' + stay.stayId + '-' + ts + '.jpg'));
+          var mr = callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
+          if (mr && mr.success) uploaded++; else failed++;
+        } catch(docErr) { failed++; Logger.log('Doc upload error [' + doc.doc_type + ']: ' + docErr.message); }
+      });
+      Logger.log(stay.stayId + ': uploaded ' + uploaded + ', failed ' + failed);
+
+      if (!stay.folderCreated) {
+        callWorker('POST', 'updateDriveFolder', {
+          stayId: stay.stayId, driveFolderId: folder.getId(),
+          driveFolderUrl: folder.getUrl(), folderCreated: 1,
+          processingNote: 'processPendingDocumentUploads — ' + new Date().toISOString(),
+        });
+      }
+
+      // Only delete the ones actually confirmed uploaded — a failed doc
+      // stays in D1 and gets retried next run, same pattern as the
+      // pending_review path above.
+      var statusResp = callWorker('GET', 'getDocumentStatus', { stayId: stay.stayId });
+      if (statusResp && statusResp.success && statusResp.data) {
+        var stillPending = statusResp.data.filter(function(d) { return d.folder_created === 0; });
+        if (stillPending.length === 0) {
+          callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId });
+          Logger.log('All docs confirmed + deleted from D1 for ' + stay.stayId);
+        } else {
+          Logger.log(stillPending.length + ' doc(s) still pending for ' + stay.stayId + ' — will retry next run');
+        }
+      }
+    } catch(e) {
+      Logger.log('Error processing pending docs for ' + stay.stayId + ': ' + e.message);
+    }
+  });
+
+  Logger.log('=== processPendingDocumentUploads END ===');
 }
 
 // ── SEND CHECK-IN CONFIRMATION EMAILS ────────────────────

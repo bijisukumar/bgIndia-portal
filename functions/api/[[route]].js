@@ -1426,6 +1426,26 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // Any stay with unprocessed docs (folder_created=0), regardless of
+      // status — catches car/plate photos attached at check-in (status
+      // already 'checked_in' by then), which getPendingReviewStays alone
+      // would never surface since it's scoped to pending_review only.
+      if (action === 'getStaysWithPendingDocuments') {
+        const { results } = await DB.prepare(`
+          SELECT DISTINCT s.stay_id, s.guest_name, s.checkin_date, s.checkout_date,
+                 s.status, s.drive_folder_id, s.drive_folder_url,
+                 (s.drive_folder_id IS NOT NULL AND s.drive_folder_id != '') as folder_created
+          FROM stays s
+          JOIN guest_documents d ON d.stay_id = s.stay_id
+          WHERE d.folder_created = 0
+        `).all()
+        return json({ success: true, data: results.map(r => ({
+          stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date,
+          status: r.status, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url,
+          folderCreated: !!r.folder_created,
+        })) })
+      }
+
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
         const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)
@@ -2514,6 +2534,40 @@ export async function onRequest(ctx) {
           await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', 'direct', body.guestName || body.bookerName, body.phone || null, body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, now(), now()).run()
         } else {
           await DB.prepare(`UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+        }
+
+        // Car / number-plate photos Raman took at check-in — same pipeline as
+        // guest ID docs: land in D1 as base64, the Apps Script
+        // (GuestFormScript.gs) picks them up on its next run, uploads them
+        // into the guest's Drive folder, then deletes the D1 copy. A 14-day
+        // sweep (cleanupExpiredDocuments) is the safety-net backstop, not
+        // the normal path — under normal operation this clears out in
+        // however long it is until the next scheduled Apps Script run, not
+        // a full week.
+        const docId = (type) => `DOC-${stayId}-${type}-${Date.now()}`
+        if (body.carPhotoB64) {
+          try {
+            await DB.prepare(
+              `INSERT OR REPLACE INTO guest_documents
+               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+            ).bind(docId('car'), stayId, 'car_photo', `Car-${stayId}.jpg`, body.carPhotoB64).run()
+          } catch (e) { console.error('car photo store error:', e?.message || e) }
+        }
+        if (body.platePhotoB64) {
+          try {
+            await DB.prepare(
+              `INSERT OR REPLACE INTO guest_documents
+               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+            ).bind(docId('plate'), stayId, 'plate_photo', `Plate-${stayId}.jpg`, body.platePhotoB64).run()
+          } catch (e) { console.error('plate photo store error:', e?.message || e) }
+        }
+        if (body.carNumber) {
+          try {
+            await DB.prepare(`UPDATE stays SET vehicle_number = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
+              .bind(body.carNumber, actor, now(), stayId).run()
+          } catch (e) { console.error('vehicle_number update error:', e?.message || e) }
         }
 
         const alertVillaId = body.villaId || 'dwarka'

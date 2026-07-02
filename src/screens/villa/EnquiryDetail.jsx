@@ -27,6 +27,16 @@ const COMM_TYPES = [
 // plain status change here would silently skip.
 const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
 
+// Builds a wa.me deep-link pre-filled with the quote text, so the owner can
+// open the guest's WhatsApp chat with it ready to send (not auto-sent).
+function buildQuoteWaLink(e) {
+  const phone = e.phone
+  if (!phone) return null
+  const raw = String(phone).replace(/\D/g, '')
+  const num = raw.startsWith('91') ? raw : (raw.length === 10 ? `91${raw}` : raw)
+  return `https://wa.me/${num}?text=${encodeURIComponent(buildQuote(e))}`
+}
+
 function buildQuote(e) {
   const nights = e.nights || 1
   const finalTotal = e.final_offer_amount || e.quote_amount || 0
@@ -461,6 +471,25 @@ export default function EnquiryDetail() {
           <button onClick={handleCopyQuote} className="btn btn-teal" style={{ marginTop: '12px' }}>
             📋 Generate & copy WhatsApp quote
           </button>
+          {e.phone ? (
+            <a href={buildQuoteWaLink(e)} target="_blank" rel="noreferrer"
+              className="btn"
+              style={{
+                marginTop: '8px', display: 'block', textAlign: 'center', textDecoration: 'none',
+                background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)',
+                color: '#25D366', fontWeight: '700',
+              }}>
+              💬 Send quote in WhatsApp
+            </a>
+          ) : (
+            <div style={{
+              marginTop: '8px', padding: '10px 14px', borderRadius: '10px', textAlign: 'center',
+              background: 'rgba(37,211,102,0.05)', border: '1px dashed rgba(37,211,102,0.2)',
+              color: 'rgba(37,211,102,0.45)', fontSize: '0.78rem',
+            }}>
+              💬 Add a phone number to send the quote via WhatsApp
+            </div>
+          )}
 
           {pricingParams && (
             <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-dim)' }}>

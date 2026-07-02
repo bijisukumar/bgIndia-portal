@@ -95,7 +95,9 @@ function familiesBlock(ic) {
     `* A safe, homely environment (not a hotel crowd setup)`,
     `* Support for smooth local travel and Kerala experience planning`,
     ``,
-    `We also help many families plan their Kerala stay beyond Guruvayur — including Cochin, Guruvayur temple visits, and curated local experiences through our trusted network.`,
+    `We also help many families plan their Kerala stay beyond Guruvayur — Wildlife, Hill Station, Ayurvedic experiences, Kerala martial arts programs, temple visits, and curated local experiences through our trusted network.`,
+    ``,
+    `${ic.link}Explore Kerala experiences: https://www.luxuryvillasofguruvayur.com/KeralaVacay`,
   ]
 }
 

@@ -43,16 +43,55 @@ function fmtQuoteDate(d) {
   return parsed.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-function buildQuote(e) {
+// Shared pieces every quote variant needs, computed once.
+function quoteCore(e) {
   const nights = e.nights || 1
-  const finalTotal = e.final_offer_amount || e.quote_amount || 0
   const billableGuests = (e.adults || 0) + (e.children || 0)
-  const bedroomCount = getBedroomEstimate(e.villa_id || 'dwarka', billableGuests)
-  const firstName = (e.guest_name || '').trim().split(' ')[0] || 'there'
-  const nightsLabel = nights === 1 ? 'the night' : `${nights} nights`
+  return {
+    nights,
+    finalTotal: e.final_offer_amount || e.quote_amount || 0,
+    quoteAmount: e.quote_amount || 0,
+    discountAmount: e.discount_amount || 0,
+    bedroomCount: getBedroomEstimate(e.villa_id || 'dwarka', billableGuests),
+    firstName: (e.guest_name || '').trim().split(' ')[0] || 'there',
+    fullName: (e.guest_name || '').trim() || 'there',
+    guestCount: e.guests_count || billableGuests || 1,
+    nightsLabel: nights === 1 ? 'the night' : `${nights} nights`,
+  }
+}
 
+const FAMILIES_BLOCK = [
+  `🌿 Why families choose us in Guruvayur`,
+  `Luxury Villas of Guruvayur is designed specifically for families who want:`,
+  ``,
+  `* A peaceful, private villa close to the temple`,
+  `* Comfortable shared spaces for large family groups`,
+  `* A safe, homely environment (not a hotel crowd setup)`,
+  `* Support for smooth local travel and Kerala experience planning`,
+  ``,
+  `We also help many families plan their Kerala stay beyond Guruvayur — including Cochin, Guruvayur temple visits, and curated local experiences through our trusted network.`,
+]
+
+const LINKS_BLOCK = [
+  `📸 Villa details: https://luxuryvillasofguruvayur.com/villa`,
+  `❓ FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
+]
+
+const SIGNOFF_BLOCK = (closingLine) => [
+  ``,
+  closingLine,
+  ``,
+  `സസ്നേഹം (Sasneham)`,
+  `Biji Sukumar`,
+  `Luxury Villas of Guruvayur`,
+  `📞 +91 99950 43283  (GPay available)`,
+]
+
+// ── Default: no discount, no B2B — standard first-contact quote ──
+function buildQuoteDefault(e) {
+  const c = quoteCore(e)
   return [
-    `Namaskaram ${firstName},`,
+    `Namaskaram ${c.firstName},`,
     ``,
     `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out — we would be truly happy to host your family during your visit to Guruvayur.`,
     ``,
@@ -62,31 +101,91 @@ function buildQuote(e) {
     ``,
     `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
-    `🏡 Villa: ${bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `👨‍👩‍👧‍👦 Guests: ${e.guests_count || billableGuests || 1}`,
-    `💰 Total Stay Cost: ${fmt(finalTotal)} (all inclusive for ${nightsLabel})`,
+    `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
+    `💰 Total Stay Cost: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
-    `🌿 Why families choose us in Guruvayur`,
-    `Luxury Villas of Guruvayur is designed specifically for families who want:`,
+    ...FAMILIES_BLOCK,
     ``,
-    `* A peaceful, private villa close to the temple`,
-    `* Comfortable shared spaces for large family groups`,
-    `* A safe, homely environment (not a hotel crowd setup)`,
-    `* Support for smooth local travel and Kerala experience planning`,
-    ``,
-    `We also help many families plan their Kerala stay beyond Guruvayur — including Cochin, Guruvayur temple visits, and curated local experiences through our trusted network.`,
-    ``,
-    `📸 Villa details: https://luxuryvillasofguruvayur.com/villa`,
-    `❓ FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
-    ``,
-    `If this works for your plans, I can go ahead and block the dates for you.`,
-    ``,
-    `സസ്നേഹം (Sasneham)`,
-    `Biji Sukumar`,
-    `Luxury Villas of Guruvayur`,
-    `📞 +91 99950 43283  (GPay available)`,
+    ...LINKS_BLOCK,
+    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you.`),
   ].join('\n')
+}
+
+// ── Repeat / loyalty guest — lead with the discount, make it feel special ──
+function buildQuoteRepeatDiscount(e) {
+  const c = quoteCore(e)
+  const label = e.discount_category
+    ? (DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Valued Guest')
+    : 'Returning Guest'
+  const pct = e.discount_category ? e.discount_pct : e.repeat_discount_pct
+  return [
+    `Namaskaram ${c.firstName} 🙏`,
+    ``,
+    `This is Biji from Luxury Villas of Guruvayur. Wonderful to hear from you again — it's always a pleasure to welcome back our guests!`,
+    ``,
+    `We have checked your dates and the villa is available:`,
+    `📅 Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `📅 Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    ``,
+    `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    ``,
+    `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
+    ``,
+    `🎁 As a ${label}, we're delighted to offer you a special discounted rate this time!`,
+    `💰 Regular Tariff: ${fmt(c.quoteAmount)}`,
+    `🎁 ${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
+    `✨ Your Special Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    `(includes early check-in / late check-out flexibility where possible)`,
+    ``,
+    `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again. 🌿`,
+    ``,
+    ...LINKS_BLOCK,
+    ...SIGNOFF_BLOCK(`If this works for your plans, I can go ahead and block the dates for you.`),
+  ].join('\n')
+}
+
+// ── B2B / travel partner — call out the commission clearly and positively ──
+function buildQuoteB2B(e) {
+  const c = quoteCore(e)
+  const label = DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Partner'
+  return [
+    `Namaskaram ${c.fullName} 🙏`,
+    ``,
+    `This is Biji from Luxury Villas of Guruvayur. Thank you for checking availability with us for your guest's stay in Guruvayur.`,
+    ``,
+    `We have checked the dates and the villa is available:`,
+    `📅 Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
+    `📅 Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    ``,
+    `🔗 Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    ``,
+    `🏡 Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
+    `👨‍👩‍👧‍👦 Guests: ${c.guestCount}`,
+    ``,
+    `🤝 As our valued ${label}, here's your special partner pricing:`,
+    `💰 Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
+    `🤝 Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
+    `✅ Net Payable to Us: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    ``,
+    `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking! 🌿`,
+    ``,
+    ...LINKS_BLOCK,
+    ...SIGNOFF_BLOCK(`If this works, let me know and I'll go ahead and block the dates.`),
+  ].join('\n')
+}
+
+function buildQuote(e) {
+  const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
+  const isRepeatDiscount = !isB2B && (
+    ['loyal_patron', 'elite_guest', 'platinum_guest'].includes(e.discount_category) ||
+    (!e.discount_category && (e.repeat_discount_pct || 0) > 0)
+  )
+  if (isB2B) return buildQuoteB2B(e)
+  if (isRepeatDiscount) return buildQuoteRepeatDiscount(e)
+  return buildQuoteDefault(e)
 }
 
 export default function EnquiryDetail() {

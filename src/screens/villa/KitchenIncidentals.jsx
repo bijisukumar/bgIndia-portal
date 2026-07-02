@@ -82,33 +82,42 @@ export default function KitchenIncidentals() {
     ]
     if (!items.length) { showToast('Add at least one item', 'error'); return }
     setSaving(true)
+
+    // 1) Save the incidentals. If this fails, surface the real reason and stop.
+    let saveResult
     try {
-      const saveResult = await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes, villaId: 'dwarka' })
-      
+      saveResult = await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes, villaId: 'dwarka' })
+    } catch (e) {
+      showToast(e?.message || 'Failed to save incidentals', 'error')
+      setSaving(false)
+      return
+    }
+
+    // Incidentals are saved — clear the form now so a checkout retry can't re-add them.
+    setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
+
+    // 2) Check the guest out (skip for historical/retroactive sessions).
+    try {
       let commMsg = ''
       if (stay && !stay.isHistoricalSession) {
         const result = await api.checkOut({ stayId: stay?.stayId })
-        if (result?.commissionCreated) {
-          commMsg = ` · Raman ₹${result.ramanComm} commission logged`
-        }
+        if (result?.commissionCreated) commMsg = ` · Raman ₹${result.ramanComm} commission logged`
       } else {
         commMsg = ' · Retroactive items added'
       }
-
       showToast(`Check-out saved ✓${commMsg}`)
-
-      // If selling these items dropped any of them to/below 10% of the preferred
-      // stock level, warn so a restock can be scheduled before running out.
-      const lowStockAlerts = saveResult?.lowStockAlerts || []
-      if (lowStockAlerts.length) {
-        const names = lowStockAlerts.map(a => `${a.name} (${a.qtyInStock} left)`).join(', ')
-        setTimeout(() => showToast(`⚠️ Low stock: ${names}`, 'error'), 1200)
-      }
-
-      setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
       if (stay?.isHistoricalSession) setStay(null)
-    } catch { showToast('Failed to save', 'error') }
-    finally { setSaving(false) }
+    } catch (e) {
+      showToast(`Items saved, but checkout step failed: ${e?.message || 'error'}`, 'error')
+    }
+
+    // Low-stock warnings from the save step.
+    const lowStockAlerts = saveResult?.lowStockAlerts || []
+    if (lowStockAlerts.length) {
+      const names = lowStockAlerts.map(a => `${a.name} (${a.qtyInStock} left)`).join(', ')
+      setTimeout(() => showToast(`⚠️ Low stock: ${names}`, 'error'), 1200)
+    }
+    setSaving(false)
   }
 
   return (

@@ -663,9 +663,13 @@ export async function onRequest(ctx) {
 
       if (action === 'getActiveStay') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
+        // "Today" in IST — a stay is only live once its check-in date has arrived.
+        const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
         const stay = await DB.prepare(
-          `SELECT * FROM stays WHERE villa_id = ? AND status = 'checked_in' ORDER BY checkin_date DESC LIMIT 1`
-        ).bind(villaId).first()
+          `SELECT * FROM stays
+             WHERE villa_id = ? AND status = 'checked_in' AND checkin_date <= ?
+             ORDER BY checkin_date DESC LIMIT 1`
+        ).bind(villaId, todayIST).first()
         if (!stay) return json({ success: true, data: null })
         return json({ success: true, data: {
           ...stay,
@@ -2778,41 +2782,56 @@ export async function onRequest(ctx) {
         const lowStockAlerts = [];
 
         for (const item of items) {
+          // Resolve the inventory link safely: ad-hoc/custom items and anything
+          // not actually present in inventory are stored as NULL so the
+          // inv_item_id foreign key can never reject the insert.
+          let invItemId = item.itemId || item.inv_item_id || null
+          if (invItemId === 'custom') invItemId = null
+          if (invItemId) {
+            const exists = await DB.prepare(
+              `SELECT 1 FROM inventory WHERE item_id = ? AND villa_id = ?`
+            ).bind(invItemId, villaId).first()
+            if (!exists) invItemId = null
+          }
+
           await DB.prepare(
             `INSERT INTO stay_incidentals (
               item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
           ).bind(
-            genId('INC'), 
-            body.stayId, 
-            item.itemId || item.inv_item_id || null, 
-            item.name, 
-            Number(item.qty) || 1, 
-            Number(item.pricePerUnit) || Number(item.price) || 0, 
-            Number(item.subtotal) || Number(item.total) || 0, 
-            currentActor, 
-            currentActor, 
-            timestamp, 
+            genId('INC'),
+            body.stayId,
+            invItemId,
+            item.name,
+            Number(item.qty) || 1,
+            Number(item.pricePerUnit) || Number(item.price) || 0,
+            Number(item.subtotal) || Number(item.total) || 0,
+            currentActor,
+            currentActor,
+            timestamp,
             timestamp
           ).run();
 
-          // Decrement live stock — skip ad-hoc/custom items, they have no inventory row.
-          const invItemId = item.itemId || item.inv_item_id || null
-          if (invItemId && invItemId !== 'custom') {
-            const qtySold = Number(item.qty) || 1
-            await DB.prepare(`
-              UPDATE inventory
-              SET qty_in_stock = MAX(0, COALESCE(qty_in_stock, 0) - ?),
-                  updated_by = ?, updated_at = ?
-              WHERE item_id = ? AND villa_id = ?
-            `).bind(qtySold, currentActor, timestamp, invItemId, villaId).run()
+          // Decrement live stock — only for real inventory items. Never let a
+          // stock-update hiccup fail the incidental that already inserted.
+          if (invItemId) {
+            try {
+              const qtySold = Number(item.qty) || 1
+              await DB.prepare(`
+                UPDATE inventory
+                SET qty_in_stock = MAX(0, COALESCE(qty_in_stock, 0) - ?),
+                    updated_by = ?, updated_at = ?
+                WHERE item_id = ? AND villa_id = ?
+              `).bind(qtySold, currentActor, timestamp, invItemId, villaId).run()
 
-            // Check resulting stock against 10% of preferred level
-            const row = await DB.prepare(
-              `SELECT name, qty_in_stock, preferred_stock FROM inventory WHERE item_id = ? AND villa_id = ?`
-            ).bind(invItemId, villaId).first()
-            if (row && row.preferred_stock > 0 && row.qty_in_stock <= row.preferred_stock * 0.1) {
-              lowStockAlerts.push({ itemId: invItemId, name: row.name, qtyInStock: row.qty_in_stock, preferredStock: row.preferred_stock })
+              const row = await DB.prepare(
+                `SELECT name, qty_in_stock, preferred_stock FROM inventory WHERE item_id = ? AND villa_id = ?`
+              ).bind(invItemId, villaId).first()
+              if (row && row.preferred_stock > 0 && row.qty_in_stock <= row.preferred_stock * 0.1) {
+                lowStockAlerts.push({ itemId: invItemId, name: row.name, qtyInStock: row.qty_in_stock, preferredStock: row.preferred_stock })
+              }
+            } catch (stockErr) {
+              console.error('stock decrement failed (non-fatal):', stockErr?.message)
             }
           }
         }

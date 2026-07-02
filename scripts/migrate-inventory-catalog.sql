@@ -1,13 +1,15 @@
 -- Makes the inventory item catalog fully DB-driven instead of a hardcoded
--- frontend list (INVENTORY_MASTER in Inventory.jsx). Adds an `active` flag
--- so items can be archived (hidden everywhere, history preserved) instead
--- of hard-deleted, and seeds the 13 items that were previously baked into
--- the frontend code, so existing qty/price data already saved against
--- these item_ids is untouched (INSERT OR IGNORE — only fills in metadata
--- for rows that don't already exist).
+-- frontend list (INVENTORY_MASTER in Inventory.jsx). Seeds the 13 items
+-- that were previously baked into the frontend code, so existing
+-- qty/price data already saved against these item_ids is untouched
+-- (INSERT OR IGNORE — only fills in metadata for rows that don't already
+-- exist).
+--
+-- The `active` column itself is added by
+-- scripts/migrate-inventory-add-columns.sql — run that FIRST if you
+-- haven't already, then run this one.
 --
 -- Run: npx wrangler d1 execute bgindia-db --file=scripts/migrate-inventory-catalog.sql --remote
-ALTER TABLE inventory ADD COLUMN active INTEGER DEFAULT 1;
 
 INSERT OR IGNORE INTO inventory (item_id, villa_id, name, unit, category, cost_price, sell_price, preferred_stock, active, created_by, updated_by)
 VALUES

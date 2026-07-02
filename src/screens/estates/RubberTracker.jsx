@@ -96,6 +96,7 @@ export default function RubberTracker() {
   }
 
   const cellInput = { width: '100%', padding: '9px 4px', textAlign: 'center', borderRadius: '8px', border: '1px solid var(--border-dim)', background: 'var(--dark-input)', color: '#EDF2F7', fontSize: '0.9rem', fontFamily: "'DM Sans',sans-serif" }
+  const arrowBtn = { flex: '0 0 auto', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, borderRadius: '8px', background: 'var(--dark-input)', color: '#9AA5B4', border: '1px solid var(--border-dim)', fontSize: '1.1rem', lineHeight: 1, cursor: 'pointer' }
   const isToday = (d) => d === localTodayStr()
 
   return (
@@ -110,10 +111,10 @@ export default function RubberTracker() {
         <div className="card">
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="field-label">Week starting (Mon)</label>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="btn" style={{ padding: '9px 14px', flex: '0 0 auto', background: 'var(--dark-input)', color: '#9AA5B4', border: '1px solid var(--border-dim)' }} onClick={() => shiftWeek(-1)}>‹</button>
-              <input className="field-input gold" type="date" style={{ flex: 1 }} value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
-              <button className="btn" style={{ padding: '9px 14px', flex: '0 0 auto', background: 'var(--dark-input)', color: '#9AA5B4', border: '1px solid var(--border-dim)' }} onClick={() => shiftWeek(1)}>›</button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+              <button type="button" onClick={() => shiftWeek(-1)} aria-label="Previous week" style={arrowBtn}>‹</button>
+              <input className="field-input gold" type="date" style={{ flex: '1 1 auto', minWidth: 0 }} value={weekStart} onChange={e => setWeekStart(mondayOf(e.target.value))} />
+              <button type="button" onClick={() => shiftWeek(1)} aria-label="Next week" style={arrowBtn}>›</button>
             </div>
           </div>
         </div>

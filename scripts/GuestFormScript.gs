@@ -710,3 +710,8 @@ function testConnection() {
   if (resp && resp.success) Logger.log('✅ Connected: ' + resp.data.villaName);
   else Logger.log('❌ Connection failed');
 }
+
+function testPendingStays() {
+  var resp = callWorker('POST', 'getPendingReviewStays', {});
+  Logger.log('Response: ' + JSON.stringify(resp));
+}

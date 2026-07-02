@@ -237,6 +237,7 @@ export const api = {
   getInventoryPrices:          (vId)    => get('getInventoryPrices', { villaId: vId }),
   saveInventoryRestock:        (data)   => post('saveInventoryRestock', data),
   getInventoryRestockLog:      (vId)    => get('getInventoryRestockLog', { villaId: vId }),
+  getStayPhotos:               (stayId) => get('getStayPhotos', { stayId }),
   getInventory:                (vId)    => get('getInventory', { villaId: vId }),
   saveInventoryStock:          (data)   => post('saveInventoryStock', data),
   saveInventoryPreferredStock: (data)   => post('saveInventoryPreferredStock', data),

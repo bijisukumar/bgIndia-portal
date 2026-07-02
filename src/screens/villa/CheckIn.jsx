@@ -47,6 +47,53 @@ const STATUS_META = {
   ready_for_checkout: { label:'Ready for Check-out', color:'#F59E0B', icon:'🧳' },
 }
 
+// Shows the car/number-plate photos Raman captured at check-in, while
+// they're still in D1 (kept there for ~5 days for exactly this purpose,
+// even after they've already reached the guest's Drive folder — see
+// cleanupExpiredDocuments and processPendingDocumentUploads in
+// GuestFormScript.gs). After 5 days these are only in Drive.
+function CarPlatePhotos({ stayId }) {
+  const [photos, setPhotos] = useState(null)  // null = loading, [] = none, [...] = found
+  const [zoomed, setZoomed] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setPhotos(null)
+    api.getStayPhotos(stayId)
+      .then(rows => { if (!cancelled) setPhotos(Array.isArray(rows) ? rows : []) })
+      .catch(() => { if (!cancelled) setPhotos([]) })
+    return () => { cancelled = true }
+  }, [stayId])
+
+  if (photos === null) return null   // don't flash a section while loading
+  if (photos.length === 0) return null  // nothing captured, or past the 5-day window — no clutter
+
+  return (
+    <>
+      <div className="card-section-label">CAR & PLATE PHOTOS <span style={{fontWeight:400,color:'#5C7080'}}>(available ~5 days)</span></div>
+      <div style={{display:'flex', gap:'8px', marginBottom:'14px'}}>
+        {photos.map(p => (
+          <img key={p.doc_id}
+            src={`data:image/jpeg;base64,${p.file_b64}`}
+            alt={p.doc_type}
+            onClick={() => setZoomed(p)}
+            style={{width:'100px', height:'80px', objectFit:'cover', borderRadius:'8px',
+              border:'1px solid var(--border-dim)', cursor:'pointer'}} />
+        ))}
+      </div>
+      {zoomed && (
+        <div onClick={() => setZoomed(null)} style={{
+          position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', zIndex:1000,
+          display:'flex', alignItems:'center', justifyContent:'center', padding:'20px',
+        }}>
+          <img src={`data:image/jpeg;base64,${zoomed.file_b64}`} alt={zoomed.doc_type}
+            style={{maxWidth:'100%', maxHeight:'100%', borderRadius:'8px'}} />
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function CheckIn() {
   const navigate = useNavigate()
   const [stays,    setStays]    = useState([])
@@ -501,6 +548,8 @@ export default function CheckIn() {
                         </div>
                       </div>
                     </div>
+
+                    <CarPlatePhotos stayId={selected.stay_id} />
 
                     {/* Status actions */}
                     <div className="card-section-label">CHECKOUT ACTIONS</div>

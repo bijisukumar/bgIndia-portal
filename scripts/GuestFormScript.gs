@@ -520,19 +520,11 @@ function processPendingDocumentUploads() {
         });
       }
 
-      // Only delete the ones actually confirmed uploaded — a failed doc
-      // stays in D1 and gets retried next run, same pattern as the
-      // pending_review path above.
-      var statusResp = callWorker('GET', 'getDocumentStatus', { stayId: stay.stayId });
-      if (statusResp && statusResp.success && statusResp.data) {
-        var stillPending = statusResp.data.filter(function(d) { return d.folder_created === 0; });
-        if (stillPending.length === 0) {
-          callWorker('GET', 'deleteGuestDocuments', { stayId: stay.stayId });
-          Logger.log('All docs confirmed + deleted from D1 for ' + stay.stayId);
-        } else {
-          Logger.log(stillPending.length + ' doc(s) still pending for ' + stay.stayId + ' — will retry next run');
-        }
-      }
+      // Unlike the pending_review path (which deletes ID/passport docs
+      // from D1 immediately once confirmed uploaded), car/plate photos are
+      // intentionally left in D1 after upload — they're meant to stay
+      // viewable in-app for a few days. cleanupExpiredDocuments sweeps
+      // them after 5 days, not this function.
     } catch(e) {
       Logger.log('Error processing pending docs for ' + stay.stayId + ': ' + e.message);
     }

@@ -594,7 +594,8 @@ export async function onRequest(ctx) {
         const tenant = await DB.prepare(
           `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
                   address, checkin_time, checkout_time,
-                  breakfast_rate, raman_comm_pct, logo_url, plan
+                  breakfast_rate, raman_comm_pct, logo_url, plan,
+                  owner_email, owner_email_cc, drive_root_id
            FROM tenants WHERE tenant_id = ? AND active = 1`
         ).bind(tenantId).first()
         if (!tenant) return err('Tenant not found', 404)
@@ -611,6 +612,9 @@ export async function onRequest(ctx) {
           ramanCommPct:  tenant.raman_comm_pct || 10,
           logoUrl:       tenant.logo_url || null,
           plan:          tenant.plan || 'starter',
+          ownerEmail:    tenant.owner_email || null,
+          ownerEmailCC:  tenant.owner_email_cc || null,
+          driveRootId:   tenant.drive_root_id || null,
         }})
       }
 
@@ -1426,6 +1430,19 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // Car/plate photos for in-app viewing — returns them whether or not
+      // they've reached Drive yet (folder_created 0 or 1), since they're
+      // intentionally kept in D1 for ~5 days for exactly this purpose.
+      if (action === 'getStayPhotos') {
+        const stayId = url.searchParams.get('stayId') || ''
+        if (!stayId) return err('stayId required')
+        const { results } = await DB.prepare(
+          `SELECT doc_id, doc_type, file_name, file_b64, created_at
+           FROM guest_documents WHERE stay_id = ? AND doc_type IN ('car_photo','plate_photo')
+           ORDER BY created_at DESC`
+        ).bind(stayId).all()
+        return json({ success: true, data: results })
+      }
       // Any stay with unprocessed docs (folder_created=0), regardless of
       // status — catches car/plate photos attached at check-in (status
       // already 'checked_in' by then), which getPendingReviewStays alone
@@ -4205,7 +4222,15 @@ export async function onRequest(ctx) {
       // folder_created=1: Drive upload confirmed, safe to delete
       // folder_created=0: Drive upload never happened — stale, also cleaned after 14 days
       if (action === 'cleanupExpiredDocuments') {
-        // Count stale unprocessed docs before deleting (for logging)
+        // Two different rules by doc_type:
+        //  - car_photo/plate_photo: kept for 5 days regardless of upload
+        //    status (folder_created), so they're viewable in-app for a
+        //    few days after check-in even though they've already reached
+        //    Drive — this IS the normal path for these two, not a failure
+        //    backstop.
+        //  - everything else (govt_id, passport, ...): unchanged — a
+        //    14-day sweep that should rarely fire, since those get
+        //    explicitly deleted right after confirmed upload already.
         const staleUnprocessed = await DB.prepare(
           `SELECT COUNT(*) as cnt FROM guest_documents
            WHERE folder_created = 0
@@ -4213,7 +4238,8 @@ export async function onRequest(ctx) {
         ).first()
         const result = await DB.prepare(
           `DELETE FROM guest_documents
-           WHERE created_at < datetime('now', '-14 days')`
+           WHERE (doc_type IN ('car_photo','plate_photo') AND created_at < datetime('now', '-5 days'))
+              OR (doc_type NOT IN ('car_photo','plate_photo') AND created_at < datetime('now', '-14 days'))`
         ).run()
         return json({ success: true, data: {
           deleted: result.meta?.changes || 0,

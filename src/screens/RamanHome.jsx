@@ -235,6 +235,13 @@ export default function RamanHome() {
       disabled: false,
     },
     {
+      icon: '📦', bg: 'rgba(15,110,86,0.08)', arrow: '#0F6E56',
+      title: 'Inventory',
+      sub: 'Stock levels · restock after a purchase',
+      path: '/raman/inventory',
+      disabled: false,
+    },
+    {
       icon: '💰', bg: 'rgba(52,168,83,0.08)', arrow: '#34A853',
       title: 'My earnings',
       sub: 'Commission snapshot · paid & outstanding',

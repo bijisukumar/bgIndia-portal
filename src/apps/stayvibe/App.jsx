@@ -54,6 +54,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
+        <Route path="/raman/inventory"        element={<Inventory />} />
         <Route path="/owner/villa/expenses"   element={<VillaExpenses />} />
         <Route path="/owner/villa/notifications" element={<NotificationSettings />} />
         <Route path="/owner/villa/inventory/preferred-stock"  element={<PreferredStock />} />

@@ -125,9 +125,14 @@ export default function Inventory() {
       const payload = Object.fromEntries(
         INVENTORY_MASTER.map(i => [i.id, { qty: stock[i.id]?.qty ?? 0, name: i.name }])
       )
-      await api.saveInventoryStock({ villaId: 'dwarka', stock: payload })
-      showToast('Stock saved ✓')
-    } catch { showToast('Failed to save', 'error') }
+      const res = await api.saveInventoryStock({ villaId: 'dwarka', stock: payload })
+      if (res?.errors?.length > 0) {
+        const first = res.errors[0]
+        showToast(`Saved ${res.savedCount}/${res.total} — "${first.itemId}" failed: ${first.error}`, 'error')
+      } else {
+        showToast('Stock saved ✓')
+      }
+    } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
   }
 
@@ -136,7 +141,7 @@ export default function Inventory() {
     try {
       await api.saveInventoryPrices({ villaId: 'dwarka', prices })
       showToast('Prices saved ✓')
-    } catch { showToast('Failed to save', 'error') }
+    } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
   }
 
@@ -147,19 +152,27 @@ export default function Inventory() {
     if (!entries.length) { showToast('Enter qty for at least one item', 'error'); return }
     setSaving(true)
     try {
-      await api.saveInventoryRestock({ villaId: 'dwarka', entries })
-      // Update local stock
+      const res = await api.saveInventoryRestock({ villaId: 'dwarka', entries })
+      const failedIds = new Set((res?.errors || []).map(e2 => e2.itemId))
+      // Only reflect items that actually saved in local state — an item
+      // that failed shouldn't show as restocked in the UI when it wasn't.
       entries.forEach(e => {
+        if (failedIds.has(e.id)) return
         setStock(s => ({ ...s, [e.id]: { ...s[e.id], qty: (s[e.id]?.qty || 0) + parseFloat(e.qty) } }))
       })
-      setRestock(r => Object.fromEntries(Object.keys(r).map(k => [k, { qty: '', totalCost: '' }])))
-      showToast('Restock recorded ✓')
+      setRestock(r => Object.fromEntries(Object.keys(r).map(k => [k, failedIds.has(k) ? r[k] : { qty: '', totalCost: '' }])))
+      if (res?.errors?.length > 0) {
+        const first = res.errors[0]
+        showToast(`Saved ${res.savedCount}/${res.total} — "${first.itemId}" failed: ${first.error}`, 'error')
+      } else {
+        showToast('Restock recorded ✓')
+      }
       // Pull the fresh log so the new entries show up immediately
       try {
         const log = await api.getInventoryRestockLog?.('dwarka')
         if (Array.isArray(log)) setRestockLog(log)
       } catch { /* non-critical */ }
-    } catch { showToast('Failed to save', 'error') }
+    } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
   }
 

@@ -2603,54 +2603,72 @@ export async function onRequest(ctx) {
         const villaId = body.villaId || 'dwarka'
         const entries = body.entries || []
         if (!entries.length) return err('entries required')
+        const errors = []
+        let savedCount = 0
         for (const e of entries) {
           const qty       = parseFloat(e.qty) || 0
           const totalCost = parseFloat(e.totalCost) || 0
           if (qty <= 0) continue
           const pricePerUnit = qty > 0 ? totalCost / qty : 0
-
-          await DB.prepare(`
-            INSERT INTO inventory_restock_log
-              (id, villa_id, item_id, item_name, qty_bought, total_cost, price_per_unit, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).bind(genId('RSTK'), villaId, e.id, e.name || e.id, qty, totalCost, pricePerUnit, actor, now()).run()
-
-          const result = await DB.prepare(`
-            UPDATE inventory
-            SET qty_in_stock = COALESCE(qty_in_stock, 0) + ?,
-                last_restocked = ?,
-                updated_by = ?, updated_at = ?
-            WHERE item_id = ? AND villa_id = ?
-          `).bind(qty, now(), actor, now(), e.id, villaId).run()
-          if (!result.meta?.changes) {
+          try {
             await DB.prepare(`
-              INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, last_restocked, created_by, updated_by, created_at, updated_at)
+              INSERT INTO inventory_restock_log
+                (id, villa_id, item_id, item_name, qty_bought, total_cost, price_per_unit, created_by, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(e.id, villaId, e.name || e.id, qty, now(), actor, actor, now(), now()).run()
+            `).bind(genId('RSTK'), villaId, e.id, e.name || e.id, qty, totalCost, pricePerUnit, actor, now()).run()
+
+            const result = await DB.prepare(`
+              UPDATE inventory
+              SET qty_in_stock = COALESCE(qty_in_stock, 0) + ?,
+                  last_restocked = ?,
+                  updated_by = ?, updated_at = ?
+              WHERE item_id = ? AND villa_id = ?
+            `).bind(qty, now(), actor, now(), e.id, villaId).run()
+            if (!result.meta?.changes) {
+              await DB.prepare(`
+                INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, last_restocked, created_by, updated_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `).bind(e.id, villaId, e.name || e.id, qty, now(), actor, actor, now(), now()).run()
+            }
+            savedCount++
+          } catch (err2) {
+            // Same class of bug as saveInventoryPreferredStock: one bad
+            // item_id used to silently fail the ENTIRE restock batch with
+            // no detail. Now every other item still saves.
+            console.error(`saveInventoryRestock failed for item ${e.id}:`, err2?.message || err2)
+            errors.push({ itemId: e.id, error: err2?.message || String(err2) })
           }
         }
-        return json({ success: true })
+        return json({ success: true, data: { savedCount, total: entries.filter(e => (parseFloat(e.qty) || 0) > 0).length, errors } })
       }
 
       // INVENTORY — direct stock quantity correction (Stock tab +/- and manual edit)
       if (action === 'saveInventoryStock') {
         const villaId = body.villaId || 'dwarka'
         const stock   = body.stock || {}
+        const errors = []
+        let savedCount = 0
         for (const [itemId, s] of Object.entries(stock)) {
           const qty = parseFloat(s.qty) || 0
-          const result = await DB.prepare(`
-            UPDATE inventory
-            SET qty_in_stock = ?, updated_by = ?, updated_at = ?
-            WHERE item_id = ? AND villa_id = ?
-          `).bind(qty, actor, now(), itemId, villaId).run()
-          if (!result.meta?.changes) {
-            await DB.prepare(`
-              INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, created_by, updated_by, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(itemId, villaId, s.name || itemId, qty, actor, actor, now(), now()).run()
+          try {
+            const result = await DB.prepare(`
+              UPDATE inventory
+              SET qty_in_stock = ?, updated_by = ?, updated_at = ?
+              WHERE item_id = ? AND villa_id = ?
+            `).bind(qty, actor, now(), itemId, villaId).run()
+            if (!result.meta?.changes) {
+              await DB.prepare(`
+                INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, created_by, updated_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              `).bind(itemId, villaId, s.name || itemId, qty, actor, actor, now(), now()).run()
+            }
+            savedCount++
+          } catch (e) {
+            console.error(`saveInventoryStock failed for item ${itemId}:`, e?.message || e)
+            errors.push({ itemId, error: e?.message || String(e) })
           }
         }
-        return json({ success: true })
+        return json({ success: true, data: { savedCount, total: Object.keys(stock).length, errors } })
       }
 
       // INVENTORY — set preferred (target) stock levels per item; used to flag low stock

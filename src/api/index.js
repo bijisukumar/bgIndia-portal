@@ -34,8 +34,8 @@ async function get(action, params = {}) {
     const url = qs ? `${BASE}/${action}?${qs}` : `${BASE}/${action}`
     const res = await fetch(url, { headers: authHeaders() })
     if (res.status === 401) { handle401(); return }
-    if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
-    const data = await res.json()
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status} on ${action}`)
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
     logger.info('API:GET', `${action} OK`)
     // NOTE: must NOT use `data?.data ?? data` here — `??` treats a
@@ -61,8 +61,11 @@ async function post(action, payload) {
       body:    JSON.stringify(payload),
     })
     if (res.status === 401) { handle401(); return }
-    if (!res.ok) throw new Error(`HTTP ${res.status} on ${action}`)
-    const data = await res.json()
+    // Read the JSON body first — our API returns a helpful { error } even on
+    // 4xx/5xx (e.g. the double-booking message on a 409). Surface that rather
+    // than a bare "HTTP 409".
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status} on ${action}`)
     if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
     logger.info('API:POST', `${action} OK`)
     // See matching note in get() above — same fix, same reason.

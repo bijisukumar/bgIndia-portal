@@ -2505,55 +2505,77 @@ export async function onRequest(ctx) {
         const bookingValue = parseFloat(body.bookingValue) || enquiry.final_offer_amount || enquiry.quote_amount || 0
 
         // Respect the same overlap protection used by createBooking — refuse
-        // to silently double-book the villa.
+        // ── Idempotency / partial-write recovery ──────────────────────
+        // The writes below are now atomic (DB.batch), but earlier confirms
+        // were not — one could create the stay + booking yet fail before
+        // marking the enquiry confirmed, leaving it on "Quoted" while a
+        // confirmed stay exists. Every retry then self-conflicts on the
+        // overlap check and 409s forever. If a booking already exists for
+        // this enquiry, heal the enquiry state and return it instead.
+        const priorBooking = await DB.prepare(
+          `SELECT booking_id, stay_id FROM bookings WHERE enquiry_id = ? ORDER BY created_at DESC LIMIT 1`
+        ).bind(enquiryId).first()
+        if (priorBooking) {
+          await DB.prepare(
+            `UPDATE enquiries SET status='confirmed', booking_confirmed=1, booking_value=?, updated_by=?, updated_at=? WHERE enquiry_id=? AND booking_confirmed=0`
+          ).bind(bookingValue, actor, now(), enquiryId).run()
+          return json({ success: true, data: { stayId: priorBooking.stay_id, bookingId: priorBooking.booking_id, alreadyConfirmed: true } })
+        }
+
+        // Overlap protection — refuse to silently double-book the villa.
         const conflict = await DB.prepare(`
           SELECT stay_id, guest_name, checkin_date, checkout_date FROM stays
           WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
             AND checkin_date < ? AND checkout_date > ? LIMIT 1
         `).bind(villaId, enquiry.checkout_date, enquiry.checkin_date).first()
         if (conflict) {
+          // Same-guest overlaps (extensions) get routed to a modify/extend
+          // flow in a later phase via upsertStay. For now a genuine overlap
+          // blocks with a clear, now-visible reason instead of a bare HTTP 409.
           return json({ success: false, error: `Villa already booked ${conflict.checkin_date} → ${conflict.checkout_date} (${conflict.guest_name})`, conflict }, 409)
         }
 
+        // ── Create stay + booking + side effects atomically ───────────
+        // DB.batch runs as one transaction, so we can never again land in the
+        // half-written state that caused the self-conflict above.
         const stayId = genStayId(villaId)
-        await DB.prepare(`
-          INSERT INTO stays (
-            stay_id, villa_id, source, guest_name, guest_phone, guest_email,
-            checkin_date, checkout_date, nights, adults, children,
-            gross, net, status, created_by, updated_by
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
-        `).bind(
-          stayId, villaId, enquiry.source || 'direct', enquiry.guest_name, enquiry.phone, enquiry.email,
-          enquiry.checkin_date, enquiry.checkout_date, enquiry.nights || 1, enquiry.guests_count || 1, 0,
-          bookingValue, bookingValue, actor, actor
-        ).run()
-
         const bookingId = genId('BKG')
-        await DB.prepare(`
-          INSERT INTO bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).bind(bookingId, enquiryId, enquiry.guest_id, stayId, bookingValue, actor).run()
-
-        await DB.prepare(`
-          UPDATE enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
-        `).bind(bookingValue, actor, now(), enquiryId).run()
-
+        const stmts = [
+          DB.prepare(`
+            INSERT INTO stays (
+              stay_id, villa_id, source, guest_name, guest_phone, guest_email,
+              checkin_date, checkout_date, nights, adults, children,
+              gross, net, status, created_by, updated_by
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
+          `).bind(
+            stayId, villaId, enquiry.source || 'direct', enquiry.guest_name, enquiry.phone, enquiry.email,
+            enquiry.checkin_date, enquiry.checkout_date, enquiry.nights || 1, enquiry.guests_count || 1, 0,
+            bookingValue, bookingValue, actor, actor
+          ),
+          DB.prepare(`
+            INSERT INTO bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).bind(bookingId, enquiryId, enquiry.guest_id, stayId, bookingValue, actor),
+          DB.prepare(`
+            UPDATE enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+          `).bind(bookingValue, actor, now(), enquiryId),
+        ]
         if (enquiry.guest_id) {
-          await DB.prepare(`
+          stmts.push(DB.prepare(`
             UPDATE guests SET
               total_stays = total_stays + 1,
               total_nights = total_nights + ?,
               total_revenue = total_revenue + ?,
               last_seen_at = ?, updated_by = ?, updated_at = ?
             WHERE guest_id = ?
-          `).bind(enquiry.nights || 1, bookingValue, now(), actor, now(), enquiry.guest_id).run()
+          `).bind(enquiry.nights || 1, bookingValue, now(), actor, now(), enquiry.guest_id))
         }
-
-        await DB.prepare(`
+        stmts.push(DB.prepare(`
           INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
           VALUES (?, ?, 'status_change', ?, ?)
-        `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor).run()
+        `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor))
 
+        await DB.batch(stmts)
         return json({ success: true, data: { stayId, bookingId } })
       }
 

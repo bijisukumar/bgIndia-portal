@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS stays (
   review_date      TEXT,             -- YYYY-MM-DD
   airbnb_conf      TEXT,             -- Airbnb confirmation code (for email matching)
   converted_to_direct INTEGER DEFAULT 0,
+  -- Identity links (Phase 1) — written by resolveGuest / upsertStay going
+  -- forward; backfilled from bookings for historical rows.
+  guest_id         TEXT,              -- -> guests.guest_id
+  enquiry_id       TEXT,              -- -> enquiries.enquiry_id
   -- Audit
   created_by  TEXT DEFAULT 'owner',   -- owner | raman | pradosh | auto | system
   created_at  TEXT DEFAULT (datetime('now')),
@@ -265,6 +269,8 @@ CREATE INDEX IF NOT EXISTS idx_stays_status    ON stays(status);
 CREATE INDEX IF NOT EXISTS idx_stays_guest     ON stays(guest_name);
 CREATE INDEX IF NOT EXISTS idx_stays_source    ON stays(source);
 CREATE INDEX IF NOT EXISTS idx_stays_audit     ON stays(created_by, updated_by);
+CREATE INDEX IF NOT EXISTS idx_stays_guest_id  ON stays(guest_id);
+CREATE INDEX IF NOT EXISTS idx_stays_enquiry   ON stays(enquiry_id);
 CREATE INDEX IF NOT EXISTS idx_harvests_date   ON coconut_harvests(harvest_date);
 CREATE INDEX IF NOT EXISTS idx_rental_income   ON rental_income(prop_id, year, month);
 CREATE INDEX IF NOT EXISTS idx_raman_paid      ON raman_commissions(is_paid, checkin_date);

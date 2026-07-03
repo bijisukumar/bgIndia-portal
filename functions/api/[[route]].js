@@ -335,6 +335,77 @@ function genId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+// ── GUEST IDENTITY RESOLVER ───────────────────────────────────
+// Find-or-create a guests row by normalized phone/email. This is the SAME
+// matching saveEnquiry uses, extracted here so every write path resolves a
+// guest the same way instead of forking its own logic. Returns guest_id, or
+// null when there's nothing to match on (no phone and no email) — the same
+// conservative behavior as before, so we never create blank guest records.
+async function resolveGuest(DB, { name, phone, email, actor = 'auto' }) {
+  const normPhone = (phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+  const normEmail = (email || '').trim().toLowerCase()
+  if (!normPhone && !normEmail) return null
+  const existing = await DB.prepare(
+    `SELECT guest_id FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+  ).bind(normPhone, normEmail).first()
+  if (existing) {
+    await DB.prepare(`UPDATE guests SET last_seen_at = datetime('now'), updated_by = ?, updated_at = datetime('now') WHERE guest_id = ?`)
+      .bind(actor, existing.guest_id).run()
+    return existing.guest_id
+  }
+  const guestId = genId('GST')
+  await DB.prepare(`INSERT INTO guests (guest_id, name, phone, email, created_by, updated_by) VALUES (?,?,?,?,?,?)`)
+    .bind(guestId, name || 'Unknown', normPhone, normEmail, actor, actor).run()
+  return guestId
+}
+
+// ── STAY OVERLAP CLASSIFIER ───────────────────────────────────
+// Classifies how a candidate date range relates to existing active stays at
+// a villa, using a half-open interval [checkin, checkout): the checkout day
+// itself is free, so a guest checking out and another checking in on the
+// same day is NOT an overlap. Returns:
+//   ownOverlap   — an overlapping active stay belonging to the same guest
+//                  (an extension / re-submit of THEIR booking, not a dup)
+//   otherOverlap — an overlapping stay for a DIFFERENT guest (double booking)
+//   backToBack   — stays that only touch on a turnover day (valid, info only)
+async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, excludeStayId = null, guestId = null, phone = null, email = null, guestName = null }) {
+  const co = checkoutDate || checkinDate
+  const { results } = await DB.prepare(
+    `SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, status, source, created_at, guest_id
+       FROM stays
+      WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
+        AND stay_id != ?
+        AND checkin_date <= ? AND checkout_date >= ?`
+  ).bind(villaId, excludeStayId || '', co, checkinDate).all()
+
+  const normP = (phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+  const normE = (email || '').trim().toLowerCase()
+  const fullName = s => (s || '').toLowerCase().replace(/\s+/g, ' ').trim()
+  // "Same guest" only on a RELIABLE signal — guest_id, phone, email, or an
+  // exact full-name match. A loose first-name match is deliberately NOT enough:
+  // silently merging two different guests is worse than a false alarm, so any
+  // ambiguous overlap falls through to otherOverlap and gets flagged for a
+  // human to resolve rather than auto-merged.
+  const sameGuest = s =>
+    (guestId && s.guest_id && s.guest_id === guestId) ||
+    (!!normP && !!s.guest_phone && s.guest_phone.replace(/[\s\-]/g, '').replace(/^\+?91/, '') === normP) ||
+    (!!normE && !!s.guest_email && s.guest_email.trim().toLowerCase() === normE) ||
+    (!!guestName && !!s.guest_name && fullName(s.guest_name) === fullName(guestName))
+
+  const overlaps = [], backToBack = []
+  for (const s of (results || [])) {
+    const strictOverlap = s.checkin_date < co && s.checkout_date > checkinDate
+    const touches = s.checkout_date === checkinDate || s.checkin_date === co
+    if (strictOverlap) overlaps.push(s)
+    else if (touches) backToBack.push(s)
+  }
+  return {
+    ownOverlap:   overlaps.find(sameGuest) || null,
+    otherOverlap: overlaps.find(s => !sameGuest(s)) || null,
+    backToBack,
+  }
+}
+
 // ── ROUTER ────────────────────────────────────────────────
 export async function onRequest(ctx) {
   const { request, env } = ctx
@@ -483,16 +554,28 @@ export async function onRequest(ctx) {
 
       const submittedAt = now()
       let stayId = existingStayId
+      const guestId = await resolveGuest(DB, { name: safeGuestName, phone, email })
+      let reviewNote = null
+      let dupOtherStay = null
 
       if (!stayId) {
-        const firstName = guestName.split(' ')[0]
-        const found = await DB.prepare(
-          `SELECT stay_id, status FROM stays
-           WHERE guest_name LIKE ? AND checkin_date = ?
-             AND villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
-           LIMIT 1`
-        ).bind(`%${firstName}%`, checkInDate, villaId).first()
-        if (found) stayId = found.stay_id
+        // Identity + overlap match (replaces the fragile exact-checkin_date
+        // match that forked the Gulshan duplicate). If this guest already has
+        // an overlapping active stay, this form belongs to THAT booking —
+        // update it rather than inserting a second stay.
+        const cls = await classifyStayConflicts(DB, {
+          villaId, checkinDate: checkInDate, checkoutDate: checkOutDate,
+          guestId, phone, email, guestName: safeGuestName,
+        })
+        if (cls.ownOverlap) {
+          stayId = cls.ownOverlap.stay_id
+          const co = checkOutDate || ''
+          if (cls.ownOverlap.checkin_date !== checkInDate || (co && cls.ownOverlap.checkout_date !== co)) {
+            reviewNote = `Check-in form dates ${checkInDate}→${checkOutDate || '?'} differ from booked ${cls.ownOverlap.checkin_date}→${cls.ownOverlap.checkout_date} — verify (possible extension).`
+          }
+        } else if (cls.otherOverlap) {
+          dupOtherStay = cls.otherOverlap
+        }
       }
 
       if (stayId) {
@@ -588,6 +671,51 @@ export async function onRequest(ctx) {
           reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
           reqBeds, bedsCount
         ).run()
+      }
+
+      // Stamp the resolved guest link (Phase 1 column) — starts populating
+      // stays.guest_id for the check-in-form path, which never wrote it before.
+      if (guestId) {
+        await DB.prepare(`UPDATE stays SET guest_id = COALESCE(guest_id, ?) WHERE stay_id = ?`).bind(guestId, stayId).run()
+      }
+
+      // Extension / date-change on the guest's own booking → flag for review
+      // rather than silently trusting guest-entered dates.
+      if (reviewNote) {
+        await DB.prepare(
+          `UPDATE stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), status = 'pending_review', updated_at = datetime('now') WHERE stay_id = ?`
+        ).bind(reviewNote, stayId).run()
+      }
+
+      // Genuine overlap with a DIFFERENT guest — a real double booking arriving
+      // through the check-in form, the exact gap that let the Gulshan case
+      // through unflagged. Don't block the guest, but log it, alert staff, and
+      // mark the new stay pending_review so nobody checks two parties into one
+      // villa.
+      if (dupOtherStay) {
+        const co = checkOutDate || checkInDate
+        const overlapNights = Math.max(0, Math.round(
+          (Math.min(new Date(dupOtherStay.checkout_date), new Date(co)) -
+           Math.max(new Date(dupOtherStay.checkin_date), new Date(checkInDate))) / 86400000))
+        try {
+          await DB.prepare(
+            `INSERT INTO duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights)
+             VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`
+          ).bind(`DUP-${Date.now()}`, villaId, dupOtherStay.stay_id, dupOtherStay.guest_name, dupOtherStay.checkin_date, dupOtherStay.checkout_date, dupOtherStay.source || 'unknown', dupOtherStay.created_at || null, safeGuestName, checkInDate, checkOutDate || null, 'checkin_form', null, overlapNights).run()
+        } catch (e) { console.error('dup log (checkin form):', e?.message || e) }
+        await DB.prepare(
+          `UPDATE stays SET status='pending_review', notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_at = datetime('now') WHERE stay_id = ?`
+        ).bind(`Overlaps existing stay ${dupOtherStay.stay_id} (${dupOtherStay.guest_name}) ${dupOtherStay.checkin_date}→${dupOtherStay.checkout_date} — possible double booking.`, stayId).run()
+        try {
+          await sendAlert(env, '🚨 Possible double booking (check-in form) — ' + villaId, [
+            'Source: Guest check-in form (submitGuestCheckIn)',
+            `New guest:  ${safeGuestName} | ${checkInDate} → ${checkOutDate || '?'}`,
+            `Existing:   ${dupOtherStay.stay_id} | ${dupOtherStay.guest_name} | ${dupOtherStay.checkin_date} → ${dupOtherStay.checkout_date}`,
+            `Overlap:    ${overlapNights} night(s)`,
+            '',
+            'The new stay is marked pending_review — verify before check-in.',
+          ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId)
+        } catch (e) { console.error('dup alert (checkin form):', e?.message || e) }
       }
 
       const docId = (type, sid) => `DOC-${sid}-${type}-${Date.now()}`

@@ -1726,7 +1726,7 @@ export async function onRequest(ctx) {
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
         const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)
-        const { results } = await DB.prepare(`SELECT * FROM duplicate_bookings WHERE detected_at >= ? ORDER BY detected_at DESC`).bind(cutoff.toISOString().slice(0,10)).all()
+        const { results } = await DB.prepare(`SELECT * FROM duplicate_bookings WHERE detected_at >= ? AND (resolved IS NULL OR resolved = 0) ORDER BY detected_at DESC`).bind(cutoff.toISOString().slice(0,10)).all()
         const byChannel = {}
         results.forEach(r => {
           const ch = r.new_source || 'unknown'

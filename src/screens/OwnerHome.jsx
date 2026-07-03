@@ -136,6 +136,34 @@ function PendingReviewBlock({ onApproved }) {
     } finally { setSaving(false) }
   }
 
+  async function handleVoid() {
+    if (!selected) return
+    const reason = window.prompt(`Void ${selected.guestName}'s stay? It's kept for reference (not active). Reason:`, 'duplicate / created in error')
+    if (reason === null) return
+    setSaving(true)
+    try {
+      await api.resolveStay({ stayId: selected.stayId, reason: reason || 'voided' })
+      showToast(`Voided ${selected.guestName} — kept on record`)
+      const updated = pending.filter(p => p.stayId !== selected.stayId)
+      setPending(updated); setSelected(updated[0] || null); onApproved?.()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setSaving(false) }
+  }
+
+  async function handleDelete() {
+    if (!selected) return
+    if (!window.confirm(`HARD DELETE ${selected.guestName}?\n\nThis removes the stay and its child rows (a tombstone is logged for reference). Blocked automatically if a paid commission exists — void instead in that case.`)) return
+    const reason = window.prompt('Delete reason (for the log):', 'test / junk record') || 'hard delete'
+    setSaving(true)
+    try {
+      await api.deleteStay({ stayId: selected.stayId, confirm: true, reason })
+      showToast(`Deleted ${selected.guestName}`)
+      const updated = pending.filter(p => p.stayId !== selected.stayId)
+      setPending(updated); setSelected(updated[0] || null); onApproved?.()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setSaving(false) }
+  }
+
   function fmt(d) {
     if (!d) return '—'
     try { return parseLocalDate(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
@@ -191,6 +219,22 @@ function PendingReviewBlock({ onApproved }) {
               border: '1px solid rgba(52,168,83,0.4)', background: 'rgba(52,168,83,0.12)',
               color: '#34A853', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>
             {saving ? '…' : '✅ Onboard Guest'}
+          </button>
+        </div>
+      )}
+      {selected && (
+        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <button onClick={handleVoid} disabled={saving}
+            style={{ flex: 1, padding: '9px', borderRadius: '10px',
+              border: '1px solid rgba(245,158,11,0.3)', background: 'transparent',
+              color: '#F59E0B', fontSize: '0.75rem', cursor: 'pointer' }}>
+            Void (keep record)
+          </button>
+          <button onClick={handleDelete} disabled={saving}
+            style={{ flex: 1, padding: '9px', borderRadius: '10px',
+              border: '1px solid rgba(239,68,68,0.3)', background: 'transparent',
+              color: '#EF4444', fontSize: '0.75rem', cursor: 'pointer' }}>
+            Delete
           </button>
         </div>
       )}
@@ -713,6 +757,16 @@ function DuplicateBookingsBlock() {
     }).catch(() => {})
   }, [])
 
+  async function resolveInc(dupId) {
+    const note = window.prompt('Mark this incident resolved? It stays on record for reference. Note:', 'reviewed')
+    if (note === null) return
+    try {
+      await api.resolveDuplicate({ dupId, resolution: note || 'resolved' })
+      const d = await api.getDuplicateBookings({ months: 2 })
+      if (d && d.total !== undefined) setData(d)
+    } catch (e) { /* silent — banner just won't change */ }
+  }
+
   if (!data || data.total === 0) return (
     <div style={{ marginBottom:'16px', background:'rgba(52,168,83,0.06)',
       border:'1px solid rgba(52,168,83,0.2)', borderRadius:'12px',
@@ -763,6 +817,12 @@ function DuplicateBookingsBlock() {
                   <div style={{ color:'#4B5563' }}>
                     Conflicted with: {inc.existingGuest} ({inc.existingDates}) — {inc.overlapNights} night overlap
                   </div>
+                  {inc.dupId && (
+                    <div onClick={() => resolveInc(inc.dupId)}
+                      style={{ marginTop:'3px', color:'#F59E0B', fontWeight:600, cursor:'pointer', fontSize:'0.68rem' }}>
+                      Mark resolved
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

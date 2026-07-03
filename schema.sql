@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS stays (
   -- forward; backfilled from bookings for historical rows.
   guest_id         TEXT,              -- -> guests.guest_id
   enquiry_id       TEXT,              -- -> enquiries.enquiry_id
+  hold_confirmation INTEGER DEFAULT 0, -- 1 = flagged; poller holds the guest confirmation (Phase 3b)
   -- Audit
   created_by  TEXT DEFAULT 'owner',   -- owner | raman | pradosh | auto | system
   created_at  TEXT DEFAULT (datetime('now')),
@@ -556,3 +557,47 @@ CREATE TABLE IF NOT EXISTS processing_log (
 
 CREATE INDEX IF NOT EXISTS idx_processing_log_created ON processing_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_processing_log_stay    ON processing_log(stay_id);
+
+-- Duplicate-booking incidents (was created directly on the live DB and never
+-- tracked here; synced now, including the Phase 3 resolve columns).
+CREATE TABLE IF NOT EXISTS duplicate_bookings (
+  dup_id             TEXT PRIMARY KEY,
+  villa_id           TEXT,
+  detected_at        TEXT DEFAULT (datetime('now')),
+  existing_stay_id   TEXT,
+  existing_guest     TEXT,
+  existing_checkin   TEXT,
+  existing_checkout  TEXT,
+  existing_source    TEXT,
+  existing_booked_at TEXT,
+  new_guest          TEXT,
+  new_checkin        TEXT,
+  new_checkout       TEXT,
+  new_source         TEXT,
+  new_airbnb_conf    TEXT,
+  overlap_nights     INTEGER DEFAULT 0,
+  resolved           INTEGER DEFAULT 0,   -- Phase 3
+  resolved_by        TEXT,
+  resolved_at        TEXT,
+  resolution         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_duplicate_bookings_villa    ON duplicate_bookings(villa_id);
+CREATE INDEX IF NOT EXISTS idx_duplicate_bookings_resolved ON duplicate_bookings(resolved);
+
+-- Tombstone log: every void or hard-delete records who/when/why + a snapshot,
+-- so a record is always traceable even after a hard delete removed the row.
+CREATE TABLE IF NOT EXISTS deletion_log (
+  del_id        TEXT PRIMARY KEY,
+  stay_id       TEXT,
+  villa_id      TEXT,
+  action        TEXT,                -- 'void' | 'cancelled' | 'delete'
+  guest_name    TEXT,
+  checkin_date  TEXT,
+  checkout_date TEXT,
+  reason        TEXT,
+  snapshot      TEXT,                -- JSON snapshot of the stay at resolution time
+  actor         TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_deletion_log_stay ON deletion_log(stay_id);
+CREATE INDEX IF NOT EXISTS idx_deletion_log_villa ON deletion_log(villa_id);

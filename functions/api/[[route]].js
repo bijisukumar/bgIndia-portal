@@ -2713,6 +2713,69 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, bookingId } })
       }
 
+      // ── RESOLVE / VOID A STAY (soft — default) ───────────────────────
+      // Marks a stay void/cancelled, keeps the row (excluded from active
+      // views), logs a tombstone, and reverses an UNPAID commission. A PAID
+      // commission is left untouched — money is never silently erased.
+      if (action === 'resolveStay') {
+        const stayId = body.stayId
+        if (!stayId) return err('stayId required')
+        const reason = (body.reason || '').trim() || 'resolved'
+        const newStatus = body.status === 'cancelled' ? 'cancelled' : 'void'
+        const stay = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        const paidComm = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
+        const stmts = [
+          DB.prepare(`UPDATE stays SET status = ?, notes = TRIM(COALESCE(notes,'') || ' | ' || ? || ': ' || ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`)
+            .bind(newStatus, newStatus, reason, actor, stayId),
+          DB.prepare(`INSERT INTO deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+            .bind(genId('DEL'), stayId, stay.villa_id, newStatus, stay.guest_name, stay.checkin_date, stay.checkout_date, reason,
+                  JSON.stringify({ status: stay.status, source: stay.source, nights: stay.nights, net: stay.net, guest_phone: stay.guest_phone, guest_id: stay.guest_id }), actor),
+        ]
+        if (!paidComm) stmts.push(DB.prepare(`DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId))
+        await DB.batch(stmts)
+        return json({ success: true, data: { stayId, status: newStatus, paidCommissionKept: !!paidComm } })
+      }
+
+      // ── HARD DELETE A STAY (admin, guarded) ──────────────────────────
+      // Cascades the operational child rows and removes the stay, but refuses
+      // if a PAID commission exists (forcing a soft void instead), writes a
+      // full-snapshot tombstone, and PRESERVES the duplicate_bookings incident
+      // (marks it resolved) rather than erasing history. Requires confirm:true.
+      if (action === 'deleteStay') {
+        const stayId = body.stayId
+        if (!stayId) return err('stayId required')
+        if (body.confirm !== true && body.confirm !== 'true') return err('confirm:true required for hard delete')
+        const stay = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        const paidComm = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
+        if (paidComm) return json({ success: false, code: 'paid_commission', error: 'This stay has a PAID commission — hard delete is blocked. Void it instead to preserve the financial record.' }, 409)
+        const reason = (body.reason || '').trim() || 'hard delete'
+        await DB.batch([
+          DB.prepare(`INSERT INTO deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+            .bind(genId('DEL'), stayId, stay.villa_id, 'delete', stay.guest_name, stay.checkin_date, stay.checkout_date, reason, JSON.stringify(stay), actor),
+          DB.prepare(`DELETE FROM guest_requests   WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stay_cars        WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stay_incidentals WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM guest_documents  WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM bookings         WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM processing_log   WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId),
+          DB.prepare(`UPDATE duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = 'stay deleted' WHERE existing_stay_id = ? AND (resolved IS NULL OR resolved = 0)`).bind(actor, stayId),
+          DB.prepare(`DELETE FROM stays WHERE stay_id = ?`).bind(stayId),
+        ])
+        return json({ success: true, data: { stayId, deleted: true } })
+      }
+
+      // ── RESOLVE A DUPLICATE-BOOKING INCIDENT (keep for reference) ─────
+      if (action === 'resolveDuplicate') {
+        const dupId = body.dupId
+        if (!dupId) return err('dupId required')
+        await DB.prepare(`UPDATE duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = ? WHERE dup_id = ?`)
+          .bind(actor, (body.resolution || 'reviewed').trim(), dupId).run()
+        return json({ success: true, data: { dupId, resolved: true } })
+      }
+
       if (action === 'runSQLWrite') {
         const sql = body?.sql ? body.sql.trim() : ''
         if (!sql) return err('sql required')

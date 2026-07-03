@@ -37,6 +37,69 @@ function normalizePlate(s) {
   return t
 }
 
+// ── PASSPORT MRZ PARSER (TD3 — 2 lines × 44 chars) ────────────
+// Deterministically parses the machine-readable zone of a passport into
+// structured fields. Advisory only (the guest verifies everything), so it is
+// permissive: it returns whatever it can and leaves the rest blank rather
+// than failing. Kept out of the model's hands on purpose — the model only
+// transcribes the two MRZ lines; the field extraction happens here where it's
+// reliable and testable.
+function parseMrzTD3(text) {
+  if (!text) return null
+  const lines = String(text).toUpperCase()
+    .split(/[\r\n]+/)
+    .map(l => l.replace(/[^A-Z0-9<]/g, ''))
+    .filter(l => l.includes('<') && l.length >= 30)
+  if (lines.length < 2) return null
+  // The two longest <-bearing lines are the MRZ.
+  lines.sort((a, b) => b.length - a.length)
+  let l1 = lines[0], l2 = lines[1]
+  // Name line starts with the document type letter (P for passport).
+  if (!/^P/.test(l1) && /^P/.test(l2)) { const t = l1; l1 = l2; l2 = t }
+  const pad = s => (s + '<'.repeat(44)).slice(0, 44)
+  l1 = pad(l1); l2 = pad(l2)
+
+  const clean = s => s.replace(/</g, ' ').replace(/\s+/g, ' ').trim()
+  const num   = s => s.replace(/</g, '').trim()
+
+  const issuing   = num(l1.slice(2, 5))
+  const [surRaw, givRaw = ''] = l1.slice(5).split('<<')
+  const surname     = clean(surRaw)
+  const givenNames  = clean(givRaw)
+
+  const passportNumber = num(l2.slice(0, 9))
+  const nationality    = num(l2.slice(10, 13))
+  const dobRaw         = l2.slice(13, 19)
+  const sexRaw         = l2.slice(20, 21)
+  const expRaw         = l2.slice(21, 27)
+
+  const toDate = (yymmdd, kind) => {
+    if (!/^\d{6}$/.test(yymmdd)) return ''
+    const yy = parseInt(yymmdd.slice(0, 2), 10)
+    const mm = yymmdd.slice(2, 4)
+    const dd = yymmdd.slice(4, 6)
+    if (mm < '01' || mm > '12' || dd < '01' || dd > '31') return ''
+    const curYY = new Date().getFullYear() % 100
+    const year = kind === 'expiry' ? 2000 + yy : (yy > curYY ? 1900 + yy : 2000 + yy)
+    return `${year}-${mm}-${dd}`
+  }
+
+  const titled = clean([givenNames, surname].join(' '))
+    .toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+
+  return {
+    passportNumber,
+    nationalityCode: nationality,
+    issuingCountry:  issuing,
+    dob:    toDate(dobRaw, 'dob'),
+    sex:    sexRaw === 'M' ? 'Male' : sexRaw === 'F' ? 'Female' : '',
+    expiry: toDate(expRaw, 'expiry'),
+    surname,
+    givenNames,
+    fullName: titled,
+  }
+}
+
 // ── JWT HELPERS (Web Crypto API — available in all CF Workers) ──
 async function signJwt(payload, secret) {
   const enc     = new TextEncoder()
@@ -570,6 +633,57 @@ export async function onRequest(ctx) {
   }
 
   // RESOLVE CHECKIN LINK — public endpoint (no auth)
+  // ── PASSPORT MRZ OCR (public — guest check-in form pre-fill) ──────
+  // Reads the passport photo page with the hosted vision model and returns
+  // structured MRZ fields to PRE-FILL the guest's own check-in form. Public
+  // by necessity: the guest form is unauthenticated, exactly like
+  // submitGuestCheckIn. Advisory + self-healing — any failure returns empty
+  // fields so the guest simply types them in; it can never throw the form.
+  if (action === 'ocrPassport' && method === 'POST') {
+    const pBody = await request.json().catch(() => ({}))
+    const b64 = pBody.passportPhotoB64
+    const empty = (reason) => json({ success: true, data: { fields: {}, reason } })
+    if (!b64) return empty('no_image')
+    if (b64.length > 8000000) return empty('too_large')   // ~6MB decoded image guard
+    if (!env.AI) { console.error('ocrPassport: env.AI binding missing'); return empty('ai_unbound') }
+
+    const OCR_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct'
+    const OCR_PROMPT = 'This is the photo page of a passport. Find the machine-readable zone: the two long lines of capital letters, digits and < characters at the very bottom. Transcribe those two lines EXACTLY as printed, each on its own line, including every < character, and output nothing else. If there is no machine-readable zone, respond with exactly NONE.'
+
+    let bytes
+    try {
+      const bin = atob(b64)
+      const arr = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+      bytes = [...arr]
+    } catch (e) { console.error('ocrPassport: bad base64:', e?.message || e); return empty('bad_b64') }
+
+    const runOcr = async () => {
+      const out = await env.AI.run(OCR_MODEL, { prompt: OCR_PROMPT, image: bytes, max_tokens: 128, temperature: 0 })
+      return (out && out.response ? String(out.response) : '').trim()
+    }
+
+    let raw = ''
+    try {
+      raw = await runOcr()
+    } catch (e1) {
+      // Same one-time Meta license 'agree' self-heal as the plate OCR.
+      console.error('ocrPassport: first attempt failed, license agree + retry:', e1?.message || e1)
+      try {
+        await env.AI.run(OCR_MODEL, { prompt: 'agree' })
+        raw = await runOcr()
+      } catch (e2) {
+        console.error('ocrPassport: retry failed:', e2?.message || e2)
+        return empty('ocr_error')
+      }
+    }
+
+    if (!raw || /^none$/i.test(raw.trim())) return empty('no_mrz')
+    const parsed = parseMrzTD3(raw)
+    if (!parsed || !parsed.passportNumber) return empty('parse_failed')
+    return json({ success: true, data: { fields: parsed, raw } })
+  }
+
   if (action === 'resolveCheckinLink' && method === 'POST') {
     const rlBody = await request.json().catch(() => ({}))
     const { token: linkToken } = rlBody

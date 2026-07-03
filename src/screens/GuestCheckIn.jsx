@@ -224,6 +224,8 @@ export default function GuestCheckIn() {
   const [portOfArrival,      setPortOfArrival]     = useState('')
   const [nextDest,           setNextDest]          = useState('')
   const passportRef = useRef()
+  const [passportOcrBusy, setPassportOcrBusy] = useState(false)  // reading MRZ
+  const [passportOcrHint, setPassportOcrHint] = useState('')     // status under the upload
   const visaRef     = useRef()
 
   function handleFileUpload(e, setPreview, setFile) {
@@ -233,6 +235,54 @@ export default function GuestCheckIn() {
     const reader = new FileReader()
     reader.onload = ev => setPreview(ev.target.result)
     reader.readAsDataURL(file)
+  }
+
+  // Passport upload → preview, then fire MRZ OCR to pre-fill passport fields.
+  // Advisory only: the guest verifies everything. Never blocks the form, and
+  // only pre-fills fields the guest hasn't already typed.
+  function handlePassportUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      setPassportPreview(ev.target.result)
+      // Only OCR image uploads — a PDF passport scan skips straight to manual.
+      if (file.type && file.type.startsWith('image/')) {
+        runPassportOcr(ev.target.result.split(',')[1])
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  async function runPassportOcr(passportPhotoB64) {
+    if (!passportPhotoB64) return
+    setPassportOcrBusy(true); setPassportOcrHint('')
+    try {
+      // Public endpoint — called with a raw fetch (no auth), exactly like the
+      // form's own submitGuestCheckIn call.
+      const res  = await fetch('/api/ocrPassport', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ passportPhotoB64 }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const f = data?.data?.fields || {}
+      if (!f.passportNumber) {
+        setPassportOcrHint("Couldn't read your passport automatically — please fill the fields in below")
+        return
+      }
+      let filled = 0
+      if (f.passportNumber && !passportNo)    { setPassportNo(f.passportNumber);   filled++ }
+      if (f.expiry        && !passportExpiry) { setPassportExpiry(f.expiry);        filled++ }
+      if (f.dob           && !dob)            { setDob(f.dob);                      filled++ }
+      if (f.fullName      && !fullName.trim()){ setFullName(f.fullName);            filled++ }
+      setPassportOcrHint(filled
+        ? '✨ Filled in from your passport — please check each field is correct'
+        : 'Passport read — please confirm the details below are correct')
+    } catch (e) {
+      setPassportOcrHint("Couldn't read your passport automatically — please fill the fields in below")
+    } finally {
+      setPassportOcrBusy(false)
+    }
   }
 
   function validate() {
@@ -600,10 +650,16 @@ export default function GuestCheckIn() {
               color="#85B7EB" icon="🛂"
               hint="Clear photo of the biographical data page" />
             <input ref={passportRef} type="file" accept="image/*,application/pdf" capture="environment"
-              onChange={e => handleFileUpload(e, setPassportPreview, null)}
+              onChange={handlePassportUpload}
               style={{ display:'none' }} />
             {passportPreview && (
               <div style={{ fontSize:'0.7rem', color:'#34A853', marginTop:'4px' }}>✅ Passport uploaded</div>
+            )}
+            {passportOcrBusy && (
+              <div style={{ fontSize:'0.7rem', color:'#85B7EB', marginTop:'4px' }}>🔎 Reading passport…</div>
+            )}
+            {passportOcrHint && !passportOcrBusy && (
+              <div style={{ fontSize:'0.7rem', color:'#9aa4b2', marginTop:'4px' }}>{passportOcrHint}</div>
             )}
           </Field>
 

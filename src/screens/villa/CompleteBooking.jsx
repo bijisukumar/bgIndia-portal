@@ -249,6 +249,39 @@ export default function CompleteBooking() {
     finally { setTransitioning(false) }
   }
 
+  // Void (soft) — keeps the row on record, hides it from active lists, logs a
+  // tombstone, reverses an unpaid commission. Works on ANY stay regardless of
+  // status (unlike the pending-review-only buttons).
+  async function handleVoidStay() {
+    if (!selected) return
+    const reason = window.prompt(`Void ${selected.guest_name}'s stay? It's kept on record but removed from active lists. Reason:`, 'duplicate / created in error')
+    if (reason === null) return
+    setTransitioning(true)
+    try {
+      const res = await api.resolveStay({ stayId: selected.stay_id, reason: reason || 'voided' })
+      showToast(res?.paidCommissionKept ? 'Voided — paid commission kept ✓' : 'Voided ✓')
+      setSelected(null)
+      await loadStays()
+    } catch(e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setTransitioning(false) }
+  }
+
+  // Hard delete (admin) — removes the stay + child rows, logs a tombstone,
+  // auto-blocked by the backend if a paid commission exists.
+  async function handleDeleteStay() {
+    if (!selected) return
+    if (!window.confirm(`PERMANENTLY DELETE ${selected.guest_name} (${selected.stay_id})?\n\nRemoves the stay and its child rows. A tombstone is logged for reference. Auto-blocked if a paid commission exists — void instead in that case.`)) return
+    const reason = window.prompt('Delete reason (for the log):', 'test / junk record') || 'hard delete'
+    setTransitioning(true)
+    try {
+      await api.deleteStay({ stayId: selected.stay_id, confirm: true, reason })
+      showToast('Deleted ✓')
+      setSelected(null)
+      await loadStays()
+    } catch(e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setTransitioning(false) }
+  }
+
   // Debounced type-ahead search for the Booked By picker
   useEffect(() => {
     if (!bookedByOpen) return
@@ -1014,6 +1047,19 @@ export default function CompleteBooking() {
                       disabled={transitioning}
                       style={actionBtn('#c62828')}>
                       {transitioning?'…':'❌ Cancel booking'}
+                    </button>
+                  )}
+
+                  {selected && (
+                    <button onClick={handleVoidStay} disabled={transitioning}
+                      style={actionBtn('#F59E0B')}>
+                      {transitioning?'…':'🚫 Void stay (keep on record)'}
+                    </button>
+                  )}
+                  {selected && (
+                    <button onClick={handleDeleteStay} disabled={transitioning}
+                      style={actionBtn('#EF4444')}>
+                      {transitioning?'…':'🗑️ Delete permanently'}
                     </button>
                   )}
                 </div>

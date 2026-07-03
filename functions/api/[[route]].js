@@ -373,7 +373,7 @@ async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, e
   const { results } = await DB.prepare(
     `SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, status, source, created_at, guest_id
        FROM stays
-      WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
+      WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
         AND stay_id != ?
         AND checkin_date <= ? AND checkout_date >= ?`
   ).bind(villaId, excludeStayId || '', co, checkinDate).all()
@@ -970,7 +970,7 @@ export async function onRequest(ctx) {
             MAX(state)          as state,
             MAX(country)        as country,
             GROUP_CONCAT(DISTINCT source) as all_sources
-           FROM stays WHERE status != 'cancelled'
+           FROM stays WHERE status NOT IN ('cancelled','void')
            GROUP BY guest_name ORDER BY last_stay DESC`
         ).all()
         const guests = results.map(r => ({
@@ -1000,7 +1000,7 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results: stays } = await DB.prepare(
-          `SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? AND status != 'cancelled'`
+          `SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
         ).bind(villaId, `${year}%`).all()
 
         const totalBookings  = stays.length
@@ -1431,17 +1431,17 @@ export async function onRequest(ctx) {
         const key = url.searchParams.get('key')
         const PRESET_QUERIES = {
           total_stays:       `SELECT COUNT(*) as total FROM stays`,
-          by_channel:        `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stays WHERE status != 'cancelled' GROUP BY source ORDER BY total_net DESC`,
-          by_year:           `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as bookings, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stays WHERE status != 'cancelled' GROUP BY year ORDER BY year DESC`,
-          top_guests:        `SELECT guest_name, COUNT(*) as visits, ROUND(SUM(net),0) as total_spent FROM stays WHERE status != 'cancelled' GROUP BY guest_name HAVING visits > 1 ORDER BY visits DESC LIMIT 10`,
+          by_channel:        `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY source ORDER BY total_net DESC`,
+          by_year:           `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as bookings, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY year ORDER BY year DESC`,
+          top_guests:        `SELECT guest_name, COUNT(*) as visits, ROUND(SUM(net),0) as total_spent FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY guest_name HAVING visits > 1 ORDER BY visits DESC LIMIT 10`,
           recent_5:          `SELECT stay_id, guest_name, checkin_date, source, ROUND(net,0) as net, status FROM stays ORDER BY checkin_date DESC LIMIT 5`,
           raman_unpaid:      `SELECT guest_name, checkin_date, nights, commission FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC`,
           raman_summary:     `SELECT is_paid, COUNT(*) as count, SUM(commission) as total FROM raman_commissions GROUP BY is_paid`,
           inventory_stock:   `SELECT name, category, qty_in_stock, sell_price FROM inventory WHERE villa_id = 'dwarka' ORDER BY category, name`,
           low_stock:         `SELECT name, qty_in_stock, sell_price FROM inventory WHERE villa_id = 'dwarka' AND qty_in_stock <= 3 ORDER BY qty_in_stock`,
           rental_ytd:        `SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax) as expense, SUM(net) as net FROM rental_income WHERE year = strftime('%Y','now') GROUP BY prop_id`,
-          direct_conversion: `SELECT source, COUNT(*) as bookings FROM stays WHERE status != 'cancelled' GROUP BY source`,
-          avg_tariff_year:   `SELECT strftime('%Y', checkin_date) as year, ROUND(AVG(tariff_per_night),0) as avg_tariff, ROUND(AVG(nights),1) as avg_nights FROM stays WHERE status != 'cancelled' AND tariff_per_night > 0 GROUP BY year ORDER BY year DESC`,
+          direct_conversion: `SELECT source, COUNT(*) as bookings FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY source`,
+          avg_tariff_year:   `SELECT strftime('%Y', checkin_date) as year, ROUND(AVG(tariff_per_night),0) as avg_tariff, ROUND(AVG(nights),1) as avg_nights FROM stays WHERE status NOT IN ('cancelled','void') AND tariff_per_night > 0 GROUP BY year ORDER BY year DESC`,
         }
         const sql = PRESET_QUERIES[key]
         if (!sql) return err(`Unknown query key: ${key}`)
@@ -1454,25 +1454,25 @@ export async function onRequest(ctx) {
         const statYear = url.searchParams.get('statYear') || null
 
         const cityQuery = statYear
-          ? `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') AND checkin_date LIKE ? GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
-          : `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
+          ? `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date LIKE ? GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
+          : `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
         const cityBinds = statYear ? [villaId, `${statYear}%`] : [villaId]
         const { results: cityRows } = await DB.prepare(cityQuery).bind(...cityBinds).all()
 
         const { results: purposeRows } = await DB.prepare(
-          `SELECT CASE WHEN LOWER(notes) LIKE '%wedding%' THEN 'Wedding' WHEN LOWER(notes) LIKE '%temple%' OR LOWER(notes) LIKE '%guruvayur%' THEN 'Temple / Pilgrimage' WHEN LOWER(notes) LIKE '%tourism%' OR LOWER(notes) LIKE '%holiday%' OR LOWER(notes) LIKE '%vacation%' THEN 'Tourism' WHEN LOWER(notes) LIKE '%family%' THEN 'Family Visit' WHEN LOWER(notes) LIKE '%arangettam%' THEN 'Arangettam' WHEN LOWER(notes) LIKE '%kerala%' THEN 'Kerala Tour' ELSE 'Other' END as purpose, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as guests, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') GROUP BY purpose ORDER BY bookings DESC`
+          `SELECT CASE WHEN LOWER(notes) LIKE '%wedding%' THEN 'Wedding' WHEN LOWER(notes) LIKE '%temple%' OR LOWER(notes) LIKE '%guruvayur%' THEN 'Temple / Pilgrimage' WHEN LOWER(notes) LIKE '%tourism%' OR LOWER(notes) LIKE '%holiday%' OR LOWER(notes) LIKE '%vacation%' THEN 'Tourism' WHEN LOWER(notes) LIKE '%family%' THEN 'Family Visit' WHEN LOWER(notes) LIKE '%arangettam%' THEN 'Arangettam' WHEN LOWER(notes) LIKE '%kerala%' THEN 'Kerala Tour' ELSE 'Other' END as purpose, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as guests, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY purpose ORDER BY bookings DESC`
         ).bind(villaId).all()
 
         const { results: channelRows } = await DB.prepare(
-          `SELECT source as channel, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as unique_guests, ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue, ROUND(SUM(COALESCE(net,0)),0) as net_revenue, ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') GROUP BY source ORDER BY net_revenue DESC`
+          `SELECT source as channel, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as unique_guests, ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue, ROUND(SUM(COALESCE(net,0)),0) as net_revenue, ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY source ORDER BY net_revenue DESC`
         ).bind(villaId).all()
 
         const { results: staleRows } = await DB.prepare(
-          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stays WHERE status NOT IN ('cancelled')`
+          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stays WHERE status NOT IN ('cancelled','void')`
         ).all()
 
         const { results: monthRows } = await DB.prepare(
-          `SELECT strftime('%Y', checkin_date) as year, strftime('%m', checkin_date) as month, COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region, COUNT(DISTINCT guest_name) as guests, COUNT(*) as bookings, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled') AND from_city IS NOT NULL AND from_city != '' GROUP BY year, month, region ORDER BY year DESC, month ASC`
+          `SELECT strftime('%Y', checkin_date) as year, strftime('%m', checkin_date) as month, COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region, COUNT(DISTINCT guest_name) as guests, COUNT(*) as bookings, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND from_city IS NOT NULL AND from_city != '' GROUP BY year, month, region ORDER BY year DESC, month ASC`
         ).bind(villaId).all()
 
         return json({ success: true, data: { cities: cityRows, purposes: purposeRows, channels: channelRows, stale: staleRows[0] || {}, monthlyByRegion: monthRows, statYear: statYear || 'all' } })
@@ -1488,7 +1488,7 @@ export async function onRequest(ctx) {
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, request_breakfast, breakfast_choice, request_cab, govt_id_type, govt_id_num FROM stays WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, request_breakfast, breakfast_choice, request_cab, govt_id_type, govt_id_num FROM stays WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
         ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
@@ -1503,7 +1503,7 @@ export async function onRequest(ctx) {
         if (!guestName || !reviewDate) return err('guestName and reviewDate required')
         const windowStart = new Date(reviewDate)
         windowStart.setDate(windowStart.getDate() - 14)
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled') ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate).all()
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled','void') ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate).all()
         if (results.length > 0) return json({ success: true, data: { stayId: results[0].stay_id, guestName: results[0].guest_name }})
         return json({ success: true, data: null })
       }
@@ -1537,7 +1537,7 @@ export async function onRequest(ctx) {
                   booked_by_guest_id, booked_by_name
            FROM stays
            WHERE villa_id = ?
-             AND status NOT IN ('closed','cancelled')
+             AND status NOT IN ('closed','cancelled','void')
              AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
            ORDER BY checkin_date ASC`
         ).bind(villaId).all()
@@ -2279,7 +2279,7 @@ export async function onRequest(ctx) {
         if (!guest) return json({ success: true, data: null })
         const { results: pastStays } = await DB.prepare(
           `SELECT stay_id, checkin_date, checkout_date, net, source FROM stays
-           WHERE (guest_phone = ? OR guest_email = ?) AND status != 'cancelled'
+           WHERE (guest_phone = ? OR guest_email = ?) AND status NOT IN ('cancelled','void')
            ORDER BY checkin_date DESC LIMIT 10`
         ).bind(phoneRaw, emailRaw).all()
         return json({ success: true, data: { guest, pastStays } })

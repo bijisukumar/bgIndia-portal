@@ -2632,7 +2632,6 @@ export async function onRequest(ctx) {
         const villaId = enquiry.villa_id || 'dwarka'
         const bookingValue = parseFloat(body.bookingValue) || enquiry.final_offer_amount || enquiry.quote_amount || 0
 
-        // Respect the same overlap protection used by createBooking — refuse
         // ── Idempotency / partial-write recovery ──────────────────────
         // The writes below are now atomic (DB.batch), but earlier confirms
         // were not — one could create the stay + booking yet fail before
@@ -2650,17 +2649,24 @@ export async function onRequest(ctx) {
           return json({ success: true, data: { stayId: priorBooking.stay_id, bookingId: priorBooking.booking_id, alreadyConfirmed: true } })
         }
 
-        // Overlap protection — refuse to silently double-book the villa.
-        const conflict = await DB.prepare(`
-          SELECT stay_id, guest_name, checkin_date, checkout_date FROM stays
-          WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out')
-            AND checkin_date < ? AND checkout_date > ? LIMIT 1
-        `).bind(villaId, enquiry.checkout_date, enquiry.checkin_date).first()
-        if (conflict) {
-          // Same-guest overlaps (extensions) get routed to a modify/extend
-          // flow in a later phase via upsertStay. For now a genuine overlap
-          // blocks with a clear, now-visible reason instead of a bare HTTP 409.
-          return json({ success: false, error: `Villa already booked ${conflict.checkin_date} → ${conflict.checkout_date} (${conflict.guest_name})`, conflict }, 409)
+        // Overlap protection — identity-aware (Phase 2b). A same-guest overlap
+        // is this guest's OWN existing stay (an extension / already-booked),
+        // not a double booking — surface it with the stay id so the UI can
+        // attach or adjust dates instead of dead-409'ing forever. A different
+        // guest overlapping is a real double booking → block.
+        const cls = await classifyStayConflicts(DB, {
+          villaId, checkinDate: enquiry.checkin_date, checkoutDate: enquiry.checkout_date,
+          guestId: enquiry.guest_id, phone: enquiry.phone, email: enquiry.email, guestName: enquiry.guest_name,
+        })
+        if (cls.otherOverlap) {
+          const c = cls.otherOverlap
+          return json({ success: false, code: 'double_booking', conflict: c,
+            error: `Villa already booked ${c.checkin_date} → ${c.checkout_date} (${c.guest_name})` }, 409)
+        }
+        if (cls.ownOverlap) {
+          const o = cls.ownOverlap
+          return json({ success: false, code: 'same_guest_existing_stay', existingStayId: o.stay_id,
+            error: `${enquiry.guest_name} already has an overlapping stay (${o.stay_id}: ${o.checkin_date} → ${o.checkout_date}). Modify that booking or adjust these dates instead of creating a second one.` }, 409)
         }
 
         // ── Create stay + booking + side effects atomically ───────────
@@ -2783,17 +2789,26 @@ export async function onRequest(ctx) {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
 
-        const firstName = (body.guestName || body.bookerName || '').split(' ')[0]
-        const provisional = await DB.prepare(`SELECT stay_id, status FROM stays WHERE guest_name LIKE ? AND checkin_date = ? AND villa_id = ? AND status NOT IN ('cancelled','closed','checked_out') LIMIT 1`).bind(`%${firstName}%`, body.checkInDate, body.villaId || 'dwarka').first()
+        // Identity + overlap classification (Phase 2b) — replaces the fragile
+        // exact-checkin_date "provisional" match. A same-guest overlap is this
+        // guest's existing hold/enquiry stay → enrich it with the Airbnb data
+        // (no duplicate even if the dates shifted). A different-guest overlap
+        // is a real double booking → alert + log + block.
+        const cls = await classifyStayConflicts(DB, {
+          villaId: body.villaId || 'dwarka',
+          checkinDate: body.checkInDate, checkoutDate: body.checkOutDate,
+          phone: body.guestPhone, email: body.guestEmail,
+          guestName: body.guestName || body.bookerName,
+        })
 
-        if (provisional) {
+        if (cls.ownOverlap) {
+          const provisional = cls.ownOverlap
           await DB.prepare(`UPDATE stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
           return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
 
-        const conflict = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, status, source, created_at FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out') AND checkin_date < ? AND checkout_date > ? LIMIT 1`).bind(body.villaId || 'dwarka', body.checkOutDate, body.checkInDate).first()
-
-        if (conflict) {
+        if (cls.otherOverlap) {
+          const conflict = cls.otherOverlap
           const alertSubject = '🚨 URGENT — Double booking detected! ' + (body.checkInDate || '')
           const alertVillaId = body.villaId || 'dwarka'
           const alertLines = [

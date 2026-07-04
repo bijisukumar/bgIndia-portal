@@ -1010,9 +1010,12 @@ export async function onRequest(ctx) {
         const nightsOf = r => (r.nights && r.nights > 0)
           ? r.nights
           : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
-        const grossOf = r => (r.gross && r.gross > 0)
-          ? r.gross
-          : (r.net || 0) + (r.commission_amt || 0)
+        // A villa's gross for a channel booking = what it earns BEFORE the
+        // channel's host commission = net + commission. Many Airbnb rows have a
+        // stored gross that's understated (base tariff only), which made net
+        // exceed gross. Floor gross at net+commission so gross is always >= net;
+        // keep a legitimately larger stored gross where present.
+        const grossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
 
         const totalBookings  = stays.length
         const totalNights    = stays.reduce((s, r) => s + nightsOf(r), 0)

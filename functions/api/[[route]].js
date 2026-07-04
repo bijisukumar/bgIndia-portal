@@ -2974,6 +2974,63 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { plate, raw: cleaned } })
       }
 
+      // ── RECEIPT OCR (Villa Expenses pre-fill, Raman-side) ────────────
+      // Reads a purchase receipt with the hosted vision model and returns
+      // vendor / amount / date / category / description to PRE-FILL the expense
+      // form. v1 is read-only: the image is used to extract fields and is NOT
+      // stored. Advisory + self-healing; every failure returns empty fields so
+      // Raman just types it in — it never blocks the screen.
+      if (action === 'ocrReceipt') {
+        const b64 = body.receiptPhotoB64
+        const empty = (reason) => json({ success: true, data: { fields: {}, reason } })
+        if (!b64) return empty('no_image')
+        if (b64.length > 8000000) return empty('too_large')
+        if (!env.AI) { console.error('ocrReceipt: env.AI binding missing'); return empty('ai_unbound') }
+
+        const OCR_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct'
+        const CATS = ['Electricity','Maintenance','Repairs','Laundry','Deep Cleaning','Pest Control (Mosquito & Bats)','Kitchen Crockery','Appliance / AC Service','Landscaping','Painting','Water Filtration System','Water System — Motor & Associated','Bulk Purchases (Soap, Shampoo, Body Wash etc.)','Other']
+        const OCR_PROMPT = 'This is a photo of a purchase receipt or bill. Respond with ONLY a JSON object and no other text: {"vendor":"shop/vendor name or empty","amount":<grand total as a number, no currency symbol>,"date":"YYYY-MM-DD or empty","category":"the single closest match from this list: '
+          + CATS.join(' | ') + '","description":"short summary of what was bought, or empty"}. If a field is unreadable use an empty string, or 0 for amount. If unsure of category use "Other". Output the JSON only.'
+
+        let bytes
+        try {
+          const bin = atob(b64); const arr = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+          bytes = [...arr]
+        } catch (e) { console.error('ocrReceipt: bad base64:', e?.message || e); return empty('bad_b64') }
+
+        const runOcr = async () => {
+          const out = await env.AI.run(OCR_MODEL, { prompt: OCR_PROMPT, image: bytes, max_tokens: 300, temperature: 0 })
+          return (out && out.response ? String(out.response) : '').trim()
+        }
+
+        let raw = ''
+        try {
+          raw = await runOcr()
+        } catch (e1) {
+          console.error('ocrReceipt: first attempt failed, license agree + retry:', e1?.message || e1)
+          try { await env.AI.run(OCR_MODEL, { prompt: 'agree' }); raw = await runOcr() }
+          catch (e2) { console.error('ocrReceipt: retry failed:', e2?.message || e2); return empty('ocr_error') }
+        }
+
+        let parsed = null
+        try {
+          const m = raw.match(/\{[\s\S]*\}/)   // pull the JSON object out of any surrounding text
+          if (m) parsed = JSON.parse(m[0])
+        } catch (e) { console.error('ocrReceipt: JSON parse failed:', e?.message || e) }
+        if (!parsed) return empty('parse_failed')
+
+        const amtNum = parseFloat(String(parsed.amount == null ? '' : parsed.amount).replace(/[^0-9.]/g, '')) || 0
+        const fields = {
+          vendor:      String(parsed.vendor || '').slice(0, 120),
+          amount:      amtNum > 0 ? amtNum : '',
+          date:        /^\d{4}-\d{2}-\d{2}$/.test(parsed.date || '') ? parsed.date : '',
+          category:    CATS.includes(parsed.category) ? parsed.category : 'Other',
+          description: String(parsed.description || '').slice(0, 300),
+        }
+        return json({ success: true, data: { fields, raw } })
+      }
+
       if (action === 'confirmCheckIn') {
         let stayId = body.stayId
         if (!stayId) {

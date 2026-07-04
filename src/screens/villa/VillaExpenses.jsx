@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
@@ -35,6 +35,9 @@ export default function VillaExpenses() {
   const [toast, setToast]   = useState(null)
   const [form, setForm]     = useState({ ...EMPTY_FORM })
   const [editId, setEditId] = useState(null)
+  const scanRef = useRef(null)
+  const [scanBusy, setScanBusy] = useState(false)   // reading a receipt
+  const [scanHint, setScanHint] = useState('')
 
   const [txns, setTxns]               = useState([])
   const [loadingTxns, setLoadingTxns] = useState(false)
@@ -42,6 +45,45 @@ export default function VillaExpenses() {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const showToast = (msg, t = 'success') => { setToast({ msg, t }); setTimeout(() => setToast(null), 3000) }
+
+  // Scan a receipt → OCR → pre-fill the expense form. v1 is read-only: the
+  // image is only used to read fields and is not stored. Raman verifies and
+  // saves; if it can't be read he just types it in.
+  function handleScan(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      if (file.type && file.type.startsWith('image/')) runReceiptOcr(ev.target.result.split(',')[1])
+      else setScanHint('Please use a photo of the receipt')
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''   // allow re-scanning the same file
+  }
+
+  async function runReceiptOcr(b64) {
+    if (!b64) return
+    setScanBusy(true); setScanHint('')
+    try {
+      const res = await api.ocrReceipt({ receiptPhotoB64: b64 })
+      const f = res?.fields || {}
+      setForm(prev => ({
+        ...prev,
+        paidTo:      f.vendor      || prev.paidTo,
+        amount:      f.amount      ? String(f.amount) : prev.amount,
+        date:        f.date        || prev.date,
+        category:    f.category    || prev.category,
+        description: f.description || prev.description,
+      }))
+      setScanHint((f.vendor || f.amount || f.date)
+        ? '✨ Filled from the receipt — please check each field before saving'
+        : "Couldn't read the receipt — please enter it manually")
+    } catch (e) {
+      setScanHint("Couldn't read the receipt — please enter it manually")
+    } finally {
+      setScanBusy(false)
+    }
+  }
 
   useEffect(() => { if (tab === 'history') loadTxns() }, [tab])
 
@@ -132,6 +174,18 @@ export default function VillaExpenses() {
 
             <div className="card-section-label">EXPENSE DETAILS</div>
             <div className="card">
+              <input ref={scanRef} type="file" accept="image/*" capture="environment"
+                onChange={handleScan} style={{ display: 'none' }} />
+              <button type="button" onClick={() => scanRef.current?.click()} disabled={scanBusy}
+                style={{ width: '100%', padding: '11px', marginBottom: scanHint ? '6px' : '12px',
+                  borderRadius: '10px', border: '1px solid rgba(200,144,58,0.4)',
+                  background: 'rgba(200,144,58,0.1)', color: 'var(--gold)', fontWeight: 600,
+                  fontSize: '0.85rem', cursor: 'pointer' }}>
+                {scanBusy ? '🔎 Reading receipt…' : '📷 Scan receipt'}
+              </button>
+              {scanHint && (
+                <div style={{ fontSize: '0.72rem', color: '#9aa4b2', marginBottom: '12px' }}>{scanHint}</div>
+              )}
               <div className="grid-2">
                 <div className="field"><label className="field-label">Date</label>
                   <input className="field-input gold" type="date" value={form.date} onChange={e => set('date', e.target.value)} /></div>

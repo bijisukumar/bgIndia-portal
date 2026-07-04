@@ -1003,9 +1003,20 @@ export async function onRequest(ctx) {
           `SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
         ).bind(villaId, `${year}%`).all()
 
+        // Robust per-stay figures. Many rows (especially Airbnb-imported) have
+        // an empty nights/gross column — which made nights show 0 and net
+        // exceed gross. Derive nights from the dates, and when gross is missing
+        // treat gross as net + channel commission so gross is always >= net.
+        const nightsOf = r => (r.nights && r.nights > 0)
+          ? r.nights
+          : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
+        const grossOf = r => (r.gross && r.gross > 0)
+          ? r.gross
+          : (r.net || 0) + (r.commission_amt || 0)
+
         const totalBookings  = stays.length
-        const totalNights    = stays.reduce((s, r) => s + (r.nights || 0), 0)
-        const grossRevenue   = stays.reduce((s, r) => s + (r.gross || 0), 0)
+        const totalNights    = stays.reduce((s, r) => s + nightsOf(r), 0)
+        const grossRevenue   = stays.reduce((s, r) => s + grossOf(r), 0)
         const totalNet       = stays.reduce((s, r) => s + (r.net || 0), 0)
         const totalComm      = stays.reduce((s, r) => s + (r.commission_amt || 0), 0)
         const byChannel      = {}
@@ -1065,9 +1076,10 @@ export async function onRequest(ctx) {
         const months = {}
         for (let m = 1; m <= 12; m++) {
           const mStays  = stays.filter(s => new Date(s.checkin_date).getMonth() + 1 === m)
-          const gross   = mStays.reduce((s, r) => s + (r.gross || 0), 0)
+          const gross   = mStays.reduce((s, r) => s + grossOf(r), 0)
           const fees    = mStays.reduce((s, r) => s + (r.commission_amt || 0), 0)
           const net     = mStays.reduce((s, r) => s + (r.net || 0), 0)
+          const nights  = mStays.reduce((s, r) => s + nightsOf(r), 0)
           const kitchen   = kitchenByMonth[m]   || 0
           const direct    = mStays.filter(s => (s.source || '').toLowerCase() === 'direct').length
 
@@ -1078,6 +1090,7 @@ export async function onRequest(ctx) {
             fees,
             profit:    net,
             net,
+            nights,
             direct,
             breakdown: { tariff: gross, kitchen, breakfast: 0, carRental: 0, events: 0 }
           }

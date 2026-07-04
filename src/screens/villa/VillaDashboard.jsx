@@ -743,6 +743,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
     : (monthData.nights || 0)
 
   const directRatio = totalBookings > 0 ? `${totalDirect} / ${totalBookings}` : '—'
+  const directPct   = totalBookings > 0 ? Math.round((totalDirect / totalBookings) * 100) : 0
   const gross4margin = monthData.revenue || monthData.gross || 0
   const net4margin   = monthData.net || monthData.profit || 0
   const margin = gross4margin > 0 ? Math.round((net4margin / gross4margin) * 100) : 0
@@ -804,7 +805,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
           <div className="stat-card">
             <div className="stat-label">Direct ratio</div>
             <div className="stat-val green">{directRatio}</div>
-            <div className="stat-sub">Direct / total bookings</div>
+            <div className="stat-sub">{directPct}% direct · {100 - directPct}% channel</div>
           </div>
         </div>
       )}

@@ -31,6 +31,20 @@
 //   Guest form submit — runs from GuestFormScript.gs
 // ============================================================
 
+// ── CHANGELOG (newest first — this file is the source of truth for live) ────
+// v1.1  2026-07-05
+//   • pollAirbnbCancellations(): reads Airbnb "Canceled: Reservation <code>"
+//     emails and cancels the matching stay via the cancelByConfirmation
+//     Worker action. Wired into pollNewReservations().
+//   • Room-fee parse fix: nightFee now captures the room TOTAL. It was
+//     capturing the per-night rate ("₹4,910 x 2 nights" → 4,910), which made
+//     gross (= nightFee + cleaningFee) understated. Now multiplies out or
+//     reads the "N nights room fee ₹TOTAL" line.
+// v1.0  (baseline, pre-changelog)
+//   • Poll Airbnb "Reservation confirmed" emails → create bookings in D1.
+//   • Poll Airbnb reviews. Drive folder + Sheets backup + owner email.
+// ============================================================
+
 // ── CONFIG ────────────────────────────────────────────────────────────────
 var WORKER_URL    = 'https://manage.luxuryvillasofguruvayur.com/api';
 var OWNER_EMAIL   = 'bijisukumar@gmail.com';   // where booking alerts are sent
@@ -64,11 +78,73 @@ function pollNewReservations() {
     sendAlert('🚨 Poller error', e.message + '\n' + (e.stack||''));
   }
   try {
+    pollAirbnbCancellations();
+  } catch(e) {
+    Logger.log('pollAirbnbCancellations ERROR: ' + e.message);
+  }
+  try {
     pollAirbnbReviews();
   } catch(e) {
     Logger.log('pollAirbnbReviews ERROR: ' + e.message);
   }
   Logger.log('=== pollNewReservations END ===');
+}
+
+// ── AIRBNB CANCELLATION POLLER ────────────────────────────────────────────
+function pollAirbnbCancellations() {
+  var threads = GmailApp.search(
+    'from:automated@airbnb.com subject:"Canceled: Reservation" is:unread',
+    0, 20
+  );
+  Logger.log('Unread Airbnb cancellation threads: ' + threads.length);
+  if (threads.length === 0) return;
+
+  threads.forEach(function(thread) {
+    var msg     = thread.getMessages()[0];
+    var subject = msg.getSubject();
+    var body    = msg.getPlainBody();
+    Logger.log('Processing cancellation: ' + subject);
+
+    try {
+      // Conf code from subject: "Canceled: Reservation HMZ9QHBPXE for Dec 10 – 11, 2026"
+      var confMatch = subject.match(/\b(HM[A-Z0-9]{6,12})\b/) ||
+                      body.match(/\b(HM[A-Z0-9]{6,12})\b/);
+      var confCode  = confMatch ? confMatch[1] : null;
+
+      if (!confCode) {
+        Logger.log('No conf code in cancellation: ' + subject);
+        sendAlert('⚠️ Cancellation email — no conf code parsed', 'Subject: ' + subject);
+        msg.markRead();
+        return;
+      }
+
+      var resp = callWorker('POST', 'cancelByConfirmation', { confirmationCode: confCode });
+
+      if (resp && resp.success) {
+        var d = resp.data || {};
+        if (d.cancelled) {
+          Logger.log('✅ Cancelled ' + d.stayId + ' (' + d.guestName + ')');
+          sendAlert('❌ Airbnb cancellation: ' + (d.guestName || confCode),
+            'Reservation ' + confCode + ' was cancelled on Airbnb.' +
+            '\nStay ' + d.stayId + ' set to cancelled — removed from active bookings & revenue.' +
+            '\n\nSubject: ' + subject);
+        } else if (d.alreadyCancelled) {
+          Logger.log('Already cancelled: ' + d.stayId);
+        } else if (d.matched === false) {
+          Logger.log('No stay for conf ' + confCode + ' (never imported) — nothing to cancel.');
+        }
+      } else {
+        Logger.log('cancelByConfirmation failed: ' + JSON.stringify(resp));
+        sendAlert('⚠️ Cancellation not applied: ' + confCode,
+          'Worker response: ' + JSON.stringify(resp) + '\nSubject: ' + subject +
+          '\nPlease cancel this booking manually.');
+      }
+
+      msg.markRead();
+    } catch(e) {
+      Logger.log('Error processing cancellation "' + subject + '": ' + e.message);
+    }
+  });
 }
 
 // ── AIRBNB REVIEW POLLER ──────────────────────────────────────────────────
@@ -470,10 +546,19 @@ function parseAirbnbConfirmation(body, subject) {
     return parseFloat(String(m[1]).replace(/[,₹\s\u20B9]/g, '')) || 0;
   }
 
-  // Night fee: "₹4,910.00 x 2 nights" or "2 nights room fee   ₹9,820.00"
-  var nightFee = amt(/([\d,\.]+)\s*(?:×|x)\s*\d+\s*night/i) ||
-                 amt(/(₹[\d,\.]+)\s*x\s*\d+\s*night/i) ||
-                 amt(/\d+\s+nights?\s+room\s+fee\s+₹?\s*([\d,\.]+)/i);
+  // Room fee TOTAL (not the per-night rate — that was the bug that
+  // understated gross). Airbnb shows it two ways:
+  //   "2 nights room fee   ₹9,820.00"   <- total (preferred)
+  //   "₹4,910.00 x 2 nights"            <- rate x nights (multiply out)
+  var nightFee = amt(/\d+\s+nights?\s+room\s+fee\s+₹?\s*([\d,\.]+)/i);
+  if (!nightFee) {
+    var rx = body.match(/([\d,\.]+)\s*(?:×|x)\s*(\d+)\s*night/i);
+    if (rx) {
+      var rate = parseFloat(String(rx[1]).replace(/[,₹\s\u20B9]/g, '')) || 0;
+      var n    = parseInt(rx[2]) || nights || 1;
+      nightFee = rate * n;
+    }
+  }
 
   var cleaningFee = amt(/Cleaning fee\s+₹?\s*([\d,\.]+)/i);
 

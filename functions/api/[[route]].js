@@ -2792,6 +2792,33 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { dupId, resolved: true } })
       }
 
+      // ── CANCEL A BOOKING BY AIRBNB CONFIRMATION CODE ─────────────────
+      // Called by the Gmail poller when an Airbnb "Canceled: Reservation
+      // <code>" email arrives. Finds the stay by airbnb_conf, sets it
+      // cancelled, and logs it. Idempotent: re-processing the same cancel
+      // email is a no-op, and a code we never imported returns matched:false
+      // (not an error) so the poller can safely mark the email read.
+      // Money fields are left intact — cancelled stays are already excluded
+      // from every revenue query by the status filter, and keeping the amounts
+      // preserves cancellation/lost-revenue reporting.
+      if (action === 'cancelByConfirmation') {
+        const conf = (body.confirmationCode || '').trim()
+        if (!conf) return err('confirmationCode required')
+        const stay = await DB.prepare(
+          `SELECT stay_id, guest_name, status, checkin_date, checkout_date, source FROM stays WHERE airbnb_conf = ? LIMIT 1`
+        ).bind(conf).first()
+        if (!stay) return json({ success: true, data: { matched: false, confirmationCode: conf } })
+        if (stay.status === 'cancelled') {
+          return json({ success: true, data: { matched: true, stayId: stay.stay_id, alreadyCancelled: true } })
+        }
+        await DB.batch([
+          DB.prepare(`UPDATE stays SET status = 'cancelled', updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(stay.stay_id),
+          DB.prepare(`INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'cancellation', ?, ?, datetime('now'))`)
+            .bind(genId('LOG'), stay.stay_id, `Airbnb cancellation (${conf}) — ${stay.guest_name} ${stay.checkin_date} → ${stay.checkout_date}. Status set to cancelled.`),
+        ])
+        return json({ success: true, data: { matched: true, stayId: stay.stay_id, cancelled: true, guestName: stay.guest_name } })
+      }
+
       if (action === 'runSQLWrite') {
         const sql = body?.sql ? body.sql.trim() : ''
         if (!sql) return err('sql required')

@@ -17,6 +17,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
+import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
@@ -455,6 +456,10 @@ export default function CompleteBooking() {
                         <span style={{fontWeight:'600',fontSize:'0.9rem',
                           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                           {stay.guest_name}
+                        </span>
+                        <span style={{fontSize:'0.6rem',fontWeight:'700',padding:'1px 7px',
+                          borderRadius:'9px',flexShrink:0, ...channelPillStyle(stay.source)}}>
+                          {channelLabel(stay.source)}
                         </span>
                         {stay.booked_by_name && (
                           <span style={{fontSize:'0.65rem',color:'#85B7EB',flexShrink:0}}>

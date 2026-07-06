@@ -1739,6 +1739,33 @@ export async function onRequest(ctx) {
         })) })
       }
 
+      // ── RECENT ACTIVITY (last 48 hrs) — bookings + cancellations ─────
+      // Feeds the owner-home "Your last 48 hrs" acknowledgement block. New
+      // bookings by created_at, cancellations by updated_at.
+      if (action === 'recentActivity') {
+        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, booked_by_name,
+                  CASE WHEN status = 'cancelled' THEN 'cancellation' ELSE 'booking' END AS kind,
+                  CASE WHEN status = 'cancelled' THEN updated_at ELSE created_at END AS event_at
+             FROM stays
+            WHERE villa_id = ?
+              AND (
+                (status = 'cancelled' AND updated_at >= datetime('now','-48 hours'))
+                OR (status NOT IN ('cancelled','void','closed') AND created_at >= datetime('now','-48 hours'))
+              )
+            ORDER BY event_at DESC
+            LIMIT 25`
+        ).bind(villaId).all()
+        const items = (results || []).map(r => ({
+          stayId: r.stay_id, guestName: r.guest_name,
+          checkIn: r.checkin_date, checkOut: r.checkout_date,
+          source: r.source || 'direct', bookedByName: r.booked_by_name || null,
+          kind: r.kind, eventAt: r.event_at,
+        }))
+        return json({ success: true, data: { items } })
+      }
+
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
         const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)

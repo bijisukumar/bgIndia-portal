@@ -4,6 +4,7 @@ import { CONFIG } from '../config'
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { parseLocalDate } from '../utils/dates'
+import { channelLabel, channelPillStyle } from '../utils/channel'
 
 // Two top-level sections: Hospitality (Villa + Rental) and Estates
 const HOSPITALITY = {
@@ -97,6 +98,75 @@ function MenuSection({ section }) {
             <div className="menu-arrow" style={{ background: row.arrow }}>›</div>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ── YOUR LAST 48 HRS — recent bookings + cancellations, ack with OK ───────
+function Last48Block() {
+  const [items, setItems] = useState([])
+  const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    api.recentActivity({ villaId: 'dwarka' }).then(d => {
+      const list = (d && d.items) ? d.items : []
+      let ackAt = ''
+      try { ackAt = localStorage.getItem('activityAckAt') || '' } catch (_) {}
+      setItems(ackAt ? list.filter(it => (it.eventAt || '') > ackAt) : list)
+    }).catch(() => {})
+  }, [])
+
+  function acknowledge() {
+    try { localStorage.setItem('activityAckAt', new Date().toISOString().replace('T', ' ').slice(0, 19)) } catch (_) {}
+    setDismissed(true)
+  }
+
+  if (dismissed || items.length === 0) return null
+
+  const fmt = d => { try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } catch (_) { return d } }
+
+  return (
+    <div style={{ marginBottom: '16px', background: 'rgba(133,183,235,0.06)',
+      border: '1px solid rgba(133,183,235,0.25)', borderRadius: '12px', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(133,183,235,0.15)',
+        display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span>🕓</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: '700', color: '#85B7EB', letterSpacing: '1.5px' }}>
+          YOUR LAST 48 HRS
+        </span>
+        <span style={{ marginLeft: 'auto', background: 'rgba(133,183,235,0.2)', color: '#85B7EB',
+          fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
+          {items.length}
+        </span>
+      </div>
+      {items.map((it, i) => {
+        const cancelled = it.kind === 'cancellation'
+        return (
+          <div key={i} style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: '10px',
+            borderBottom: i < items.length - 1 ? '1px solid rgba(133,183,235,0.1)' : 'none' }}>
+            <span style={{ fontSize: '1rem' }}>{cancelled ? '❌' : '✅'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
+                display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.guestName}</span>
+                <span style={{ fontSize: '0.6rem', fontWeight: '700', padding: '1px 7px', borderRadius: '9px',
+                  flexShrink: 0, ...channelPillStyle(it.source) }}>{channelLabel(it.source)}</span>
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#9AA5B4', marginTop: '2px' }}>
+                {cancelled ? 'Cancelled · ' : 'Booked · '}{fmt(it.checkIn)} → {fmt(it.checkOut)}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(133,183,235,0.15)' }}>
+        <button onClick={acknowledge}
+          style={{ width: '100%', padding: '9px', borderRadius: '10px', cursor: 'pointer',
+            border: '1px solid rgba(133,183,235,0.4)', background: 'rgba(133,183,235,0.12)',
+            color: '#85B7EB', fontWeight: '700', fontSize: '0.8rem' }}>
+          OK — got it
+        </button>
       </div>
     </div>
   )
@@ -882,6 +952,9 @@ export default function OwnerHome() {
 
         {/* Check-in Links — always visible for owner */}
         <CheckinLinksBlock />
+
+        {/* Your last 48 hrs — recent bookings + cancellations, ack with OK */}
+        <Last48Block />
 
         <MenuSection section={HOSPITALITY} />
         <MenuSection section={PEOPLE} />

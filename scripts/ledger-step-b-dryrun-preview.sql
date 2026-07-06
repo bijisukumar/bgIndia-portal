@@ -36,6 +36,8 @@
 --   * Gulshan DWK-2026-22309 (direct + extras)
 --   * Mithuna (clean Airbnb decomposition)
 --   * every row with negative extra_charges (candidate `discount`, NEEDS-CONFIRM)
+-- NOTE: built with json_each slots instead of UNION ALL — D1 caps
+-- SQLITE_MAX_COMPOUND_SELECT well below stock SQLite.
 -- ----------------------------------------------------------------------------
 WITH base AS (
   SELECT
@@ -58,34 +60,47 @@ WITH base AS (
       OR guest_name LIKE '%Mithuna%'         -- clean Airbnb
       OR COALESCE(extra_charges,0) < 0       -- every negative-extras row
     )
-)
-SELECT stay_id, guest_name, source, item_type, direction,
-       gross_amount, tax_amount, flag
-FROM (
-  SELECT stay_id, guest_name, source, 1 AS ord,
-         'room_fee' AS item_type, 'inflow' AS direction,
-         room_fee_calc AS gross_amount, 0 AS tax_amount,
-         CASE WHEN night_fee > 0 THEN 'from night_fee' ELSE 'derived' END AS flag
-  FROM base WHERE room_fee_calc != 0
-  UNION ALL
-  SELECT stay_id, guest_name, source, 2, 'cleaning_fee', 'inflow',
-         cleaning_fee, 0, '' FROM base WHERE cleaning_fee > 0
-  UNION ALL
-  SELECT stay_id, guest_name, source, 3, 'extra_charge', 'inflow',
-         extra_charges, 0, '' FROM base WHERE extra_charges > 0
-  UNION ALL
-  SELECT stay_id, guest_name, source, 4, 'discount', 'outflow',
-         ROUND(ABS(extra_charges),2), 0,
-         '*** NEEDS-CONFIRM: negative extra_charges reclassified ***'
-  FROM base WHERE extra_charges < 0
-  UNION ALL
-  SELECT stay_id, guest_name, source, 5, 'channel_commission', 'outflow',
-         commission_amt, 0, '' FROM base WHERE commission_amt > 0
-  UNION ALL
-  SELECT stay_id, guest_name, source, 6, 'guest_service_fee', 'passthrough',
-         guest_service_fee, 0, 'excluded from P&L' FROM base WHERE guest_service_fee > 0
-)
-ORDER BY stay_id, ord;
+),
+slots AS (SELECT CAST(value AS INTEGER) AS ord FROM json_each('[1,2,3,4,5,6]'))
+SELECT
+  b.stay_id, b.guest_name, b.source,
+  CASE s.ord
+    WHEN 1 THEN 'room_fee'
+    WHEN 2 THEN 'cleaning_fee'
+    WHEN 3 THEN 'extra_charge'
+    WHEN 4 THEN 'discount'
+    WHEN 5 THEN 'channel_commission'
+    WHEN 6 THEN 'guest_service_fee'
+  END AS item_type,
+  CASE s.ord
+    WHEN 1 THEN 'inflow' WHEN 2 THEN 'inflow' WHEN 3 THEN 'inflow'
+    WHEN 4 THEN 'outflow' WHEN 5 THEN 'outflow'
+    WHEN 6 THEN 'passthrough'
+  END AS direction,
+  CASE s.ord
+    WHEN 1 THEN b.room_fee_calc
+    WHEN 2 THEN b.cleaning_fee
+    WHEN 3 THEN b.extra_charges
+    WHEN 4 THEN ROUND(ABS(b.extra_charges), 2)
+    WHEN 5 THEN b.commission_amt
+    WHEN 6 THEN b.guest_service_fee
+  END AS gross_amount,
+  0 AS tax_amount,
+  CASE s.ord
+    WHEN 1 THEN CASE WHEN b.night_fee > 0 THEN 'from night_fee' ELSE 'derived' END
+    WHEN 4 THEN '*** NEEDS-CONFIRM: negative extra_charges reclassified ***'
+    WHEN 6 THEN 'excluded from P&L'
+    ELSE ''
+  END AS flag
+FROM base b
+CROSS JOIN slots s
+WHERE (s.ord = 1 AND b.room_fee_calc != 0)
+   OR (s.ord = 2 AND b.cleaning_fee > 0)
+   OR (s.ord = 3 AND b.extra_charges > 0)
+   OR (s.ord = 4 AND b.extra_charges < 0)
+   OR (s.ord = 5 AND b.commission_amt > 0)
+   OR (s.ord = 6 AND b.guest_service_fee > 0)
+ORDER BY b.stay_id, s.ord;
 
 
 -- ----------------------------------------------------------------------------

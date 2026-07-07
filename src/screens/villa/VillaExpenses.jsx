@@ -5,15 +5,21 @@ import { localTodayStr } from '../../utils/dates'
 
 const TODAY = localTodayStr()
 
-// Fixed category list per owner's regular villa costs (2026-07-01).
+// DEFAULT category list. Per-villa override lives in villa_settings key
+// 'expense_categories' (JSON array) — loaded on mount below — so onboarding
+// a new villa means saving a different list via saveVillaSetting, no code
+// change. Reporting is category-agnostic (history filter derives from actual
+// txns; P&L sums all rows), so lists can differ freely per villa.
 export const VILLA_EXPENSE_CATS = [
   'Electricity',
   'Maintenance',
   'Repairs',
   'Laundry',
   'Deep Cleaning',
+  'Housekeeping Supplies',
   'Pest Control (Mosquito & Bats)',
   'Kitchen Crockery',
+  'Kitchen Supplies',
   'Appliance / AC Service',
   'Landscaping',
   'Painting',
@@ -43,6 +49,17 @@ export default function VillaExpenses() {
   const [loadingTxns, setLoadingTxns] = useState(false)
   const [filterCat, setFilterCat]     = useState('all')
 
+  // Categories: per-villa configurable via villa_settings, default fallback.
+  const [cats, setCats] = useState(VILLA_EXPENSE_CATS)
+  useEffect(() => {
+    api.getVillaSettings(villaId).then(res => {
+      try {
+        const parsed = JSON.parse(res?.data?.expense_categories || 'null')
+        if (Array.isArray(parsed) && parsed.length) setCats(parsed)
+      } catch (e) { /* keep defaults */ }
+    }).catch(() => { /* keep defaults */ })
+  }, [villaId])
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const showToast = (msg, t = 'success') => { setToast({ msg, t }); setTimeout(() => setToast(null), 3000) }
 
@@ -65,7 +82,7 @@ export default function VillaExpenses() {
     if (!b64) return
     setScanBusy(true); setScanHint('')
     try {
-      const res = await api.ocrReceipt({ receiptPhotoB64: b64 })
+      const res = await api.ocrReceipt({ receiptPhotoB64: b64, villaId })
       const f = res?.fields || {}
       setForm(prev => ({
         ...prev,
@@ -197,7 +214,7 @@ export default function VillaExpenses() {
               <div className="field"><label className="field-label">Category</label>
                 <select className="field-input" value={form.category} onChange={e => set('category', e.target.value)}>
                   <option value="">Select category...</option>
-                  {VILLA_EXPENSE_CATS.map(c => <option key={c}>{c}</option>)}
+                  {cats.map(c => <option key={c}>{c}</option>)}
                 </select>
               </div>
               <div className="field"><label className="field-label">Paid to</label>

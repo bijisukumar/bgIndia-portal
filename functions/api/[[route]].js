@@ -3138,7 +3138,16 @@ export async function onRequest(ctx) {
         if (b64.length > 8000000) return empty('too_large')
         if (!env.AI) { console.error('ocrReceipt: env.AI binding missing'); return empty('ai_unbound') }
 
-        const CATS = ['Electricity','Maintenance','Repairs','Laundry','Deep Cleaning','Pest Control (Mosquito & Bats)','Kitchen Crockery','Appliance / AC Service','Landscaping','Painting','Water Filtration System','Water System — Motor & Associated','Bulk Purchases (Soap, Shampoo, Body Wash etc.)','Other']
+        // Categories: per-villa list from villa_settings ('expense_categories',
+        // JSON array) so the OCR matches against the same options the dropdown
+        // shows; hardcoded list is only the fallback default.
+        const DEFAULT_CATS = ['Electricity','Maintenance','Repairs','Laundry','Deep Cleaning','Housekeeping Supplies','Pest Control (Mosquito & Bats)','Kitchen Crockery','Kitchen Supplies','Appliance / AC Service','Landscaping','Painting','Water Filtration System','Water System — Motor & Associated','Bulk Purchases (Soap, Shampoo, Body Wash etc.)','Other']
+        let CATS = DEFAULT_CATS
+        try {
+          const catRow = await DB.prepare(`SELECT value FROM villa_settings WHERE villa_id = ? AND key = 'expense_categories'`).bind(body.villaId || 'dwarka').first()
+          const parsedCats = catRow && catRow.value ? JSON.parse(catRow.value) : null
+          if (Array.isArray(parsedCats) && parsedCats.length) CATS = parsedCats
+        } catch (e) { /* fall back to defaults */ }
         const SYSTEM = 'You are a precise receipt and bill data extractor. Read the image carefully and read the printed numbers exactly. Return only the requested fields.'
         const INSTRUCTION =
           'Extract from this receipt/bill image: the vendor or shop name; the GRAND TOTAL actually paid as a number only with no currency symbol (the final total, not a single line item); the date as YYYY-MM-DD; the closest category from this list — ' +

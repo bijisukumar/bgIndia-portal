@@ -233,6 +233,9 @@ export default function EnquiryDetail() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [commType, setCommType] = useState('whatsapp')
+  const [addingPhone, setAddingPhone] = useState(false)
+  const [phoneDraft, setPhoneDraft] = useState('')
+  const [phoneBusy, setPhoneBusy] = useState(false)
   const [commNote, setCommNote] = useState('')
   const [followUpDue, setFollowUpDue] = useState('')
   const [bookingValue, setBookingValue] = useState('')
@@ -347,6 +350,33 @@ export default function EnquiryDetail() {
       load()
     } catch { showToast('Failed to update discount', 'error') }
     finally { setDiscountBusy(false) }
+  }
+
+  // Inline phone add — unlocks the 'Send quote in WhatsApp' button without
+  // leaving the screen. Reuses saveEnquiry's update path (full payload, only
+  // phone changes), which also normalizes and links the guest record.
+  const handleSavePhone = async () => {
+    const digits = String(phoneDraft).replace(/\D/g, '')
+    if (digits.length < 10) { showToast('Enter a valid phone number (10+ digits)', 'error'); return }
+    setPhoneBusy(true)
+    try {
+      await api.saveEnquiry({
+        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        guestName: e.guest_name, phone: phoneDraft.trim(), email: e.email, source: e.source,
+        checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
+        adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
+        purpose: e.purpose, quoteAmount: e.quote_amount,
+        repeatDiscountPct: e.repeat_discount_pct || 0,
+        discountCategory: e.discount_category || null,
+        discountPct: e.discount_pct || 0,
+        extraCharges: e.extra_charges || 0, extraLines: e.extra_lines || null,
+        status: e.status, notes: e.notes,
+      })
+      showToast('Phone added ✓ — WhatsApp send unlocked')
+      setAddingPhone(false); setPhoneDraft('')
+      load()
+    } catch (err2) { showToast('Failed: ' + err2.message, 'error') }
+    finally { setPhoneBusy(false) }
   }
 
   const handleSaveExtras = async () => {
@@ -599,13 +629,34 @@ export default function EnquiryDetail() {
               💬 Send quote in WhatsApp
             </a>
           ) : (
-            <div style={{
-              marginTop: '8px', padding: '10px 14px', borderRadius: '10px', textAlign: 'center',
-              background: 'rgba(37,211,102,0.05)', border: '1px dashed rgba(37,211,102,0.2)',
-              color: 'rgba(37,211,102,0.45)', fontSize: '0.78rem',
-            }}>
-              💬 Add a phone number to send the quote via WhatsApp
-            </div>
+            !addingPhone ? (
+              <button onClick={() => { setAddingPhone(true); setPhoneDraft('+91') }} style={{
+                marginTop: '8px', padding: '10px 14px', borderRadius: '10px', textAlign: 'center',
+                background: 'rgba(37,211,102,0.08)', border: '1px dashed rgba(37,211,102,0.35)',
+                color: '#25D366', fontSize: '0.78rem', fontWeight: 600, width: '100%', cursor: 'pointer',
+              }}>
+                💬 Add phone number to send via WhatsApp
+              </button>
+            ) : (
+              <div style={{
+                marginTop: '8px', padding: '10px 12px', borderRadius: '10px',
+                background: 'rgba(37,211,102,0.05)', border: '1px solid rgba(37,211,102,0.25)',
+              }}>
+                <div className="field-label" style={{ marginBottom: '4px' }}>Mobile / WhatsApp</div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="tel" className="field-input" autoFocus placeholder="+91 98765 43210"
+                    value={phoneDraft} onChange={ev => setPhoneDraft(ev.target.value)}
+                    onKeyDown={ev => { if (ev.key === 'Enter') handleSavePhone() }}
+                    style={{ flex: 1 }} />
+                  <button className="btn btn-gold" disabled={phoneBusy} onClick={handleSavePhone}>
+                    {phoneBusy ? '…' : 'Save'}
+                  </button>
+                  <button className="btn" disabled={phoneBusy} onClick={() => { setAddingPhone(false); setPhoneDraft('') }}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )
           )}
 
           {pricingParams && (

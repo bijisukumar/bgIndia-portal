@@ -335,6 +335,59 @@ function genId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+// ── LEDGER ADAPTER (Step C — docs/DB-Ledger-Refactor-Spec.md) ─────────────
+// One mapping, called after every financial write to `stays`, with just the
+// stayId. It re-reads the row post-write, so all write paths share this ONE
+// decode — byte-identical to the Step B backfill rules validated on all 293
+// historical rows. Deterministic line_id = stayId:item_type; DELETE+INSERT
+// in a single DB.batch (atomic in D1) so edits replace lines cleanly. The
+// roll-up (item_type-explicit, spec §4) then rewrites gross/commission/net
+// FROM the ledger, enforcing net = gross − commission by construction.
+// NON-BLOCKING by design: any failure here logs and returns — the booking
+// write that already succeeded is never affected.
+async function syncStayLedger(DB, stayId) {
+  try {
+    if (!stayId) return
+    const s = await DB.prepare(`SELECT stay_id, villa_id, gross, commission_amt, net, extra_charges, cleaning_fee, night_fee, guest_service_fee FROM stays WHERE stay_id = ?`).bind(stayId).first()
+    if (!s) return
+    const r2 = x => Math.round((Number(x) || 0) * 100) / 100
+    const cleaning = r2(s.cleaning_fee)
+    const extras   = r2(s.extra_charges)
+    const comm     = r2(s.commission_amt)
+    const gsf      = r2(s.guest_service_fee)
+    const nightFee = r2(s.night_fee)
+    // room_fee: night_fee-authoritative (Airbnb), else derived from gross so
+    // the roll-up reproduces the stored gross exactly on non-itemized rows.
+    const roomFee  = nightFee > 0 ? nightFee : r2((s.gross || 0) - cleaning - extras)
+
+    const lines = []
+    const add = (type, dir, amt, note) => lines.push({ id: `${stayId}:${type}`, type, dir, amt: r2(amt), note })
+    if (roomFee !== 0)  add('room_fee', 'inflow', roomFee, nightFee > 0 ? 'adapter: from night_fee' : 'adapter: derived from gross')
+    if (cleaning > 0)   add('cleaning_fee', 'inflow', cleaning, 'adapter')
+    if (extras > 0)     add('extra_charge', 'inflow', extras, 'adapter')  // upsell revenue
+    if (extras < 0)     add('discount', 'outflow', Math.abs(extras), 'adapter: reclassified from negative extra_charges')
+    if (comm > 0)       add('channel_commission', 'outflow', comm, 'adapter')
+    if (gsf > 0)        add('guest_service_fee', 'passthrough', gsf, 'adapter')  // excluded from P&L
+
+    const stmts = [DB.prepare(`DELETE FROM booking_line_items WHERE stay_id = ?`).bind(stayId)]
+    for (const l of lines) {
+      stmts.push(DB.prepare(`INSERT INTO booking_line_items (line_id, stay_id, villa_id, item_type, direction, gross_amount, tax_amount, note) VALUES (?,?,?,?,?,?,0,?)`)
+        .bind(l.id, stayId, s.villa_id || null, l.type, l.dir, l.amt, l.note))
+    }
+    if (lines.length) {
+      const gross = r2(
+        lines.filter(l => ['room_fee','cleaning_fee','extra_charge'].includes(l.type)).reduce((a,l) => a + l.amt, 0)
+        - lines.filter(l => l.type === 'discount').reduce((a,l) => a + l.amt, 0))
+      const commission = r2(lines.filter(l => l.type === 'channel_commission').reduce((a,l) => a + l.amt, 0))
+      stmts.push(DB.prepare(`UPDATE stays SET gross = ?, commission_amt = ?, net = ? WHERE stay_id = ?`)
+        .bind(gross, commission, r2(gross - commission), stayId))
+    }
+    await DB.batch(stmts)
+  } catch (e) {
+    console.log('syncStayLedger non-blocking failure:', stayId, e && e.message)
+  }
+}
+
 // ── GUEST IDENTITY RESOLVER ───────────────────────────────────
 // Find-or-create a guests row by normalized phone/email. This is the SAME
 // matching saveEnquiry uses, extracted here so every write path resolves a
@@ -1116,11 +1169,49 @@ export async function onRequest(ctx) {
         const directSaving = stays.filter(s=>(s.source||'').toLowerCase()!=='direct').reduce((sum,s)=>sum+(s.commission_amt||0),0)
         const avgNights = totalBookings > 0 ? Math.round((totalNights/totalBookings)*10)/10 : 0
 
+        // ── P&L (Step D) — computed FROM the ledger, upsell broken out ──
+        // Four-part P&L per spec: Net to owner = gross − channel commission
+        // − staff commission − expenses. Upsell = extra_charge line items
+        // (floor beds, extended checkout, add-ons collected outside the
+        // channel). Passthrough (guest_service_fee/guest_tax) excluded.
+        // Wrapped in try/catch: if ledger tables are ever absent the
+        // dashboard still renders everything else unchanged.
+        let pnl = null
+        try {
+          const { results: lg } = await DB.prepare(`
+            SELECT b.item_type, ROUND(SUM(b.gross_amount),2) AS total
+            FROM booking_line_items b JOIN stays s ON s.stay_id = b.stay_id
+            WHERE s.villa_id = ? AND s.checkin_date LIKE ? AND s.status NOT IN ('cancelled','void')
+            GROUP BY b.item_type`).bind(villaId, `${year}%`).all()
+          const t = {}
+          ;(lg || []).forEach(r => { t[r.item_type] = r.total || 0 })
+          const r2 = x => Math.round((Number(x) || 0) * 100) / 100
+          const staffRow = await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM raman_commissions WHERE strftime('%Y', checkin_date) = ?`).bind(String(year)).first()
+          const expRow   = await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM villa_expenses WHERE villa_id = ? AND strftime('%Y', date) = ?`).bind(villaId, String(year)).first()
+          const upsell            = r2(t.extra_charge)
+          const grossLedger       = r2((t.room_fee || 0) + (t.cleaning_fee || 0) + (t.extra_charge || 0) - (t.discount || 0))
+          const channelCommission = r2(t.channel_commission)
+          const staffCommission   = r2(staffRow && staffRow.total)
+          const expenses          = r2(expRow && expRow.total)
+          pnl = {
+            gross: grossLedger,
+            upsell,
+            roomFees:     r2(t.room_fee),
+            cleaningFees: r2(t.cleaning_fee),
+            discounts:    r2(t.discount),
+            channelCommission,
+            staffCommission,
+            expenses,
+            netToOwner:  r2(grossLedger - channelCommission - staffCommission - expenses),
+            passthrough: r2(t.guest_service_fee),
+          }
+        } catch (e) {}
+
         return json({ success: true, data: {
           totalBookings, totalNights, grossRevenue, totalNet, totalComm,
           totalDirect, byChannel, stays, months, quarterly,
           bestMonth, topChannel, directSaving, avgNights,
-          kitchenSummary, lowStockCount
+          kitchenSummary, lowStockCount, pnl
         }})
       }
 
@@ -2753,6 +2844,7 @@ export async function onRequest(ctx) {
         `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor))
 
         await DB.batch(stmts)
+        await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId, bookingId } })
       }
 
@@ -2937,6 +3029,7 @@ export async function onRequest(ctx) {
         if (cls.ownOverlap) {
           const provisional = cls.ownOverlap
           await DB.prepare(`UPDATE stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
+          await syncStayLedger(DB, provisional.stay_id)
           return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
 
@@ -2967,6 +3060,7 @@ export async function onRequest(ctx) {
         }
 
         await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', body.source || 'direct', body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
+        await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId } })
       }
 
@@ -3523,6 +3617,7 @@ export async function onRequest(ctx) {
       if (action === 'saveVillaRentalIncome') {
         if (body.stayId) {
           await DB.prepare(`UPDATE stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, body.extraLines || null, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
+          await syncStayLedger(DB, body.stayId)
           return json({ success: true, data: { stayId: body.stayId, updated: true } })
         }
         const stayId = genStayId(body.villaId || 'dwarka')
@@ -3537,6 +3632,7 @@ export async function onRequest(ctx) {
           const ramanComm = nightsForComm > 1 ? 2000 : 1000
           await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nightsForComm, ramanComm, now(), now()).run()
         }
+        await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId } })
       }
 

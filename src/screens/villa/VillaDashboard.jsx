@@ -810,6 +810,47 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
         </div>
       )}
 
+      {!loading && data?.pnl && (
+        <>
+          <div className="card-section-label">P&L — NET TO OWNER · FULL YEAR {year}</div>
+          <div className="card">
+            <div className="net-row">
+              <span className="net-label">Gross revenue (ledger)</span>
+              <span className="net-val">{fmt(data.pnl.gross)}</span>
+            </div>
+            <div className="net-row" style={{ paddingLeft:'14px' }}>
+              <span className="net-label" style={{ color:'var(--gold)' }}>↳ Upsell revenue</span>
+              <span className="net-val pos">+{fmt(data.pnl.upsell)}</span>
+            </div>
+            {(data.pnl.discounts || 0) > 0 && (
+              <div className="net-row" style={{ paddingLeft:'14px' }}>
+                <span className="net-label">↳ Discounts</span>
+                <span className="net-val" style={{ color:'#E06C5A' }}>−{fmt(data.pnl.discounts)}</span>
+              </div>
+            )}
+            <div className="net-row">
+              <span className="net-label">Channel commission</span>
+              <span className="net-val" style={{ color:'#E06C5A' }}>−{fmt(data.pnl.channelCommission)}</span>
+            </div>
+            <div className="net-row">
+              <span className="net-label">Staff commission</span>
+              <span className="net-val" style={{ color:'#E06C5A' }}>−{fmt(data.pnl.staffCommission)}</span>
+            </div>
+            <div className="net-row">
+              <span className="net-label">Expenses</span>
+              <span className="net-val" style={{ color:'#E06C5A' }}>−{fmt(data.pnl.expenses)}</span>
+            </div>
+            <div className="net-row" style={{ borderTop:'1px solid rgba(255,255,255,0.08)', marginTop:'6px', paddingTop:'8px' }}>
+              <span className="net-label" style={{ fontWeight:600 }}>Net to owner</span>
+              <span className="net-val pos" style={{ fontSize:'1.05rem', fontWeight:700 }}>{fmt(data.pnl.netToOwner)}</span>
+            </div>
+            <div style={{ color:'var(--text-dim)', fontSize:'0.72rem', marginTop:'8px' }}>
+              From the booking ledger · upsell = floor beds, extended checkout &amp; add-ons · guest-paid channel fees ({fmt(data.pnl.passthrough)}) excluded as passthrough
+            </div>
+          </div>
+        </>
+      )}
+
       <div className="card-section-label">REVENUE BREAKDOWN</div>
       <div className="card">
         {loading ? <Skeleton h={160}/> : (

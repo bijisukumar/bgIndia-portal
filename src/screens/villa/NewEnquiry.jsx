@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, fmtDate } from '../../utils/dates'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS,
@@ -82,6 +82,22 @@ export default function NewEnquiry() {
   const nights = form.checkInDate && form.checkOutDate
     ? Math.max(0, Math.round((parseLocalDate(form.checkOutDate) - parseLocalDate(form.checkInDate)) / 86400000))
     : 0
+
+  // Availability label — auto-checks as soon as both dates are valid.
+  // avail: undefined = idle, 'loading', or { available, conflicts, nearby }
+  const [avail, setAvail] = useState(undefined)
+  useEffect(() => {
+    if (!form.checkInDate || !form.checkOutDate || form.checkOutDate <= form.checkInDate) { setAvail(undefined); return }
+    let stale = false
+    setAvail('loading')
+    api.checkAvailability({ villaId: 'dwarka', checkIn: form.checkInDate, checkOut: form.checkOutDate })
+      .then(d => { if (!stale) setAvail(d || undefined) })
+      .catch(() => { if (!stale) setAvail(undefined) })
+    return () => { stale = true }
+  }, [form.checkInDate, form.checkOutDate])
+
+  const fmtShort = d => { try { return fmtDate(d, { day: 'numeric', month: 'short' }) } catch (_) { return d } }
+  const turnoverTag = r => (r.checkout_date === form.checkInDate || r.checkin_date === form.checkOutDate) ? ' (same-day turnover)' : ''
   const adultsNum = parseInt(form.adults, 10) || 0
   const childrenNum = parseInt(form.children, 10) || 0
   const infantsNum = parseInt(form.infants, 10) || 0
@@ -201,6 +217,29 @@ export default function NewEnquiry() {
             </div>
           </div>
           {nights > 0 && <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '-6px 0 10px' }}>{nights} night{nights === 1 ? '' : 's'}</div>}
+          {avail === 'loading' && (
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '-2px 0 10px' }}>Checking availability…</div>
+          )}
+          {avail && avail !== 'loading' && (
+            <div style={{ margin: '-2px 0 10px' }}>
+              {avail.available ? (
+                <div style={{ color: '#34A853', fontSize: '0.76rem', fontWeight: 600 }}>
+                  ✓ Villa available {fmtShort(form.checkInDate)} → {fmtShort(form.checkOutDate)}
+                </div>
+              ) : (
+                <div style={{ color: '#E06C5A', fontSize: '0.76rem', fontWeight: 600 }}>
+                  ✕ Not available — {avail.conflicts.map(c =>
+                    `${c.guest_name} ${fmtShort(c.checkin_date)}→${fmtShort(c.checkout_date)}`).join(' · ')}
+                </div>
+              )}
+              {avail.nearby && avail.nearby.length > 0 && (
+                <div style={{ color: '#5C7080', fontSize: '0.7rem', marginTop: '3px', lineHeight: 1.5 }}>
+                  Around these dates: {avail.nearby.map(r =>
+                    `${r.guest_name} ${fmtShort(r.checkin_date)}→${fmtShort(r.checkout_date)}${turnoverTag(r)}`).join(' · ')}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
             <div className="field">
               <div className="field-label">Adults</div>

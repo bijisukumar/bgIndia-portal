@@ -1625,6 +1625,32 @@ export async function onRequest(ctx) {
         }})
       }
 
+      // ── CHECK AVAILABILITY (enquiry screen) ─────────────────────────────
+      // Conflicts = stays overlapping the requested range (same-day
+      // turnover allowed: checkout day == requested check-in is NOT a
+      // conflict). Nearby = stays within ±3 days for turnover context.
+      if (action === 'checkAvailability') {
+        const villaId  = url.searchParams.get('villaId') || 'dwarka'
+        const checkIn  = url.searchParams.get('checkIn')
+        const checkOut = url.searchParams.get('checkOut')
+        if (!checkIn || !checkOut || checkOut <= checkIn) return err('checkIn and checkOut (after checkIn) required')
+        const { results } = await DB.prepare(`
+          SELECT stay_id, guest_name, checkin_date, checkout_date, source, status
+          FROM stays
+          WHERE villa_id = ?
+            AND status NOT IN ('cancelled','void')
+            AND checkout_date IS NOT NULL AND checkout_date != ''
+            AND checkin_date  < date(?, '+3 day')
+            AND checkout_date > date(?, '-3 day')
+          ORDER BY checkin_date`).bind(villaId, checkOut, checkIn).all()
+        const conflicts = [], nearby = []
+        for (const r of (results || [])) {
+          if (r.checkin_date < checkOut && r.checkout_date > checkIn) conflicts.push(r)
+          else nearby.push(r)
+        }
+        return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby } })
+      }
+
       if (action === 'getUpcomingStays') {
         const villaId = url.searchParams.get('villaId') || 'dwarka'
         const { results } = await DB.prepare(

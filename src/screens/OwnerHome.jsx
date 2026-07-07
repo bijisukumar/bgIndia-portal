@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { CONFIG } from '../config'
 import { useState, useEffect } from 'react'
 import { api } from '../api'
-import { parseLocalDate } from '../utils/dates'
+import { parseLocalDate, fmtDate } from '../utils/dates'
 import { channelLabel, channelPillStyle } from '../utils/channel'
 
 // Two top-level sections: Hospitality (Villa + Rental) and Estates
@@ -105,26 +105,43 @@ function MenuSection({ section }) {
 
 // ── YOUR LAST 48 HRS — recent bookings + cancellations, ack with OK ───────
 function Last48Block() {
+  const villaId = 'dwarka'
   const [items, setItems] = useState([])
+  const [acked, setAcked] = useState([])          // ['<stayId>:<kind>', ...]
   const [dismissed, setDismissed] = useState(false)
 
+  // Per-ITEM acknowledgement, stored server-side in villa_settings
+  // ('activity_ack', JSON array of stayId:kind) so it survives devices and
+  // browser-storage clearing. The old timestamp-vs-eventAt comparison was
+  // fragile: any later touch to a row's updated_at (pollers, edits) made a
+  // cancellation "newer" than the ack and resurrected the whole block.
+  // Identity-based ack can't resurface an item — unless its kind changes
+  // (a booking later cancelled), which is exactly when it SHOULD come back.
   useEffect(() => {
-    api.recentActivity({ villaId: 'dwarka' }).then(d => {
-      const list = (d && d.items) ? d.items : []
-      let ackAt = ''
-      try { ackAt = localStorage.getItem('activityAckAt') || '' } catch (_) {}
-      setItems(ackAt ? list.filter(it => (it.eventAt || '') > ackAt) : list)
-    }).catch(() => {})
+    Promise.all([
+      api.recentActivity({ villaId }).catch(() => null),
+      api.getVillaSettings(villaId).catch(() => null),
+    ]).then(([act, settings]) => {
+      const list = (act && act.items) ? act.items : []
+      let ack = []
+      try {
+        const parsed = JSON.parse(settings?.data?.activity_ack || settings?.activity_ack || 'null')
+        if (Array.isArray(parsed)) ack = parsed
+      } catch (_) {}
+      setAcked(ack)
+      setItems(list.filter(it => !ack.includes(`${it.stayId}:${it.kind}`)))
+    })
   }, [])
 
   function acknowledge() {
-    try { localStorage.setItem('activityAckAt', new Date().toISOString().replace('T', ' ').slice(0, 19)) } catch (_) {}
-    setDismissed(true)
+    setDismissed(true)  // hide immediately; persistence is best-effort behind it
+    const merged = [...new Set([...acked, ...items.map(it => `${it.stayId}:${it.kind}`)])].slice(-200)
+    api.saveVillaSetting({ villaId, key: 'activity_ack', value: JSON.stringify(merged) }).catch(() => {})
   }
 
   if (dismissed || items.length === 0) return null
 
-  const fmt = d => { try { return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) } catch (_) { return d } }
+  const fmt = d => fmtDate(d, { day: 'numeric', month: 'short' })
 
   return (
     <div style={{ marginBottom: '16px', background: 'rgba(133,183,235,0.06)',

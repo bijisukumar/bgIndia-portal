@@ -105,6 +105,8 @@ export default function CompleteBooking() {
   const [mergePromptOpen, setMergePromptOpen] = useState(false)
   const [mergeContactId,  setMergeContactId]  = useState(null) // which checked stay_id is the "booked by" contact
   const [mergeGuestMatches, setMergeGuestMatches] = useState({}) // stay_id -> {guest_id, name} | null (not found) | undefined (loading)
+  const [absorbPrompt, setAbsorbPrompt] = useState(null) // { source, target } — offer to move financials off the duplicate
+  const [absorbBusy, setAbsorbBusy] = useState(false)
 
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),3500)
@@ -367,9 +369,35 @@ export default function CompleteBooking() {
       const res = await api.linkBookedBy({ stayId: stayToUpdate, guestId: contactGuest.guest_id })
       const otherName = stays.find(s => s.stay_id === stayToUpdate)?.guest_name || 'the other guest'
       showToast(res?.backfilledGuestId ? `Linked ✓ — ${otherName} added to guest history for next time` : 'Linked ✓')
+      // Step 2 of an agent-booking merge: if the booking contact's row holds
+      // the money and the guest's row holds none, offer to move the
+      // financials over and void the duplicate — one stay keeps the money,
+      // so revenue is never counted twice and never lost.
+      const contactStay = stays.find(x => x.stay_id === mergeContactId)
+      const guestStay   = stays.find(x => x.stay_id === stayToUpdate)
+      const contactHasMoney = ((contactStay?.gross || 0) > 0 || (contactStay?.net || 0) > 0)
+      const guestHasMoney   = ((guestStay?.gross || 0) > 0 || (guestStay?.net || 0) > 0)
+      if (contactStay && guestStay && contactHasMoney && !guestHasMoney) {
+        setAbsorbPrompt({ source: contactStay, target: guestStay })
+      }
       exitMergeMode()
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
+  }
+
+  async function handleAbsorb() {
+    if (!absorbPrompt) return
+    setAbsorbBusy(true)
+    try {
+      const res = await api.absorbDuplicateStay({
+        sourceStayId: absorbPrompt.source.stay_id,
+        targetStayId: absorbPrompt.target.stay_id,
+      })
+      showToast(`Moved ₹${(res?.movedNet || 0).toLocaleString('en-IN')} net to ${absorbPrompt.target.guest_name} — duplicate voided ✓`)
+      setAbsorbPrompt(null)
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    setAbsorbBusy(false)
   }
 
   const s = selected
@@ -486,6 +514,32 @@ export default function CompleteBooking() {
                 )
               })}
             </div>
+            {absorbPrompt && (
+              <div style={{background:'var(--dark-card)',border:'1px solid rgba(200,144,58,0.45)',
+                borderRadius:'12px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'0.85rem',fontWeight:'600',marginBottom:'4px'}}>
+                  Move the money to the real guest?
+                </div>
+                <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:'10px',lineHeight:1.5}}>
+                  <b>{absorbPrompt.source.guest_name}</b>'s booking holds the financials
+                  (₹{(absorbPrompt.source.net || 0).toLocaleString('en-IN')} net) but
+                  <b> {absorbPrompt.target.guest_name}</b> is the guest checking in.
+                  This moves ALL financials onto {absorbPrompt.target.guest_name}'s stay and
+                  voids {absorbPrompt.source.guest_name}'s row as a duplicate — one stay keeps
+                  the money, so nothing is lost and nothing is counted twice.
+                </div>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <button className="btn btn-gold" style={{flex:1}} disabled={absorbBusy}
+                    onClick={handleAbsorb}>
+                    {absorbBusy ? 'Moving…' : '💰 Move & void duplicate'}
+                  </button>
+                  <button className="btn" style={{flex:1}} disabled={absorbBusy}
+                    onClick={()=>setAbsorbPrompt(null)}>
+                    Keep both
+                  </button>
+                </div>
+              </div>
+            )}
             {mergeMode && mergeChecked.length === 2 && !mergePromptOpen && (
               <button className="btn btn-gold" style={{width:'100%',marginBottom:'14px'}}
                 onClick={openMergePrompt}>

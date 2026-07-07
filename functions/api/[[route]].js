@@ -4007,6 +4007,62 @@ export async function onRequest(ctx) {
       // and pays, someone else physically stays). Pass guestId=null to unlink.
       // Denormalizes the name alongside the id so list views can render
       // "Booked by: X" without an extra JOIN, same pattern as guest_name itself.
+      // ── ABSORB DUPLICATE STAY — agent-booking merge, step 2 ─────────────
+      // One physical stay, two rows (booker's channel booking holds the
+      // money; guest's check-in row holds identity + docs). This action
+      // MOVES all financial + channel fields source → target, voids the
+      // source as a duplicate, and re-syncs the ledger — atomically, in one
+      // D1 batch, so the money is never on two live rows (no double count)
+      // and never on zero live rows (nothing lost).
+      // Guards: refuses if the target already carries money (would double
+      // count / overwrite), or if either row is already retired.
+      // airbnb_conf moves to the target and is NULLed on the source so a
+      // future Airbnb modification/cancellation email matches the LIVE row.
+      // Void (not cancel) because the stay is happening — this row is a
+      // duplicate, not a lost booking, so it must not appear in
+      // cancellation/lost-revenue reporting.
+      if (action === 'absorbDuplicateStay') {
+        const { sourceStayId, targetStayId } = body
+        if (!sourceStayId || !targetStayId) return err('sourceStayId and targetStayId required')
+        if (sourceStayId === targetStayId) return err('source and target must differ')
+        const src = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(sourceStayId).first()
+        const tgt = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(targetStayId).first()
+        if (!src || !tgt) return err('Stay not found', 404)
+        if (['cancelled','void','closed'].includes(tgt.status)) return err('Target stay is not active')
+        if (src.status === 'void') return err('Source stay is already void')
+        if ((src.gross || 0) <= 0 && (src.net || 0) <= 0) return err('Source stay has no financials to absorb')
+        if ((tgt.gross || 0) > 0 || (tgt.net || 0) > 0) {
+          return err('Target already has financials — refusing to overwrite. Clear one side first to avoid double counting.')
+        }
+        await DB.batch([
+          DB.prepare(`UPDATE stays SET
+              source = ?, airbnb_conf = COALESCE(?, airbnb_conf),
+              tariff_per_night = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?,
+              extra_charges = ?, extra_lines = ?,
+              night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?,
+              guest_service_fee = ?, guest_paid_total = ?,
+              notes = TRIM(COALESCE(notes,'') || ' | Financials absorbed from duplicate ' || ?),
+              updated_by = ?, updated_at = datetime('now')
+            WHERE stay_id = ?`).bind(
+            src.source || tgt.source, src.airbnb_conf || null,
+            src.tariff_per_night || 0, src.gross || 0, src.commission_pct || 0, src.commission_amt || 0, src.net || 0,
+            src.extra_charges || 0, src.extra_lines || null,
+            src.night_fee || 0, src.cleaning_fee || 0, src.host_service_fee || 0, src.you_earn || 0,
+            src.guest_service_fee || 0, src.guest_paid_total || 0,
+            sourceStayId, actor, targetStayId),
+          DB.prepare(`UPDATE stays SET status = 'void', airbnb_conf = NULL,
+              notes = TRIM(COALESCE(notes,'') || ' | Voided as duplicate — financials moved to ' || ?),
+              updated_by = ?, updated_at = datetime('now')
+            WHERE stay_id = ?`).bind(targetStayId, actor, sourceStayId),
+          DB.prepare(`DELETE FROM booking_line_items WHERE stay_id = ?`).bind(sourceStayId),
+          DB.prepare(`INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'merge', ?, ?, datetime('now'))`)
+            .bind(genId('LOG'), targetStayId,
+              `Absorbed financials from duplicate ${sourceStayId} (${src.guest_name}) into ${targetStayId} (${tgt.guest_name}); duplicate voided. Net moved: ${src.net || 0}.`),
+        ])
+        await syncStayLedger(DB, targetStayId)
+        return json({ success: true, data: { targetStayId, sourceStayId, movedNet: src.net || 0, movedGross: src.gross || 0 } })
+      }
+
       if (action === 'linkBookedBy') {
         const { stayId, guestId } = body
         if (!stayId) return err('stayId required')

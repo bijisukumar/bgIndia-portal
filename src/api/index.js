@@ -107,6 +107,7 @@ export const api = {
   cancelStay:           (data)   => post('cancelStay', data),
   updateStayStatus:     (data)   => post('updateStayStatus', data),
   searchGuestsByName:   (q)      => get('searchGuestsByName', { q }),
+  absorbDuplicateStay: (data)   => post('absorbDuplicateStay', data),
   linkBookedBy:         (data)   => post('linkBookedBy', data),
   getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
   getUpcomingStays:     (villaId)=> get('getUpcomingStays', { villaId }),

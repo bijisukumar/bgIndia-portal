@@ -643,15 +643,17 @@ export default function EnquiryDetail() {
                 background: 'rgba(37,211,102,0.05)', border: '1px solid rgba(37,211,102,0.25)',
               }}>
                 <div className="field-label" style={{ marginBottom: '4px' }}>Mobile / WhatsApp</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <input type="tel" className="field-input" autoFocus placeholder="+91 98765 43210"
                     value={phoneDraft} onChange={ev => setPhoneDraft(ev.target.value)}
                     onKeyDown={ev => { if (ev.key === 'Enter') handleSavePhone() }}
-                    style={{ flex: 1 }} />
-                  <button className="btn btn-gold" disabled={phoneBusy} onClick={handleSavePhone}>
+                    style={{ flex: '1 1 auto', minWidth: 0, fontSize: '0.85rem', marginBottom: 0 }} />
+                  <button className="btn btn-gold" disabled={phoneBusy} onClick={handleSavePhone}
+                    style={{ flex: '0 0 auto', width: 'auto', padding: '8px 16px', fontSize: '0.8rem', marginBottom: 0 }}>
                     {phoneBusy ? '…' : 'Save'}
                   </button>
-                  <button className="btn" disabled={phoneBusy} onClick={() => { setAddingPhone(false); setPhoneDraft('') }}>
+                  <button className="btn" disabled={phoneBusy} onClick={() => { setAddingPhone(false); setPhoneDraft('') }}
+                    style={{ flex: '0 0 auto', width: 'auto', padding: '8px 12px', fontSize: '0.8rem', marginBottom: 0 }}>
                     ✕
                   </button>
                 </div>

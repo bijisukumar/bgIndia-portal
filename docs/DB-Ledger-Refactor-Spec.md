@@ -85,10 +85,10 @@ net        = gross − commission
 | Step | What | Status |
 |---|---|---|
 | A | Create tables + seed channels | ✅ done (`scripts/ledger-step-a-create-tables.sql`) |
-| B | Backfill: decode historical `stays` rows into line items | 🔍 **dry-run in review** — `scripts/ledger-step-b-dryrun-preview.sql` (read-only). Writes only after preview approval. |
-| C | Channel adapter on the write path (`createBooking` / poller feed the ledger) | pending |
-| D | P&L dashboard boxes (Gross · Channel comm · Staff comm · Expenses → Net to owner) | pending |
-| E | Write-time invariant + contract test | pending |
+| B | Backfill: decode historical `stays` rows into line items | ✅ done 2026-07-06 — dry-run approved (293 in scope, 291 OK, 2 confirmed extras corrections), apply executed (469 lines), invariant violations 0 |
+| C | Channel adapter on the write path | ✅ done — `syncStayLedger()` wired into all 5 financial write paths, non-blocking, roll-ups from ledger |
+| D | P&L dashboard boxes (Gross incl. upsell breakout · Channel comm · Staff comm · Expenses → Net to owner) | ✅ done — ledger-derived `pnl` in getVillaDashboard + overview card |
+| E | Write-time invariant + contract test | invariant enforced by construction in adapter; contract test pending |
 
 Payouts UI + GST report are parked until Booking.com actually lands.
 

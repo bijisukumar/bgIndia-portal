@@ -13,7 +13,8 @@ const EXPENSE_CATS = ['Labour wages','Salary','Fertilizer','Pesticide','Tractor 
 
 // Pavutumuri (rubber) — matches the estate's actual income/sales and expense lines
 const PAVUTUMURI_INCOME_CATS  = ['Rubber Sheet','Ottupal','Coconut','Lease income','Govt subsidy','Other income']
-const PAVUTUMURI_EXPENSE_CATS = ['Rubber Labour','Formic Acid','Fertilizer','Tree waterproofing',
+const PAVUTUMURI_EXPENSE_CATS = ['Rubber Plantation','Coconut Plantation','Overall Farm (gates/fencing/road)',
+  'Rubber Labour','Formic Acid','Fertilizer','Tree waterproofing',
   'Smoke house repair','Coconut Labour','House maintenance','Transport','Land tax','Other expense']
 
 function catsFor(estate, type) {

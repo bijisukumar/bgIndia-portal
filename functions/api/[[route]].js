@@ -3778,6 +3778,9 @@ export async function onRequest(ctx) {
             treeCount: parseInt(r.treeCount) || 0,
             sheetCount: parseInt(r.sheetCount) || 0,
             ottupalCount: parseInt(r.ottupalCount) || 0,
+            block: (r.block || '').trim() || null,           // 'A' | 'B' | 'AB'
+            rain: r.rain ? 1 : 0,                             // rain-affected day
+            tappingRate: Math.round((parseFloat(r.tappingRate) || 0) * 100) / 100,
             notes: r.notes || body.notes || null,
             force: !!r.force,
           }))
@@ -3799,20 +3802,24 @@ export async function onRequest(ctx) {
         const workerSet = new Set()
         for (const e of entries) {
           if (!e.workerName || !e.date) continue
-          if (e.treeCount === 0 && e.sheetCount === 0 && e.ottupalCount === 0 && !e.force) continue
+          // Rain days save with zero counts — they ARE the record (rain = no tapping)
+          if (e.treeCount === 0 && e.sheetCount === 0 && e.ottupalCount === 0 && !e.rain && !e.force) continue
           const id = genId('RP')
           await ActiveDB.prepare(`
             INSERT INTO rubber_production
-              (prod_id, estate_id, worker_name, prod_date, tree_count, sheet_count, ottupal_count, notes, created_by, created_at, updated_by, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+              (prod_id, estate_id, worker_name, prod_date, tree_count, sheet_count, ottupal_count, block, rain, tapping_rate, notes, created_by, created_at, updated_by, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(estate_id, worker_name, prod_date) DO UPDATE SET
               tree_count    = excluded.tree_count,
               sheet_count   = excluded.sheet_count,
               ottupal_count = excluded.ottupal_count,
+              block         = excluded.block,
+              rain          = excluded.rain,
+              tapping_rate  = excluded.tapping_rate,
               notes         = excluded.notes,
               updated_by    = excluded.updated_by,
               updated_at    = excluded.updated_at
-          `).bind(id, estateId, e.workerName, e.date, e.treeCount, e.sheetCount, e.ottupalCount, e.notes, actor, now(), actor, now()).run()
+          `).bind(id, estateId, e.workerName, e.date, e.treeCount, e.sheetCount, e.ottupalCount, e.block, e.rain, e.tappingRate, e.notes, actor, now(), actor, now()).run()
           saved++; sumTree += e.treeCount; sumSheet += e.sheetCount; sumOttupal += e.ottupalCount
           workerSet.add(e.workerName)
         }
@@ -3835,6 +3842,51 @@ export async function onRequest(ctx) {
         ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
 
         return json({ success: true, data: { saved, sumTree, sumSheet, sumOttupal } })
+      }
+
+      // ── RUBBER MONTHLY REGISTER SUMMARY ─────────────────────────────────
+      // Per-DATE classification across all tappers (a calendar day counts
+      // once): rain if any row flags rain; tapping if sheets were produced;
+      // maintenance if trees were worked but no sheets (prep/maintenance —
+      // matches the paper register where trees are accounted but sheets = 0).
+      // Wages = SUM(tree_count * tapping_rate). Plus month P&L from
+      // estate_transactions (income vs expense by category).
+      if (action === 'getRubberMonthly') {
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        const month = url.searchParams.get('month')
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) return err("month required as 'YYYY-MM'")
+        const { results: rows } = await ActiveDB.prepare(`
+          SELECT prod_date,
+                 MAX(COALESCE(rain,0))                          AS rain,
+                 SUM(COALESCE(tree_count,0))                    AS trees,
+                 SUM(COALESCE(sheet_count,0))                   AS sheets,
+                 SUM(COALESCE(ottupal_count,0))                 AS ottupal,
+                 ROUND(SUM(COALESCE(tree_count,0) * COALESCE(tapping_rate,0)), 2) AS wages
+          FROM rubber_production
+          WHERE estate_id = ? AND prod_date LIKE ?
+          GROUP BY prod_date ORDER BY prod_date`).bind(estateId, `${month}%`).all()
+        let tappingDays = 0, maintenanceDays = 0, rainDays = 0
+        let trees = 0, sheets = 0, ottupal = 0, wages = 0
+        for (const r of (rows || [])) {
+          if (r.rain) rainDays++
+          else if ((r.sheets || 0) > 0) tappingDays++
+          else if ((r.trees || 0) > 0) maintenanceDays++
+          trees += r.trees || 0; sheets += r.sheets || 0; ottupal += r.ottupal || 0; wages += r.wages || 0
+        }
+        const { results: txns } = await ActiveDB.prepare(`
+          SELECT type, category, ROUND(SUM(amount),2) AS total
+          FROM estate_transactions
+          WHERE estate = ? AND date LIKE ?
+          GROUP BY type, category ORDER BY type, total DESC`).bind(estateId, `${month}%`).all()
+        const income  = (txns || []).filter(t => t.type === 'income')
+        const expense = (txns || []).filter(t => t.type === 'expense')
+        const totalIncome  = Math.round(income.reduce((a, t) => a + (t.total || 0), 0) * 100) / 100
+        const totalExpense = Math.round(expense.reduce((a, t) => a + (t.total || 0), 0) * 100) / 100
+        return json({ success: true, data: {
+          month, days: { tapping: tappingDays, maintenance: maintenanceDays, rain: rainDays, recorded: (rows || []).length },
+          production: { trees, sheets, ottupal, wages: Math.round(wages * 100) / 100 },
+          pnl: { income, expense, totalIncome, totalExpense, net: Math.round((totalIncome - totalExpense) * 100) / 100 },
+        }})
       }
 
       if (action === 'getRubberProduction') {

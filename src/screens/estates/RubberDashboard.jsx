@@ -346,8 +346,137 @@ export default function RubberDashboard() {
             </div>
           </>
         )}
+
+        <MonthlyRegister />
       </div>
     </div>
+  )
+}
+
+// ── MONTHLY REGISTER + P&L (paper-register parity) ────────────────────────
+// Day classification: rain / tapping / maintenance (trees worked, no sheets).
+// P&L: estate_transactions income vs expense for the month. Includes a
+// structured "record rubber sale" calculator (sheets -> kg -> Rs and
+// ottupal kg -> Rs) that saves as two income transactions.
+function MonthlyRegister() {
+  const thisMonth = localTodayStr().slice(0, 7)
+  const [month, setMonth] = useState(thisMonth)
+  const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [saleOpen, setSaleOpen] = useState(false)
+  const [sale, setSale] = useState({ sheets: '', weightKg: '', ratePerKg: '200', ottupalKg: '', ottupalRate: '150' })
+  const [toast, setToast] = useState(null)
+  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+
+  const load = () => api.getRubberMonthly({ estate: 'pavutumuri', month }).then(setData).catch(() => setData(null))
+  useEffect(() => { setData(null); load() }, [month]) // eslint-disable-line
+
+  const setS = (k, v) => setSale(f => {
+    const n = { ...f, [k]: v }
+    // 600 g per sheet default — auto-fill weight from sheet count unless the
+    // user has typed a weight themselves (only overwrite when it tracks)
+    if (k === 'sheets') {
+      const auto = Math.round((parseFloat(v) || 0) * 0.6 * 100) / 100
+      const prevAuto = Math.round((parseFloat(f.sheets) || 0) * 0.6 * 100) / 100
+      if (!f.weightKg || parseFloat(f.weightKg) === prevAuto) n.weightKg = auto ? String(auto) : ''
+    }
+    return n
+  })
+  const incomeA = Math.round((parseFloat(sale.weightKg) || 0) * (parseFloat(sale.ratePerKg) || 0) * 100) / 100
+  const incomeB = Math.round((parseFloat(sale.ottupalKg) || 0) * (parseFloat(sale.ottupalRate) || 0) * 100) / 100
+
+  async function saveSale() {
+    if (incomeA <= 0 && incomeB <= 0) { showToast('Enter sheets/weight or ottupal kg', 'error'); return }
+    setBusy(true)
+    try {
+      const date = `${month}-15` <= localTodayStr() ? `${month}-15` : localTodayStr()
+      if (incomeA > 0) await api.saveEstateTransaction({
+        estate: 'pavutumuri', type: 'income', date, category: 'Rubber Sheet', amount: incomeA,
+        description: `${sale.sheets || '?'} sheets · ${sale.weightKg} kg @ ₹${sale.ratePerKg}/kg`,
+      })
+      if (incomeB > 0) await api.saveEstateTransaction({
+        estate: 'pavutumuri', type: 'income', date, category: 'Ottupal', amount: incomeB,
+        description: `${sale.ottupalKg} kg loose rubber @ ₹${sale.ottupalRate}/kg`,
+      })
+      showToast(`Sale recorded — ₹${(incomeA + incomeB).toLocaleString('en-IN')} ✓`)
+      setSale({ sheets: '', weightKg: '', ratePerKg: '200', ottupalKg: '', ottupalRate: '150' })
+      setSaleOpen(false); load()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    setBusy(false)
+  }
+
+  const inp = { width: '100%', padding: '9px 6px', textAlign: 'center', borderRadius: 8, border: '1px solid var(--border-dim)', background: 'var(--dark-input)', color: '#EDF2F7', fontSize: '0.85rem' }
+  const dayPill = (label, n, color) => (
+    <div style={{ flex: 1, textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${color}33` }}>
+      <div style={{ fontSize: '1.3rem', fontWeight: 700, color }}>{n}</div>
+      <div style={{ fontSize: '0.58rem', color: '#5C7080', letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</div>
+    </div>
+  )
+  const d = data
+  return (
+    <>
+      <div className="card-section-label" style={{ marginTop: 20 }}>MONTHLY REGISTER &amp; P&amp;L</div>
+      <div className="card">
+        <input className="field-input gold" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ marginBottom: 12 }} />
+        {!d ? <div style={{ color: '#5C7080', fontSize: '0.8rem', textAlign: 'center', padding: 12 }}>Loading…</div> : (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {dayPill('Tapping days', d.days.tapping, '#5FD0AE')}
+              {dayPill('Maintenance', d.days.maintenance, '#C8903A')}
+              {dayPill('Rain — no tap', d.days.rain, '#5B8DBE')}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#9AA5B4', marginBottom: 12 }}>
+              {d.production.trees.toLocaleString('en-IN')} trees · {d.production.sheets.toLocaleString('en-IN')} sheets · {d.production.ottupal.toLocaleString('en-IN')} ottupal · tapper wages ₹{d.production.wages.toLocaleString('en-IN')}
+            </div>
+            <div className="net-row"><span className="net-label">Income</span><span className="net-val pos">₹{d.pnl.totalIncome.toLocaleString('en-IN')}</span></div>
+            {d.pnl.income.map(t => (
+              <div key={'i' + t.category} className="net-row" style={{ paddingLeft: 14 }}>
+                <span className="net-label" style={{ fontSize: '0.72rem' }}>{t.category}</span>
+                <span className="net-val" style={{ fontSize: '0.78rem' }}>₹{t.total.toLocaleString('en-IN')}</span>
+              </div>
+            ))}
+            <div className="net-row"><span className="net-label">Expenses</span><span className="net-val" style={{ color: '#E06C5A' }}>−₹{d.pnl.totalExpense.toLocaleString('en-IN')}</span></div>
+            {d.pnl.expense.map(t => (
+              <div key={'e' + t.category} className="net-row" style={{ paddingLeft: 14 }}>
+                <span className="net-label" style={{ fontSize: '0.72rem' }}>{t.category}</span>
+                <span className="net-val" style={{ fontSize: '0.78rem', color: '#E06C5A' }}>−₹{t.total.toLocaleString('en-IN')}</span>
+              </div>
+            ))}
+            <div className="net-row" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 6, paddingTop: 8 }}>
+              <span className="net-label" style={{ fontWeight: 600 }}>Month net</span>
+              <span className="net-val big" style={{ color: d.pnl.net >= 0 ? '#5FD0AE' : '#E06C5A' }}>₹{d.pnl.net.toLocaleString('en-IN')}</span>
+            </div>
+          </>
+        )}
+
+        {!saleOpen ? (
+          <button className="btn" style={{ marginTop: 12, background: 'rgba(15,110,86,0.15)', color: '#5FD0AE', border: '1px solid rgba(15,110,86,0.4)' }} onClick={() => setSaleOpen(true)}>
+            + Record rubber sale (sheets / ottupal)
+          </button>
+        ) : (
+          <div style={{ marginTop: 12, padding: '12px', borderRadius: 10, border: '1px solid rgba(15,110,86,0.35)', background: 'rgba(15,110,86,0.06)' }}>
+            <div style={{ fontSize: '0.62rem', color: '#5C7080', letterSpacing: '0.6px', marginBottom: 6 }}>INCOME A — SHEETS (600 g/sheet auto)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 4 }}>
+              <input style={inp} type="number" inputMode="numeric" placeholder="Sheets" value={sale.sheets} onChange={e => setS('sheets', e.target.value)} />
+              <input style={inp} type="number" inputMode="decimal" placeholder="Weight kg" value={sale.weightKg} onChange={e => setS('weightKg', e.target.value)} />
+              <input style={inp} type="number" inputMode="decimal" placeholder="₹/kg" value={sale.ratePerKg} onChange={e => setS('ratePerKg', e.target.value)} />
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#5FD0AE', textAlign: 'right', marginBottom: 10 }}>Income A: ₹{incomeA.toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: '0.62rem', color: '#5C7080', letterSpacing: '0.6px', marginBottom: 6 }}>INCOME B — OTTUPAL / LOOSE RUBBER</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 4 }}>
+              <input style={inp} type="number" inputMode="decimal" placeholder="Kg" value={sale.ottupalKg} onChange={e => setS('ottupalKg', e.target.value)} />
+              <input style={inp} type="number" inputMode="decimal" placeholder="₹/kg" value={sale.ottupalRate} onChange={e => setS('ottupalRate', e.target.value)} />
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#5FD0AE', textAlign: 'right', marginBottom: 10 }}>Income B: ₹{incomeB.toLocaleString('en-IN')}</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-teal" style={{ flex: 2 }} disabled={busy} onClick={saveSale}>{busy ? 'Saving…' : `Save sale — ₹${(incomeA + incomeB).toLocaleString('en-IN')}`}</button>
+              <button className="btn" style={{ flex: 1 }} disabled={busy} onClick={() => setSaleOpen(false)}>✕</button>
+            </div>
+          </div>
+        )}
+      </div>
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+    </>
   )
 }
 

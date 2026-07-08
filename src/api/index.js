@@ -206,6 +206,7 @@ export const api = {
   deleteManagerSettlement:(data)      => post('deleteManagerSettlement', data),
 
   // ── ESTATES ──────────────────────────────────────────────
+  getRubberMonthly:     (params) => get('getRubberMonthly', params),
   saveEstateTransaction:  (data)   => post('saveEstateTransaction', data),
   getEstateTransactions:  (estate) => get('getEstateTransactions', { estate }),
   deleteEstateTransaction:(data)   => post('deleteEstateTransaction', data),

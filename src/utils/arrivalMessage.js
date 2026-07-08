@@ -20,6 +20,12 @@ const VILLA_ADDRESS   = 'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 6
 // Raman for date/guest-count/request changes, only Biji can approve those.
 const HOST_WA_NUMBER  = '+1 972.876.5101'
 
+// Villa facts for the booking-info block. Bedrooms belongs in villa_settings
+// once multi-villa lands; constant is fine while Dwarka is the only property.
+const VILLA_BEDROOMS  = 4
+const CHECKIN_TIME    = 'after 4:00 PM'
+const CHECKOUT_TIME   = 'by 11:00 AM'
+
 function fmtLong(d) {
   const parsed = parseLocalDate(d)
   if (!parsed) return null
@@ -32,41 +38,54 @@ function fmtLong(d) {
  *   checkout_date, adults, children, request_early_checkin, request_late_checkout
  */
 export function buildArrivalMessage(stay = {}) {
-  const name = (stay.guest_name || '').trim().split(' ')[0] || 'there'
+  // Full name in the greeting (matches the owner's established format and
+  // avoids 'Namaskaram J!' for initials-style names like 'J S Jagadish Babu')
+  const name = (stay.guest_name || '').trim() || 'there'
   const ci = fmtLong(stay.checkin_date)
   const co = fmtLong(stay.checkout_date)
   const adults   = parseInt(stay.adults, 10)   || 1
   const children = parseInt(stay.children, 10) || 0
+  const totalGuests = adults + children
+  const breakdown = children > 0 ? ` (${adults} adult${adults !== 1 ? 's' : ''} + ${children} child${children !== 1 ? 'ren' : ''})` : ''
 
-  const extended = []
-  if (stay.request_early_checkin) extended.push('Early check-in requested ⏰')
-  if (stay.request_late_checkout) extended.push('Late check-out requested 🌙')
+  // Nights: prefer stored value, else derive from the dates
+  let nights = parseInt(stay.nights, 10) || 0
+  if (!nights) {
+    const a = parseLocalDate(stay.checkin_date), b = parseLocalDate(stay.checkout_date)
+    if (a && b) nights = Math.max(1, Math.round((b - a) / 86400000))
+  }
+
+  // If an early check-in / late check-out was requested, the fixed times are
+  // shown as "as agreed" so the critical-timing note stays truthful.
+  const ciTime = stay.request_early_checkin ? 'early check-in as agreed \u23F0' : CHECKIN_TIME
+  const coTime = stay.request_late_checkout ? 'late check-out as agreed \uD83C\uDF19' : CHECKOUT_TIME
 
   const lines = [
-    `Namaskaram ${name}! 🙏`,
+    `Namaskaram ${name}! \uD83D\uDE4F`,
     ``,
-    `This is Raman, your host coordinator at ${VILLA_FULL_NAME}. Happy to confirm — your booking is all set! ✅`,
+    `This is Raman, your host coordinator. Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`,
     ``,
-    `📅 Check-in: ${ci || '—'}`,
-    `📅 Check-out: ${co || '—'}`,
-    `👥 Max Guests: ${adults} adult${adults !== 1 ? 's' : ''}${children > 0 ? ` + ${children} child${children !== 1 ? 'ren' : ''}` : ''}`,
-  ]
-
-  if (extended.length) lines.push(`⏳ ${extended.join(' · ')}`)
-
-  lines.push(
+    `Please review your booking info:`,
     ``,
-    `📍 Location: ${VILLA_MAPS_LINK}`,
+    `\u2022 Max guest count: ${totalGuests} guest${totalGuests !== 1 ? 's' : ''}${breakdown} \u2014 count validated at check-in`,
+    `\u2022 Bedrooms: ${VILLA_BEDROOMS} bedrooms [Standard Indian Queen size beds]`,
+    `\u2022 Nights of stay: ${nights || '\u2014'}`,
+    `\u2022 Check-in: ${ci || '\u2014'} \u2014 ${ciTime}`,
+    `\u2022 Check-out: ${co || '\u2014'} \u2014 ${coTime}`,
+    ``,
+    `\u23F0 IMPORTANT: please keep a close watch on the check-in and check-out times above. Unless a different time has been agreed with us in advance, these timings are critical \u2014 the next guest's arrival and the villa's preparation are planned around them.`,
+    ``,
+    `\uD83D\uDCCD Location: ${VILLA_MAPS_LINK}`,
     VILLA_ADDRESS,
     ``,
     `A couple of things so I'm ready and waiting for you at the gate:`,
-    `1️⃣ Please message me on this number about 1 hour before you reach Guruvayur.`,
-    `2️⃣ I'll be at the villa to welcome you and help with check-in — same at check-out, just give me a heads-up on your departure time.`,
+    `1\uFE0F\u20E3 Please message me on this number about 1 hour before you reach Guruvayur.`,
+    `2\uFE0F\u20E3 I'll be at the villa to welcome you and help with check-in \u2014 same at check-out, just give me a heads-up on your departure time.`,
     ``,
-    `Note: any changes to your booking (dates, guest count, or requests) need to be approved directly by our host Biji — please reach out on WhatsApp at ${HOST_WA_NUMBER}.`,
+    `Note: any changes to your booking (dates, guest count, or requests) need to be approved directly by our host Biji \u2014 please reach out on WhatsApp at ${HOST_WA_NUMBER}.`,
     ``,
-    `Looking forward to hosting you! 🏡`,
-  )
+    `Looking forward to hosting you! \uD83C\uDFE1`,
+  ]
 
   return lines.join('\n')
 }

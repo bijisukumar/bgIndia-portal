@@ -118,6 +118,7 @@ export const EXTRA_ITEMS = [
   { label: 'Early Check-in',              amount: 500  },
   { label: 'Late Check-out',              amount: 500  },
   { label: 'Early Check-in + Late Check-out', amount: 1000 },
+  { label: 'Additional Day',              amount: 0    },
   { label: 'Breakfast',                   amount: 0    },
   { label: 'Floor Bed',                   amount: 750  },
   { label: 'Additional Guest',            amount: 0    },

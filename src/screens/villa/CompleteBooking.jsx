@@ -22,19 +22,9 @@ import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
 
-// Extra charge line items — each has a label and default amount
-const EXTRA_ITEMS = [
-  { label: 'Early Check-in',              amount: 500  },
-  { label: 'Late Check-out',              amount: 500  },
-  { label: 'Early Check-in + Late Check-out', amount: 1000 },
-  { label: 'Breakfast',                   amount: 0    },
-  { label: 'Floor Bed',                   amount: 750  },
-  { label: 'Additional Guest',            amount: 0    },
-  { label: 'Taxi Pick-up',                amount: 0    },
-  { label: 'Drop-off & Pick-up',          amount: 0    },
-  { label: 'Cleaning Fee',                amount: 1000 },
-  { label: 'Other',                       amount: 0    },
-]
+// Extra charge line items — single source of truth in utils/villaPricing
+// (shared with EnquiryDetail quotes) so the two dropdowns can never drift.
+import { EXTRA_ITEMS } from '../../utils/villaPricing'
 
 // Airbnb-specific fee structure (from confirmation email)
 const EMPTY_AIRBNB = {

@@ -16,11 +16,11 @@ classification explicit inside each DB.
 | stays | stayvibe_stays | 850 |
 | bookings | stayvibe_bookings | 113 |
 | enquiries | stayvibe_enquiries | 106 |
-| raman_commissions | stayvibe_raman_commissions | 289 |
+| raman_commissions | **stayvibe_manager_commissions** (renamed: any host's manager/staff, plural supported; names configurable) | 289 |
 | inventory | stayvibe_inventory | 82 |
 | inventory_restock_log | stayvibe_inventory_restock_log | 7 |
-| stay_cars | stayvibe_stay_cars | 10 |
-| stay_incidentals | stayvibe_stay_incidentals | 17 |
+| stay_cars | stayvibe_cars (simplified) | 10 |
+| stay_incidentals | stayvibe_incidentals (simplified) | 17 |
 | checkin_links | stayvibe_checkin_links | 9 |
 | guest_requests | stayvibe_guest_requests | 15 |
 | duplicate_bookings | stayvibe_duplicate_bookings | 14 |
@@ -57,6 +57,35 @@ processing_log (24), deletion_log (5), alert_log (10) → `infra_<same>`.
 - **maintenance_events (10)** — verify at execution whether rental or estate
   scoped; classify accordingly.
 
+## 1b. Owner decisions LOCKED (2026-07-09)
+- raman_commissions → **stayvibe_manager_commissions**; manager/staff names
+  become config (multiple staff per host, paid monthly). UI strings "Raman"
+  → CONFIG-driven manager name(s).
+- stay_cars → **stayvibe_cars**; stay_incidentals → **stayvibe_incidentals**.
+- guests → stayvibe_guests; communication_log → stayvibe_communication_log;
+  maintenance_events classified at execution.
+- **Estate DB consolidation:** estate actions already route to
+  bgindiadb-estates (ActiveDB), but stale estate table copies exist in
+  bgindia-db from the pre-split schema.sql. 2.1: verify live data per estate
+  table, move any stragglers into bgindiadb-estates, DROP estate tables from
+  bgindia-db, split schema.sql cleanly. Complete disconnect.
+- **Indexes renamed too** (45 across both DBs): SQLite keeps indexes working
+  after table rename but keeps old index NAMES — migration drops/recreates
+  each as `<prefix>_idx_*` so the namespace is total. No triggers/views exist.
+- Deploy window approved: IST night.
+
+## 1c. Multi-property per host — audit result
+One host = many villas is the DESIGN (config.villas[] array; villa_id on 19
+tables; queries filter it; checkAvailability/dashboard/etc. take villaId).
+Gaps to close in 2.1:
+- 66 frontend + 54 worker hardcoded 'dwarka' → replace with selected-villa
+  context (CONFIG default = first active villa).
+- 9 tables scope via stay_id only (manager_commissions, guest_requests, cars,
+  incidentals, guest_documents, communication_log, bookings): villa derivable
+  by join — add villa_id columns where monthly per-property reporting needs
+  them (manager_commissions gets it in 2.1).
+- guests are host-level (shared across the host's villas) — correct as-is.
+
 ## 2. What must change (end-to-end impact)
 
 1. **DB:** one rename migration per database (`ALTER TABLE x RENAME TO p_x`).
@@ -88,6 +117,21 @@ unavoidable ~2-5 minute window where old code hits new tables. Plan:
    run both DB migrations → merge to main → Pages auto-deploys (~2 min).
 4. Validate: run **TestRunner** (full suite) + **SchemaValidation** against
    the new contracts. Rollback = reverse migrations + git revert.
+
+## 3b. SaaS tenancy model (decided)
+**One host = one deployment = one config = one D1 pair.** Shared codebase,
+per-host Cloudflare Pages project with its own D1 databases and its own
+config. Rationale at this scale (handful of hosts): hard data isolation,
+per-host custom domain + branding anyway, trivial offboarding/export, no
+cross-tenant query risk, D1 DBs are effectively free. WITHIN a host,
+multiple properties are villa codes (villa_id) — unique per villa.
+Config placement: src/config.js becomes a thin loader; per-host files live
+in `hosts/<hostId>/config.js`, selected at build with VITE_HOST=<hostId>.
+Branding: platform brand is **StayVibe** ("Powered by StayVibe" footer);
+header shows the HOST's brand/logo from config — "Guruvayur Estates"/BG logo
+becomes just the guruvayur host's config values, new hosts get their own.
+New generic StayVibe logo: to be designed (SVG in public/, referenced from
+config).
 
 ## 4. Configuration inventory (SaaS onboarding surface)
 

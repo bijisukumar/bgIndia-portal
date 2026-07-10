@@ -3210,20 +3210,20 @@ export async function onRequest(ctx) {
       // verifies/corrects, and this never blocks or is required for check-in.
       // Every failure path returns { plate: '' } with success:true so the UI
       // just falls back to manual entry — it must never throw the screen.
+      // v2: same fix as ocrReceipt — Llama 3.2 Vision alone was unreliable
+      // (that's why receipts moved to Scout first); Llama 4 Scout is now
+      // primary, Llama 3.2 stays as the fallback so it can't get worse.
       if (action === 'ocrPlate') {
         const b64 = body.platePhotoB64
         if (!b64) return json({ success: true, data: { plate: '', raw: '', reason: 'no_image' } })
-        // AI binding not attached to this Pages project yet — degrade quietly
-        // rather than error, so the check-in screen keeps working as-is.
         if (!env.AI) {
           console.error('ocrPlate: env.AI binding missing on this deployment')
           return json({ success: true, data: { plate: '', raw: '', reason: 'ai_unbound' } })
         }
 
-        const OCR_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct'  // hosted → free-neuron tier; swap to llama-4-scout if accuracy needs a bump
-        const OCR_PROMPT = 'This is a photo of an Indian vehicle number plate. Read the registration number exactly. Respond with ONLY the plate characters in capital letters, no spaces and no other words. If no plate is legible, respond with exactly NONE.'
+        const OCR_INSTRUCTION = 'This is a photo of an Indian vehicle number plate. Read the registration number exactly. Respond with ONLY the plate characters in capital letters, no spaces and no other words. If no plate is legible, respond with exactly NONE.'
 
-        // base64 → raw image bytes (the vision model expects a byte array)
+        // base64 → raw image bytes (the Llama 3.2 fallback expects a byte array)
         let bytes
         try {
           const bin = atob(b64)
@@ -3235,33 +3235,57 @@ export async function onRequest(ctx) {
           return json({ success: true, data: { plate: '', raw: '', reason: 'bad_b64' } })
         }
 
-        const runOcr = async () => {
-          const out = await env.AI.run(OCR_MODEL, { prompt: OCR_PROMPT, image: bytes, max_tokens: 24, temperature: 0 })
-          return (out && out.response ? String(out.response) : '').trim()
-        }
+        const cleanPlate = (rawStr) => String(rawStr || '').replace(/["'`.\r\n]/g, ' ').trim()
+        const isPlate = (cleaned) => !!cleaned && !/^none$/i.test(cleaned)
 
-        let raw = ''
+        // Primary: Llama 4 Scout (natively multimodal, image as data-URL)
+        let raw = '', modelUsed = 'llama-4-scout'
         try {
-          raw = await runOcr()
-        } catch (e1) {
-          // Meta's first-use license gate requires a one-time { prompt: 'agree' }
-          // per account. Self-heal it here so the owner never runs a manual
-          // activation step, then retry once. If it still fails, fall back to
-          // manual entry.
-          console.error('ocrPlate: first attempt failed, trying license agree:', e1?.message || e1)
-          try {
-            await env.AI.run(OCR_MODEL, { prompt: 'agree' })
-            raw = await runOcr()
-          } catch (e2) {
-            console.error('ocrPlate: retry failed:', e2?.message || e2)
-            return json({ success: true, data: { plate: '', raw: '', reason: 'ocr_error' } })
+          const out = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+            messages: [
+              { role: 'system', content: 'You are a precise vehicle number-plate reader.' },
+              { role: 'user', content: [
+                { type: 'text', text: OCR_INSTRUCTION },
+                { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64 } },
+              ] },
+            ],
+            max_tokens: 24,
+            temperature: 0,
+          })
+          raw = (out && out.response ? String(out.response) : '').trim()
+        } catch (e) {
+          console.error('ocrPlate: Scout attempt failed:', e?.message || e)
+        }
+        let cleaned = cleanPlate(raw)
+
+        // Fallback: Llama 3.2 11B Vision (known { prompt, image: bytes } format)
+        if (!isPlate(cleaned)) {
+          modelUsed = 'llama-3.2-vision'
+          const runLegacy = async () => {
+            const out = await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', { prompt: OCR_INSTRUCTION, image: bytes, max_tokens: 24, temperature: 0 })
+            return (out && out.response ? String(out.response) : '').trim()
           }
+          try {
+            raw = await runLegacy()
+          } catch (e1) {
+            // Meta's first-use license gate requires a one-time { prompt: 'agree' }
+            // per account. Self-heal it here so the owner never runs a manual
+            // activation step, then retry once.
+            console.error('ocrPlate: legacy attempt failed, trying license agree:', e1?.message || e1)
+            try {
+              await env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', { prompt: 'agree' })
+              raw = await runLegacy()
+            } catch (e2) {
+              console.error('ocrPlate: legacy retry failed:', e2?.message || e2)
+              raw = ''
+            }
+          }
+          cleaned = cleanPlate(raw)
         }
 
-        const cleaned = raw.replace(/["'`.\r\n]/g, ' ').trim()
-        const noPlate = !cleaned || /^none$/i.test(cleaned)
-        const plate = noPlate ? '' : normalizePlate(cleaned)
-        return json({ success: true, data: { plate, raw: cleaned } })
+        if (!isPlate(cleaned)) return json({ success: true, data: { plate: '', raw: cleaned, reason: 'ocr_error', model: modelUsed } })
+        const plate = normalizePlate(cleaned)
+        return json({ success: true, data: { plate, raw: cleaned, model: modelUsed } })
       }
 
       // ── RECEIPT OCR (Villa Expenses pre-fill, Raman-side) ────────────

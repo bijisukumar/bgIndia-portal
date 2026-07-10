@@ -134,6 +134,16 @@ async function verifyJwt(token, secret) {
   } catch { return null }
 }
 
+// ── PIN HASHING (SHA-256 hex) ─────────────────────────────────
+// platform_auth_tokens stores only the hash, never the raw PIN — a debug
+// tool like D1Explorer.jsx can read this table, so plaintext PINs would be
+// a real exposure. Same crypto.subtle already used for JWT signing above.
+async function hashPin(pin) {
+  const enc  = new TextEncoder()
+  const buf  = await crypto.subtle.digest('SHA-256', enc.encode(String(pin)))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 // ── EMAIL ALERT via Resend ───────────────────────────────────
 // Forced full rebuild #2 (2026-07-01, post RESEND_API_KEY dashboard
 // re-add) — testing whether Cloudflare Pages was reusing a warm Functions
@@ -538,12 +548,55 @@ export async function onRequest(ctx) {
     const { pin } = await request.json().catch(() => ({}))
     if (!pin) return err('PIN required', 400)
 
-    const users = {
-      [env.PIN_OWNER]:   { name: 'Owner',        role: 'owner',          actor: 'owner'   },
-      [env.PIN_RAMAN]:   { name: 'RamananKutty', role: 'manager',        actor: 'raman'   },
-      [env.PIN_PRADOSH]: { name: 'Pradosh',       role: 'estate_manager', actor: 'pradosh' },
+    // Platform-level bypass: the master owner isn't tenant data, so this
+    // PIN lives as an env secret (like JWT_SECRET), not a DB row.
+    // propertyIds: null means "every property, every tenant" — checked
+    // explicitly by assertPropertyAccess(), never accidentally.
+    let found = null
+    if (env.PIN_MASTER_OWNER && String(pin) === String(env.PIN_MASTER_OWNER)) {
+      found = { name: 'Master Owner', role: 'master_owner', actor: 'master_owner', tenantId: null, propertyIds: null }
+    } else {
+      const pinHash = await hashPin(pin)
+      const row = await DB.prepare(
+        `SELECT tenant_id, role, actor, label FROM platform_auth_tokens WHERE token_hash = ? AND active = 1`
+      ).bind(pinHash).first()
+      if (row) {
+        const { results: props } = await DB.prepare(
+          `SELECT property_id FROM platform_properties WHERE tenant_id = ? AND active = 1`
+        ).bind(row.tenant_id).all()
+        found = {
+          name: row.label || row.actor, role: row.role, actor: row.actor,
+          tenantId: row.tenant_id, propertyIds: props.map(p => p.property_id),
+        }
+      } else {
+        // Self-healing migration path: the 3 original users' PINs live
+        // only in these env vars until each one logs in for the first
+        // time post-cutover. On a match here, silently write the hashed
+        // row so every subsequent login uses the fast DB path — nobody
+        // needs to retype a PIN, and their real PIN value is never seen
+        // or typed into a migration script. Safe to delete this block
+        // (and the 3 env vars) once all 3 have logged in at least once.
+        const LEGACY = {
+          [env.PIN_OWNER]:   { tenantId: 'dwarka', role: 'owner',          actor: 'owner'   },
+          [env.PIN_RAMAN]:   { tenantId: 'dwarka', role: 'manager',        actor: 'raman'   },
+          [env.PIN_PRADOSH]: { tenantId: 'dwarka', role: 'estate_manager', actor: 'pradosh' },
+        }
+        const legacy = LEGACY[String(pin)]
+        if (legacy) {
+          try {
+            await DB.prepare(
+              `INSERT OR IGNORE INTO platform_auth_tokens (token_hash, tenant_id, role, actor, label, active, created_at)
+               VALUES (?, ?, ?, ?, ?, 1, datetime('now'))`
+            ).bind(pinHash, legacy.tenantId, legacy.role, legacy.actor, legacy.actor).run()
+          } catch (e) { console.error('legacy PIN auto-migration failed:', e?.message || e) }
+          const { results: props } = await DB.prepare(
+            `SELECT property_id FROM platform_properties WHERE tenant_id = ? AND active = 1`
+          ).bind(legacy.tenantId).all()
+          found = { name: legacy.actor, role: legacy.role, actor: legacy.actor,
+            tenantId: legacy.tenantId, propertyIds: props.map(p => p.property_id) }
+        }
+      }
     }
-    const found = users[String(pin)]
 
     if (!found) {
       await sendAlert(env, '⚠️ bgIndia — Failed login attempt', [
@@ -563,11 +616,13 @@ export async function onRequest(ctx) {
     }
 
     const token = await signJwt({
-      name:  found.name,
-      role:  found.role,
-      actor: found.actor,
-      iat:   Math.floor(Date.now() / 1000),
-      exp:   Math.floor(Date.now() / 1000) + (12 * 60 * 60),
+      name:        found.name,
+      role:        found.role,
+      actor:       found.actor,
+      tenantId:    found.tenantId,
+      propertyIds: found.propertyIds,
+      iat:         Math.floor(Date.now() / 1000),
+      exp:         Math.floor(Date.now() / 1000) + (12 * 60 * 60),
     }, env.JWT_SECRET)
 
     return json({ success: true, token })
@@ -897,6 +952,33 @@ export async function onRequest(ctx) {
   const actor = payload.actor || 'owner'
   const now   = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
 
+  // ── PROPERTY ACCESS GUARD ────────────────────────────────────────
+  // The actual multi-tenant security boundary: a logged-in user can only
+  // touch the villaId(s) their own tenant owns. propertyIds == null means
+  // full access (master_owner, and the server-to-server SYSTEM_TOKEN,
+  // whose synthetic payload above has no propertyIds at all) — an
+  // explicit bypass, checked here, never an accidental gap. Any real
+  // tenant token always carries a concrete array from login, even if
+  // empty, so there's no ambiguous in-between state.
+  function assertPropertyAccess(payload, villaId) {
+    if (!villaId) return
+    if (payload.propertyIds == null) return
+    if (!payload.propertyIds.includes(villaId)) {
+      throw new Error('FORBIDDEN_PROPERTY')
+    }
+  }
+
+  // Same principle for estates: raman/pradosh each only work one estate.
+  // Previously the client-supplied ?estate= param was trusted outright;
+  // now it's validated against the actor's actual assignment.
+  const ESTATE_BY_ACTOR = { raman: 'pavutumuri', pradosh: 'pollachi' }
+  function assertEstateAccess(payload, estateId) {
+    if (!estateId) return
+    if (payload.role === 'owner' || payload.role === 'master_owner') return
+    if (ESTATE_BY_ACTOR[payload.actor] === estateId) return
+    throw new Error('FORBIDDEN_PROPERTY')
+  }
+
   const ActiveDB = ESTATE_ACTIONS.has(action) ? DB_ESTATES : DB
   if (ESTATE_ACTIONS.has(action) && !DB_ESTATES) {
     return err('Estates DB not configured', 503)
@@ -935,8 +1017,53 @@ export async function onRequest(ctx) {
         }})
       }
 
+      // ── PROPERTY PICKER OPTIONS (post-login, before entering the app) ──
+      // Normal tenant login: their own properties. master_owner: every
+      // property across every tenant, grouped by tenant, for
+      // troubleshooting. The frontend skips the picker entirely when
+      // there's only 1 option (today's real Dwarka case).
+      if (action === 'getPropertyPickerOptions') {
+        if (payload.propertyIds == null) {
+          const { results } = await DB.prepare(
+            `SELECT p.property_id, p.name, p.unit_type, p.tenant_id, t.villa_name AS tenant_name
+               FROM platform_properties p
+               JOIN platform_tenants t ON t.tenant_id = p.tenant_id
+              WHERE p.active = 1
+              ORDER BY t.villa_name, p.name`
+          ).all()
+          return json({ success: true, data: { isMasterOwner: true, properties: results.map(r => ({
+            propertyId: r.property_id, name: r.name, unitType: r.unit_type,
+            tenantId: r.tenant_id, tenantName: r.tenant_name,
+          })) } })
+        }
+        // Deliberately scoped to payload.propertyIds (the JWT's own claim
+        // from login), NOT a fresh "WHERE tenant_id = ?" re-query. A live
+        // re-query can surface a property added after this token was
+        // issued — the picker would then offer something
+        // assertPropertyAccess (which checks the same claim) immediately
+        // 403s on. Requiring a fresh login to see a newly-added property
+        // is the normal, expected JWT tradeoff; showing an option that
+        // can't actually be used is a real bug (caught in local testing).
+        if (payload.propertyIds.length === 0) {
+          return json({ success: true, data: { isMasterOwner: false, properties: [] } })
+        }
+        const placeholders = payload.propertyIds.map(() => '?').join(',')
+        const { results } = await DB.prepare(
+          `SELECT p.property_id, p.name, p.unit_type, p.tenant_id, t.villa_name AS tenant_name
+             FROM platform_properties p
+             JOIN platform_tenants t ON t.tenant_id = p.tenant_id
+            WHERE p.property_id IN (${placeholders}) AND p.active = 1
+            ORDER BY p.name`
+        ).bind(...payload.propertyIds).all()
+        return json({ success: true, data: { isMasterOwner: false, properties: results.map(r => ({
+          propertyId: r.property_id, name: r.name, unitType: r.unit_type,
+          tenantId: r.tenant_id, tenantName: r.tenant_name,
+        })) } })
+      }
+
       if (action === 'getStays') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results } = year === 'all'
           ? await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? ORDER BY checkin_date DESC`).bind(villaId).all()
@@ -973,6 +1100,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getRecentCheckouts') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
            FROM stayvibe_stays WHERE villa_id = ?
@@ -984,6 +1112,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getActiveStay') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         // "Today" in IST — a stay is only live once its check-in date has arrived.
         const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
         const stay = await DB.prepare(
@@ -1055,6 +1184,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getVillaDashboard') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results: stays } = await DB.prepare(
           `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
@@ -1228,6 +1358,7 @@ export async function onRequest(ctx) {
       // is reliable without joining stayvibe_channels.
       if (action === 'getChannelMixInsight') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const now2    = new Date()
         const month   = url.searchParams.get('month') || String(now2.getMonth() + 1).padStart(2, '0')
         const year    = url.searchParams.get('year')  || now2.getFullYear()
@@ -1274,6 +1405,7 @@ export async function onRequest(ctx) {
       // half-open-interval semantics as the duplicate-booking checker.
       if (action === 'getOccupancyGaps') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const windowDays = 60
         const { results: stays } = await DB.prepare(
           `SELECT checkin_date, checkout_date FROM stayvibe_stays
@@ -1518,6 +1650,7 @@ export async function onRequest(ctx) {
       if (action === 'getRubberHarvests') {
         const year     = url.searchParams.get('year')
         const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        assertEstateAccess(payload, estateId)
         let query = `SELECT * FROM estate360_rubber_harvests WHERE estate_id = ?`
         const binds = [estateId]
         if (year && year !== 'all') { query += ` AND harvest_date LIKE ?`; binds.push(`${year}%`) }
@@ -1545,6 +1678,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getInventory') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const includeInactive = url.searchParams.get('includeInactive') === '1'
         const { results } = await DB.prepare(
           includeInactive
@@ -1556,6 +1690,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getInventoryPrices') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(`SELECT item_id, cost_price, sell_price FROM stayvibe_inventory WHERE villa_id = ?`).bind(villaId).all()
         const prices = Object.fromEntries(results.map(r => [r.item_id, { costPrice: r.cost_price, sellPrice: r.sell_price }]))
         return json({ success: true, data: prices })
@@ -1566,6 +1701,7 @@ export async function onRequest(ctx) {
         // "Get pricing" button on the enquiry screen, and reusable later by a
         // guest-facing quick-pricing screen — same shape either way.
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(
           `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
         ).bind(villaId).all()
@@ -1575,6 +1711,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getInventoryRestockLog') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const limit   = parseInt(url.searchParams.get('limit') || '50', 10)
         const { results } = await DB.prepare(
           `SELECT * FROM stayvibe_inventory_restock_log WHERE villa_id = ? ORDER BY created_at DESC LIMIT ?`
@@ -1647,6 +1784,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getMarketingStats') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const statYear = url.searchParams.get('statYear') || null
 
         const cityQuery = statYear
@@ -1706,6 +1844,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getRamanTodo') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stayvibe_stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
         const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review') AND checkin_date >= date('now') AND checkin_date <= date('now', '+7 days') ORDER BY checkin_date ASC`).bind(villaId).all()
         return json({ success: true, data: {
@@ -1720,6 +1859,7 @@ export async function onRequest(ctx) {
       // conflict). Nearby = stays within ±3 days for turnover context.
       if (action === 'checkAvailability') {
         const villaId  = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const checkIn  = url.searchParams.get('checkIn')
         const checkOut = url.searchParams.get('checkOut')
         if (!checkIn || !checkOut || checkOut <= checkIn) return err('checkIn and checkOut (after checkIn) required')
@@ -1742,6 +1882,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getUpcomingStays') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, guest_phone, guest_email,
                   checkin_date, checkout_date, nights, adults, children,
@@ -1950,6 +2091,7 @@ export async function onRequest(ctx) {
       // bookings by created_at, cancellations by updated_at.
       if (action === 'recentActivity') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, booked_by_name,
                   CASE WHEN status = 'cancelled' THEN 'cancellation' ELSE 'booking' END AS kind,
@@ -2062,6 +2204,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getCampaigns') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(`SELECT c.id, c.campaign_name, c.unique_token, c.channel, c.is_active, c.notes, c.created_at, SUM(CASE WHEN a.event_type='click' THEN 1 ELSE 0 END) as clicks, SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries, SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings FROM stayvibe_marketing_campaigns c LEFT JOIN stayvibe_campaign_analytics a ON a.campaign_id = c.id WHERE c.villa_id = ? GROUP BY c.id ORDER BY c.created_at DESC`).bind(villaId).all()
         return json({ success: true, data: results })
       }
@@ -2076,6 +2219,7 @@ export async function onRequest(ctx) {
       // IRRIGATION ZONE HEALTH DASHBOARD (Cleaned to exclude non-existent column fields)
       if (action === 'getIrrigationZoneHealth') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const today    = new Date().toISOString().slice(0, 10)
 
         let zones = []
@@ -2117,6 +2261,7 @@ export async function onRequest(ctx) {
       // IRRIGATION HISTORY — full log list
       if (action === 'getIrrigationHistory') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`).bind(estateId).all()
         return json({ success: true, data: results })
       }
@@ -2124,6 +2269,7 @@ export async function onRequest(ctx) {
       // MANGO HARVESTS — list
       if (action === 'getMangoHarvests') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_mango_harvests WHERE estate = ? ORDER BY harvest_date DESC`).bind(estateId).all()
         return json({ success: true, data: results })
       }
@@ -2131,6 +2277,7 @@ export async function onRequest(ctx) {
       // ESTATE LEDGER TRANSACTIONS — full history list (Income/Expense tab)
       if (action === 'getEstateTransactions') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const { results } = await ActiveDB.prepare(
           `SELECT txn_id, estate, type, date, category, amount, paid_to, description, created_at
            FROM estate360_estate_transactions WHERE estate = ? ORDER BY date DESC, created_at DESC LIMIT 500`
@@ -2140,6 +2287,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getVillaExpenses') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(
           `SELECT txn_id, villa_id, date, category, amount, paid_to, description, created_at
            FROM stayvibe_villa_expenses WHERE villa_id = ? ORDER BY date DESC, created_at DESC LIMIT 500`
@@ -2151,6 +2299,7 @@ export async function onRequest(ctx) {
       // e.g. 'owner_email_alert'. Returned as a flat object for easy form binding.
       if (action === 'getVillaSettings') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(`SELECT key, value FROM stayvibe_villa_settings WHERE villa_id = ?`).bind(villaId).all()
         const settings = {}
         // Keys prefixed with '_' are internal/sensitive (e.g. _resend_api_key)
@@ -2172,6 +2321,7 @@ export async function onRequest(ctx) {
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_estate_contacts WHERE estate = ? AND active = 1 ORDER BY category, name`).bind(estateId).all()
         return json({ success: true, data: results })
       }
@@ -2179,6 +2329,7 @@ export async function onRequest(ctx) {
       // ESTATE HIGHLIGHTS — Operational Summary Dashboard
       if (action === 'getEstateHighlights') {
         const estateId  = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const cutoff    = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
         const cutoffStr = cutoff.toISOString().slice(0, 10)
         const today     = new Date().toISOString().slice(0, 10)
@@ -2248,8 +2399,9 @@ export async function onRequest(ctx) {
 
       // ESTATE DASHBOARD — Financial Year-to-Date P&L Aggregation
       if (action === 'getEstateDashboard') {
-        if (payload.role !== 'owner') return err('Owner access only', 403)
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
         const today = new Date()
         const curYear = today.getFullYear()
         const cutoffStr = `${curYear}-01-01`            // calendar year-to-date
@@ -2466,6 +2618,7 @@ export async function onRequest(ctx) {
       // List enquiries for the tracker grid (optionally filtered by status)
       if (action === 'getEnquiries') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const status  = url.searchParams.get('status') || ''
         const { results } = await DB.prepare(
           status
@@ -2551,6 +2704,7 @@ export async function onRequest(ctx) {
       // Conversion dashboard — KPIs, source breakdown, repeat-guest metrics
       if (action === 'getEnquiryDashboard') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results: rows } = await DB.prepare(
           `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? AND date_received LIKE ?`
@@ -2595,6 +2749,7 @@ export async function onRequest(ctx) {
       // Enquiries needing follow-up today or overdue, for the dashboard alert block
       if (action === 'getEnquiryFollowUps') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(`
           SELECT * FROM stayvibe_enquiries
           WHERE villa_id = ? AND status NOT IN ('confirmed','lost','cancelled')
@@ -2674,6 +2829,7 @@ export async function onRequest(ctx) {
       // INVENTORY — low-stock items (qty_in_stock <= 10% of preferred_stock), for dashboard alerts
       if (action === 'getLowStockItems') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(`
           SELECT item_id, name, unit, category, qty_in_stock, preferred_stock
           FROM stayvibe_inventory
@@ -2692,6 +2848,7 @@ export async function onRequest(ctx) {
       // estate_transactions (income vs expense by category).
       if (action === 'getRubberMonthly') {
         const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        assertEstateAccess(payload, estateId)
         const month = url.searchParams.get('month')
         if (!month || !/^\d{4}-\d{2}$/.test(month)) return err("month required as 'YYYY-MM'")
         const { results: rows } = await ActiveDB.prepare(`
@@ -2730,6 +2887,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getRubberProduction') {
         const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        assertEstateAccess(payload, estateId)
         const month    = url.searchParams.get('month')      // 'YYYY-MM' optional
         const weekStart= url.searchParams.get('weekStart')  // 'YYYY-MM-DD' optional
         let query = `SELECT * FROM estate360_rubber_production WHERE estate_id = ?`
@@ -2759,6 +2917,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getManagerSettlements') {
         const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        assertEstateAccess(payload, estateId)
         const { results: payments } = await ActiveDB.prepare(
           `SELECT * FROM estate360_manager_settlements WHERE estate_id = ? ORDER BY payment_date DESC, created_at DESC LIMIT 500`
         ).bind(estateId).all()
@@ -2793,6 +2952,7 @@ export async function onRequest(ctx) {
       // is_repeat_guest + fills previous_stays/discount context if matched.
       if (action === 'saveEnquiry') {
         const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const normPhone = (body.phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
         const normEmail = (body.email || '').trim().toLowerCase()
 
@@ -2988,6 +3148,7 @@ export async function onRequest(ctx) {
         if (!enquiry.checkin_date || !enquiry.checkout_date) return err('Enquiry is missing check-in/check-out dates')
 
         const villaId = enquiry.villa_id || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const bookingValue = parseFloat(body.bookingValue) || enquiry.final_offer_amount || enquiry.quote_amount || 0
 
         // ── Idempotency / partial-write recovery ──────────────────────
@@ -3607,6 +3768,7 @@ export async function onRequest(ctx) {
       // INVENTORY — save cost/sell prices (Prices tab)
       if (action === 'saveInventoryPrices') {
         const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const prices  = body.prices || {}
         for (const [itemId, p] of Object.entries(prices)) {
           const costPrice = parseFloat(p.costPrice) || 0
@@ -3629,6 +3791,7 @@ export async function onRequest(ctx) {
       // INVENTORY — record a restock (Restock tab): logs the purchase + bumps qty_in_stock
       if (action === 'saveInventoryRestock') {
         const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const entries = body.entries || []
         if (!entries.length) return err('entries required')
         const errors = []
@@ -3678,6 +3841,7 @@ export async function onRequest(ctx) {
       // INVENTORY — direct stock quantity correction (Stock tab +/- and manual edit)
       if (action === 'saveInventoryStock') {
         const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const stock   = body.stock || {}
         const errors = []
         let savedCount = 0
@@ -3709,6 +3873,7 @@ export async function onRequest(ctx) {
       // fake 'Add item' button that only showed a toast and forgot it).
       if (action === 'addInventoryItem') {
         const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const name = (body.name || '').trim()
         if (!name) return err('name required')
         const unit = (body.unit || '').trim() || 'unit'
@@ -3752,6 +3917,7 @@ export async function onRequest(ctx) {
 
       if (action === 'saveInventoryPreferredStock') {
         const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
         const levels  = body.levels || {}
         const errors = []
         let savedCount = 0
@@ -3787,6 +3953,7 @@ export async function onRequest(ctx) {
      if (action === 'saveKitchenEntry') {
         const items = body.items || [];
         const villaId = body.villaId || DEFAULT_VILLA_ID;
+        assertPropertyAccess(payload, villaId)
         
         // SAFE CONTEXT INTIATION — Guarantee fallback tokens exist
         const currentActor = typeof actor !== 'undefined' ? actor : 'raman';
@@ -5242,6 +5409,9 @@ export async function onRequest(ctx) {
     return err('Method not allowed', 405)
 
   } catch (e) {
+    if (e.message === 'FORBIDDEN_PROPERTY') {
+      return json({ success: false, error: 'You do not have access to this property' }, 403)
+    }
     console.error('Worker error:', e)
     return json({ success: false, error: e.message }, 500)
   }

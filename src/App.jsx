@@ -2,27 +2,20 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { restoreActiveVillaId, clearActiveVillaId } from './utils/villaContext'
+import AccessDenied from './components/AccessDenied'
 import './index.css'
 
 // Root screens
 import Login          from './screens/Login'
 import PropertyPicker from './screens/PropertyPicker'
 import OwnerHome      from './screens/OwnerHome'
-import EstateManagerHome from './screens/EstateManagerHome'
-import RamanHome      from './screens/RamanHome'
 import RDashboard         from './screens/RDashboard'
-import RDashboardSnapshot from './screens/RDashboardSnapshot'
 
 // Villa screens
 import VillaHub          from './screens/villa/VillaHub'
-import VillaRentalIncome from './screens/villa/VillaRentalIncome'
 import CompleteBooking    from './screens/villa/CompleteBooking'
 import VillaDashboard    from './screens/villa/VillaDashboard'
 import NewBooking        from './screens/villa/NewBooking'
-import CheckIn           from './screens/villa/CheckIn'
-import KitchenIncidentals from './screens/villa/KitchenIncidentals'
-import BreakfastEntry    from './screens/villa/BreakfastEntry'
-import CarRentalEntry    from './screens/villa/CarRentalEntry'
 import GuestRepository   from './screens/villa/GuestRepository'
 import Inventory         from './screens/villa/Inventory'
 import VillaExpenses     from './screens/villa/VillaExpenses'
@@ -53,9 +46,12 @@ function ProtectedRoutes() {
   const [resolved, setResolved] = useState(() => !!restoreActiveVillaId())
 
   if (!user) return <Navigate to="/login" replace />
+  // manage.* is the super-user console — only master_owner gets in.
+  // Every other role (including a tenant's own owner/manager PIN) has
+  // its own dedicated app (stayvibe.*/estate360.*/rev360.*) instead.
+  if (user.role !== 'master_owner') return <AccessDenied />
   if (!resolved) return <PropertyPicker onResolved={() => setResolved(true)} />
 
-  const role = user.role
   const showSwitcher = user.propertyIds == null || (user.propertyIds && user.propertyIds.length > 1)
 
   return (
@@ -71,8 +67,9 @@ function ProtectedRoutes() {
       </button>
     )}
     <Routes>
-      {/* ── OWNER ──────────────────────────────────── */}
-      {(role === 'owner' || role === 'master_owner') && <>
+      {/* Only master_owner ever reaches here (gated above) — always true,
+          kept explicit rather than an unconditional fragment. */}
+      {user.role === 'master_owner' && <>
         <Route path="/"                       element={<OwnerHome />} />
         {/* Villa */}
         <Route path="/owner/villa"            element={<VillaHub />} />
@@ -98,27 +95,6 @@ function ProtectedRoutes() {
         <Route path="/debug"                  element={<DebugPanel />} />
         <Route path="/test"                   element={<TestRunner />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
-      </>}
-
-      {/* ── PRADOSH (estate manager) ───────────────── */}
-      {role === 'estate_manager' && <>
-        <Route path="/"                       element={<EstateManagerHome />} />
-        <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
-        <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
-        <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
-      </>}
-
-      {/* ── RAMAN (villa manager) ──────────────────── */}
-      {role === 'manager' && <>
-        <Route path="/"                       element={<RamanHome />} />
-        <Route path="/raman/checkin"          element={<CheckIn />} />
-        <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
-        <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
-        <Route path="/raman/carrental"        element={<CarRentalEntry />} />
-        <Route path="/raman/expenses"         element={<VillaExpenses />} />
-        <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
-        <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
-        <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

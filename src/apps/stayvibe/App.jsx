@@ -7,6 +7,7 @@
 // ============================================================
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
+import AccessDenied from '../../components/AccessDenied'
 import '../../index.css'
 
 // Auth
@@ -15,7 +16,6 @@ import Login from '../../screens/Login'
 // Owner — villa screens only
 import OwnerHome      from '../../screens/OwnerHome'
 import VillaHub       from '../../screens/villa/VillaHub'
-import VillaRentalIncome from '../../screens/villa/VillaRentalIncome'
 import CompleteBooking from '../../screens/villa/CompleteBooking'
 import VillaDashboard from '../../screens/villa/VillaDashboard'
 import NewBooking     from '../../screens/villa/NewBooking'
@@ -43,11 +43,18 @@ function ProtectedRoutes() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
   const role = user.role
+  // master_owner can log in directly to a tenant's own site too (not just
+  // the aggregate manage.* console) for in-context troubleshooting.
+  // Any other role (e.g. estate_manager) has no business here — deny
+  // cleanly instead of silently redirect-looping on "/".
+  if (role !== 'owner' && role !== 'master_owner' && role !== 'manager') {
+    return <AccessDenied />
+  }
 
   return (
     <Routes>
       {/* ── OWNER ── */}
-      {role === 'owner' && <>
+      {(role === 'owner' || role === 'master_owner') && <>
         <Route path="/"                       element={<OwnerHome />} />
         <Route path="/owner/villa"            element={<VillaHub />} />
         <Route path="/owner/villa/booking"    element={<NewBooking />} />

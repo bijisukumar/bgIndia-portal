@@ -7,9 +7,22 @@ Properties within a host = villa codes. Target: intake → live in < 1 day.
 static/branding config lives in `hosts/<hostId>/config.js` (git-tracked,
 build-time, e.g. villas[], theme, pricing catalog); anything that must
 change WITHOUT a redeploy (rates, phone numbers, check-in/checkout times)
-or that's inherently dynamic (auth) lives in the `platform_tenants` /
-`platform_auth_tokens` D1 tables, served via `getTenantConfig`. Both need
-seeding for a new host — see step B.2 below.
+or that's inherently dynamic (auth, billing) lives in the
+`platform_tenants` / `platform_properties` / `platform_auth_tokens` D1
+tables, served via `getTenantConfig`. Both need seeding for a new host —
+see step B.2 below.
+
+**Auth model** (added post-Release-2.1, multi-tenant foundation): PINs are
+never stored in plaintext or as per-Pages-project env vars for regular
+tenants anymore — each tenant's owner/manager PINs are hashed (SHA-256)
+and stored in `platform_auth_tokens`, scoped to that tenant's `tenant_id`.
+A separate `PIN_MASTER_OWNER` env var (platform-level, not tenant data)
+lets Biji log in with full cross-tenant access for troubleshooting.
+`platform_properties` records which property/properties (villa or room)
+each tenant owns — this is the server-side authorization boundary
+(`assertPropertyAccess` in the worker); a tenant's login can only ever
+touch their own `villaId`(s), enforced on every request, not just hidden
+by frontend routing.
 
 ## A. Intake 1-pager (host fills this — everything config needs)
 
@@ -49,18 +62,24 @@ seeding for a new host — see step B.2 below.
    define every table under its namespaced name (`stayvibe_`/`rev360_`/
    `infra_`/`platform_`/`estate360_`), so a fresh host needs no separate
    migration, just the schema files as-is. Then:
-   - Seed `platform_tenants` + `platform_auth_tokens` for the new
-     `tenant_id` (= the villa id from step 1) — copy
-     `scripts/onboard-new-host-seed-template.sql`, fill in the
+   - Seed `platform_tenants` + `platform_properties` +
+     `platform_auth_tokens` for the new `tenant_id` (= the villa id from
+     step 1) — copy `scripts/onboard-new-host-seed-template.sql`, hash
+     each chosen PIN first (`node -e "console.log(require('crypto').
+     createHash('sha256').update('<PIN>').digest('hex'))"`), fill in the
      `<PLACEHOLDER>` values, run it. This is what `getTenantConfig` serves
-     to the frontend and what `GuestFormScript.gs` reads on first use.
+     to the frontend, what `GuestFormScript.gs` reads on first use, and
+     what the login action checks PINs against.
    - Run channel/expense-category seeds as before.
 3. Create Pages project `<hostId>-portal`; bind DB/DB_ESTATES/AI; set
    `[vars] DEFAULT_VILLA_ID = "<the villa id from step 1>"` in that
    project's wrangler.toml (or Pages dashboard env var) — **easy to
    forget, and if unset the worker silently falls back to `'dwarka'`
-   instead of failing loudly**; secrets: PINs, RESEND_API_KEY,
-   `JWT_SECRET`. Build with `VITE_HOST=<hostId>`.
+   instead of failing loudly**; secrets: `PIN_MASTER_OWNER` (shared across
+   all hosts if they're on the same worker deployment — Biji's own
+   cross-tenant troubleshooting login, not tenant-specific), RESEND_API_KEY,
+   `JWT_SECRET`. Regular tenant PINs come from the seed step above, not
+   env vars. Build with `VITE_HOST=<hostId>`.
 4. Custom domain on Pages; SSL auto.
 5. Google: deploy the 3 Apps Script projects under host's Gmail; set
    `WORKER_URL`/`TENANT_ID` (2 lines, per `scripts/GuestFormScript.gs`'s
@@ -72,9 +91,17 @@ seeding for a new host — see step B.2 below.
    booking → confirm isolation from any other host's data → SchemaValidation).
 7. Walk host through: New Booking, Check-in flow, Expenses, Dashboard P&L.
 
-## C. Per-villa go-live (adding property #2, #3 to an existing host)
-1. Add villa object to the host's config.villas[] (code, names, address,
-   maps, bedrooms, times, rate card).
-2. Seed villa_settings rows for the new code (expense_categories, extras).
-3. Drive folder for the villa; poller recognizes the new code.
-4. TestRunner pass with the new villaId.
+## C. Per-property go-live (adding property #2, #3 to an existing tenant)
+Same tenant, same login — the property picker (shown right after login)
+handles the rest automatically once there's more than one property.
+1. Add a `platform_properties` row for the new `property_id`, same
+   `tenant_id` as the existing one (`unit_type` = `'villa'` or `'room'`).
+2. Add villa object to the host's `config.villas[]` (code, names, address,
+   maps, bedrooms, times, rate card) — branding/pricing details, separate
+   from the ownership row above.
+3. Seed villa_settings rows for the new code (expense_categories, extras).
+4. Drive folder for the villa; poller recognizes the new code.
+5. TestRunner pass with the new villaId.
+6. No auth changes needed — the existing owner/manager PINs already cover
+   every property this tenant owns (`platform_auth_tokens` is scoped by
+   `tenant_id`, not per-property).

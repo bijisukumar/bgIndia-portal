@@ -1,9 +1,12 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useState } from 'react'
 import { AuthProvider, useAuth } from './hooks/useAuth'
+import { restoreActiveVillaId, clearActiveVillaId } from './utils/villaContext'
 import './index.css'
 
 // Root screens
 import Login          from './screens/Login'
+import PropertyPicker from './screens/PropertyPicker'
 import OwnerHome      from './screens/OwnerHome'
 import EstateManagerHome from './screens/EstateManagerHome'
 import RamanHome      from './screens/RamanHome'
@@ -43,13 +46,33 @@ import D1Explorer  from './screens/infra/D1Explorer'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
+  // A tenant with just 1 property (today's real Dwarka case) never sees
+  // this — restoreActiveVillaId() resolves instantly from a prior pick
+  // this session, or the picker resolves it in one round-trip on first
+  // load and it's never shown again until "Switch property" is used.
+  const [resolved, setResolved] = useState(() => !!restoreActiveVillaId())
+
   if (!user) return <Navigate to="/login" replace />
+  if (!resolved) return <PropertyPicker onResolved={() => setResolved(true)} />
+
   const role = user.role
+  const showSwitcher = user.propertyIds == null || (user.propertyIds && user.propertyIds.length > 1)
 
   return (
+    <>
+    {showSwitcher && (
+      <button
+        onClick={() => { clearActiveVillaId(); setResolved(false) }}
+        style={{ position: 'fixed', top: 10, right: 10, zIndex: 1000,
+          background: 'rgba(200,144,58,0.15)', border: '1px solid rgba(200,144,58,0.4)',
+          borderRadius: '8px', color: '#C8903A', fontSize: '0.7rem', fontWeight: '700',
+          padding: '6px 10px', cursor: 'pointer' }}>
+        ⇄ Switch property
+      </button>
+    )}
     <Routes>
       {/* ── OWNER ──────────────────────────────────── */}
-      {role === 'owner' && <>
+      {(role === 'owner' || role === 'master_owner') && <>
         <Route path="/"                       element={<OwnerHome />} />
         {/* Villa */}
         <Route path="/owner/villa"            element={<VillaHub />} />
@@ -100,6 +123,7 @@ function ProtectedRoutes() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   )
 }
 

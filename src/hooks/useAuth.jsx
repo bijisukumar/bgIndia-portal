@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
         sessionStorage.removeItem('ge_token')
         return null
       }
-      return { name: payload.name, role: payload.role, actor: payload.actor }
+      return { name: payload.name, role: payload.role, actor: payload.actor, tenantId: payload.tenantId, propertyIds: payload.propertyIds }
     } catch { return null }
   })
 
@@ -60,7 +60,7 @@ export function AuthProvider({ children }) {
       if (!payload) return { ok: false, reason: 'invalid' }
 
       sessionStorage.setItem('ge_token', token)
-      const userData = { name: payload.name, role: payload.role, actor: payload.actor }
+      const userData = { name: payload.name, role: payload.role, actor: payload.actor, tenantId: payload.tenantId, propertyIds: payload.propertyIds }
       setUser(userData)
       return { ok: true }
     } catch {

@@ -222,7 +222,8 @@ export const api = {
   getGuests:            ()       => get('getGuests'),
 
   // ── TENANT CONFIG ─────────────────────────────────────────
-  getTenantConfig:      (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
+  getTenantConfig:          (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
+  getPropertyPickerOptions: ()         => get('getPropertyPickerOptions'),
 
   // ── RAMAN ────────────────────────────────────────────────
   getRamanTodo:         (villaId)=> get('getRamanTodo', { villaId: villaId || DEFAULT_VILLA_ID }),

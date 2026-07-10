@@ -656,32 +656,54 @@ CREATE INDEX IF NOT EXISTS infra_idx_deletion_log_villa ON infra_deletion_log(vi
 -- getTenantConfig action, not directly — confirmed the .gs file itself
 -- needs no change).
 CREATE TABLE IF NOT EXISTS platform_tenants (
-  tenant_id         TEXT PRIMARY KEY,
-  villa_name        TEXT,
-  owner_email       TEXT,
-  owner_email_cc    TEXT,
-  drive_root_id     TEXT,
-  airbnb_email      TEXT,
-  phone1            TEXT,
-  phone2            TEXT,
-  guest_contact     TEXT,
-  address           TEXT,
-  logo_url          TEXT,
-  checkin_time      TEXT DEFAULT '16:00',
-  checkout_time     TEXT DEFAULT '11:00',
-  breakfast_rate    INTEGER DEFAULT 275,
-  raman_comm_pct    INTEGER DEFAULT 10,
-  plan              TEXT DEFAULT 'starter',
-  active            INTEGER DEFAULT 1,
-  created_at        TEXT
+  tenant_id            TEXT PRIMARY KEY,
+  villa_name           TEXT,
+  owner_email          TEXT,
+  owner_email_cc       TEXT,
+  drive_root_id        TEXT,
+  airbnb_email         TEXT,
+  phone1               TEXT,
+  phone2               TEXT,
+  guest_contact        TEXT,
+  address              TEXT,
+  logo_url             TEXT,
+  checkin_time         TEXT DEFAULT '16:00',
+  checkout_time        TEXT DEFAULT '11:00',
+  breakfast_rate       INTEGER DEFAULT 275,
+  raman_comm_pct       INTEGER DEFAULT 10,
+  plan                 TEXT DEFAULT 'starter',
+  active               INTEGER DEFAULT 1,
+  created_at           TEXT,
+  billing_contact_name TEXT,
+  billing_email        TEXT,
+  primary_hostname     TEXT
 );
 
+-- Tenant<->property ownership record (auth/billing layer). property_id
+-- uses the same identifier values already used as villa_id across
+-- stayvibe_* tables — this is the ownership record, not a replacement for
+-- hosts/<id>/config.js's villas[] branding array. unit_type distinguishes
+-- a whole villa from a single room; display-only, nothing else depends on it.
+CREATE TABLE IF NOT EXISTS platform_properties (
+  property_id  TEXT PRIMARY KEY,
+  tenant_id    TEXT NOT NULL REFERENCES platform_tenants(tenant_id),
+  name         TEXT,
+  unit_type    TEXT DEFAULT 'villa',
+  active       INTEGER DEFAULT 1,
+  created_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_platform_properties_tenant ON platform_properties(tenant_id);
+
+-- token_hash = SHA-256 hex of the PIN (never store PINs in plaintext —
+-- this table is readable by debug tools like D1Explorer.jsx). actor is
+-- the short internal slug ('raman', 'pradosh') that estate-routing logic
+-- keys off; label is the display name ('RamananKutty').
 CREATE TABLE IF NOT EXISTS platform_auth_tokens (
-  token       TEXT PRIMARY KEY,
-  tenant_id   TEXT,
-  role        TEXT,
+  token_hash  TEXT PRIMARY KEY,
+  tenant_id   TEXT NOT NULL REFERENCES platform_tenants(tenant_id),
+  role        TEXT NOT NULL,
+  actor       TEXT NOT NULL,
   label       TEXT,
   active      INTEGER DEFAULT 1,
   created_at  TEXT
 );
--- platform_tenants / platform_auth_tokens have no indexes today (verified live).

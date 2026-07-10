@@ -1101,14 +1101,23 @@ export async function onRequest(ctx) {
       if (action === 'getRecentCheckouts') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        // 7-day cap alongside LIMIT 2 — a stale checkout from weeks back
-        // (e.g. after a slow period) shouldn't linger as "recent".
+        // Includes 'ready_for_checkout' — a guest whose stay period ended
+        // but hasn't been formally checked out yet (the exact "old guest
+        // still needs closing out" case: their checkout_date arrived, a
+        // new guest may already be checked in for the turnover, but no
+        // one has run the actual checkout action). Ordered so that guest
+        // surfaces first since it's the most actionable/urgent; already-
+        // processed checked_out/closed stays follow, capped at 7 days so
+        // a stale one from a slow period doesn't linger as "recent".
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
            FROM stayvibe_stays WHERE villa_id = ?
-           AND status IN ('checked_out', 'closed')
-           AND checkout_date >= date('now', '-7 days')
-           ORDER BY checkout_date DESC LIMIT 2`
+           AND (
+             status = 'ready_for_checkout'
+             OR (status IN ('checked_out', 'closed') AND checkout_date >= date('now', '-7 days'))
+           )
+           ORDER BY CASE status WHEN 'ready_for_checkout' THEN 0 ELSE 1 END, checkout_date DESC
+           LIMIT 3`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }

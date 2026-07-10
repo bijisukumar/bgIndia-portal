@@ -4,6 +4,16 @@ import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
+// A guest whose stay period has ended but hasn't been formally checked
+// out yet ('ready_for_checkout') is NOT historical — this screen never
+// touches stays.status regardless, but the label still needs to reflect
+// the real state so Raman knows who he's logging a charge for.
+function guestLabel(g) {
+  if (g.status === 'checked_in') return `🟢 ${g.guestName} — active stay`
+  if (g.status === 'ready_for_checkout') return `🟡 ${g.guestName} — ready for checkout`
+  return `${g.guestName} — checked out ${g.checkoutDate}`
+}
+
 export default function CarRentalEntry() {
   const navigate = useNavigate()
   const [stay, setStay]             = useState(null)
@@ -32,7 +42,8 @@ export default function CarRentalEntry() {
         ...(active && active.stayId ? [{ ...active, isHistoricalSession: false }] : []),
         ...(Array.isArray(checkouts) ? checkouts.map(c => ({
           stayId: c.stay_id, guestName: c.guest_name,
-          isHistoricalSession: true, checkoutDate: c.checkout_date,
+          status: c.status, isHistoricalSession: c.status !== 'ready_for_checkout',
+          checkoutDate: c.checkout_date,
         })) : []),
       ]
       setGuestOptions(options)
@@ -77,7 +88,7 @@ export default function CarRentalEntry() {
             >
               {guestOptions.map(g => (
                 <option key={g.stayId} value={g.stayId}>
-                  {g.isHistoricalSession ? `${g.guestName} — checked out ${g.checkoutDate}` : `🟢 ${g.guestName} — active stay`}
+                  {guestLabel(g)}
                 </option>
               ))}
             </select>

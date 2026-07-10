@@ -10,6 +10,17 @@ function isLowStock(qtyInStock, preferred) {
   return (preferred || 0) > 0 && (qtyInStock || 0) <= threshold
 }
 
+// A guest whose stay period has ended but hasn't been formally checked
+// out yet ('ready_for_checkout') is NOT historical — saving here should
+// still run the actual checkout (handleSave's existing `!isHistoricalSession`
+// check already does this correctly once this is set right). Only an
+// already-processed checked_out/closed stay is historical/retroactive.
+function guestLabel(g) {
+  if (g.status === 'checked_in') return `🟢 ${g.guestName} — active stay`
+  if (g.status === 'ready_for_checkout') return `🟡 ${g.guestName} — ready for checkout`
+  return `${g.guestName} — checked out ${g.checkoutDate}`
+}
+
 export default function KitchenIncidentals() {
   const navigate  = useNavigate()
   const [stay, setStay]     = useState(null)
@@ -42,12 +53,12 @@ export default function KitchenIncidentals() {
         ...(active && active.stayId ? [{
           stayId: active.stayId, guestName: active.guestName || 'Active Guest',
           checkoutDate: active.checkoutDate || '—', nights: active.nights || '—',
-          isHistoricalSession: false,
+          status: 'checked_in', isHistoricalSession: false,
         }] : []),
         ...(Array.isArray(checkouts) ? checkouts.map(c => ({
           stayId: c.stay_id, guestName: c.guest_name,
           checkoutDate: c.checkout_date, nights: c.nights || 1,
-          isHistoricalSession: true,
+          status: c.status, isHistoricalSession: c.status !== 'ready_for_checkout',
         })) : []),
       ]
       setGuestOptions(options)
@@ -156,7 +167,7 @@ export default function KitchenIncidentals() {
               >
                 {guestOptions.map(g => (
                   <option key={g.stayId} value={g.stayId}>
-                    {g.isHistoricalSession ? `${g.guestName} — checked out ${g.checkoutDate}` : `🟢 ${g.guestName} — active stay`}
+                    {guestLabel(g)}
                   </option>
                 ))}
               </select>

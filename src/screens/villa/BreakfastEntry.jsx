@@ -8,7 +8,11 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 export default function BreakfastEntry() {
   const navigate   = useNavigate()
   const [stay, setStay]         = useState(null)
-  const [recentCheckouts, setRecentCheckouts] = useState([])
+  // Combined list: active stay (if any) first, then recent checkouts —
+  // always offered together so Raman can log a just-checked-out guest's
+  // breakfast charge (these can land 1-2 days late) even after a new
+  // guest has already checked in and become the active stay.
+  const [guestOptions, setGuestOptions] = useState([])
   const [date, setDate]         = useState(localTodayStr())
   const [guestCount, setCount]  = useState(0)
   const [rate, setRate]         = useState(CONFIG.breakfastRate || 275)
@@ -19,14 +23,26 @@ export default function BreakfastEntry() {
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
   const total = guestCount * rate
 
+  const selectGuest = (g) => {
+    setStay(g)
+    setCount(parseInt(g.adults || g.guestCount || 0))
+  }
+
   useEffect(() => {
-    api.getActiveStay(DEFAULT_VILLA_ID).then(s => {
-      if (s?.stayId) {
-        setStay(s)
-        setCount(parseInt(s.adults||s.guestCount||0))
-      }
+    Promise.all([
+      api.getActiveStay(DEFAULT_VILLA_ID).catch(() => null),
+      api.getRecentCheckouts(DEFAULT_VILLA_ID).catch(() => []),
+    ]).then(([active, checkouts]) => {
+      const options = [
+        ...(active && active.stayId ? [{ ...active, isHistoricalSession: false }] : []),
+        ...(Array.isArray(checkouts) ? checkouts.map(c => ({
+          stayId: c.stay_id, guestName: c.guest_name, adults: c.adults,
+          isHistoricalSession: true, checkoutDate: c.checkout_date,
+        })) : []),
+      ]
+      setGuestOptions(options)
+      if (options.length) selectGuest(options[0])
     })
-    api.getRecentCheckouts(DEFAULT_VILLA_ID).then(d => { if (Array.isArray(d)) setRecentCheckouts(d) }).catch(() => {})
   }, [])
 
   const handleSave = async () => {
@@ -51,43 +67,34 @@ export default function BreakfastEntry() {
         <div style={{width:34}}/>
       </div>
       <div className="screen-body">
+        {guestOptions.length > 0 && (
+          <div className="card" style={{ padding: '14px', marginBottom: '12px' }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', color: '#5C7080', marginBottom: '6px', fontWeight: '600', letterSpacing: '1px' }}>
+              GUEST CONTEXT — who is this breakfast for?
+            </label>
+            <select
+              value={stay?.stayId || ''}
+              onChange={(e) => {
+                const chosen = guestOptions.find(g => g.stayId === e.target.value)
+                if (chosen) selectGuest(chosen)
+              }}
+              className="field-input"
+              style={{ width: '100%', background: '#1A202C', color: '#FFF', padding: '8px', borderRadius: '6px', border: '1px solid rgba(200,144,58,0.3)' }}
+            >
+              {guestOptions.map(g => (
+                <option key={g.stayId} value={g.stayId}>
+                  {g.isHistoricalSession ? `${g.guestName} — checked out ${g.checkoutDate}` : `🟢 ${g.guestName} — active stay`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {!stay ? (
           <div className="card" style={{ padding: '14px', marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '0.75rem', color: '#F59E0B', marginBottom: '6px', fontWeight: '600' }}>
-              ⚠️ No active stay found. Select a recent checkout to log breakfast charges:
-            </label>
-            {recentCheckouts.length > 0 ? (
-              <select
-                onChange={(e) => {
-                  const chosen = recentCheckouts.find(r => r.stay_id === e.target.value)
-                  if (chosen) {
-                    setStay({
-                      stayId: chosen.stay_id, guestName: chosen.guest_name,
-                      adults: chosen.adults, isHistoricalSession: true,
-                    })
-                    setCount(parseInt(chosen.adults) || 0)
-                  } else { setStay(null) }
-                }}
-                className="field-input"
-                style={{ width: '100%', background: '#1A202C', color: '#FFF', padding: '8px', borderRadius: '6px', border: '1px solid rgba(245,158,11,0.3)' }}
-              >
-                <option value="">-- Choose a past checkout --</option>
-                {recentCheckouts.map(s => (
-                  <option key={s.stay_id} value={s.stay_id}>{s.guest_name} (Checked out: {s.checkout_date})</option>
-                ))}
-              </select>
-            ) : (
-              <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>No recent checkouts found.</div>
-            )}
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>No active stay or recent checkouts found.</div>
           </div>
         ) : (
           <>
-            {stay.isHistoricalSession && (
-              <div className="card" style={{ padding: '10px 14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#5C7080', fontSize: '0.65rem' }}>🔴 RETROACTIVE — {stay.guestName}</span>
-                <button onClick={() => setStay(null)} style={{ background: 'transparent', border: 'none', color: '#EF4444', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}>✕ Clear</button>
-              </div>
-            )}
             <div className="card-section-label">BREAKFAST ENTRY</div>
             <div className="card">
               <div className="grid-2">

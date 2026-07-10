@@ -1101,10 +1101,13 @@ export async function onRequest(ctx) {
       if (action === 'getRecentCheckouts') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
+        // 7-day cap alongside LIMIT 2 — a stale checkout from weeks back
+        // (e.g. after a slow period) shouldn't linger as "recent".
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
            FROM stayvibe_stays WHERE villa_id = ?
            AND status IN ('checked_out', 'closed')
+           AND checkout_date >= date('now', '-7 days')
            ORDER BY checkout_date DESC LIMIT 2`
         ).bind(villaId).all()
         return json({ success: true, data: results })

@@ -183,6 +183,7 @@ export const CONFIG = {
       { label: 'Taxi Pick-up',                amount: 0    },
       { label: 'Drop-off & Pick-up',          amount: 0    },
       { label: 'Cleaning Fee',                amount: 1000 },
+      { label: 'Event & Culinary Services',   amount: 0    },
       { label: 'Other',                       amount: 0    },
     ],
   },

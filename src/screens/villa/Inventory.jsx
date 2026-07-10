@@ -346,7 +346,7 @@ export default function Inventory() {
                     <div style={{ color: 'var(--text)', fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px' }}>
                       {item.name} <span style={{ color: '#5C7080', fontSize: '0.7rem' }}>· per {item.unit}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 80px', gap: '6px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '70px 70px 1fr', gap: '6px' }}>
                       <div>
                         <div style={{ color: '#5C7080', fontSize: '0.65rem', marginBottom: '2px' }}>QTY BOUGHT</div>
                         <input type="number" placeholder="0"

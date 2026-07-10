@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { channelLabel, channelPillStyle } from '../../utils/channel'
 
 // ── SEGMENT DEFINITIONS ───────────────────────────────────────────────────
 const SEGMENTS = {
@@ -12,19 +13,6 @@ const SEGMENTS = {
   family:   { label:'Family Traveller', icon:'👨‍👩‍👧‍👦', color:'#34A853', bg:'rgba(52,168,83,0.12)' },
   overseas: { label:'Overseas Guest',   icon:'✈️', color:'#185FA5', bg:'rgba(24,95,165,0.12)' },
   vip:      { label:'VIP (5+ stays)',   icon:'👑', color:'#F59E0B', bg:'rgba(245,158,11,0.12)', minStays:5 },
-}
-
-// Channel display config
-const CHANNEL_META = {
-  airbnb:      { label:'Airbnb',      color:'#FF5A5F', bg:'rgba(255,90,95,0.12)'  },
-  direct:      { label:'Direct',      color:'#34A853', bg:'rgba(52,168,83,0.12)'  },
-  'booking.com':{ label:'Booking.com',color:'#003580', bg:'rgba(0,53,128,0.15)'  },
-  makemytrip:  { label:'MakeMyTrip',  color:'#e74c3c', bg:'rgba(231,76,60,0.12)' },
-  other:       { label:'Other',       color:'#5C7080', bg:'rgba(92,112,128,0.12)' },
-}
-function channelMeta(src) {
-  const key = String(src||'').toLowerCase().replace(/[^a-z]/g,'')
-  return CHANNEL_META[src] || CHANNEL_META[key] || CHANNEL_META.other
 }
 
 function getSegments(guest) {
@@ -102,15 +90,12 @@ function GuestCard({ guest, onClick }) {
           </span>
         )}
         {/* Channel badges */}
-        {sources.map(src => {
-          const m = channelMeta(src)
-          return (
-            <span key={src} style={{ fontSize:'0.65rem', fontWeight:'700', padding:'2px 6px',
-              borderRadius:'8px', color:m.color, background:m.bg }}>
-              {m.label}
-            </span>
-          )
-        })}
+        {sources.map(src => (
+          <span key={src} style={{ fontSize:'0.65rem', fontWeight:'700', padding:'2px 6px',
+            borderRadius:'8px', ...channelPillStyle(src) }}>
+            {channelLabel(src)}
+          </span>
+        ))}
       </div>
 
       {/* Sub-line */}
@@ -200,11 +185,10 @@ function GuestDetail({ guest, onClose }) {
             <div className="net-row">
               <span className="net-label">Booked via</span>
               <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
-                {sources.map(src => {
-                  const m = channelMeta(src)
-                  return <span key={src} style={{ fontSize:'0.72rem', fontWeight:'700',
-                    padding:'2px 7px', borderRadius:'8px', color:m.color, background:m.bg }}>{m.label}</span>
-                })}
+                {sources.map(src => (
+                  <span key={src} style={{ fontSize:'0.72rem', fontWeight:'700',
+                    padding:'2px 7px', borderRadius:'8px', ...channelPillStyle(src) }}>{channelLabel(src)}</span>
+                ))}
               </div>
             </div>
             {/* Location */}
@@ -434,14 +418,13 @@ function MarketingTab() {
       <div style={{ background:'var(--dark-card)', borderRadius:'12px',
         border:'1px solid var(--border-dim)', overflow:'hidden', marginBottom:'14px' }}>
         {(stats.channels||[]).map((ch,i) => {
-          const m = channelMeta(ch.channel)
           return (
             <div key={i} style={{ padding:'12px 16px',
               borderBottom: i < stats.channels.length-1 ? '1px solid var(--border-dim)' : 'none' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
                   <span style={{ fontSize:'0.75rem', fontWeight:'700', padding:'2px 8px',
-                    borderRadius:'8px', color:m.color, background:m.bg }}>{m.label}</span>
+                    borderRadius:'8px', ...channelPillStyle(ch.channel) }}>{channelLabel(ch.channel)}</span>
                   <span style={{ color:'var(--text-dim)', fontSize:'0.75rem' }}>
                     {ch.bookings} bookings · {ch.unique_guests} guests
                   </span>

@@ -5,7 +5,7 @@
 const KNOWN = {
   direct:       'Direct',
   airbnb:       'Airbnb',
-  'booking.com':'Booking.com', bookingcom: 'Booking.com', booking: 'Booking.com',
+  'booking.com':'Booking.com', bookingcom: 'Booking.com', booking: 'Booking.com', booking_com: 'Booking.com',
   expedia:      'Expedia',
   vrbo:         'VRBO',
   makemytrip:   'MakeMyTrip', mmt: 'MakeMyTrip',

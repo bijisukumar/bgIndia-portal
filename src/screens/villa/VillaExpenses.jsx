@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const TODAY = localTodayStr()
 
@@ -35,7 +36,7 @@ const EMPTY_FORM = { date: TODAY, category: '', amount: '', description: '', pai
 
 export default function VillaExpenses() {
   const navigate   = useNavigate()
-  const villaId     = 'dwarka'
+  const villaId     = DEFAULT_VILLA_ID
   const [tab, setTab]       = useState('add')        // 'add' | 'history'
   const [saving, setSaving] = useState(false)
   const [toast, setToast]   = useState(null)

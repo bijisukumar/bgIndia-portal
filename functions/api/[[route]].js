@@ -197,7 +197,7 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
   }
   if (DB) {
     try {
-      await DB.prepare(`INSERT INTO alert_log (log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at) VALUES (?,?,?,?,?,?,?,?)`)
+      await DB.prepare(`INSERT INTO infra_alert_log (log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at) VALUES (?,?,?,?,?,?,?,?)`)
         .bind(genId('AL'), villaId || null, subject, recipient, ok ? 1 : 0, statusCode, detail ? detail.slice(0, 500) : null, new Date().toISOString().slice(0, 19).replace('T', ' '))
         .run()
     } catch (e) { console.error('alert_log insert failed:', e?.message || e) }
@@ -212,7 +212,7 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
 // OWNER_EMAIL env secret, then a hardcoded last resort.
 async function getOwnerAlertEmail(DB, env, villaId) {
   try {
-    const row = await DB.prepare(`SELECT value FROM villa_settings WHERE villa_id = ? AND key = 'owner_email_alert'`).bind(villaId || 'dwarka').first()
+    const row = await DB.prepare(`SELECT value FROM stayvibe_villa_settings WHERE villa_id = ? AND key = 'owner_email_alert'`).bind(villaId || env.DEFAULT_VILLA_ID || 'dwarka').first()
     if (row?.value) return row.value
   } catch (e) { console.error('getOwnerAlertEmail lookup failed:', e?.message || e) }
   return env.OWNER_EMAIL || 'bijits@hotmail.com'
@@ -230,7 +230,7 @@ async function getOwnerAlertEmail(DB, env, villaId) {
 async function getResendApiKey(DB, env) {
   if (env.RESEND_API_KEY) return env.RESEND_API_KEY
   try {
-    const row = await DB.prepare(`SELECT value FROM villa_settings WHERE villa_id = 'dwarka' AND key = '_resend_api_key'`).first()
+    const row = await DB.prepare(`SELECT value FROM stayvibe_villa_settings WHERE villa_id = ? AND key = '_resend_api_key'`).bind(env.DEFAULT_VILLA_ID || 'dwarka').first()
     if (row?.value) return row.value
   } catch (e) { console.error('getResendApiKey DB lookup failed:', e?.message || e) }
   return null
@@ -348,7 +348,7 @@ function genId(prefix) {
 async function syncStayLedger(DB, stayId) {
   try {
     if (!stayId) return
-    const s = await DB.prepare(`SELECT stay_id, villa_id, gross, commission_amt, net, extra_charges, cleaning_fee, night_fee, guest_service_fee FROM stays WHERE stay_id = ?`).bind(stayId).first()
+    const s = await DB.prepare(`SELECT stay_id, villa_id, gross, commission_amt, net, extra_charges, cleaning_fee, night_fee, guest_service_fee FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
     if (!s) return
     const r2 = x => Math.round((Number(x) || 0) * 100) / 100
     const cleaning = r2(s.cleaning_fee)
@@ -369,9 +369,9 @@ async function syncStayLedger(DB, stayId) {
     if (comm > 0)       add('channel_commission', 'outflow', comm, 'adapter')
     if (gsf > 0)        add('guest_service_fee', 'passthrough', gsf, 'adapter')  // excluded from P&L
 
-    const stmts = [DB.prepare(`DELETE FROM booking_line_items WHERE stay_id = ?`).bind(stayId)]
+    const stmts = [DB.prepare(`DELETE FROM stayvibe_booking_line_items WHERE stay_id = ?`).bind(stayId)]
     for (const l of lines) {
-      stmts.push(DB.prepare(`INSERT INTO booking_line_items (line_id, stay_id, villa_id, item_type, direction, gross_amount, tax_amount, note) VALUES (?,?,?,?,?,?,0,?)`)
+      stmts.push(DB.prepare(`INSERT INTO stayvibe_booking_line_items (line_id, stay_id, villa_id, item_type, direction, gross_amount, tax_amount, note) VALUES (?,?,?,?,?,?,0,?)`)
         .bind(l.id, stayId, s.villa_id || null, l.type, l.dir, l.amt, l.note))
     }
     if (lines.length) {
@@ -379,7 +379,7 @@ async function syncStayLedger(DB, stayId) {
         lines.filter(l => ['room_fee','cleaning_fee','extra_charge'].includes(l.type)).reduce((a,l) => a + l.amt, 0)
         - lines.filter(l => l.type === 'discount').reduce((a,l) => a + l.amt, 0))
       const commission = r2(lines.filter(l => l.type === 'channel_commission').reduce((a,l) => a + l.amt, 0))
-      stmts.push(DB.prepare(`UPDATE stays SET gross = ?, commission_amt = ?, net = ? WHERE stay_id = ?`)
+      stmts.push(DB.prepare(`UPDATE stayvibe_stays SET gross = ?, commission_amt = ?, net = ? WHERE stay_id = ?`)
         .bind(gross, commission, r2(gross - commission), stayId))
     }
     await DB.batch(stmts)
@@ -399,15 +399,15 @@ async function resolveGuest(DB, { name, phone, email, actor = 'auto' }) {
   const normEmail = (email || '').trim().toLowerCase()
   if (!normPhone && !normEmail) return null
   const existing = await DB.prepare(
-    `SELECT guest_id FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+    `SELECT guest_id FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
   ).bind(normPhone, normEmail).first()
   if (existing) {
-    await DB.prepare(`UPDATE guests SET last_seen_at = datetime('now'), updated_by = ?, updated_at = datetime('now') WHERE guest_id = ?`)
+    await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = datetime('now'), updated_by = ?, updated_at = datetime('now') WHERE guest_id = ?`)
       .bind(actor, existing.guest_id).run()
     return existing.guest_id
   }
   const guestId = genId('GST')
-  await DB.prepare(`INSERT INTO guests (guest_id, name, phone, email, created_by, updated_by) VALUES (?,?,?,?,?,?)`)
+  await DB.prepare(`INSERT INTO stayvibe_guests (guest_id, name, phone, email, created_by, updated_by) VALUES (?,?,?,?,?,?)`)
     .bind(guestId, name || 'Unknown', normPhone, normEmail, actor, actor).run()
   return guestId
 }
@@ -425,7 +425,7 @@ async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, e
   const co = checkoutDate || checkinDate
   const { results } = await DB.prepare(
     `SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, status, source, created_at, guest_id
-       FROM stays
+       FROM stayvibe_stays
       WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
         AND stay_id != ?
         AND checkin_date <= ? AND checkout_date >= ?`
@@ -464,6 +464,10 @@ export async function onRequest(ctx) {
   const { request, env } = ctx
   const DB         = env.DB || env.bgindia_db
   const DB_ESTATES = env.DB_ESTATES
+  // Per-host default villa id (set via wrangler.toml [vars] — see
+  // Release 2.1 de-hardcode: each host's deployment sets its own value,
+  // falls back to 'dwarka' for the current single-host deployment).
+  const DEFAULT_VILLA_ID = env.DEFAULT_VILLA_ID || 'dwarka'
 
   if (!DB) {
     console.error('DB binding missing — env keys:', Object.keys(env).join(', '))
@@ -476,7 +480,7 @@ export async function onRequest(ctx) {
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest',
     'getRubberHarvests',  'saveRubberHarvest',
-    'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction',
+    'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction', 'getRubberMonthly',
     'getManagerSettlements', 'saveManagerSettlement', 'deleteManagerSettlement',
     'getEstateTransactions', 'saveEstateTransaction', 'deleteEstateTransaction',
     'getEstateDashboard',
@@ -574,7 +578,7 @@ export async function onRequest(ctx) {
     try {
       const publicBody = await request.json().catch(() => ({}))
       const {
-        villaId = 'dwarka', partner = 'direct', stayId: existingStayId,
+        villaId = DEFAULT_VILLA_ID, partner = 'direct', stayId: existingStayId,
         guestName, dob, gender, nationality = 'Indian',
         phone, email,
         homeAddress, city, state, pincode, country = 'India', fromCity,
@@ -633,7 +637,7 @@ export async function onRequest(ctx) {
 
       if (stayId) {
         await DB.prepare(`
-          UPDATE stays SET
+          UPDATE stayvibe_stays SET
             guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
             guest_email = COALESCE(NULLIF(guest_email,''), ?),
             dob = ?, gender = ?, nationality = ?,
@@ -680,7 +684,7 @@ export async function onRequest(ctx) {
           ? Math.max(1, Math.round((new Date(checkOutDate) - new Date(checkInDate)) / 86400000))
           : 1)
         await DB.prepare(`
-          INSERT INTO stays (
+          INSERT INTO stayvibe_stays (
             stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, children, gross, net,
             dob, gender, nationality,
@@ -729,14 +733,14 @@ export async function onRequest(ctx) {
       // Stamp the resolved guest link (Phase 1 column) — starts populating
       // stays.guest_id for the check-in-form path, which never wrote it before.
       if (guestId) {
-        await DB.prepare(`UPDATE stays SET guest_id = COALESCE(guest_id, ?) WHERE stay_id = ?`).bind(guestId, stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET guest_id = COALESCE(guest_id, ?) WHERE stay_id = ?`).bind(guestId, stayId).run()
       }
 
       // Extension / date-change on the guest's own booking → flag for review
       // rather than silently trusting guest-entered dates.
       if (reviewNote) {
         await DB.prepare(
-          `UPDATE stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), status = 'pending_review', updated_at = datetime('now') WHERE stay_id = ?`
+          `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), status = 'pending_review', updated_at = datetime('now') WHERE stay_id = ?`
         ).bind(reviewNote, stayId).run()
       }
 
@@ -752,12 +756,12 @@ export async function onRequest(ctx) {
            Math.max(new Date(dupOtherStay.checkin_date), new Date(checkInDate))) / 86400000))
         try {
           await DB.prepare(
-            `INSERT INTO duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights)
+            `INSERT INTO stayvibe_duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights)
              VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`
           ).bind(`DUP-${Date.now()}`, villaId, dupOtherStay.stay_id, dupOtherStay.guest_name, dupOtherStay.checkin_date, dupOtherStay.checkout_date, dupOtherStay.source || 'unknown', dupOtherStay.created_at || null, safeGuestName, checkInDate, checkOutDate || null, 'checkin_form', null, overlapNights).run()
         } catch (e) { console.error('dup log (checkin form):', e?.message || e) }
         await DB.prepare(
-          `UPDATE stays SET status='pending_review', notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_at = datetime('now') WHERE stay_id = ?`
+          `UPDATE stayvibe_stays SET status='pending_review', notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_at = datetime('now') WHERE stay_id = ?`
         ).bind(`Overlaps existing stay ${dupOtherStay.stay_id} (${dupOtherStay.guest_name}) ${dupOtherStay.checkin_date}→${dupOtherStay.checkout_date} — possible double booking.`, stayId).run()
         try {
           await sendAlert(env, '🚨 Possible double booking (check-in form) — ' + villaId, [
@@ -775,7 +779,7 @@ export async function onRequest(ctx) {
       if (idFileB64) {
         try {
           await DB.prepare(
-            `INSERT OR REPLACE INTO guest_documents
+            `INSERT OR REPLACE INTO stayvibe_guest_documents
              (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
              VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
           ).bind(docId('id', stayId), stayId, 'govt_id', idFileName || ('ID-' + stayId + '.jpg'), idFileB64).run()
@@ -784,7 +788,7 @@ export async function onRequest(ctx) {
       if (publicBody.passportFileB64) {
         try {
           await DB.prepare(
-            `INSERT OR REPLACE INTO guest_documents
+            `INSERT OR REPLACE INTO stayvibe_guest_documents
              (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
              VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
           ).bind(docId('passport', stayId), stayId, 'passport', 'passport-' + stayId + '.jpg', publicBody.passportFileB64).run()
@@ -793,7 +797,7 @@ export async function onRequest(ctx) {
       if (publicBody.visaFileB64) {
         try {
           await DB.prepare(
-            `INSERT OR REPLACE INTO guest_documents
+            `INSERT OR REPLACE INTO stayvibe_guest_documents
              (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
              VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
           ).bind(docId('visa', stayId), stayId, 'visa', 'visa-' + stayId + '.jpg', publicBody.visaFileB64).run()
@@ -805,7 +809,7 @@ export async function onRequest(ctx) {
       console.error('submitGuestCheckIn crash:', submitErr.message)
       try {
         await DB.prepare(
-          `INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
+          `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at)
            VALUES (?, 'error', 'unknown', ?, datetime('now'))`
         ).bind('ERR-' + Date.now(), 'submitGuestCheckIn failed: ' + submitErr.message).run()
       } catch(logErr) {}
@@ -870,11 +874,11 @@ export async function onRequest(ctx) {
     const { token: linkToken } = rlBody
     if (!linkToken) return err('token required')
     const link = await DB.prepare(
-      `SELECT token, villa_id, partner, label, is_active FROM checkin_links WHERE token = ?`
+      `SELECT token, villa_id, partner, label, is_active FROM stayvibe_checkin_links WHERE token = ?`
     ).bind(linkToken).first()
     if (!link) return json({ success: false, error: 'Invalid link' }, 404)
     if (!link.is_active) return json({ success: false, error: 'Link deactivated' }, 403)
-    await DB.prepare(`UPDATE checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`).bind(new Date().toISOString().slice(0, 19).replace('T', ' '), linkToken).run()
+    await DB.prepare(`UPDATE stayvibe_checkin_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`).bind(new Date().toISOString().slice(0, 19).replace('T', ' '), linkToken).run()
     return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
   }
 
@@ -903,13 +907,13 @@ export async function onRequest(ctx) {
     if (method === 'GET') {
 
       if (action === 'getTenantConfig') {
-        const tenantId = url.searchParams.get('tenantId') || 'dwarka'
+        const tenantId = url.searchParams.get('tenantId') || DEFAULT_VILLA_ID
         const tenant = await DB.prepare(
           `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
                   address, checkin_time, checkout_time,
                   breakfast_rate, raman_comm_pct, logo_url, plan,
                   owner_email, owner_email_cc, drive_root_id
-           FROM tenants WHERE tenant_id = ? AND active = 1`
+           FROM platform_tenants WHERE tenant_id = ? AND active = 1`
         ).bind(tenantId).first()
         if (!tenant) return err('Tenant not found', 404)
         return json({ success: true, data: {
@@ -932,11 +936,11 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getStays') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results } = year === 'all'
-          ? await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? ORDER BY checkin_date DESC`).bind(villaId).all()
-          : await DB.prepare(`SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? ORDER BY checkin_date DESC`).bind(villaId, `${year}%`).all()
+          ? await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? ORDER BY checkin_date DESC`).bind(villaId).all()
+          : await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? ORDER BY checkin_date DESC`).bind(villaId, `${year}%`).all()
         const mapped = results.map(r => ({
           ...r,
           stayId:          r.stay_id,
@@ -968,10 +972,10 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRecentCheckouts') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
-           FROM stays WHERE villa_id = ?
+           FROM stayvibe_stays WHERE villa_id = ?
            AND status IN ('checked_out', 'closed')
            ORDER BY checkout_date DESC LIMIT 2`
         ).bind(villaId).all()
@@ -979,11 +983,11 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getActiveStay') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         // "Today" in IST — a stay is only live once its check-in date has arrived.
         const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
         const stay = await DB.prepare(
-          `SELECT * FROM stays
+          `SELECT * FROM stayvibe_stays
              WHERE villa_id = ? AND status = 'checked_in' AND checkin_date <= ?
              ORDER BY checkin_date DESC LIMIT 1`
         ).bind(villaId, todayIST).first()
@@ -1001,7 +1005,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getPendingCheckIns') {
         const { results } = await DB.prepare(
-          `SELECT * FROM stays WHERE status = 'ready_for_checkin' ORDER BY checkin_date ASC`
+          `SELECT * FROM stayvibe_stays WHERE status = 'ready_for_checkin' ORDER BY checkin_date ASC`
         ).all()
         return json({ success: true, data: results })
       }
@@ -1023,7 +1027,7 @@ export async function onRequest(ctx) {
             MAX(state)          as state,
             MAX(country)        as country,
             GROUP_CONCAT(DISTINCT source) as all_sources
-           FROM stays WHERE status NOT IN ('cancelled','void')
+           FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')
            GROUP BY guest_name ORDER BY last_stay DESC`
         ).all()
         const guests = results.map(r => ({
@@ -1050,10 +1054,10 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getVillaDashboard') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results: stays } = await DB.prepare(
-          `SELECT * FROM stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
+          `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
         ).bind(villaId, `${year}%`).all()
 
         // Robust per-stay figures. Many rows (especially Airbnb-imported) have
@@ -1086,7 +1090,7 @@ export async function onRequest(ctx) {
         try {
           const { results: kitchenRows } = await DB.prepare(
             `SELECT strftime('%m', created_at) as month, SUM(total) as total
-             FROM stay_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
+             FROM stayvibe_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
           ).bind(String(year)).all()
           kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month), r.total||0]))
         } catch(e) {}
@@ -1101,8 +1105,8 @@ export async function onRequest(ctx) {
                    SUM(si.qty) as qty_sold,
                    SUM(si.total) as revenue,
                    SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
-            FROM stay_incidentals si
-            LEFT JOIN inventory i ON i.item_id = si.inv_item_id
+            FROM stayvibe_incidentals si
+            LEFT JOIN stayvibe_inventory i ON i.item_id = si.inv_item_id
             WHERE strftime('%Y', si.created_at) = ?
             GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
             ORDER BY revenue DESC
@@ -1123,7 +1127,7 @@ export async function onRequest(ctx) {
         let lowStockCount = 0
         try {
           const { results: lowStock } = await DB.prepare(`
-            SELECT COUNT(*) as c FROM inventory
+            SELECT COUNT(*) as c FROM stayvibe_inventory
             WHERE villa_id = ? AND preferred_stock > 0 AND qty_in_stock <= (preferred_stock * 0.1)
           `).bind(villaId).all()
           lowStockCount = lowStock?.[0]?.c || 0
@@ -1180,14 +1184,14 @@ export async function onRequest(ctx) {
         try {
           const { results: lg } = await DB.prepare(`
             SELECT b.item_type, ROUND(SUM(b.gross_amount),2) AS total
-            FROM booking_line_items b JOIN stays s ON s.stay_id = b.stay_id
+            FROM stayvibe_booking_line_items b JOIN stayvibe_stays s ON s.stay_id = b.stay_id
             WHERE s.villa_id = ? AND s.checkin_date LIKE ? AND s.status NOT IN ('cancelled','void')
             GROUP BY b.item_type`).bind(villaId, `${year}%`).all()
           const t = {}
           ;(lg || []).forEach(r => { t[r.item_type] = r.total || 0 })
           const r2 = x => Math.round((Number(x) || 0) * 100) / 100
-          const staffRow = await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM raman_commissions WHERE strftime('%Y', checkin_date) = ?`).bind(String(year)).first()
-          const expRow   = await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM villa_expenses WHERE villa_id = ? AND strftime('%Y', date) = ?`).bind(villaId, String(year)).first()
+          const staffRow = await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions WHERE strftime('%Y', checkin_date) = ?`).bind(String(year)).first()
+          const expRow   = await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM stayvibe_villa_expenses WHERE villa_id = ? AND strftime('%Y', date) = ?`).bind(villaId, String(year)).first()
           const upsell            = r2(t.extra_charge)
           const grossLedger       = r2((t.room_fee || 0) + (t.cleaning_fee || 0) + (t.extra_charge || 0) - (t.discount || 0))
           const channelCommission = r2(t.channel_commission)
@@ -1218,7 +1222,7 @@ export async function onRequest(ctx) {
       if (action === 'getRamanUnpaid') {
         const { results } = await DB.prepare(
           `SELECT rc.*, COALESCE(s.review_rating, 0) as review_rating
-           FROM raman_commissions rc LEFT JOIN stays s ON s.stay_id = rc.stay_id
+           FROM stayvibe_manager_commissions rc LEFT JOIN stayvibe_stays s ON s.stay_id = rc.stay_id
            WHERE rc.is_paid = 0 ORDER BY rc.checkin_date ASC`
         ).all()
         const totalUnpaid = results.reduce((s, r) => s + (r.commission || 0), 0)
@@ -1239,7 +1243,7 @@ export async function onRequest(ctx) {
       if (action === 'getRamanHistory') {
         const { results } = await DB.prepare(
           `SELECT paid_date, COUNT(*) as stays, SUM(commission) as total
-           FROM raman_commissions WHERE is_paid = 1 GROUP BY paid_date ORDER BY paid_date DESC`
+           FROM stayvibe_manager_commissions WHERE is_paid = 1 GROUP BY paid_date ORDER BY paid_date DESC`
         ).all()
         return json({ success: true, data: results })
       }
@@ -1250,16 +1254,16 @@ export async function onRequest(ctx) {
         // raman_commissions row (e.g. commission was never auto-created).
         const { results: paidRows } = await DB.prepare(
           `SELECT comm_id, guest_name, checkin_date, nights, commission, paid_date
-           FROM raman_commissions WHERE is_paid = 1 ORDER BY checkin_date ASC`
+           FROM stayvibe_manager_commissions WHERE is_paid = 1 ORDER BY checkin_date ASC`
         ).all()
         const { results: unpaidRows } = await DB.prepare(
           `SELECT comm_id, guest_name, checkin_date, nights, commission
-           FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
+           FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
         ).all()
         const { results: missedRows } = await DB.prepare(
           `SELECT s.stay_id, s.guest_name, s.checkin_date, s.nights
-           FROM stays s
-           LEFT JOIN raman_commissions rc ON rc.stay_id = s.stay_id
+           FROM stayvibe_stays s
+           LEFT JOIN stayvibe_manager_commissions rc ON rc.stay_id = s.stay_id
            WHERE s.status IN ('checked_out','closed') AND rc.comm_id IS NULL
            ORDER BY s.checkin_date ASC`
         ).all()
@@ -1317,10 +1321,10 @@ export async function onRequest(ctx) {
       if (action === 'getRamanDashboard') {
         const { results: byYear } = await DB.prepare(
           `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year, SUM(commission) as total_paid, COUNT(*) as stays_paid
-           FROM raman_commissions WHERE is_paid = 1 GROUP BY year ORDER BY year DESC`
+           FROM stayvibe_manager_commissions WHERE is_paid = 1 GROUP BY year ORDER BY year DESC`
         ).all()
         const { results: unpaidRows } = await DB.prepare(
-          `SELECT comm_id, guest_name, checkin_date, nights, commission FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
+          `SELECT comm_id, guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
         ).all()
 
         const totalUnpaid = unpaidRows.reduce((s,r) => s + (r.commission||0), 0)
@@ -1347,7 +1351,7 @@ export async function onRequest(ctx) {
         const propId = url.searchParams.get('propId')
         const year   = url.searchParams.get('year') || new Date().getFullYear()
         const month  = url.searchParams.get('month')
-        let query = `SELECT * FROM rental_income WHERE year = ?`
+        let query = `SELECT * FROM rev360_rental_income WHERE year = ?`
         const binds = [year]
         if (propId) { query += ` AND prop_id = ?`; binds.push(propId) }
         if (month !== null && month !== undefined) { query += ` AND month = ?`; binds.push(parseInt(month)) }
@@ -1363,13 +1367,13 @@ export async function onRequest(ctx) {
         // property_expenses (replaces rental_income's expense columns).
         const rentRows = await DB.prepare(`
           SELECT prop_id, CAST(substr(period_month, 6, 2) AS INTEGER) as month, SUM(total_due) as income
-          FROM rent_transactions
+          FROM rev360_rent_transactions
           WHERE substr(period_month, 1, 4) = ?
           GROUP BY prop_id, month
         `).bind(String(year)).all()
         const expenseRows = await DB.prepare(`
           SELECT prop_id, month, SUM(total_expense) as expense
-          FROM property_expenses
+          FROM rev360_property_expenses
           WHERE year = ?
           GROUP BY prop_id, month
         `).bind(parseInt(year)).all()
@@ -1394,7 +1398,7 @@ export async function onRequest(ctx) {
       // COCONUT HARVESTS — Get History List
       if (action === 'getCoconutHarvests') {
         const year = url.searchParams.get('year')
-        let query = `SELECT * FROM coconut_harvests`
+        let query = `SELECT * FROM estate360_coconut_harvests`
         const binds = []
         if (year && year !== 'all') { query += ` WHERE harvest_date LIKE ?`; binds.push(`${year}%`) }
         query += ` ORDER BY harvest_date DESC`
@@ -1429,7 +1433,7 @@ export async function onRequest(ctx) {
       if (action === 'getRubberHarvests') {
         const year     = url.searchParams.get('year')
         const estateId = url.searchParams.get('estate') || 'pavutumuri'
-        let query = `SELECT * FROM rubber_harvests WHERE estate_id = ?`
+        let query = `SELECT * FROM estate360_rubber_harvests WHERE estate_id = ?`
         const binds = [estateId]
         if (year && year !== 'all') { query += ` AND harvest_date LIKE ?`; binds.push(`${year}%`) }
         query += ` ORDER BY harvest_date DESC`
@@ -1455,19 +1459,19 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getInventory') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const includeInactive = url.searchParams.get('includeInactive') === '1'
         const { results } = await DB.prepare(
           includeInactive
-            ? `SELECT * FROM inventory WHERE villa_id = ? ORDER BY category, name`
-            : `SELECT * FROM inventory WHERE villa_id = ? AND (active IS NULL OR active = 1) ORDER BY category, name`
+            ? `SELECT * FROM stayvibe_inventory WHERE villa_id = ? ORDER BY category, name`
+            : `SELECT * FROM stayvibe_inventory WHERE villa_id = ? AND (active IS NULL OR active = 1) ORDER BY category, name`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getInventoryPrices') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`SELECT item_id, cost_price, sell_price FROM inventory WHERE villa_id = ?`).bind(villaId).all()
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const { results } = await DB.prepare(`SELECT item_id, cost_price, sell_price FROM stayvibe_inventory WHERE villa_id = ?`).bind(villaId).all()
         const prices = Object.fromEntries(results.map(r => [r.item_id, { costPrice: r.cost_price, sellPrice: r.sell_price }]))
         return json({ success: true, data: prices })
       }
@@ -1476,19 +1480,19 @@ export async function onRequest(ctx) {
         // Per-night tariff by villa + billable guest count (1-12). Used by the
         // "Get pricing" button on the enquiry screen, and reusable later by a
         // guest-facing quick-pricing screen — same shape either way.
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const { results } = await DB.prepare(
-          `SELECT guest_count, tariff_per_night FROM villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+          `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
         ).bind(villaId).all()
         const rateCard = results.map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night }))
         return json({ success: true, data: { villaId, rateCard } })
       }
 
       if (action === 'getInventoryRestockLog') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const limit   = parseInt(url.searchParams.get('limit') || '50', 10)
         const { results } = await DB.prepare(
-          `SELECT * FROM inventory_restock_log WHERE villa_id = ? ORDER BY created_at DESC LIMIT ?`
+          `SELECT * FROM stayvibe_inventory_restock_log WHERE villa_id = ? ORDER BY created_at DESC LIMIT ?`
         ).bind(villaId, limit).all()
         return json({ success: true, data: results })
       }
@@ -1537,18 +1541,18 @@ export async function onRequest(ctx) {
       if (action === 'runQuery') {
         const key = url.searchParams.get('key')
         const PRESET_QUERIES = {
-          total_stays:       `SELECT COUNT(*) as total FROM stays`,
-          by_channel:        `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY source ORDER BY total_net DESC`,
-          by_year:           `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as bookings, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY year ORDER BY year DESC`,
-          top_guests:        `SELECT guest_name, COUNT(*) as visits, ROUND(SUM(net),0) as total_spent FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY guest_name HAVING visits > 1 ORDER BY visits DESC LIMIT 10`,
-          recent_5:          `SELECT stay_id, guest_name, checkin_date, source, ROUND(net,0) as net, status FROM stays ORDER BY checkin_date DESC LIMIT 5`,
-          raman_unpaid:      `SELECT guest_name, checkin_date, nights, commission FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC`,
-          raman_summary:     `SELECT is_paid, COUNT(*) as count, SUM(commission) as total FROM raman_commissions GROUP BY is_paid`,
-          inventory_stock:   `SELECT name, category, qty_in_stock, sell_price FROM inventory WHERE villa_id = 'dwarka' ORDER BY category, name`,
-          low_stock:         `SELECT name, qty_in_stock, sell_price FROM inventory WHERE villa_id = 'dwarka' AND qty_in_stock <= 3 ORDER BY qty_in_stock`,
-          rental_ytd:        `SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax) as expense, SUM(net) as net FROM rental_income WHERE year = strftime('%Y','now') GROUP BY prop_id`,
-          direct_conversion: `SELECT source, COUNT(*) as bookings FROM stays WHERE status NOT IN ('cancelled','void') GROUP BY source`,
-          avg_tariff_year:   `SELECT strftime('%Y', checkin_date) as year, ROUND(AVG(tariff_per_night),0) as avg_tariff, ROUND(AVG(nights),1) as avg_nights FROM stays WHERE status NOT IN ('cancelled','void') AND tariff_per_night > 0 GROUP BY year ORDER BY year DESC`,
+          total_stays:       `SELECT COUNT(*) as total FROM stayvibe_stays`,
+          by_channel:        `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY source ORDER BY total_net DESC`,
+          by_year:           `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as bookings, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY year ORDER BY year DESC`,
+          top_guests:        `SELECT guest_name, COUNT(*) as visits, ROUND(SUM(net),0) as total_spent FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY guest_name HAVING visits > 1 ORDER BY visits DESC LIMIT 10`,
+          recent_5:          `SELECT stay_id, guest_name, checkin_date, source, ROUND(net,0) as net, status FROM stayvibe_stays ORDER BY checkin_date DESC LIMIT 5`,
+          raman_unpaid:      `SELECT guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC`,
+          raman_summary:     `SELECT is_paid, COUNT(*) as count, SUM(commission) as total FROM stayvibe_manager_commissions GROUP BY is_paid`,
+          inventory_stock:   `SELECT name, category, qty_in_stock, sell_price FROM stayvibe_inventory WHERE villa_id = '${DEFAULT_VILLA_ID}' ORDER BY category, name`,
+          low_stock:         `SELECT name, qty_in_stock, sell_price FROM stayvibe_inventory WHERE villa_id = '${DEFAULT_VILLA_ID}' AND qty_in_stock <= 3 ORDER BY qty_in_stock`,
+          rental_ytd:        `SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax) as expense, SUM(net) as net FROM rev360_rental_income WHERE year = strftime('%Y','now') GROUP BY prop_id`,
+          direct_conversion: `SELECT source, COUNT(*) as bookings FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY source`,
+          avg_tariff_year:   `SELECT strftime('%Y', checkin_date) as year, ROUND(AVG(tariff_per_night),0) as avg_tariff, ROUND(AVG(nights),1) as avg_nights FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') AND tariff_per_night > 0 GROUP BY year ORDER BY year DESC`,
         }
         const sql = PRESET_QUERIES[key]
         if (!sql) return err(`Unknown query key: ${key}`)
@@ -1557,36 +1561,36 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getMarketingStats') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const statYear = url.searchParams.get('statYear') || null
 
         const cityQuery = statYear
-          ? `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date LIKE ? GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
-          : `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
+          ? `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date LIKE ? GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
+          : `SELECT COALESCE(NULLIF(from_city,''), NULLIF(city,''), 'Unknown') as city_name, COALESCE(NULLIF(state,''), '') as state_name, COALESCE(NULLIF(country,''), 'India') as country_name, COUNT(DISTINCT guest_name) as guest_count, COUNT(*) as booking_count, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY city_name, state_name, country_name ORDER BY guest_count DESC`
         const cityBinds = statYear ? [villaId, `${statYear}%`] : [villaId]
         const { results: cityRows } = await DB.prepare(cityQuery).bind(...cityBinds).all()
 
         const { results: purposeRows } = await DB.prepare(
-          `SELECT CASE WHEN LOWER(notes) LIKE '%wedding%' THEN 'Wedding' WHEN LOWER(notes) LIKE '%temple%' OR LOWER(notes) LIKE '%guruvayur%' THEN 'Temple / Pilgrimage' WHEN LOWER(notes) LIKE '%tourism%' OR LOWER(notes) LIKE '%holiday%' OR LOWER(notes) LIKE '%vacation%' THEN 'Tourism' WHEN LOWER(notes) LIKE '%family%' THEN 'Family Visit' WHEN LOWER(notes) LIKE '%arangettam%' THEN 'Arangettam' WHEN LOWER(notes) LIKE '%kerala%' THEN 'Kerala Tour' ELSE 'Other' END as purpose, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as guests, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY purpose ORDER BY bookings DESC`
+          `SELECT CASE WHEN LOWER(notes) LIKE '%wedding%' THEN 'Wedding' WHEN LOWER(notes) LIKE '%temple%' OR LOWER(notes) LIKE '%guruvayur%' THEN 'Temple / Pilgrimage' WHEN LOWER(notes) LIKE '%tourism%' OR LOWER(notes) LIKE '%holiday%' OR LOWER(notes) LIKE '%vacation%' THEN 'Tourism' WHEN LOWER(notes) LIKE '%family%' THEN 'Family Visit' WHEN LOWER(notes) LIKE '%arangettam%' THEN 'Arangettam' WHEN LOWER(notes) LIKE '%kerala%' THEN 'Kerala Tour' ELSE 'Other' END as purpose, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as guests, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY purpose ORDER BY bookings DESC`
         ).bind(villaId).all()
 
         const { results: channelRows } = await DB.prepare(
-          `SELECT source as channel, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as unique_guests, ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue, ROUND(SUM(COALESCE(net,0)),0) as net_revenue, ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY source ORDER BY net_revenue DESC`
+          `SELECT source as channel, COUNT(*) as bookings, COUNT(DISTINCT guest_name) as unique_guests, ROUND(SUM(COALESCE(gross,0)),0) as gross_revenue, ROUND(SUM(COALESCE(net,0)),0) as net_revenue, ROUND(SUM(COALESCE(commission_amt,0)),0) as total_commission FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') GROUP BY source ORDER BY net_revenue DESC`
         ).bind(villaId).all()
 
         const { results: staleRows } = await DB.prepare(
-          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stays WHERE status NOT IN ('cancelled','void')`
+          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')`
         ).all()
 
         const { results: monthRows } = await DB.prepare(
-          `SELECT strftime('%Y', checkin_date) as year, strftime('%m', checkin_date) as month, COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region, COUNT(DISTINCT guest_name) as guests, COUNT(*) as bookings, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND from_city IS NOT NULL AND from_city != '' GROUP BY year, month, region ORDER BY year DESC, month ASC`
+          `SELECT strftime('%Y', checkin_date) as year, strftime('%m', checkin_date) as month, COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region, COUNT(DISTINCT guest_name) as guests, COUNT(*) as bookings, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND from_city IS NOT NULL AND from_city != '' GROUP BY year, month, region ORDER BY year DESC, month ASC`
         ).bind(villaId).all()
 
         return json({ success: true, data: { cities: cityRows, purposes: purposeRows, channels: channelRows, stale: staleRows[0] || {}, monthlyByRegion: monthRows, statYear: statYear || 'all' } })
       }
 
       if (action === 'getOpenStays') {
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status FROM stays WHERE status IN ('booked','confirmed','docs_uploaded') ORDER BY checkin_date ASC`).all()
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status FROM stayvibe_stays WHERE status IN ('booked','confirmed','docs_uploaded') ORDER BY checkin_date ASC`).all()
         return json({ success: true, data: results.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status })) })
       }
 
@@ -1595,7 +1599,7 @@ export async function onRequest(ctx) {
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, request_breakfast, breakfast_choice, request_cab, govt_id_type, govt_id_num FROM stays WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, request_breakfast, breakfast_choice, request_cab, govt_id_type, govt_id_num FROM stayvibe_stays WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
         ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
@@ -1610,15 +1614,15 @@ export async function onRequest(ctx) {
         if (!guestName || !reviewDate) return err('guestName and reviewDate required')
         const windowStart = new Date(reviewDate)
         windowStart.setDate(windowStart.getDate() - 14)
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled','void') ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate).all()
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stayvibe_stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled','void') ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate).all()
         if (results.length > 0) return json({ success: true, data: { stayId: results[0].stay_id, guestName: results[0].guest_name }})
         return json({ success: true, data: null })
       }
 
       if (action === 'getRamanTodo') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
-        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review') AND checkin_date >= date('now') AND checkin_date <= date('now', '+7 days') ORDER BY checkin_date ASC`).bind(villaId).all()
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stayvibe_stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
+        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review') AND checkin_date >= date('now') AND checkin_date <= date('now', '+7 days') ORDER BY checkin_date ASC`).bind(villaId).all()
         return json({ success: true, data: {
           overdue: overdueRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkInDate: r.checkin_date, checkOutDate: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, status: r.status, daysOver: Math.floor((new Date() - new Date(r.checkout_date)) / 86400000) })),
           upcoming: upcomingRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkInDate: r.checkin_date, checkOutDate: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, status: r.status, daysUntil: Math.floor((new Date(r.checkin_date) - new Date()) / 86400000) + 1 }))
@@ -1630,13 +1634,13 @@ export async function onRequest(ctx) {
       // turnover allowed: checkout day == requested check-in is NOT a
       // conflict). Nearby = stays within ±3 days for turnover context.
       if (action === 'checkAvailability') {
-        const villaId  = url.searchParams.get('villaId') || 'dwarka'
+        const villaId  = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const checkIn  = url.searchParams.get('checkIn')
         const checkOut = url.searchParams.get('checkOut')
         if (!checkIn || !checkOut || checkOut <= checkIn) return err('checkIn and checkOut (after checkIn) required')
         const { results } = await DB.prepare(`
           SELECT stay_id, guest_name, checkin_date, checkout_date, source, status
-          FROM stays
+          FROM stayvibe_stays
           WHERE villa_id = ?
             AND status NOT IN ('cancelled','void')
             AND checkout_date IS NOT NULL AND checkout_date != ''
@@ -1652,7 +1656,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getUpcomingStays') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, guest_phone, guest_email,
                   checkin_date, checkout_date, nights, adults, children,
@@ -1668,7 +1672,7 @@ export async function onRequest(ctx) {
                   request_extra_beds, extra_beds_count,
                   nationality, purpose_of_visit, mode_of_transport, eta,
                   booked_by_guest_id, booked_by_name
-           FROM stays
+           FROM stayvibe_stays
            WHERE villa_id = ?
              AND status NOT IN ('closed','cancelled','void')
              AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
@@ -1678,7 +1682,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRentalAgreements') {
-        const { results } = await DB.prepare(`SELECT * FROM rental_props ORDER BY prop_id`).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_rental_props ORDER BY prop_id`).all()
         return json({ success: true, data: results })
       }
 
@@ -1706,8 +1710,8 @@ export async function onRequest(ctx) {
             pd.has_parking as hasParking, pd.furnishing,
             pd.elec_consumer_id as electricityConsumerNo,
             pd.address_line1, pd.address_line2, pd.city, pd.state_province, pd.postal_code, pd.country as detailsCountry
-          FROM rental_props rp
-          LEFT JOIN property_details pd ON pd.prop_id = rp.prop_id
+          FROM rev360_rental_props rp
+          LEFT JOIN rev360_property_details pd ON pd.prop_id = rp.prop_id
           ORDER BY rp.prop_id
         `).all()
         // Build the same fullAddress convenience field RentalAgreement.jsx
@@ -1727,41 +1731,41 @@ export async function onRequest(ctx) {
       if (action === 'getPropertyDetails') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const row = await DB.prepare(`SELECT * FROM property_details WHERE prop_id = ?`).bind(propId).first()
+        const row = await DB.prepare(`SELECT * FROM rev360_property_details WHERE prop_id = ?`).bind(propId).first()
         return json({ success: true, data: row || null })
       }
 
       if (action === 'getHoaHistory') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM hoa_history WHERE prop_id = ? ORDER BY effective_date DESC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_hoa_history WHERE prop_id = ? ORDER BY effective_date DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getTaxHistory') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM tax_history WHERE prop_id = ? ORDER BY tax_year DESC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_tax_history WHERE prop_id = ? ORDER BY tax_year DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getPropertyDocs') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM property_documents WHERE prop_id = ? ORDER BY category, created_at DESC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_property_documents WHERE prop_id = ? ORDER BY category, created_at DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getLeaseLosses') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM lease_losses WHERE prop_id = ? ORDER BY created_at DESC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_lease_losses WHERE prop_id = ? ORDER BY created_at DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getRev360Dashboard') {
         const year = new Date().getFullYear()
-        const props = await DB.prepare(`SELECT * FROM rental_props ORDER BY prop_id`).all()
+        const props = await DB.prepare(`SELECT * FROM rev360_rental_props ORDER BY prop_id`).all()
         // Income: rent_transactions (base_rent + maintenance + car_parking + late_fee,
         // i.e. total_due) is the new source of truth, replacing rental_income's
         // combined rent+car_parking column -- rental_income can't represent a
@@ -1770,7 +1774,7 @@ export async function onRequest(ctx) {
         // read here.
         const rentIncome = await DB.prepare(`
           SELECT prop_id, SUM(total_due) as income, COUNT(*) as months_entered
-          FROM rent_transactions
+          FROM rev360_rent_transactions
           WHERE substr(period_month, 1, 4) = ?
           GROUP BY prop_id
         `).bind(String(year)).all()
@@ -1778,7 +1782,7 @@ export async function onRequest(ctx) {
         // columns (electricity/water/property_tax/land_tax/extra_maintenance).
         const propExpense = await DB.prepare(`
           SELECT prop_id, SUM(total_expense) as expense
-          FROM property_expenses
+          FROM rev360_property_expenses
           WHERE year = ?
           GROUP BY prop_id
         `).bind(year).all()
@@ -1795,19 +1799,19 @@ export async function onRequest(ctx) {
           byProp[r.prop_id].expense = r.expense || 0
         })
         const income = Object.values(byProp).map(r => ({ ...r, net: r.income - r.expense }))
-        const losses = await DB.prepare(`SELECT prop_id, SUM(amount) as total_claimed, SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off, SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered, COUNT(*) as claim_count FROM lease_losses GROUP BY prop_id`).all()
+        const losses = await DB.prepare(`SELECT prop_id, SUM(amount) as total_claimed, SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off, SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered, COUNT(*) as claim_count FROM rev360_lease_losses GROUP BY prop_id`).all()
         const renewalAlerts = await DB.prepare(`
           SELECT prop_id, name, tenant_name, lease_end, status,
             CAST((julianday(lease_end) - julianday('now')) AS INTEGER) as days_left,
             'main' as unit_type
-          FROM rental_props
+          FROM rev360_rental_props
           WHERE lease_end IS NOT NULL AND lease_end != ''
             AND julianday(lease_end) - julianday('now') <= 90
           UNION ALL
           SELECT prop_id, name, parking_tenant_name as tenant_name, parking_lease_end as lease_end, status,
             CAST((julianday(parking_lease_end) - julianday('now')) AS INTEGER) as days_left,
             'parking' as unit_type
-          FROM rental_props
+          FROM rev360_rental_props
           WHERE has_separate_parking = 1
             AND parking_lease_end IS NOT NULL AND parking_lease_end != ''
             AND julianday(parking_lease_end) - julianday('now') <= 30
@@ -1819,7 +1823,7 @@ export async function onRequest(ctx) {
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
-        const { results } = await DB.prepare(`SELECT doc_id, stay_id, doc_type, file_name, file_b64 FROM guest_documents WHERE stay_id = ? AND folder_created = 0`).bind(stayId).all()
+        const { results } = await DB.prepare(`SELECT doc_id, stay_id, doc_type, file_name, file_b64 FROM stayvibe_guest_documents WHERE stay_id = ? AND folder_created = 0`).bind(stayId).all()
         return json({ success: true, data: results })
       }
 
@@ -1831,7 +1835,7 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         const { results } = await DB.prepare(
           `SELECT doc_id, doc_type, file_name, file_b64, created_at
-           FROM guest_documents WHERE stay_id = ? AND doc_type IN ('car_photo','plate_photo')
+           FROM stayvibe_guest_documents WHERE stay_id = ? AND doc_type IN ('car_photo','plate_photo')
            ORDER BY created_at DESC`
         ).bind(stayId).all()
         return json({ success: true, data: results })
@@ -1845,8 +1849,8 @@ export async function onRequest(ctx) {
           SELECT DISTINCT s.stay_id, s.guest_name, s.checkin_date, s.checkout_date,
                  s.status, s.drive_folder_id, s.drive_folder_url,
                  (s.drive_folder_id IS NOT NULL AND s.drive_folder_id != '') as folder_created
-          FROM stays s
-          JOIN guest_documents d ON d.stay_id = s.stay_id
+          FROM stayvibe_stays s
+          JOIN stayvibe_guest_documents d ON d.stay_id = s.stay_id
           WHERE d.folder_created = 0
         `).all()
         return json({ success: true, data: results.map(r => ({
@@ -1860,12 +1864,12 @@ export async function onRequest(ctx) {
       // Feeds the owner-home "Your last 48 hrs" acknowledgement block. New
       // bookings by created_at, cancellations by updated_at.
       if (action === 'recentActivity') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, booked_by_name,
                   CASE WHEN status = 'cancelled' THEN 'cancellation' ELSE 'booking' END AS kind,
                   CASE WHEN status = 'cancelled' THEN updated_at ELSE created_at END AS event_at
-             FROM stays
+             FROM stayvibe_stays
             WHERE villa_id = ?
               AND (
                 (status = 'cancelled' AND updated_at >= datetime('now','-48 hours'))
@@ -1886,7 +1890,7 @@ export async function onRequest(ctx) {
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
         const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)
-        const { results } = await DB.prepare(`SELECT * FROM duplicate_bookings WHERE detected_at >= ? AND (resolved IS NULL OR resolved = 0) ORDER BY detected_at DESC`).bind(cutoff.toISOString().slice(0,10)).all()
+        const { results } = await DB.prepare(`SELECT * FROM stayvibe_duplicate_bookings WHERE detected_at >= ? AND (resolved IS NULL OR resolved = 0) ORDER BY detected_at DESC`).bind(cutoff.toISOString().slice(0,10)).all()
         const byChannel = {}
         results.forEach(r => {
           const ch = r.new_source || 'unknown'
@@ -1905,11 +1909,11 @@ export async function onRequest(ctx) {
 
         if (estateType === 'coconut') {
           const harvest = await ActiveDB.prepare(
-            `SELECT harvest_date, price_per_kg, scheduled_harvest_date FROM coconut_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
+            `SELECT harvest_date, price_per_kg, scheduled_harvest_date FROM estate360_coconut_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
           ).bind(estateId).first()
 
           const irrigation = await ActiveDB.prepare(
-            `SELECT logged_date FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
+            `SELECT logged_date FROM estate360_irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
           ).bind(estateId).first()
 
           const lastPrice      = harvest?.price_per_kg           || null
@@ -1930,7 +1934,7 @@ export async function onRequest(ctx) {
         }
 
         const harvest = await ActiveDB.prepare(
-          `SELECT harvest_date, price_per_kg FROM rubber_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
+          `SELECT harvest_date, price_per_kg FROM estate360_rubber_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
         ).bind(estateId).first()
         return json({ success: true, data: {
           managerName: 'RamananKutty', estateId, estateType,
@@ -1972,15 +1976,15 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getCampaigns') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`SELECT c.id, c.campaign_name, c.unique_token, c.channel, c.is_active, c.notes, c.created_at, SUM(CASE WHEN a.event_type='click' THEN 1 ELSE 0 END) as clicks, SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries, SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings FROM marketing_campaigns c LEFT JOIN campaign_analytics a ON a.campaign_id = c.id WHERE c.villa_id = ? GROUP BY c.id ORDER BY c.created_at DESC`).bind(villaId).all()
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const { results } = await DB.prepare(`SELECT c.id, c.campaign_name, c.unique_token, c.channel, c.is_active, c.notes, c.created_at, SUM(CASE WHEN a.event_type='click' THEN 1 ELSE 0 END) as clicks, SUM(CASE WHEN a.event_type='inquiry' THEN 1 ELSE 0 END) as inquiries, SUM(CASE WHEN a.event_type='booking' THEN 1 ELSE 0 END) as bookings FROM stayvibe_marketing_campaigns c LEFT JOIN stayvibe_campaign_analytics a ON a.campaign_id = c.id WHERE c.villa_id = ? GROUP BY c.id ORDER BY c.created_at DESC`).bind(villaId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getCampaignAnalytics') {
         const campaignId = url.searchParams.get('campaignId') || ''
         if (!campaignId) return err('campaignId required')
-        const events = await DB.prepare(`SELECT event_type, country, region, city, strftime('%H', ts) as hour, DATE(ts) as day, COUNT(*) as n FROM campaign_analytics WHERE campaign_id = ? GROUP BY event_type, country, region, city, hour, day ORDER BY day DESC, hour DESC`).bind(campaignId).all()
+        const events = await DB.prepare(`SELECT event_type, country, region, city, strftime('%H', ts) as hour, DATE(ts) as day, COUNT(*) as n FROM stayvibe_campaign_analytics WHERE campaign_id = ? GROUP BY event_type, country, region, city, hour, day ORDER BY day DESC, hour DESC`).bind(campaignId).all()
         return json({ success: true, data: events.results })
       }
 
@@ -1992,7 +1996,7 @@ export async function onRequest(ctx) {
         let zones = []
         try {
           const { results } = await ActiveDB.prepare(
-            `SELECT * FROM irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`
+            `SELECT * FROM estate360_irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`
           ).bind(estateId).all()
           zones = results
         } catch(e) { return json({ success: true, data: { zones: [], lastRun: null } }) }
@@ -2001,7 +2005,7 @@ export async function onRequest(ctx) {
 
         const zoneHealth = await Promise.all(zones.map(async (z) => {
           const { results: logs } = await ActiveDB.prepare(
-            `SELECT logged_date FROM irrigation_logs WHERE estate = ? AND zone_id = ? ORDER BY logged_date DESC LIMIT 5`
+            `SELECT logged_date FROM estate360_irrigation_logs WHERE estate = ? AND zone_id = ? ORDER BY logged_date DESC LIMIT 5`
           ).bind(estateId, z.zone_id).all()
 
           const lastLogged   = logs[0]?.logged_date || null
@@ -2021,21 +2025,21 @@ export async function onRequest(ctx) {
           return { zone_id: z.zone_id, zone_name: z.zone_name, zone_label: z.zone_label, expected_freq_days: freq, last_logged: lastLogged, days_since: daysSince, consecutive_misses: consecutiveMisses, status }
         }))
 
-        const lastRun = await ActiveDB.prepare(`SELECT MAX(logged_date) as last FROM irrigation_logs WHERE estate = ?`).bind(estateId).first()
+        const lastRun = await ActiveDB.prepare(`SELECT MAX(logged_date) as last FROM estate360_irrigation_logs WHERE estate = ?`).bind(estateId).first()
         return json({ success: true, data: { zones: zoneHealth, lastRun: lastRun?.last || null } })
       }
 
       // IRRIGATION HISTORY — full log list
       if (action === 'getIrrigationHistory') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const { results } = await ActiveDB.prepare(`SELECT * FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`).bind(estateId).all()
+        const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
       // MANGO HARVESTS — list
       if (action === 'getMangoHarvests') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const { results } = await ActiveDB.prepare(`SELECT * FROM mango_harvests WHERE estate = ? ORDER BY harvest_date DESC`).bind(estateId).all()
+        const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_mango_harvests WHERE estate = ? ORDER BY harvest_date DESC`).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
@@ -2044,16 +2048,16 @@ export async function onRequest(ctx) {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         const { results } = await ActiveDB.prepare(
           `SELECT txn_id, estate, type, date, category, amount, paid_to, description, created_at
-           FROM estate_transactions WHERE estate = ? ORDER BY date DESC, created_at DESC LIMIT 500`
+           FROM estate360_estate_transactions WHERE estate = ? ORDER BY date DESC, created_at DESC LIMIT 500`
         ).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
       if (action === 'getVillaExpenses') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const { results } = await DB.prepare(
           `SELECT txn_id, villa_id, date, category, amount, paid_to, description, created_at
-           FROM villa_expenses WHERE villa_id = ? ORDER BY date DESC, created_at DESC LIMIT 500`
+           FROM stayvibe_villa_expenses WHERE villa_id = ? ORDER BY date DESC, created_at DESC LIMIT 500`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }
@@ -2061,8 +2065,8 @@ export async function onRequest(ctx) {
       // Per-villa configurable settings (SaaS onboarding) — key/value pairs,
       // e.g. 'owner_email_alert'. Returned as a flat object for easy form binding.
       if (action === 'getVillaSettings') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`SELECT key, value FROM villa_settings WHERE villa_id = ?`).bind(villaId).all()
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const { results } = await DB.prepare(`SELECT key, value FROM stayvibe_villa_settings WHERE villa_id = ?`).bind(villaId).all()
         const settings = {}
         // Keys prefixed with '_' are internal/sensitive (e.g. _resend_api_key)
         // and are never returned to the browser via this general endpoint.
@@ -2075,7 +2079,7 @@ export async function onRequest(ctx) {
         const limit = Math.min(parseInt(url.searchParams.get('limit')) || 50, 200)
         const { results } = await DB.prepare(
           `SELECT log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at
-           FROM alert_log ORDER BY created_at DESC LIMIT ?`
+           FROM infra_alert_log ORDER BY created_at DESC LIMIT ?`
         ).bind(limit).all()
         return json({ success: true, data: results })
       }
@@ -2083,7 +2087,7 @@ export async function onRequest(ctx) {
       // ESTATE CONTACTS
       if (action === 'getEstateContacts') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
-        const { results } = await ActiveDB.prepare(`SELECT * FROM estate_contacts WHERE estate = ? AND active = 1 ORDER BY category, name`).bind(estateId).all()
+        const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_estate_contacts WHERE estate = ? AND active = 1 ORDER BY category, name`).bind(estateId).all()
         return json({ success: true, data: results })
       }
 
@@ -2095,7 +2099,7 @@ export async function onRequest(ctx) {
         const today     = new Date().toISOString().slice(0, 10)
 
         const { results: harvests } = await ActiveDB.prepare(
-          `SELECT harvest_date, scheduled_harvest_date, total_nuts, total_weight_kg, harvester_name FROM coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
+          `SELECT harvest_date, scheduled_harvest_date, total_nuts, total_weight_kg, harvester_name FROM estate360_coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
         ).bind(estateId, cutoffStr).all()
 
         const harvestTimings = harvests.map((h, i) => {
@@ -2114,15 +2118,15 @@ export async function onRequest(ctx) {
         const daysToNext = nextScheduled ? Math.round((new Date(nextScheduled) - new Date(today)) / 86400000) : null
 
         const { results: irrigLogs } = await ActiveDB.prepare(
-          `SELECT logged_date, strftime('%Y-%m', logged_date) as ym, COUNT(*) as count FROM irrigation_logs WHERE estate = ? AND logged_date >= ? GROUP BY ym ORDER BY ym DESC`
+          `SELECT logged_date, strftime('%Y-%m', logged_date) as ym, COUNT(*) as count FROM estate360_irrigation_logs WHERE estate = ? AND logged_date >= ? GROUP BY ym ORDER BY ym DESC`
         ).bind(estateId, cutoffStr).all()
 
-        const lastIrrigation = await ActiveDB.prepare(`SELECT logged_date FROM irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`).bind(estateId).first()
+        const lastIrrigation = await ActiveDB.prepare(`SELECT logged_date FROM estate360_irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`).bind(estateId).first()
 
         let lastFert = null, nextFert = null
         try {
           const { results: fertilizations } = await ActiveDB.prepare(
-            `SELECT planned_date, actual_date, fertilizer_type, notes FROM fertilization_log WHERE estate = ? ORDER BY planned_date DESC`
+            `SELECT planned_date, actual_date, fertilizer_type, notes FROM estate360_fertilization_log WHERE estate = ? ORDER BY planned_date DESC`
           ).bind(estateId).all()
           lastFert = fertilizations.find(f => f.actual_date) || null
           nextFert = fertilizations.find(f => !f.actual_date) || null
@@ -2143,7 +2147,7 @@ export async function onRequest(ctx) {
                SUM(CASE WHEN box_type='Small'  THEN total_boxes ELSE 0 END) as small_boxes,
                SUM(total_boxes)  as total_boxes,
                SUM(total_revenue) as revenue
-             FROM mango_harvests WHERE estate = ?
+             FROM estate360_mango_harvests WHERE estate = ?
              GROUP BY harvest_year ORDER BY harvest_year DESC LIMIT 3`
           ).bind(estateId).all()
           mangoes = mangoResults
@@ -2167,23 +2171,23 @@ export async function onRequest(ctx) {
         const todayStr  = today.toISOString().slice(0, 10)
 
         const { results: harvests } = await ActiveDB.prepare(
-          `SELECT harvest_date, total_earnings, total_expense, net_income, harvest_expense, dehusk_expense, tractor_expense, other_expense FROM coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
+          `SELECT harvest_date, total_earnings, total_expense, net_income, harvest_expense, dehusk_expense, tractor_expense, other_expense FROM estate360_coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
         ).bind(estateId, cutoffStr).all()
 
         const { results: txns } = await ActiveDB.prepare(
-          `SELECT date, type, category, amount, paid_to, description FROM estate_transactions WHERE estate = ? AND date >= ? ORDER BY date DESC`
+          `SELECT date, type, category, amount, paid_to, description FROM estate360_estate_transactions WHERE estate = ? AND date >= ? ORDER BY date DESC`
         ).bind(estateId, cutoffStr).all()
 
         let mangoRevenue = 0
         try {
-          const mangoData = await ActiveDB.prepare(`SELECT SUM(total_revenue) as total FROM mango_harvests WHERE estate = ? AND harvest_date >= ?`).bind(estateId, cutoffStr).first()
+          const mangoData = await ActiveDB.prepare(`SELECT SUM(total_revenue) as total FROM estate360_mango_harvests WHERE estate = ? AND harvest_date >= ?`).bind(estateId, cutoffStr).first()
           mangoRevenue = mangoData?.total || 0
         } catch(e) {}
 
         let rubberHarvests = []
         try {
           const { results: rh } = await ActiveDB.prepare(
-            `SELECT harvest_date, gross, expense, net FROM rubber_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
+            `SELECT harvest_date, gross, expense, net FROM estate360_rubber_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
           ).bind(estateId, cutoffStr).all()
           rubberHarvests = rh
         } catch(e) {}
@@ -2278,7 +2282,7 @@ export async function onRequest(ctx) {
 
 
       if (action === 'getCheckinLinks') {
-        const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM checkin_links ORDER BY villa_id, partner`).all()
+        const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM stayvibe_checkin_links ORDER BY villa_id, partner`).all()
         return json({ success: true, data: results })
       }
 
@@ -2289,7 +2293,7 @@ export async function onRequest(ctx) {
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, created_at,
                   folder_created, folder_created_at, booked_by_name
-           FROM stays
+           FROM stayvibe_stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
            ORDER BY checkin_date ASC`
@@ -2316,7 +2320,7 @@ export async function onRequest(ctx) {
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
                   source, guest_phone, review_rating, review_date,
                   review_chased_at, review_chase_count
-           FROM stays
+           FROM stayvibe_stays
            WHERE status = 'checked_out'
              AND checkout_date < date('now')
              AND (review_rating IS NULL OR review_rating = 0)
@@ -2356,7 +2360,7 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         const { results } = await DB.prepare(
           `SELECT doc_id, stay_id, doc_type, file_name, folder_created, created_at, updated_at
-           FROM guest_documents WHERE stay_id = ?`
+           FROM stayvibe_guest_documents WHERE stay_id = ?`
         ).bind(stayId).all()
         return json({ success: true, data: results })
       }
@@ -2367,7 +2371,7 @@ export async function onRequest(ctx) {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
         const result = await DB.prepare(
-          `DELETE FROM guest_documents WHERE stay_id = ?`
+          `DELETE FROM stayvibe_guest_documents WHERE stay_id = ?`
         ).bind(stayId).run()
         return json({ success: true, data: { stayId, deleted: result.meta?.changes || 0 } })
       }
@@ -2376,12 +2380,12 @@ export async function onRequest(ctx) {
 
       // List enquiries for the tracker grid (optionally filtered by status)
       if (action === 'getEnquiries') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const status  = url.searchParams.get('status') || ''
         const { results } = await DB.prepare(
           status
-            ? `SELECT * FROM enquiries WHERE villa_id = ? AND status = ? ORDER BY date_received DESC`
-            : `SELECT * FROM enquiries WHERE villa_id = ? ORDER BY date_received DESC`
+            ? `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? AND status = ? ORDER BY date_received DESC`
+            : `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? ORDER BY date_received DESC`
         ).bind(...(status ? [villaId, status] : [villaId])).all()
         return json({ success: true, data: results })
       }
@@ -2399,7 +2403,7 @@ export async function onRequest(ctx) {
                  nights, guests_count, status, quote_amount, final_offer_amount, notes,
                  date_received, last_contact_date, reminder_2day_sent_at, reminder_5day_sent_at,
                  CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) AS days_since_contact
-          FROM enquiries
+          FROM stayvibe_enquiries
           WHERE status NOT IN ('confirmed','lost','cancelled')
             AND (
               (CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) >= 2 AND reminder_2day_sent_at IS NULL)
@@ -2415,14 +2419,14 @@ export async function onRequest(ctx) {
       if (action === 'getEnquiryDetail') {
         const enquiryId = url.searchParams.get('enquiryId') || ''
         if (!enquiryId) return err('enquiryId required')
-        const enquiry = await DB.prepare(`SELECT * FROM enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        const enquiry = await DB.prepare(`SELECT * FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
         if (!enquiry) return err('Enquiry not found', 404)
         const { results: timeline } = await DB.prepare(
-          `SELECT * FROM communication_log WHERE enquiry_id = ? ORDER BY occurred_at ASC`
+          `SELECT * FROM stayvibe_communication_log WHERE enquiry_id = ? ORDER BY occurred_at ASC`
         ).bind(enquiryId).all()
         let guest = null
         if (enquiry.guest_id) {
-          guest = await DB.prepare(`SELECT * FROM guests WHERE guest_id = ?`).bind(enquiry.guest_id).first()
+          guest = await DB.prepare(`SELECT * FROM stayvibe_guests WHERE guest_id = ?`).bind(enquiry.guest_id).first()
         }
         return json({ success: true, data: { enquiry, timeline, guest } })
       }
@@ -2434,11 +2438,11 @@ export async function onRequest(ctx) {
         const emailRaw = (url.searchParams.get('email') || '').trim().toLowerCase()
         if (!phoneRaw && !emailRaw) return json({ success: true, data: null })
         const guest = await DB.prepare(
-          `SELECT * FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+          `SELECT * FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
         ).bind(phoneRaw, emailRaw).first()
         if (!guest) return json({ success: true, data: null })
         const { results: pastStays } = await DB.prepare(
-          `SELECT stay_id, checkin_date, checkout_date, net, source FROM stays
+          `SELECT stay_id, checkin_date, checkout_date, net, source FROM stayvibe_stays
            WHERE (guest_phone = ? OR guest_email = ?) AND status NOT IN ('cancelled','void')
            ORDER BY checkin_date DESC LIMIT 10`
         ).bind(phoneRaw, emailRaw).all()
@@ -2453,7 +2457,7 @@ export async function onRequest(ctx) {
         const q = (url.searchParams.get('q') || '').trim()
         if (q.length < 2) return json({ success: true, data: [] })
         const { results } = await DB.prepare(
-          `SELECT guest_id, name, phone, email, total_stays FROM guests
+          `SELECT guest_id, name, phone, email, total_stays FROM stayvibe_guests
            WHERE name LIKE ? ORDER BY total_stays DESC LIMIT 15`
         ).bind(`%${q}%`).all()
         return json({ success: true, data: results })
@@ -2461,10 +2465,10 @@ export async function onRequest(ctx) {
 
       // Conversion dashboard — KPIs, source breakdown, repeat-guest metrics
       if (action === 'getEnquiryDashboard') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const year    = url.searchParams.get('year') || new Date().getFullYear()
         const { results: rows } = await DB.prepare(
-          `SELECT * FROM enquiries WHERE villa_id = ? AND date_received LIKE ?`
+          `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? AND date_received LIKE ?`
         ).bind(villaId, `${year}%`).all()
 
         const totalEnquiries = rows.length
@@ -2505,9 +2509,9 @@ export async function onRequest(ctx) {
 
       // Enquiries needing follow-up today or overdue, for the dashboard alert block
       if (action === 'getEnquiryFollowUps') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         const { results } = await DB.prepare(`
-          SELECT * FROM enquiries
+          SELECT * FROM stayvibe_enquiries
           WHERE villa_id = ? AND status NOT IN ('confirmed','lost','cancelled')
             AND follow_up_due IS NOT NULL AND follow_up_due <= date('now')
           ORDER BY follow_up_due ASC
@@ -2522,7 +2526,7 @@ export async function onRequest(ctx) {
       if (action === 'getTenancyHistory') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM tenancy_history WHERE prop_id = ? ORDER BY lease_end DESC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_tenancy_history WHERE prop_id = ? ORDER BY lease_end DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
@@ -2532,7 +2536,7 @@ export async function onRequest(ctx) {
       if (action === 'getRentTransactions') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const { results } = await DB.prepare(`SELECT * FROM rent_transactions WHERE prop_id = ? ORDER BY period_month DESC, unit_type ASC`).bind(propId).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_rent_transactions WHERE prop_id = ? ORDER BY period_month DESC, unit_type ASC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
@@ -2546,7 +2550,7 @@ export async function onRequest(ctx) {
       if (action === 'getIncomingTenant') {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
-        const row = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
+        const row = await DB.prepare(`SELECT * FROM rev360_incoming_tenants WHERE prop_id = ?`).bind(propId).first()
         return json({ success: true, data: row || null })
       }
 
@@ -2557,7 +2561,7 @@ export async function onRequest(ctx) {
         const propId = url.searchParams.get('propId') || ''
         const year = url.searchParams.get('year') || ''
         if (!propId || !year) return err('propId and year required')
-        const { results } = await DB.prepare(`SELECT * FROM property_expenses WHERE prop_id = ? AND year = ? ORDER BY month ASC`).bind(propId, parseInt(year)).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_property_expenses WHERE prop_id = ? AND year = ? ORDER BY month ASC`).bind(propId, parseInt(year)).all()
         return json({ success: true, data: results })
       }
 
@@ -2572,8 +2576,117 @@ export async function onRequest(ctx) {
         const month = url.searchParams.get('month') || ''
         const year = url.searchParams.get('year') || ''
         if (!propId || !month || !year) return err('propId, month, and year required')
-        const { results } = await DB.prepare(`SELECT * FROM maintenance_events WHERE prop_id = ? AND month = ? AND year = ? ORDER BY event_date ASC, created_at ASC`).bind(propId, parseInt(month), parseInt(year)).all()
+        const { results } = await DB.prepare(`SELECT * FROM rev360_maintenance_events WHERE prop_id = ? AND month = ? AND year = ? ORDER BY event_date ASC, created_at ASC`).bind(propId, parseInt(month), parseInt(year)).all()
         return json({ success: true, data: results })
+      }
+
+      // ── FIX (found during Release 2.1 demo-onboarding simulation,
+      // pre-existing, unrelated to this release): these 4 actions were
+      // misplaced inside the POST block below, but are called via HTTP GET
+      // from the frontend (src/api/index.js's get() helper) — every one of
+      // them 404'd in production. Relocated here, logic unchanged. ──
+
+      // INVENTORY — low-stock items (qty_in_stock <= 10% of preferred_stock), for dashboard alerts
+      if (action === 'getLowStockItems') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const { results } = await DB.prepare(`
+          SELECT item_id, name, unit, category, qty_in_stock, preferred_stock
+          FROM stayvibe_inventory
+          WHERE villa_id = ? AND preferred_stock > 0 AND qty_in_stock <= (preferred_stock * 0.1)
+          ORDER BY (CAST(qty_in_stock AS REAL) / preferred_stock) ASC
+        `).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
+      // ── RUBBER MONTHLY REGISTER SUMMARY ─────────────────────────────────
+      // Per-DATE classification across all tappers (a calendar day counts
+      // once): rain if any row flags rain; tapping if sheets were produced;
+      // maintenance if trees were worked but no sheets (prep/maintenance —
+      // matches the paper register where trees are accounted but sheets = 0).
+      // Wages = SUM(tree_count * tapping_rate). Plus month P&L from
+      // estate_transactions (income vs expense by category).
+      if (action === 'getRubberMonthly') {
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        const month = url.searchParams.get('month')
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) return err("month required as 'YYYY-MM'")
+        const { results: rows } = await ActiveDB.prepare(`
+          SELECT prod_date,
+                 MAX(COALESCE(rain,0))                          AS rain,
+                 SUM(COALESCE(tree_count,0))                    AS trees,
+                 SUM(COALESCE(sheet_count,0))                   AS sheets,
+                 SUM(COALESCE(ottupal_count,0))                 AS ottupal,
+                 ROUND(SUM(COALESCE(tree_count,0) * COALESCE(tapping_rate,0)), 2) AS wages
+          FROM estate360_rubber_production
+          WHERE estate_id = ? AND prod_date LIKE ?
+          GROUP BY prod_date ORDER BY prod_date`).bind(estateId, `${month}%`).all()
+        let tappingDays = 0, maintenanceDays = 0, rainDays = 0
+        let trees = 0, sheets = 0, ottupal = 0, wages = 0
+        for (const r of (rows || [])) {
+          if (r.rain) rainDays++
+          else if ((r.sheets || 0) > 0) tappingDays++
+          else if ((r.trees || 0) > 0) maintenanceDays++
+          trees += r.trees || 0; sheets += r.sheets || 0; ottupal += r.ottupal || 0; wages += r.wages || 0
+        }
+        const { results: txns } = await ActiveDB.prepare(`
+          SELECT type, category, ROUND(SUM(amount),2) AS total
+          FROM estate360_estate_transactions
+          WHERE estate = ? AND date LIKE ?
+          GROUP BY type, category ORDER BY type, total DESC`).bind(estateId, `${month}%`).all()
+        const income  = (txns || []).filter(t => t.type === 'income')
+        const expense = (txns || []).filter(t => t.type === 'expense')
+        const totalIncome  = Math.round(income.reduce((a, t) => a + (t.total || 0), 0) * 100) / 100
+        const totalExpense = Math.round(expense.reduce((a, t) => a + (t.total || 0), 0) * 100) / 100
+        return json({ success: true, data: {
+          month, days: { tapping: tappingDays, maintenance: maintenanceDays, rain: rainDays, recorded: (rows || []).length },
+          production: { trees, sheets, ottupal, wages: Math.round(wages * 100) / 100 },
+          pnl: { income, expense, totalIncome, totalExpense, net: Math.round((totalIncome - totalExpense) * 100) / 100 },
+        }})
+      }
+
+      if (action === 'getRubberProduction') {
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        const month    = url.searchParams.get('month')      // 'YYYY-MM' optional
+        const weekStart= url.searchParams.get('weekStart')  // 'YYYY-MM-DD' optional
+        let query = `SELECT * FROM estate360_rubber_production WHERE estate_id = ?`
+        const binds = [estateId]
+        if (weekStart) {
+          // week window: weekStart .. weekStart+6
+          const ws = new Date(weekStart + 'T00:00:00')
+          const we = new Date(ws); we.setDate(we.getDate() + 6)
+          query += ` AND prod_date BETWEEN ? AND ?`
+          binds.push(weekStart, we.toISOString().slice(0, 10))
+        } else if (month) {
+          query += ` AND prod_date LIKE ?`; binds.push(`${month}%`)
+        }
+        query += ` ORDER BY prod_date DESC LIMIT 400`
+        const { results } = await ActiveDB.prepare(query).bind(...binds).all()
+        const { results: workerRows } = await ActiveDB.prepare(
+          `SELECT DISTINCT worker_name FROM estate360_rubber_production WHERE estate_id = ? ORDER BY worker_name`
+        ).bind(estateId).all()
+        const totalTrees   = results.reduce((s, r) => s + (r.tree_count    || 0), 0)
+        const totalSheets  = results.reduce((s, r) => s + (r.sheet_count   || 0), 0)
+        const totalOttupal = results.reduce((s, r) => s + (r.ottupal_count || 0), 0)
+        return json({ success: true, data: {
+          rows: results, totalTrees, totalSheets, totalOttupal,
+          workers: workerRows.map(w => w.worker_name).filter(Boolean),
+        }})
+      }
+
+      if (action === 'getManagerSettlements') {
+        const estateId = url.searchParams.get('estate') || 'pavutumuri'
+        const { results: payments } = await ActiveDB.prepare(
+          `SELECT * FROM estate360_manager_settlements WHERE estate_id = ? ORDER BY payment_date DESC, created_at DESC LIMIT 500`
+        ).bind(estateId).all()
+        // Balance owed to the manager = total estate expenses − total paid to manager.
+        const expRow = await ActiveDB.prepare(
+          `SELECT COALESCE(SUM(amount),0) AS total FROM estate360_estate_transactions WHERE estate = ? AND type = 'expense'`
+        ).bind(estateId).first()
+        const totalExpenses = expRow?.total || 0
+        const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0)
+        return json({ success: true, data: {
+          payments, totalExpenses, totalPaid,
+          balance: totalExpenses - totalPaid,
+        }})
       }
 
       return err(`Unknown GET action: ${action}`, 404)
@@ -2594,7 +2707,7 @@ export async function onRequest(ctx) {
       // against `guests` — creates a new guests row if no match, or flags
       // is_repeat_guest + fills previous_stays/discount context if matched.
       if (action === 'saveEnquiry') {
-        const villaId = body.villaId || 'dwarka'
+        const villaId = body.villaId || DEFAULT_VILLA_ID
         const normPhone = (body.phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
         const normEmail = (body.email || '').trim().toLowerCase()
 
@@ -2606,23 +2719,23 @@ export async function onRequest(ctx) {
           enquiryId = genId('ENQ')
           if (normPhone || normEmail) {
             const existing = await DB.prepare(
-              `SELECT * FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+              `SELECT * FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
             ).bind(normPhone, normEmail).first()
             if (existing) {
               guestId = existing.guest_id
-              await DB.prepare(`UPDATE guests SET last_seen_at = ?, updated_by = ?, updated_at = ? WHERE guest_id = ?`)
+              await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = ?, updated_by = ?, updated_at = ? WHERE guest_id = ?`)
                 .bind(now(), actor, now(), guestId).run()
             } else {
               guestId = genId('GST')
               await DB.prepare(`
-                INSERT INTO guests (guest_id, name, phone, email, created_by, updated_by)
+                INSERT INTO stayvibe_guests (guest_id, name, phone, email, created_by, updated_by)
                 VALUES (?, ?, ?, ?, ?, ?)
               `).bind(guestId, body.guestName || 'Unknown', normPhone, normEmail, actor, actor).run()
             }
           }
         }
 
-        const guest = guestId ? await DB.prepare(`SELECT * FROM guests WHERE guest_id = ?`).bind(guestId).first() : null
+        const guest = guestId ? await DB.prepare(`SELECT * FROM stayvibe_guests WHERE guest_id = ?`).bind(guestId).first() : null
         const isRepeat = !!(guest && guest.total_stays > 0)
         const previousStays = guest?.total_stays || 0
 
@@ -2653,7 +2766,7 @@ export async function onRequest(ctx) {
         if (body.enquiryId) {
           // Update existing
           await DB.prepare(`
-            UPDATE enquiries SET
+            UPDATE stayvibe_enquiries SET
               guest_name = ?, phone = ?, email = ?, source = ?,
               checkin_date = ?, checkout_date = ?, nights = ?, guests_count = ?,
               adults = ?, children = ?, infants = ?, purpose = ?,
@@ -2677,7 +2790,7 @@ export async function onRequest(ctx) {
         }
 
         await DB.prepare(`
-          INSERT INTO enquiries (
+          INSERT INTO stayvibe_enquiries (
             enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
             checkin_date, checkout_date, nights, guests_count, adults, children, infants, purpose,
             quote_amount, is_repeat_guest, previous_stays, repeat_discount_pct,
@@ -2694,7 +2807,7 @@ export async function onRequest(ctx) {
 
         // First entry in the communication timeline
         await DB.prepare(`
-          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
           VALUES (?, ?, 'internal_note', 'Enquiry received', ?)
         `).bind(genId('COMM'), enquiryId, actor).run()
 
@@ -2707,7 +2820,7 @@ export async function onRequest(ctx) {
         const enquiryId = body.enquiryId
         if (!enquiryId) return err('enquiryId required')
         await DB.prepare(`
-          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
           VALUES (?, ?, ?, ?, ?)
         `).bind(genId('COMM'), enquiryId, body.type || 'internal_note', body.notes || '', actor).run()
 
@@ -2721,7 +2834,7 @@ export async function onRequest(ctx) {
         updates.push('reminder_2day_sent_at = NULL, reminder_5day_sent_at = NULL')
         updates.push('updated_by = ?, updated_at = ?'); vals.push(actor, now())
 
-        await DB.prepare(`UPDATE enquiries SET ${updates.join(', ')} WHERE enquiry_id = ?`)
+        await DB.prepare(`UPDATE stayvibe_enquiries SET ${updates.join(', ')} WHERE enquiry_id = ?`)
           .bind(...vals, enquiryId).run()
 
         return json({ success: true })
@@ -2738,7 +2851,7 @@ export async function onRequest(ctx) {
         const { enquiryId, threshold } = body
         if (!enquiryId || !['2day','5day'].includes(threshold)) return err('enquiryId and threshold (2day|5day) required')
         const col = threshold === '2day' ? 'reminder_2day_sent_at' : 'reminder_5day_sent_at'
-        await DB.prepare(`UPDATE enquiries SET ${col} = ? WHERE enquiry_id = ?`).bind(now(), enquiryId).run()
+        await DB.prepare(`UPDATE stayvibe_enquiries SET ${col} = ? WHERE enquiry_id = ?`).bind(now(), enquiryId).run()
         return json({ success: true })
       }
 
@@ -2754,7 +2867,7 @@ export async function onRequest(ctx) {
         const { source, eventType, note, refId } = body
         if (!source || !note) return err('source and note required')
         await DB.prepare(`
-          INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at)
+          INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at)
           VALUES (?, ?, ?, ?, datetime('now'))
         `).bind(
           'LOG-' + Date.now() + '-' + Math.floor(Math.random()*1000),
@@ -2770,10 +2883,10 @@ export async function onRequest(ctx) {
         const enquiryId = body.enquiryId
         if (!enquiryId) return err('enquiryId required')
         await DB.prepare(`
-          UPDATE enquiries SET status = 'lost', lost_reason = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+          UPDATE stayvibe_enquiries SET status = 'lost', lost_reason = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
         `).bind(body.lostReason || 'other', actor, now(), enquiryId).run()
         await DB.prepare(`
-          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
           VALUES (?, ?, 'status_change', ?, ?)
         `).bind(genId('COMM'), enquiryId, `Marked Lost — ${body.lostReason || 'other'}`, actor).run()
         return json({ success: true })
@@ -2785,11 +2898,11 @@ export async function onRequest(ctx) {
       if (action === 'confirmEnquiry') {
         const enquiryId = body.enquiryId
         if (!enquiryId) return err('enquiryId required')
-        const enquiry = await DB.prepare(`SELECT * FROM enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        const enquiry = await DB.prepare(`SELECT * FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
         if (!enquiry) return err('Enquiry not found', 404)
         if (!enquiry.checkin_date || !enquiry.checkout_date) return err('Enquiry is missing check-in/check-out dates')
 
-        const villaId = enquiry.villa_id || 'dwarka'
+        const villaId = enquiry.villa_id || DEFAULT_VILLA_ID
         const bookingValue = parseFloat(body.bookingValue) || enquiry.final_offer_amount || enquiry.quote_amount || 0
 
         // ── Idempotency / partial-write recovery ──────────────────────
@@ -2800,11 +2913,11 @@ export async function onRequest(ctx) {
         // overlap check and 409s forever. If a booking already exists for
         // this enquiry, heal the enquiry state and return it instead.
         const priorBooking = await DB.prepare(
-          `SELECT booking_id, stay_id FROM bookings WHERE enquiry_id = ? ORDER BY created_at DESC LIMIT 1`
+          `SELECT booking_id, stay_id FROM stayvibe_bookings WHERE enquiry_id = ? ORDER BY created_at DESC LIMIT 1`
         ).bind(enquiryId).first()
         if (priorBooking) {
           await DB.prepare(
-            `UPDATE enquiries SET status='confirmed', booking_confirmed=1, booking_value=?, updated_by=?, updated_at=? WHERE enquiry_id=? AND booking_confirmed=0`
+            `UPDATE stayvibe_enquiries SET status='confirmed', booking_confirmed=1, booking_value=?, updated_by=?, updated_at=? WHERE enquiry_id=? AND booking_confirmed=0`
           ).bind(bookingValue, actor, now(), enquiryId).run()
           return json({ success: true, data: { stayId: priorBooking.stay_id, bookingId: priorBooking.booking_id, alreadyConfirmed: true } })
         }
@@ -2836,7 +2949,7 @@ export async function onRequest(ctx) {
         const bookingId = genId('BKG')
         const stmts = [
           DB.prepare(`
-            INSERT INTO stays (
+            INSERT INTO stayvibe_stays (
               stay_id, villa_id, source, guest_name, guest_phone, guest_email,
               checkin_date, checkout_date, nights, adults, children,
               gross, net, status, created_by, updated_by
@@ -2847,16 +2960,16 @@ export async function onRequest(ctx) {
             bookingValue, bookingValue, actor, actor
           ),
           DB.prepare(`
-            INSERT INTO bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
+            INSERT INTO stayvibe_bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
             VALUES (?, ?, ?, ?, ?, ?)
           `).bind(bookingId, enquiryId, enquiry.guest_id, stayId, bookingValue, actor),
           DB.prepare(`
-            UPDATE enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+            UPDATE stayvibe_enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
           `).bind(bookingValue, actor, now(), enquiryId),
         ]
         if (enquiry.guest_id) {
           stmts.push(DB.prepare(`
-            UPDATE guests SET
+            UPDATE stayvibe_guests SET
               total_stays = total_stays + 1,
               total_nights = total_nights + ?,
               total_revenue = total_revenue + ?,
@@ -2865,7 +2978,7 @@ export async function onRequest(ctx) {
           `).bind(enquiry.nights || 1, bookingValue, now(), actor, now(), enquiry.guest_id))
         }
         stmts.push(DB.prepare(`
-          INSERT INTO communication_log (comm_id, enquiry_id, type, notes, created_by)
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
           VALUES (?, ?, 'status_change', ?, ?)
         `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor))
 
@@ -2883,17 +2996,17 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         const reason = (body.reason || '').trim() || 'resolved'
         const newStatus = body.status === 'cancelled' ? 'cancelled' : 'void'
-        const stay = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
-        const paidComm = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
+        const paidComm = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
         const stmts = [
-          DB.prepare(`UPDATE stays SET status = ?, notes = TRIM(COALESCE(notes,'') || ' | ' || ? || ': ' || ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`)
+          DB.prepare(`UPDATE stayvibe_stays SET status = ?, notes = TRIM(COALESCE(notes,'') || ' | ' || ? || ': ' || ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`)
             .bind(newStatus, newStatus, reason, actor, stayId),
-          DB.prepare(`INSERT INTO deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+          DB.prepare(`INSERT INTO infra_deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
             .bind(genId('DEL'), stayId, stay.villa_id, newStatus, stay.guest_name, stay.checkin_date, stay.checkout_date, reason,
                   JSON.stringify({ status: stay.status, source: stay.source, nights: stay.nights, net: stay.net, guest_phone: stay.guest_phone, guest_id: stay.guest_id }), actor),
         ]
-        if (!paidComm) stmts.push(DB.prepare(`DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId))
+        if (!paidComm) stmts.push(DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId))
         await DB.batch(stmts)
         return json({ success: true, data: { stayId, status: newStatus, paidCommissionKept: !!paidComm } })
       }
@@ -2907,23 +3020,23 @@ export async function onRequest(ctx) {
         const stayId = body.stayId
         if (!stayId) return err('stayId required')
         if (body.confirm !== true && body.confirm !== 'true') return err('confirm:true required for hard delete')
-        const stay = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
-        const paidComm = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
+        const paidComm = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
         if (paidComm) return json({ success: false, code: 'paid_commission', error: 'This stay has a PAID commission — hard delete is blocked. Void it instead to preserve the financial record.' }, 409)
         const reason = (body.reason || '').trim() || 'hard delete'
         await DB.batch([
-          DB.prepare(`INSERT INTO deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+          DB.prepare(`INSERT INTO infra_deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
             .bind(genId('DEL'), stayId, stay.villa_id, 'delete', stay.guest_name, stay.checkin_date, stay.checkout_date, reason, JSON.stringify(stay), actor),
-          DB.prepare(`DELETE FROM guest_requests   WHERE stay_id = ?`).bind(stayId),
-          DB.prepare(`DELETE FROM stay_cars        WHERE stay_id = ?`).bind(stayId),
-          DB.prepare(`DELETE FROM stay_incidentals WHERE stay_id = ?`).bind(stayId),
-          DB.prepare(`DELETE FROM guest_documents  WHERE stay_id = ?`).bind(stayId),
-          DB.prepare(`DELETE FROM bookings         WHERE stay_id = ?`).bind(stayId),
-          DB.prepare(`DELETE FROM processing_log   WHERE stay_id = ?`).bind(stayId),
-          DB.prepare(`DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId),
-          DB.prepare(`UPDATE duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = 'stay deleted' WHERE existing_stay_id = ? AND (resolved IS NULL OR resolved = 0)`).bind(actor, stayId),
-          DB.prepare(`DELETE FROM stays WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_guest_requests   WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_cars        WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_incidentals WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_guest_documents  WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_bookings         WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM infra_processing_log   WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId),
+          DB.prepare(`UPDATE stayvibe_duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = 'stay deleted' WHERE existing_stay_id = ? AND (resolved IS NULL OR resolved = 0)`).bind(actor, stayId),
+          DB.prepare(`DELETE FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId),
         ])
         return json({ success: true, data: { stayId, deleted: true } })
       }
@@ -2932,7 +3045,7 @@ export async function onRequest(ctx) {
       if (action === 'resolveDuplicate') {
         const dupId = body.dupId
         if (!dupId) return err('dupId required')
-        await DB.prepare(`UPDATE duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = ? WHERE dup_id = ?`)
+        await DB.prepare(`UPDATE stayvibe_duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = ? WHERE dup_id = ?`)
           .bind(actor, (body.resolution || 'reviewed').trim(), dupId).run()
         return json({ success: true, data: { dupId, resolved: true } })
       }
@@ -2950,15 +3063,15 @@ export async function onRequest(ctx) {
         const conf = (body.confirmationCode || '').trim()
         if (!conf) return err('confirmationCode required')
         const stay = await DB.prepare(
-          `SELECT stay_id, guest_name, status, checkin_date, checkout_date, source FROM stays WHERE airbnb_conf = ? LIMIT 1`
+          `SELECT stay_id, guest_name, status, checkin_date, checkout_date, source FROM stayvibe_stays WHERE airbnb_conf = ? LIMIT 1`
         ).bind(conf).first()
         if (!stay) return json({ success: true, data: { matched: false, confirmationCode: conf } })
         if (stay.status === 'cancelled') {
           return json({ success: true, data: { matched: true, stayId: stay.stay_id, alreadyCancelled: true } })
         }
         await DB.batch([
-          DB.prepare(`UPDATE stays SET status = 'cancelled', updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(stay.stay_id),
-          DB.prepare(`INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'cancellation', ?, ?, datetime('now'))`)
+          DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(stay.stay_id),
+          DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'cancellation', ?, ?, datetime('now'))`)
             .bind(genId('LOG'), stay.stay_id, `Airbnb cancellation (${conf}) — ${stay.guest_name} ${stay.checkin_date} → ${stay.checkout_date}. Status set to cancelled.`),
         ])
         return json({ success: true, data: { matched: true, stayId: stay.stay_id, cancelled: true, guestName: stay.guest_name } })
@@ -3004,7 +3117,7 @@ export async function onRequest(ctx) {
           // Shape 1: pay selected comm_ids
           const placeholders = body.commIds.map(() => '?').join(',')
           const result = await DB.prepare(
-            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
+            `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
              WHERE comm_id IN (${placeholders}) AND is_paid = 0`
           ).bind(paidDate, actor, now(), ...body.commIds).run()
           return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
@@ -3023,7 +3136,7 @@ export async function onRequest(ctx) {
           const endDate     = `${endDateObj.getFullYear()}-${String(endDateObj.getMonth() + 1).padStart(2, '0')}-${String(endDateObj.getDate()).padStart(2, '0')}`
 
           const result = await DB.prepare(
-            `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
+            `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
              WHERE checkin_date BETWEEN ? AND ? AND is_paid = 0`
           ).bind(paidDate, actor, now(), startDate, endDate).run()
           return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
@@ -3031,7 +3144,7 @@ export async function onRequest(ctx) {
 
         // Shape 3: pay all unpaid
         const result = await DB.prepare(
-          `UPDATE raman_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0`
+          `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0`
         ).bind(paidDate, actor, now()).run()
         return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
       }
@@ -3046,7 +3159,7 @@ export async function onRequest(ctx) {
         // (no duplicate even if the dates shifted). A different-guest overlap
         // is a real double booking → alert + log + block.
         const cls = await classifyStayConflicts(DB, {
-          villaId: body.villaId || 'dwarka',
+          villaId: body.villaId || DEFAULT_VILLA_ID,
           checkinDate: body.checkInDate, checkoutDate: body.checkOutDate,
           phone: body.guestPhone, email: body.guestEmail,
           guestName: body.guestName || body.bookerName,
@@ -3054,7 +3167,7 @@ export async function onRequest(ctx) {
 
         if (cls.ownOverlap) {
           const provisional = cls.ownOverlap
-          await DB.prepare(`UPDATE stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
           await syncStayLedger(DB, provisional.stay_id)
           return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
@@ -3062,7 +3175,7 @@ export async function onRequest(ctx) {
         if (cls.otherOverlap) {
           const conflict = cls.otherOverlap
           const alertSubject = '🚨 URGENT — Double booking detected! ' + (body.checkInDate || '')
-          const alertVillaId = body.villaId || 'dwarka'
+          const alertVillaId = body.villaId || DEFAULT_VILLA_ID
           const alertLines = [
             'Source: New Booking screen (createBooking)',
             'Action: New booking BLOCKED — overlapping dates detected',
@@ -3079,13 +3192,13 @@ export async function onRequest(ctx) {
 
           try {
             const overlapNights = body.checkInDate && body.checkOutDate ? Math.max(0, Math.round((Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) - Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000)) : 0
-            await DB.prepare(`INSERT INTO duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`).bind(`DUP-${Date.now()}`, body.villaId || 'dwarka', conflict.stay_id, conflict.guest_name, conflict.checkin_date, conflict.checkout_date, conflict.source || 'unknown', conflict.created_at || null, body.guestName || 'unknown', body.checkInDate, body.checkOutDate, body.source || 'unknown', body.airbnbConf || null, overlapNights).run()
+            await DB.prepare(`INSERT INTO stayvibe_duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`).bind(`DUP-${Date.now()}`, body.villaId || DEFAULT_VILLA_ID, conflict.stay_id, conflict.guest_name, conflict.checkin_date, conflict.checkout_date, conflict.source || 'unknown', conflict.created_at || null, body.guestName || 'unknown', body.checkInDate, body.checkOutDate, body.source || 'unknown', body.airbnbConf || null, overlapNights).run()
           } catch(logErr) {}
 
           return json({ success: false, error: `Double booking detected: ${conflict.guest_name} is already booked`, conflict }, 409)
         }
 
-        await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', body.source || 'direct', body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
+        await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, body.source || 'direct', body.guestName || body.bookerName, body.guestPhone || null, body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
         await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId } })
       }
@@ -3170,7 +3283,7 @@ export async function onRequest(ctx) {
         const DEFAULT_CATS = ['Electricity','Maintenance','Repairs','Laundry','Deep Cleaning','Housekeeping Supplies','Pest Control (Mosquito & Bats)','Kitchen Crockery','Kitchen Supplies','Appliance / AC Service','Landscaping','Painting','Water Filtration System','Water System — Motor & Associated','Bulk Purchases (Soap, Shampoo, Body Wash etc.)','Other']
         let CATS = DEFAULT_CATS
         try {
-          const catRow = await DB.prepare(`SELECT value FROM villa_settings WHERE villa_id = ? AND key = 'expense_categories'`).bind(body.villaId || 'dwarka').first()
+          const catRow = await DB.prepare(`SELECT value FROM stayvibe_villa_settings WHERE villa_id = ? AND key = 'expense_categories'`).bind(body.villaId || DEFAULT_VILLA_ID).first()
           const parsedCats = catRow && catRow.value ? JSON.parse(catRow.value) : null
           if (Array.isArray(parsedCats) && parsedCats.length) CATS = parsedCats
         } catch (e) { /* fall back to defaults */ }
@@ -3269,14 +3382,14 @@ export async function onRequest(ctx) {
       if (action === 'confirmCheckIn') {
         let stayId = body.stayId
         if (!stayId) {
-          const found = await DB.prepare(`SELECT stay_id FROM stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName).first()
+          const found = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName).first()
           stayId = found?.stay_id
         }
         if (!stayId) {
-          stayId = genStayId(body.villaId || 'dwarka')
-          await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', 'direct', body.guestName || body.bookerName, body.phone || null, body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, now(), now()).run()
+          stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
+          await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, 'direct', body.guestName || body.bookerName, body.phone || null, body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, now(), now()).run()
         } else {
-          await DB.prepare(`UPDATE stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
         }
 
         // Car / number-plate photos Raman took at check-in — same pipeline as
@@ -3291,7 +3404,7 @@ export async function onRequest(ctx) {
         if (body.carPhotoB64) {
           try {
             await DB.prepare(
-              `INSERT OR REPLACE INTO guest_documents
+              `INSERT OR REPLACE INTO stayvibe_guest_documents
                (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
                VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
             ).bind(docId('car'), stayId, 'car_photo', `Car-${stayId}.jpg`, body.carPhotoB64).run()
@@ -3300,7 +3413,7 @@ export async function onRequest(ctx) {
         if (body.platePhotoB64) {
           try {
             await DB.prepare(
-              `INSERT OR REPLACE INTO guest_documents
+              `INSERT OR REPLACE INTO stayvibe_guest_documents
                (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
                VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
             ).bind(docId('plate'), stayId, 'plate_photo', `Plate-${stayId}.jpg`, body.platePhotoB64).run()
@@ -3308,12 +3421,12 @@ export async function onRequest(ctx) {
         }
         if (body.carNumber) {
           try {
-            await DB.prepare(`UPDATE stays SET vehicle_number = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
+            await DB.prepare(`UPDATE stayvibe_stays SET vehicle_number = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
               .bind(body.carNumber, actor, now(), stayId).run()
           } catch (e) { console.error('vehicle_number update error:', e?.message || e) }
         }
 
-        const alertVillaId = body.villaId || 'dwarka'
+        const alertVillaId = body.villaId || DEFAULT_VILLA_ID
         ctx.waitUntil(sendAlert(env, `🔑 bgIndia — Guest checked in: ${body.guestName || body.bookerName || 'Guest'}`, [
           `Source: Raman > Check-in screen`,
           `Action: Guest checked in`,
@@ -3333,14 +3446,14 @@ export async function onRequest(ctx) {
 
       if (action === 'checkOut') {
         const { stayId } = body
-        await DB.prepare(`UPDATE stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
-        const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights, villa_id FROM stays WHERE stay_id = ?`).bind(stayId).first()
-        const coVillaId = stay?.villa_id || 'dwarka'
+        await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+        const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights, villa_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const coVillaId = stay?.villa_id || DEFAULT_VILLA_ID
         if (stay) {
-          const existing = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ?`).bind(stayId).first()
+          const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
             const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
-            await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
+            await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
 
             ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
               `Source: Raman > Check-in screen (check-out)`,
@@ -3377,26 +3490,26 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'cancelStay') {
-        await DB.prepare(`UPDATE stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), body.stayId).run()
-        await DB.prepare(`DELETE FROM raman_commissions WHERE stay_id = ? AND is_paid = 0`).bind(body.stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), body.stayId).run()
+        await DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(body.stayId).run()
         return json({ success: true })
       }
 
       // INVENTORY — save cost/sell prices (Prices tab)
       if (action === 'saveInventoryPrices') {
-        const villaId = body.villaId || 'dwarka'
+        const villaId = body.villaId || DEFAULT_VILLA_ID
         const prices  = body.prices || {}
         for (const [itemId, p] of Object.entries(prices)) {
           const costPrice = parseFloat(p.costPrice) || 0
           const sellPrice = parseFloat(p.sellPrice) || 0
           const result = await DB.prepare(`
-            UPDATE inventory
+            UPDATE stayvibe_inventory
             SET cost_price = ?, sell_price = ?, updated_by = ?, updated_at = ?
             WHERE item_id = ? AND villa_id = ?
           `).bind(costPrice, sellPrice, actor, now(), itemId, villaId).run()
           if (!result.meta?.changes) {
             await DB.prepare(`
-              INSERT INTO inventory (item_id, villa_id, name, cost_price, sell_price, created_by, updated_by, created_at, updated_at)
+              INSERT INTO stayvibe_inventory (item_id, villa_id, name, cost_price, sell_price, created_by, updated_by, created_at, updated_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(itemId, villaId, p.name || itemId, costPrice, sellPrice, actor, actor, now(), now()).run()
           }
@@ -3406,7 +3519,7 @@ export async function onRequest(ctx) {
 
       // INVENTORY — record a restock (Restock tab): logs the purchase + bumps qty_in_stock
       if (action === 'saveInventoryRestock') {
-        const villaId = body.villaId || 'dwarka'
+        const villaId = body.villaId || DEFAULT_VILLA_ID
         const entries = body.entries || []
         if (!entries.length) return err('entries required')
         const errors = []
@@ -3418,13 +3531,13 @@ export async function onRequest(ctx) {
           const pricePerUnit = qty > 0 ? totalCost / qty : 0
           try {
             await DB.prepare(`
-              INSERT INTO inventory_restock_log
+              INSERT INTO stayvibe_inventory_restock_log
                 (id, villa_id, item_id, item_name, qty_bought, total_cost, price_per_unit, created_by, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).bind(genId('RSTK'), villaId, e.id, e.name || e.id, qty, totalCost, pricePerUnit, actor, now()).run()
 
             const result = await DB.prepare(`
-              UPDATE inventory
+              UPDATE stayvibe_inventory
               SET qty_in_stock = COALESCE(qty_in_stock, 0) + ?,
                   last_restocked = ?,
                   updated_by = ?, updated_at = ?
@@ -3432,7 +3545,7 @@ export async function onRequest(ctx) {
             `).bind(qty, now(), actor, now(), e.id, villaId).run()
             if (!result.meta?.changes) {
               await DB.prepare(`
-                INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, last_restocked, created_by, updated_by, created_at, updated_at)
+                INSERT INTO stayvibe_inventory (item_id, villa_id, name, qty_in_stock, last_restocked, created_by, updated_by, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(e.id, villaId, e.name || e.id, qty, now(), actor, actor, now(), now()).run()
             }
@@ -3450,7 +3563,7 @@ export async function onRequest(ctx) {
 
       // INVENTORY — direct stock quantity correction (Stock tab +/- and manual edit)
       if (action === 'saveInventoryStock') {
-        const villaId = body.villaId || 'dwarka'
+        const villaId = body.villaId || DEFAULT_VILLA_ID
         const stock   = body.stock || {}
         const errors = []
         let savedCount = 0
@@ -3458,13 +3571,13 @@ export async function onRequest(ctx) {
           const qty = parseFloat(s.qty) || 0
           try {
             const result = await DB.prepare(`
-              UPDATE inventory
+              UPDATE stayvibe_inventory
               SET qty_in_stock = ?, updated_by = ?, updated_at = ?
               WHERE item_id = ? AND villa_id = ?
             `).bind(qty, actor, now(), itemId, villaId).run()
             if (!result.meta?.changes) {
               await DB.prepare(`
-                INSERT INTO inventory (item_id, villa_id, name, qty_in_stock, created_by, updated_by, created_at, updated_at)
+                INSERT INTO stayvibe_inventory (item_id, villa_id, name, qty_in_stock, created_by, updated_by, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(itemId, villaId, s.name || itemId, qty, actor, actor, now(), now()).run()
             }
@@ -3481,7 +3594,7 @@ export async function onRequest(ctx) {
       // INVENTORY — add a brand-new catalog item (persisted, not the old
       // fake 'Add item' button that only showed a toast and forgot it).
       if (action === 'addInventoryItem') {
-        const villaId = body.villaId || 'dwarka'
+        const villaId = body.villaId || DEFAULT_VILLA_ID
         const name = (body.name || '').trim()
         if (!name) return err('name required')
         const unit = (body.unit || '').trim() || 'unit'
@@ -3494,11 +3607,11 @@ export async function onRequest(ctx) {
         let baseId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'item'
         let itemId = baseId
         let suffix = 2
-        while (await DB.prepare(`SELECT 1 FROM inventory WHERE item_id = ?`).bind(itemId).first()) {
+        while (await DB.prepare(`SELECT 1 FROM stayvibe_inventory WHERE item_id = ?`).bind(itemId).first()) {
           itemId = `${baseId}_${suffix}`; suffix++
         }
         await DB.prepare(`
-          INSERT INTO inventory (item_id, villa_id, name, unit, category, cost_price, sell_price, qty_in_stock, preferred_stock, active, created_by, updated_by, created_at, updated_at)
+          INSERT INTO stayvibe_inventory (item_id, villa_id, name, unit, category, cost_price, sell_price, qty_in_stock, preferred_stock, active, created_by, updated_by, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 10, 1, ?, ?, ?, ?)
         `).bind(itemId, villaId, name, unit, category, costPrice, sellPrice, actor, actor, now(), now()).run()
         return json({ success: true, data: { itemId } })
@@ -3509,21 +3622,21 @@ export async function onRequest(ctx) {
       if (action === 'archiveInventoryItem') {
         const { itemId, villaId } = body
         if (!itemId) return err('itemId required')
-        await DB.prepare(`UPDATE inventory SET active = 0, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
-          .bind(actor, now(), itemId, villaId || 'dwarka').run()
+        await DB.prepare(`UPDATE stayvibe_inventory SET active = 0, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
+          .bind(actor, now(), itemId, villaId || DEFAULT_VILLA_ID).run()
         return json({ success: true, data: { itemId } })
       }
 
       if (action === 'restoreInventoryItem') {
         const { itemId, villaId } = body
         if (!itemId) return err('itemId required')
-        await DB.prepare(`UPDATE inventory SET active = 1, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
-          .bind(actor, now(), itemId, villaId || 'dwarka').run()
+        await DB.prepare(`UPDATE stayvibe_inventory SET active = 1, updated_by = ?, updated_at = ? WHERE item_id = ? AND villa_id = ?`)
+          .bind(actor, now(), itemId, villaId || DEFAULT_VILLA_ID).run()
         return json({ success: true, data: { itemId } })
       }
 
       if (action === 'saveInventoryPreferredStock') {
-        const villaId = body.villaId || 'dwarka'
+        const villaId = body.villaId || DEFAULT_VILLA_ID
         const levels  = body.levels || {}
         const errors = []
         let savedCount = 0
@@ -3531,13 +3644,13 @@ export async function onRequest(ctx) {
           const preferred = Math.max(0, parseInt(val, 10) || 0)
           try {
             const result = await DB.prepare(`
-              UPDATE inventory
+              UPDATE stayvibe_inventory
               SET preferred_stock = ?, updated_by = ?, updated_at = ?
               WHERE item_id = ? AND villa_id = ?
             `).bind(preferred, actor, now(), itemId, villaId).run()
             if (!result.meta?.changes) {
               await DB.prepare(`
-                INSERT INTO inventory (item_id, villa_id, name, preferred_stock, created_by, updated_by, created_at, updated_at)
+                INSERT INTO stayvibe_inventory (item_id, villa_id, name, preferred_stock, created_by, updated_by, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               `).bind(itemId, villaId, itemId, preferred, actor, actor, now(), now()).run()
             }
@@ -3556,21 +3669,9 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { savedCount, total: Object.keys(levels).length, errors } })
       }
 
-      // INVENTORY — low-stock items (qty_in_stock <= 10% of preferred_stock), for dashboard alerts
-      if (action === 'getLowStockItems') {
-        const villaId = url.searchParams.get('villaId') || 'dwarka'
-        const { results } = await DB.prepare(`
-          SELECT item_id, name, unit, category, qty_in_stock, preferred_stock
-          FROM inventory
-          WHERE villa_id = ? AND preferred_stock > 0 AND qty_in_stock <= (preferred_stock * 0.1)
-          ORDER BY (CAST(qty_in_stock AS REAL) / preferred_stock) ASC
-        `).bind(villaId).all()
-        return json({ success: true, data: results })
-      }
-
      if (action === 'saveKitchenEntry') {
         const items = body.items || [];
-        const villaId = body.villaId || 'dwarka';
+        const villaId = body.villaId || DEFAULT_VILLA_ID;
         
         // SAFE CONTEXT INTIATION — Guarantee fallback tokens exist
         const currentActor = typeof actor !== 'undefined' ? actor : 'raman';
@@ -3586,13 +3687,13 @@ export async function onRequest(ctx) {
           if (invItemId === 'custom') invItemId = null
           if (invItemId) {
             const exists = await DB.prepare(
-              `SELECT 1 FROM inventory WHERE item_id = ? AND villa_id = ?`
+              `SELECT 1 FROM stayvibe_inventory WHERE item_id = ? AND villa_id = ?`
             ).bind(invItemId, villaId).first()
             if (!exists) invItemId = null
           }
 
           await DB.prepare(
-            `INSERT INTO stay_incidentals (
+            `INSERT INTO stayvibe_incidentals (
               item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
           ).bind(
@@ -3615,14 +3716,14 @@ export async function onRequest(ctx) {
             try {
               const qtySold = Number(item.qty) || 1
               await DB.prepare(`
-                UPDATE inventory
+                UPDATE stayvibe_inventory
                 SET qty_in_stock = MAX(0, COALESCE(qty_in_stock, 0) - ?),
                     updated_by = ?, updated_at = ?
                 WHERE item_id = ? AND villa_id = ?
               `).bind(qtySold, currentActor, timestamp, invItemId, villaId).run()
 
               const row = await DB.prepare(
-                `SELECT name, qty_in_stock, preferred_stock FROM inventory WHERE item_id = ? AND villa_id = ?`
+                `SELECT name, qty_in_stock, preferred_stock FROM stayvibe_inventory WHERE item_id = ? AND villa_id = ?`
               ).bind(invItemId, villaId).first()
               if (row && row.preferred_stock > 0 && row.qty_in_stock <= row.preferred_stock * 0.1) {
                 lowStockAlerts.push({ itemId: invItemId, name: row.name, qtyInStock: row.qty_in_stock, preferredStock: row.preferred_stock })
@@ -3651,12 +3752,12 @@ export async function onRequest(ctx) {
 
       if (action === 'saveVillaRentalIncome') {
         if (body.stayId) {
-          await DB.prepare(`UPDATE stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, body.extraLines || null, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, body.extraLines || null, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
           await syncStayLedger(DB, body.stayId)
           return json({ success: true, data: { stayId: body.stayId, updated: true } })
         }
-        const stayId = genStayId(body.villaId || 'dwarka')
-        await DB.prepare(`INSERT INTO stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)`).bind(stayId, body.villaId || 'dwarka', (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'), body.guestName, body.checkInDate, body.checkOutDate, body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, actor, actor, now(), now()).run()
+        const stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
+        await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'), body.guestName, body.checkInDate, body.checkOutDate, body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, actor, actor, now(), now()).run()
         // This manual-entry path creates a stay directly in 'closed' state, bypassing
         // the normal checked_out transition where Raman's commission is normally
         // auto-created. Without this, guests entered here would be invisible to
@@ -3665,7 +3766,7 @@ export async function onRequest(ctx) {
         {
           const nightsForComm = parseInt(body.nights) || 1
           const ramanComm = nightsForComm > 1 ? 2000 : 1000
-          await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nightsForComm, ramanComm, now(), now()).run()
+          await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nightsForComm, ramanComm, now(), now()).run()
         }
         await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId } })
@@ -3680,7 +3781,7 @@ export async function onRequest(ctx) {
             const income = (parseFloat(prop.rent) || 0) + (parseFloat(prop.carParking) || 0)
             const expense = (parseFloat(prop.maintenance)||0) + (parseFloat(prop.electricity)||0) + (parseFloat(prop.water)||0) + (parseFloat(prop.propertyTax)||0) + (parseFloat(prop.landTax)||0) + (parseFloat(prop.extraMaintenance)||0)
             const net = income - expense; const recId = `RI-${propId}-${year}-${String(m+1).padStart(2,'0')}`
-            await DB.prepare(`INSERT OR REPLACE INTO rental_income (record_id, prop_id, month, year, rent, car_parking, maintenance, electricity, water, property_tax, land_tax, extra_maintenance, net, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(recId, propId, m + 1, year, parseFloat(prop.rent)||0, parseFloat(prop.carParking)||0, parseFloat(prop.maintenance)||0, parseFloat(prop.electricity)||0, parseFloat(prop.water)||0, parseFloat(prop.propertyTax)||0, parseFloat(prop.landTax)||0, parseFloat(prop.extraMaintenance)||0, net, actor, actor, now(), now()).run()
+            await DB.prepare(`INSERT OR REPLACE INTO rev360_rental_income (record_id, prop_id, month, year, rent, car_parking, maintenance, electricity, water, property_tax, land_tax, extra_maintenance, net, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(recId, propId, m + 1, year, parseFloat(prop.rent)||0, parseFloat(prop.carParking)||0, parseFloat(prop.maintenance)||0, parseFloat(prop.electricity)||0, parseFloat(prop.water)||0, parseFloat(prop.propertyTax)||0, parseFloat(prop.landTax)||0, parseFloat(prop.extraMaintenance)||0, net, actor, actor, now(), now()).run()
           }
         }
         return json({ success: true })
@@ -3692,7 +3793,7 @@ export async function onRequest(ctx) {
         const harvestDate = body.harvestDate
         const scheduledNext = harvestDate ? new Date(new Date(harvestDate).getTime() + 45 * 86400000).toISOString().slice(0, 10) : null
         await ActiveDB.prepare(`
-          INSERT INTO coconut_harvests
+          INSERT INTO estate360_coconut_harvests
             (harvest_id, estate_id, harvester_name, harvest_date, final_payment_date,
              total_nuts, net_good_nuts, nuts_rejected, additional_unaccounted,
              total_weight_kg, price_per_kg, avg_weight_per_nut,
@@ -3736,7 +3837,7 @@ export async function onRequest(ctx) {
         const gross = (body.totalAmount != null ? parseFloat(body.totalAmount) : weightKg * pricePerKg) || 0
         const net   = body.netIncome != null ? parseFloat(body.netIncome) : (gross - expense)
         await ActiveDB.prepare(`
-          INSERT INTO rubber_harvests
+          INSERT INTO estate360_rubber_harvests
             (harvest_id, estate_id, harvest_date, weight_kg, price_per_kg, gross, expense, net, notes, created_by, created_at, updated_by, updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(id, estateId, harvestDate, weightKg, pricePerKg, gross, expense, net, body.notes||null, actor, now(), actor, now()).run()
@@ -3806,7 +3907,7 @@ export async function onRequest(ctx) {
           if (e.treeCount === 0 && e.sheetCount === 0 && e.ottupalCount === 0 && !e.rain && !e.force) continue
           const id = genId('RP')
           await ActiveDB.prepare(`
-            INSERT INTO rubber_production
+            INSERT INTO estate360_rubber_production
               (prod_id, estate_id, worker_name, prod_date, tree_count, sheet_count, ottupal_count, block, rain, tapping_rate, notes, created_by, created_at, updated_by, updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(estate_id, worker_name, prod_date) DO UPDATE SET
@@ -3844,84 +3945,10 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { saved, sumTree, sumSheet, sumOttupal } })
       }
 
-      // ── RUBBER MONTHLY REGISTER SUMMARY ─────────────────────────────────
-      // Per-DATE classification across all tappers (a calendar day counts
-      // once): rain if any row flags rain; tapping if sheets were produced;
-      // maintenance if trees were worked but no sheets (prep/maintenance —
-      // matches the paper register where trees are accounted but sheets = 0).
-      // Wages = SUM(tree_count * tapping_rate). Plus month P&L from
-      // estate_transactions (income vs expense by category).
-      if (action === 'getRubberMonthly') {
-        const estateId = url.searchParams.get('estate') || 'pavutumuri'
-        const month = url.searchParams.get('month')
-        if (!month || !/^\d{4}-\d{2}$/.test(month)) return err("month required as 'YYYY-MM'")
-        const { results: rows } = await ActiveDB.prepare(`
-          SELECT prod_date,
-                 MAX(COALESCE(rain,0))                          AS rain,
-                 SUM(COALESCE(tree_count,0))                    AS trees,
-                 SUM(COALESCE(sheet_count,0))                   AS sheets,
-                 SUM(COALESCE(ottupal_count,0))                 AS ottupal,
-                 ROUND(SUM(COALESCE(tree_count,0) * COALESCE(tapping_rate,0)), 2) AS wages
-          FROM rubber_production
-          WHERE estate_id = ? AND prod_date LIKE ?
-          GROUP BY prod_date ORDER BY prod_date`).bind(estateId, `${month}%`).all()
-        let tappingDays = 0, maintenanceDays = 0, rainDays = 0
-        let trees = 0, sheets = 0, ottupal = 0, wages = 0
-        for (const r of (rows || [])) {
-          if (r.rain) rainDays++
-          else if ((r.sheets || 0) > 0) tappingDays++
-          else if ((r.trees || 0) > 0) maintenanceDays++
-          trees += r.trees || 0; sheets += r.sheets || 0; ottupal += r.ottupal || 0; wages += r.wages || 0
-        }
-        const { results: txns } = await ActiveDB.prepare(`
-          SELECT type, category, ROUND(SUM(amount),2) AS total
-          FROM estate_transactions
-          WHERE estate = ? AND date LIKE ?
-          GROUP BY type, category ORDER BY type, total DESC`).bind(estateId, `${month}%`).all()
-        const income  = (txns || []).filter(t => t.type === 'income')
-        const expense = (txns || []).filter(t => t.type === 'expense')
-        const totalIncome  = Math.round(income.reduce((a, t) => a + (t.total || 0), 0) * 100) / 100
-        const totalExpense = Math.round(expense.reduce((a, t) => a + (t.total || 0), 0) * 100) / 100
-        return json({ success: true, data: {
-          month, days: { tapping: tappingDays, maintenance: maintenanceDays, rain: rainDays, recorded: (rows || []).length },
-          production: { trees, sheets, ottupal, wages: Math.round(wages * 100) / 100 },
-          pnl: { income, expense, totalIncome, totalExpense, net: Math.round((totalIncome - totalExpense) * 100) / 100 },
-        }})
-      }
-
-      if (action === 'getRubberProduction') {
-        const estateId = url.searchParams.get('estate') || 'pavutumuri'
-        const month    = url.searchParams.get('month')      // 'YYYY-MM' optional
-        const weekStart= url.searchParams.get('weekStart')  // 'YYYY-MM-DD' optional
-        let query = `SELECT * FROM rubber_production WHERE estate_id = ?`
-        const binds = [estateId]
-        if (weekStart) {
-          // week window: weekStart .. weekStart+6
-          const ws = new Date(weekStart + 'T00:00:00')
-          const we = new Date(ws); we.setDate(we.getDate() + 6)
-          query += ` AND prod_date BETWEEN ? AND ?`
-          binds.push(weekStart, we.toISOString().slice(0, 10))
-        } else if (month) {
-          query += ` AND prod_date LIKE ?`; binds.push(`${month}%`)
-        }
-        query += ` ORDER BY prod_date DESC LIMIT 400`
-        const { results } = await ActiveDB.prepare(query).bind(...binds).all()
-        const { results: workerRows } = await ActiveDB.prepare(
-          `SELECT DISTINCT worker_name FROM rubber_production WHERE estate_id = ? ORDER BY worker_name`
-        ).bind(estateId).all()
-        const totalTrees   = results.reduce((s, r) => s + (r.tree_count    || 0), 0)
-        const totalSheets  = results.reduce((s, r) => s + (r.sheet_count   || 0), 0)
-        const totalOttupal = results.reduce((s, r) => s + (r.ottupal_count || 0), 0)
-        return json({ success: true, data: {
-          rows: results, totalTrees, totalSheets, totalOttupal,
-          workers: workerRows.map(w => w.worker_name).filter(Boolean),
-        }})
-      }
-
       if (action === 'deleteRubberProduction') {
         const { prodId } = body
         if (!prodId) return err('prodId required', 400)
-        await ActiveDB.prepare(`DELETE FROM rubber_production WHERE prod_id = ?`).bind(prodId).run()
+        await ActiveDB.prepare(`DELETE FROM estate360_rubber_production WHERE prod_id = ?`).bind(prodId).run()
         return json({ success: true })
       }
 
@@ -3935,7 +3962,7 @@ export async function onRequest(ctx) {
         if (!paymentDate || !amount) return err('paymentDate and amount required', 400)
         const id = genId('MS')
         await ActiveDB.prepare(`
-          INSERT INTO manager_settlements
+          INSERT INTO estate360_manager_settlements
             (settlement_id, estate_id, manager_name, payer_name, payment_date, amount, method, note, created_by, created_at)
           VALUES (?,?,?,?,?,?,?,?,?,?)
         `).bind(id, estateId, managerName, payerName, paymentDate, amount, body.method || 'cash', body.note || null, actor, now()).run()
@@ -3958,27 +3985,10 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { settlementId: id } })
       }
 
-      if (action === 'getManagerSettlements') {
-        const estateId = url.searchParams.get('estate') || 'pavutumuri'
-        const { results: payments } = await ActiveDB.prepare(
-          `SELECT * FROM manager_settlements WHERE estate_id = ? ORDER BY payment_date DESC, created_at DESC LIMIT 500`
-        ).bind(estateId).all()
-        // Balance owed to the manager = total estate expenses − total paid to manager.
-        const expRow = await ActiveDB.prepare(
-          `SELECT COALESCE(SUM(amount),0) AS total FROM estate_transactions WHERE estate = ? AND type = 'expense'`
-        ).bind(estateId).first()
-        const totalExpenses = expRow?.total || 0
-        const totalPaid = payments.reduce((s, p) => s + (p.amount || 0), 0)
-        return json({ success: true, data: {
-          payments, totalExpenses, totalPaid,
-          balance: totalExpenses - totalPaid,
-        }})
-      }
-
       if (action === 'deleteManagerSettlement') {
         const { settlementId } = body
         if (!settlementId) return err('settlementId required', 400)
-        await ActiveDB.prepare(`DELETE FROM manager_settlements WHERE settlement_id = ?`).bind(settlementId).run()
+        await ActiveDB.prepare(`DELETE FROM estate360_manager_settlements WHERE settlement_id = ?`).bind(settlementId).run()
         return json({ success: true })
       }
 
@@ -3988,7 +3998,7 @@ export async function onRequest(ctx) {
         if (!harvestDate || !estate) return json({ success:false, error:'estate and harvestDate required' }, 400)
         const id = `MH-${Date.now()}`
         await ActiveDB.prepare(`
-          INSERT INTO mango_harvests (
+          INSERT INTO estate360_mango_harvests (
             harvest_id, estate, harvest_date, box_type, 
             alphonsa, neelam, malgova, banganapally, kilimooku, sindooram, mix, 
             total_boxes, buyer, price_per_box, total_revenue, notes, created_by, created_at
@@ -4021,35 +4031,35 @@ export async function onRequest(ctx) {
       if (action === 'updateStayLocation') {
         const { stayId, homeAddress, city, state, country, fromCity, phone, email } = body
         if (!stayId) return err('stayId required')
-        await DB.prepare(`UPDATE stays SET home_address = ?, city = ?, state = ?, country = ?, from_city = ?, guest_phone = COALESCE(NULLIF(guest_phone,''), ?), guest_email = COALESCE(NULLIF(guest_email,''), ?), updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(homeAddress||null, city||null, state||null, country||'India', fromCity||null, phone||null, email||null, now(), stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET home_address = ?, city = ?, state = ?, country = ?, from_city = ?, guest_phone = COALESCE(NULLIF(guest_phone,''), ?), guest_email = COALESCE(NULLIF(guest_email,''), ?), updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(homeAddress||null, city||null, state||null, country||'India', fromCity||null, phone||null, email||null, now(), stayId).run()
         return json({ success: true, data: { stayId, city, state, country } })
       }
 
       if (action === 'updateDriveFolder') {
         const { stayId, driveFolderId, driveFolderUrl, processingNote } = body
         if (!stayId) return err('stayId required')
-        const existing = await DB.prepare(`SELECT folder_created_at, processing_log, folder_created FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        const existing = await DB.prepare(`SELECT folder_created_at, processing_log, folder_created FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         const folderCreatedAt = existing?.folder_created_at || now()
         const prevLog = existing?.processing_log ? existing.processing_log + '\n' : ''
         const logEntry = now() + ' — Drive folder created: ' + (driveFolderUrl || '') + (processingNote ? ' | ' + processingNote : '')
         const setFolderCreated = body.folderCreated !== undefined ? (body.folderCreated ? 1 : 0) : (existing?.folder_created || 0)
-        await DB.prepare(`UPDATE stays SET drive_folder_id = ?, drive_folder_url = ?, folder_created = ?, folder_created_at = ?, processing_log = ?, updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(driveFolderId || null, driveFolderUrl || null, setFolderCreated, folderCreatedAt, prevLog + logEntry, stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET drive_folder_id = ?, drive_folder_url = ?, folder_created = ?, folder_created_at = ?, processing_log = ?, updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(driveFolderId || null, driveFolderUrl || null, setFolderCreated, folderCreatedAt, prevLog + logEntry, stayId).run()
         return json({ success: true, data: { stayId, driveFolderId, folderCreatedAt } })
       }
 
       if (action === 'saveReview') {
         const { stayId, rating, source, reviewDate, reviewText, reviewNote, highlights } = body
         if (!stayId) return err('stayId required')
-        await DB.prepare(`UPDATE stays SET review_rating = ?, review_source = ?, review_date = ?, review_text = ?, review_note = ?, review_highlights = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(rating || 0, source || 'airbnb', reviewDate || now(), reviewText || null, reviewNote || null, highlights || null, 'auto', now(), stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET review_rating = ?, review_source = ?, review_date = ?, review_text = ?, review_note = ?, review_highlights = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(rating || 0, source || 'airbnb', reviewDate || now(), reviewText || null, reviewNote || null, highlights || null, 'auto', now(), stayId).run()
         return json({ success: true, data: { stayId, rating, source } })
       }
 
       if (action === 'setReadyForCheckIn' || action === 'approvePendingBooking') {
         const { stayId } = body; if (!stayId) return err('stayId required')
-        const stay = await DB.prepare(`SELECT status FROM stays WHERE stay_id = ?`).bind(stayId).first()
+        const stay = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return json({ success: true, data: { changed: false, reason: 'stay not found' }})
         if (!['booked','confirmed','docs_uploaded','pending_review'].includes(stay.status)) return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status }})
-        await DB.prepare(`UPDATE stays SET status = 'ready_for_checkin', updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(now(), stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET status = 'ready_for_checkin', updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(now(), stayId).run()
         return json({ success: true, data: { changed: true, stayId, status: 'ready_for_checkin' }})
       }
 
@@ -4057,14 +4067,14 @@ export async function onRequest(ctx) {
         const { stayId, status } = body
         if (!stayId) return err('stayId required')
         if (!['booked','confirmed','docs_uploaded','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed','cancelled'].includes(status)) return err(`Invalid status: ${status}`)
-        await DB.prepare(`UPDATE stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
         if (status === 'checked_out') {
-          const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stays WHERE stay_id = ?`).bind(stayId).first()
+          const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
           if (stay) {
-            const existing = await DB.prepare(`SELECT comm_id FROM raman_commissions WHERE stay_id = ?`).bind(stayId).first()
+            const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
             if (!existing) {
               const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
-              await DB.prepare(`INSERT INTO raman_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
+              await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
             }
           }
         }
@@ -4075,7 +4085,7 @@ export async function onRequest(ctx) {
         const { stayId } = body
         if (!stayId) return err('stayId required')
         await DB.prepare(
-          `UPDATE stays SET review_chased_at = ?, review_chase_count = COALESCE(review_chase_count, 0) + 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          `UPDATE stayvibe_stays SET review_chased_at = ?, review_chase_count = COALESCE(review_chase_count, 0) + 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
         ).bind(now(), actor, now(), stayId).run()
         return json({ success: true, data: { stayId } })
       }
@@ -4103,8 +4113,8 @@ export async function onRequest(ctx) {
         const { sourceStayId, targetStayId } = body
         if (!sourceStayId || !targetStayId) return err('sourceStayId and targetStayId required')
         if (sourceStayId === targetStayId) return err('source and target must differ')
-        const src = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(sourceStayId).first()
-        const tgt = await DB.prepare(`SELECT * FROM stays WHERE stay_id = ?`).bind(targetStayId).first()
+        const src = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(sourceStayId).first()
+        const tgt = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(targetStayId).first()
         if (!src || !tgt) return err('Stay not found', 404)
         if (['cancelled','void','closed'].includes(tgt.status)) return err('Target stay is not active')
         if (src.status === 'void') return err('Source stay is already void')
@@ -4113,7 +4123,7 @@ export async function onRequest(ctx) {
           return err('Target already has financials — refusing to overwrite. Clear one side first to avoid double counting.')
         }
         await DB.batch([
-          DB.prepare(`UPDATE stays SET
+          DB.prepare(`UPDATE stayvibe_stays SET
               source = ?, airbnb_conf = COALESCE(?, airbnb_conf),
               tariff_per_night = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?,
               extra_charges = ?, extra_lines = ?,
@@ -4128,12 +4138,12 @@ export async function onRequest(ctx) {
             src.night_fee || 0, src.cleaning_fee || 0, src.host_service_fee || 0, src.you_earn || 0,
             src.guest_service_fee || 0, src.guest_paid_total || 0,
             sourceStayId, actor, targetStayId),
-          DB.prepare(`UPDATE stays SET status = 'void', airbnb_conf = NULL,
+          DB.prepare(`UPDATE stayvibe_stays SET status = 'void', airbnb_conf = NULL,
               notes = TRIM(COALESCE(notes,'') || ' | Voided as duplicate — financials moved to ' || ?),
               updated_by = ?, updated_at = datetime('now')
             WHERE stay_id = ?`).bind(targetStayId, actor, sourceStayId),
-          DB.prepare(`DELETE FROM booking_line_items WHERE stay_id = ?`).bind(sourceStayId),
-          DB.prepare(`INSERT INTO processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'merge', ?, ?, datetime('now'))`)
+          DB.prepare(`DELETE FROM stayvibe_booking_line_items WHERE stay_id = ?`).bind(sourceStayId),
+          DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'merge', ?, ?, datetime('now'))`)
             .bind(genId('LOG'), targetStayId,
               `Absorbed financials from duplicate ${sourceStayId} (${src.guest_name}) into ${targetStayId} (${tgt.guest_name}); duplicate voided. Net moved: ${src.net || 0}.`),
         ])
@@ -4146,12 +4156,12 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         let guestName = null
         if (guestId) {
-          const guest = await DB.prepare(`SELECT name FROM guests WHERE guest_id = ?`).bind(guestId).first()
+          const guest = await DB.prepare(`SELECT name FROM stayvibe_guests WHERE guest_id = ?`).bind(guestId).first()
           if (!guest) return err('Guest not found', 404)
           guestName = guest.name
         }
         await DB.prepare(
-          `UPDATE stays SET booked_by_guest_id = ?, booked_by_name = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          `UPDATE stayvibe_stays SET booked_by_guest_id = ?, booked_by_name = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
         ).bind(guestId || null, guestName, actor, now(), stayId).run()
 
         // Linking "who's paying" (e.g. a B2B agency like Detrip) is
@@ -4164,20 +4174,20 @@ export async function onRequest(ctx) {
         // doesn't silently persist.
         let backfilledGuestId = null
         try {
-          const stay = await DB.prepare(`SELECT guest_name, guest_phone, guest_email FROM stays WHERE stay_id = ?`).bind(stayId).first()
+          const stay = await DB.prepare(`SELECT guest_name, guest_phone, guest_email FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
           if (stay?.guest_name) {
             const normPhone = (stay.guest_phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
             const normEmail = (stay.guest_email || '').trim().toLowerCase()
             if (normPhone || normEmail) {
               const existing = await DB.prepare(
-                `SELECT guest_id FROM guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
+                `SELECT guest_id FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
               ).bind(normPhone, normEmail).first()
               if (existing) {
                 backfilledGuestId = existing.guest_id
               } else {
                 backfilledGuestId = genId('GST')
                 await DB.prepare(`
-                  INSERT INTO guests (guest_id, name, phone, email, total_stays, last_seen_at, created_by, updated_by)
+                  INSERT INTO stayvibe_guests (guest_id, name, phone, email, total_stays, last_seen_at, created_by, updated_by)
                   VALUES (?, ?, ?, ?, 1, ?, ?, ?)
                 `).bind(backfilledGuestId, stay.guest_name, normPhone, normEmail, now(), actor, actor).run()
               }
@@ -4198,19 +4208,19 @@ export async function onRequest(ctx) {
           binds.push(rating, now().slice(0, 10))
         }
         binds.push(stayId)
-        await DB.prepare(`UPDATE stays SET ${updates.join(', ')} WHERE stay_id = ?`).bind(...binds).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET ${updates.join(', ')} WHERE stay_id = ?`).bind(...binds).run()
         return json({ success: true, data: { stayId, status: 'closed', rating: rating || 0 } })
       }
 
       if (action === 'saveBreakfastEntry') {
         const id = genId('BF')
-        await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
+        await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
       if (action === 'saveCarRental') {
         const id = genId('CR')
-        await DB.prepare(`INSERT INTO guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'car_rental', JSON.stringify({ date: body.date, destination: body.destination || '', amount: body.amount || 0, commission: body.commission || 0, net: body.net || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
+        await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'car_rental', JSON.stringify({ date: body.date, destination: body.destination || '', amount: body.amount || 0, commission: body.commission || 0, net: body.net || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
@@ -4221,11 +4231,11 @@ export async function onRequest(ctx) {
         const { txnId, villaId, date, category, amount, paidTo, description } = body
         if (!date || !category || !amount) return err('date, category and amount are required', 400)
         const amt = parseFloat(amount) || 0
-        const vId = villaId || 'dwarka'
+        const vId = villaId || DEFAULT_VILLA_ID
 
         if (txnId) {
           await DB.prepare(`
-            UPDATE villa_expenses SET date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=?
+            UPDATE stayvibe_villa_expenses SET date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=?
             WHERE txn_id = ?
           `).bind(date, category, amt, paidTo || null, description || null, actor, now(), txnId).run()
 
@@ -4250,7 +4260,7 @@ export async function onRequest(ctx) {
 
         const id = genId('VE')
         await DB.prepare(`
-          INSERT INTO villa_expenses (txn_id, villa_id, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at)
+          INSERT INTO stayvibe_villa_expenses (txn_id, villa_id, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?)
         `).bind(id, vId, date, category, amt, paidTo || null, description || null, actor, actor, now(), now()).run()
 
@@ -4275,7 +4285,7 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteVillaExpense') {
         const { txnId } = body; if (!txnId) return err('txnId required')
-        await DB.prepare(`DELETE FROM villa_expenses WHERE txn_id = ?`).bind(txnId).run()
+        await DB.prepare(`DELETE FROM stayvibe_villa_expenses WHERE txn_id = ?`).bind(txnId).run()
         return json({ success: true, data: { txnId, deleted: true } })
       }
 
@@ -4284,9 +4294,9 @@ export async function onRequest(ctx) {
       if (action === 'saveVillaSetting') {
         const { villaId, key, value } = body
         if (!key) return err('key required')
-        const vId = villaId || 'dwarka'
+        const vId = villaId || DEFAULT_VILLA_ID
         await DB.prepare(`
-          INSERT INTO villa_settings (villa_id, key, value, updated_by, updated_at) VALUES (?,?,?,?,?)
+          INSERT INTO stayvibe_villa_settings (villa_id, key, value, updated_by, updated_at) VALUES (?,?,?,?,?)
           ON CONFLICT(villa_id, key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at
         `).bind(vId, key, value ?? null, actor, now()).run()
         return json({ success: true, data: { villaId: vId, key, value } })
@@ -4303,7 +4313,7 @@ export async function onRequest(ctx) {
         const emoji = type === 'income' ? '💰' : '🧾'
 
         if (txnId) {
-          await ActiveDB.prepare(`UPDATE estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, amt, paidTo||null, description||null, actor, now(), txnId).run()
+          await ActiveDB.prepare(`UPDATE estate360_estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, amt, paidTo||null, description||null, actor, now(), txnId).run()
 
           ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — ${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
             `Source: Estate360 > ${estateLabel} > Income/Expense screen`,
@@ -4325,7 +4335,7 @@ export async function onRequest(ctx) {
           return json({ success: true, data: { txnId } })
         } else {
           const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
-          await ActiveDB.prepare(`INSERT INTO estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, amt, paidTo||null, description||null, actor, actor, now(), now()).run()
+          await ActiveDB.prepare(`INSERT INTO estate360_estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, amt, paidTo||null, description||null, actor, actor, now(), now()).run()
 
           ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
             `Source: Estate360 > ${estateLabel} > Income/Expense screen`,
@@ -4352,38 +4362,38 @@ export async function onRequest(ctx) {
         const { campaignName, channel, villaId, notes } = body; if (!campaignName?.trim()) return err('campaignName required')
         const slug = campaignName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
         const token = `${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`; const id = 'cmp_' + Date.now()
-        await DB.prepare(`INSERT INTO marketing_campaigns (id, campaign_name, unique_token, channel, villa_id, notes, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaignName.trim(), token, channel || 'whatsapp', villaId || 'dwarka', notes || null, actor, now()).run()
+        await DB.prepare(`INSERT INTO stayvibe_marketing_campaigns (id, campaign_name, unique_token, channel, villa_id, notes, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaignName.trim(), token, channel || 'whatsapp', villaId || DEFAULT_VILLA_ID, notes || null, actor, now()).run()
         return json({ success: true, data: { id, token, campaignName: campaignName.trim() } })
       }
 
       if (action === 'toggleCampaign') {
         const { campaignId } = body; if (!campaignId) return err('campaignId required')
-        await DB.prepare(`UPDATE marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?`).bind(campaignId).run()
+        await DB.prepare(`UPDATE stayvibe_marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?`).bind(campaignId).run()
         return json({ success: true })
       }
 
       if (action === 'deleteCampaign') {
         const { campaignId } = body; if (!campaignId) return err('campaignId required')
-        await DB.prepare(`DELETE FROM campaign_analytics WHERE campaign_id = ?`).bind(campaignId).run()
-        await DB.prepare(`DELETE FROM marketing_campaigns WHERE id = ?`).bind(campaignId).run()
+        await DB.prepare(`DELETE FROM stayvibe_campaign_analytics WHERE campaign_id = ?`).bind(campaignId).run()
+        await DB.prepare(`DELETE FROM stayvibe_marketing_campaigns WHERE id = ?`).bind(campaignId).run()
         return json({ success: true })
       }
 
       if (action === 'trackCampaignClick') {
         const { token, referrer } = body; if (!token) return err('token required')
-        const campaign = await DB.prepare(`SELECT id FROM marketing_campaigns WHERE unique_token = ? AND is_active = 1`).bind(token).first()
+        const campaign = await DB.prepare(`SELECT id FROM stayvibe_marketing_campaigns WHERE unique_token = ? AND is_active = 1`).bind(token).first()
         if (!campaign) return json({ success: false, error: 'Unknown token' })
         const cf = request.cf || {}; const id = 'evt_' + Date.now()
-        await DB.prepare(`INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaign.id, 'click', cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null, referrer || null).run()
+        await DB.prepare(`INSERT INTO stayvibe_campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaign.id, 'click', cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null, referrer || null).run()
         return json({ success: true })
       }
 
       if (action === 'trackCampaignAction') {
         const { token, eventType } = body; if (!token) return err('token required')
-        const campaign = await DB.prepare(`SELECT id FROM marketing_campaigns WHERE unique_token = ?`).bind(token).first()
+        const campaign = await DB.prepare(`SELECT id FROM stayvibe_marketing_campaigns WHERE unique_token = ?`).bind(token).first()
         if (!campaign) return json({ success: false })
         const cf = request.cf || {}; const id = 'evt_' + Date.now()
-        await DB.prepare(`INSERT INTO campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent) VALUES (?,?,?,?,?,?,?)`).bind(id, campaign.id, eventType, cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null).run()
+        await DB.prepare(`INSERT INTO stayvibe_campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent) VALUES (?,?,?,?,?,?,?)`).bind(id, campaign.id, eventType, cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null).run()
         return json({ success: true })
       }
 
@@ -4393,7 +4403,7 @@ export async function onRequest(ctx) {
         if (!estate || !loggedDate) return err('estate and loggedDate required')
         const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
         await ActiveDB.prepare(
-          `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
+          `INSERT INTO estate360_irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
            VALUES (?,?,?,?,?,?, NULL, NULL, ?)`
         ).bind(id, estate, loggedDate, notes||null, actor, now(), parseInt(durationMins)||0).run()
 
@@ -4421,7 +4431,7 @@ export async function onRequest(ctx) {
         if (!estate || !zoneId || !loggedDate) return err('estate, zoneId, loggedDate required')
         const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
         await ActiveDB.prepare(
-          `INSERT INTO irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
+          `INSERT INTO estate360_irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
            VALUES (?,?,?,?,?,?,?,?,?)`
         ).bind(id, estate, loggedDate, notes||null, actor, now(), zoneId, zoneName||null, parseInt(durationMins)||0).run()
 
@@ -4450,8 +4460,8 @@ export async function onRequest(ctx) {
         if (!estate || !zoneName) return err('estate and zoneName required')
         const id = zoneId || ('zone_' + estate + '_' + Date.now())
         await ActiveDB.prepare(
-          `INSERT OR REPLACE INTO irrigation_zones (zone_id, estate, zone_name, zone_label, expected_freq_days, coconut_trees, new_holes, motor, mango_trees, active, sort_order, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM irrigation_zones WHERE zone_id=?), ?))`
+          `INSERT OR REPLACE INTO estate360_irrigation_zones (zone_id, estate, zone_name, zone_label, expected_freq_days, coconut_trees, new_holes, motor, mango_trees, active, sort_order, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM estate360_irrigation_zones WHERE zone_id=?), ?))`
         ).bind(id, estate, zoneName, zoneLabel||null, parseInt(expectedFreqDays)||7, parseInt(coconutTrees)||0, parseInt(newHoles)||0, motor||null, parseInt(mangoTrees)||0, active !== false ? 1 : 0, parseInt(sortOrder)||0, id, now()).run()
         return json({ success: true, data: { zoneId: id } })
       }
@@ -4462,7 +4472,7 @@ export async function onRequest(ctx) {
         if (!estate || !plannedDate) return err('estate and plannedDate required')
         const id = 'fert_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
         await ActiveDB.prepare(
-          `INSERT INTO fertilization_log (log_id, estate, planned_date, actual_date, fertilizer_type, quantity_kg, cost, done_by, notes, created_by, created_at)
+          `INSERT INTO estate360_fertilization_log (log_id, estate, planned_date, actual_date, fertilizer_type, quantity_kg, cost, done_by, notes, created_by, created_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?)`
         ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null, parseFloat(quantityKg)||0, parseFloat(cost)||0, doneBy||null, notes||null, actor, now()).run()
 
@@ -4490,7 +4500,7 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteEstateTransaction') {
         const { txnId } = body; if (!txnId) return err('txnId required')
-        await ActiveDB.prepare(`DELETE FROM estate_transactions WHERE txn_id = ?`).bind(txnId).run()
+        await ActiveDB.prepare(`DELETE FROM estate360_estate_transactions WHERE txn_id = ?`).bind(txnId).run()
         return json({ success: true, data: { txnId, deleted: true } })
       }
 
@@ -4501,7 +4511,7 @@ export async function onRequest(ctx) {
         const d = body
         if (!d.propId) return err('propId required')
 
-        const existing = await DB.prepare(`SELECT prop_id, next_renewal_date FROM rental_props WHERE prop_id = ?`).bind(d.propId).first()
+        const existing = await DB.prepare(`SELECT prop_id, next_renewal_date FROM rev360_rental_props WHERE prop_id = ?`).bind(d.propId).first()
 
         // next_renewal_date: if the caller didn't explicitly pass one, default it to
         // leaseEnd (the natural "renew or vacate" checkpoint). Once set, later saves
@@ -4531,7 +4541,7 @@ export async function onRequest(ctx) {
 
         if (existing) {
           await DB.prepare(`
-            UPDATE rental_props SET
+            UPDATE rev360_rental_props SET
               name = COALESCE(?, name), location = COALESCE(?, location),
               country = ?, currency = ?,
               tenant_name = ?, tenant_email = ?, tenant_phone = ?, tenant_address = ?, tenant_pan = ?,
@@ -4567,7 +4577,7 @@ export async function onRequest(ctx) {
           ).run()
         } else {
           await DB.prepare(`
-            INSERT INTO rental_props (
+            INSERT INTO rev360_rental_props (
               prop_id, name, location, country, currency,
               tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
               deposit, agreed_rent, maintenance_fee,
@@ -4618,7 +4628,7 @@ export async function onRequest(ctx) {
         const legacyStatus = stage === 'Completed' ? (endReason || 'Completed')
           : (isDelinquent ? 'Delinquent' : stage)
         await DB.prepare(`
-          UPDATE rental_props SET stage = ?, is_delinquent = ?, end_reason = ?, status = ?, updated_by = ?, updated_at = ?
+          UPDATE rev360_rental_props SET stage = ?, is_delinquent = ?, end_reason = ?, status = ?, updated_by = ?, updated_at = ?
           WHERE prop_id = ?
         `).bind(stage, isDelinquent ? 1 : 0, stage === 'Completed' ? (endReason || 'Lease Ended') : null, legacyStatus, actor, now(), propId).run()
         return json({ success: true, data: { propId, stage, isDelinquent: !!isDelinquent, endReason } })
@@ -4627,7 +4637,7 @@ export async function onRequest(ctx) {
       if (action === 'updateTenantStatus') {
         const { propId, status } = body; if (!propId || !status) return err('propId and status required')
         if (!['Active','Notice Given','Delinquent','Evicted','Runaway','Completed'].includes(status)) return err('Invalid status')
-        await DB.prepare(`UPDATE rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`).bind(status, actor, now(), propId).run()
+        await DB.prepare(`UPDATE rev360_rental_props SET status = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`).bind(status, actor, now(), propId).run()
         return json({ success: true, data: { propId, status } })
       }
 
@@ -4637,78 +4647,78 @@ export async function onRequest(ctx) {
         const { propId, field, value } = body
         const allowed = ['doc_contract_signed','doc_id_captured','doc_move_in','doc_move_out','doc_damage_report']
         if (!propId || !allowed.includes(field)) return err('propId and a valid field required')
-        await DB.prepare(`UPDATE rental_props SET ${field} = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`)
+        await DB.prepare(`UPDATE rev360_rental_props SET ${field} = ?, updated_by = ?, updated_at = ? WHERE prop_id = ?`)
           .bind(value ? 1 : 0, actor, now(), propId).run()
         return json({ success: true, data: { propId, field, value: !!value } })
       }
 
       if (action === 'savePropertyDetails') {
         const d = body; if (!d.propId) return err('propId required')
-        const existing = await DB.prepare(`SELECT prop_id FROM property_details WHERE prop_id = ?`).bind(d.propId).first()
+        const existing = await DB.prepare(`SELECT prop_id FROM rev360_property_details WHERE prop_id = ?`).bind(d.propId).first()
         const fields = ['address_line1','address_line2','city','state_province','postal_code','country','elec_provider','elec_consumer_id','elec_account_number','elec_portal_url','elec_monthly_avg','water_provider','water_consumer_id','water_account_number','water_portal_url','water_monthly_avg','gas_provider','gas_consumer_id','gas_account_number','gas_portal_url','gas_monthly_avg','internet_provider','internet_account','internet_monthly','hoa_name','hoa_account','hoa_monthly','other_utility_name','other_utility_id','other_utility_monthly','tax_parcel_id','tax_authority','tax_annual','tax_portal_url','loan_lender','loan_account','loan_original','loan_outstanding','loan_monthly_emi','loan_interest_rate','loan_start_date','loan_end_date','loan_portal_url','purchase_price','purchase_date','estimated_value','estimated_value_date','currency','insurance_provider','insurance_policy_no','insurance_annual','insurance_expiry','notes']
         const vals = fields.map(f => { const camel = f.replace(/_([a-z])/g, (_, c) => c.toUpperCase()); const v = d[camel] !== undefined ? d[camel] : d[f]; return (typeof v === 'number' ? v : (v || null)) })
         if (existing) {
           const sets = fields.map(f => f + ' = ?').join(', ')
-          await DB.prepare(`UPDATE property_details SET ${sets}, updated_at = ? WHERE prop_id = ?`).bind(...vals, now(), d.propId).run()
+          await DB.prepare(`UPDATE rev360_property_details SET ${sets}, updated_at = ? WHERE prop_id = ?`).bind(...vals, now(), d.propId).run()
         } else {
           const cols = ['prop_id', ...fields, 'created_at', 'updated_at'].join(', '); const placeholders = ['?', ...fields.map(() => '?'), '?', '?'].join(', ')
-          await DB.prepare(`INSERT INTO property_details (${cols}) VALUES (${placeholders})`).bind(d.propId, ...vals, now(), now()).run()
+          await DB.prepare(`INSERT INTO rev360_property_details (${cols}) VALUES (${placeholders})`).bind(d.propId, ...vals, now(), now()).run()
         }
         return json({ success: true, data: { propId: d.propId } })
       }
 
       if (action === 'saveHoaEntry') {
         const { id, propId, effectiveDate, monthlyAmount, currency, notes } = body; if (!propId || !effectiveDate || monthlyAmount === undefined) return err('propId, effectiveDate, monthlyAmount required')
-        const entryId = id || ('hoa_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO hoa_history (id, prop_id, effective_date, monthly_amount, currency, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM hoa_history WHERE id=?), ?))`).bind(entryId, propId, effectiveDate, parseFloat(monthlyAmount)||0, currency||'INR', notes||null, entryId, now()).run()
+        const entryId = id || ('hoa_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO rev360_hoa_history (id, prop_id, effective_date, monthly_amount, currency, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM rev360_hoa_history WHERE id=?), ?))`).bind(entryId, propId, effectiveDate, parseFloat(monthlyAmount)||0, currency||'INR', notes||null, entryId, now()).run()
         return json({ success: true, data: { id: entryId } })
       }
 
       if (action === 'deleteHoaEntry') {
         const { id } = body; if (!id) return err('id required')
-        await DB.prepare(`DELETE FROM hoa_history WHERE id = ?`).bind(id).run()
+        await DB.prepare(`DELETE FROM rev360_hoa_history WHERE id = ?`).bind(id).run()
         return json({ success: true, data: { id, deleted: true } })
       }
 
       if (action === 'saveTaxEntry') {
         const { id, propId, taxYear, annualAmount, currency, parcelId, taxAuthority, dueDate, paidDate, paidAmount, receiptRef, notes } = body; if (!propId || !taxYear || annualAmount === undefined) return err('propId, taxYear, annualAmount required')
-        const entryId = id || ('tax_' + propId + '_' + taxYear); await DB.prepare(`INSERT OR REPLACE INTO tax_history (id, prop_id, tax_year, annual_amount, currency, parcel_id, tax_authority, due_date, paid_date, paid_amount, receipt_ref, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM tax_history WHERE id=?),?))`).bind(entryId, propId, parseInt(taxYear), parseFloat(annualAmount)||0, currency||'INR', parcelId||null, taxAuthority||null, dueDate||null, paidDate||null, parseFloat(paidAmount)||0, receiptRef||null, notes||null, entryId, now()).run()
+        const entryId = id || ('tax_' + propId + '_' + taxYear); await DB.prepare(`INSERT OR REPLACE INTO rev360_tax_history (id, prop_id, tax_year, annual_amount, currency, parcel_id, tax_authority, due_date, paid_date, paid_amount, receipt_ref, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM rev360_tax_history WHERE id=?),?))`).bind(entryId, propId, parseInt(taxYear), parseFloat(annualAmount)||0, currency||'INR', parcelId||null, taxAuthority||null, dueDate||null, paidDate||null, parseFloat(paidAmount)||0, receiptRef||null, notes||null, entryId, now()).run()
         return json({ success: true, data: { id: entryId } })
       }
 
       if (action === 'deleteTaxEntry') {
         const { id } = body; if (!id) return err('id required')
-        await DB.prepare(`DELETE FROM tax_history WHERE id = ?`).bind(id).run()
+        await DB.prepare(`DELETE FROM rev360_tax_history WHERE id = ?`).bind(id).run()
         return json({ success: true, data: { id, deleted: true } })
       }
 
       if (action === 'savePropertyDoc') {
         const { docId, propId, category, docName, driveUrl, driveFolderUrl, fileType, docDate, notes } = body; if (!propId || !docName) return err('propId and docName required')
-        const id = docId || ('doc_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO property_documents (doc_id, prop_id, category, doc_name, drive_url, drive_folder_url, file_type, doc_date, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM property_documents WHERE doc_id=?),?))`).bind(id, propId, category||'Other', docName.trim(), driveUrl||null, driveFolderUrl||null, fileType||null, docDate||null, notes||null, id, now()).run()
+        const id = docId || ('doc_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO rev360_property_documents (doc_id, prop_id, category, doc_name, drive_url, drive_folder_url, file_type, doc_date, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?, COALESCE((SELECT created_at FROM rev360_property_documents WHERE doc_id=?),?))`).bind(id, propId, category||'Other', docName.trim(), driveUrl||null, driveFolderUrl||null, fileType||null, docDate||null, notes||null, id, now()).run()
         return json({ success: true, data: { docId: id } })
       }
 
       if (action === 'deletePropertyDoc') {
         const { docId } = body; if (!docId) return err('docId required')
-        await DB.prepare(`DELETE FROM property_documents WHERE doc_id = ?`).bind(docId).run()
+        await DB.prepare(`DELETE FROM rev360_property_documents WHERE doc_id = ?`).bind(docId).run()
         return json({ success: true, data: { docId, deleted: true } })
       }
 
       if (action === 'saveLeaseLoss') {
         const { lossId, propId, leaseSnapshot, itemCategory, description, amount, currency, evidenceFileName, evidenceDriveUrl, evidenceTimestamp, status: lossStatus } = body; if (!propId || !description || amount === undefined) return err('propId, description, amount required')
         if (!['Rent','Damage','Cleaning','Legal','Other'].includes(itemCategory)) return err('Invalid itemCategory')
-        const id = lossId || ('loss_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO lease_losses (loss_id, prop_id, lease_snapshot, item_category, description, amount, currency, evidence_file_name, evidence_drive_url, evidence_timestamp, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM lease_losses WHERE loss_id=?),?),?)`).bind(id, propId, leaseSnapshot||'', itemCategory||'Other', description, parseFloat(amount)||0, currency||'INR', evidenceFileName||null, evidenceDriveUrl||null, evidenceTimestamp||null, lossStatus||'Estimated', actor, id, now(), now()).run()
+        const id = lossId || ('loss_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO rev360_lease_losses (loss_id, prop_id, lease_snapshot, item_category, description, amount, currency, evidence_file_name, evidence_drive_url, evidence_timestamp, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM rev360_lease_losses WHERE loss_id=?),?),?)`).bind(id, propId, leaseSnapshot||'', itemCategory||'Other', description, parseFloat(amount)||0, currency||'INR', evidenceFileName||null, evidenceDriveUrl||null, evidenceTimestamp||null, lossStatus||'Estimated', actor, id, now(), now()).run()
         return json({ success: true, data: { lossId: id } })
       }
 
       if (action === 'updateLeaseLossStatus') {
         const { lossId, status: lossStatus } = body; if (!lossId || !lossStatus) return err('lossId and status required')
-        await DB.prepare(`UPDATE lease_losses SET status = ?, updated_at = ? WHERE loss_id = ?`).bind(lossStatus, now(), lossId).run()
+        await DB.prepare(`UPDATE rev360_lease_losses SET status = ?, updated_at = ? WHERE loss_id = ?`).bind(lossStatus, now(), lossId).run()
         return json({ success: true, data: { lossId, status: lossStatus } })
       }
 
       if (action === 'deleteLeaseLoss') {
         const { lossId } = body; if (!lossId) return err('lossId required')
-        await DB.prepare(`DELETE FROM lease_losses WHERE loss_id = ?`).bind(lossId).run()
+        await DB.prepare(`DELETE FROM rev360_lease_losses WHERE loss_id = ?`).bind(lossId).run()
         return json({ success: true, data: { lossId, deleted: true } })
       }
 
@@ -4729,7 +4739,7 @@ export async function onRequest(ctx) {
         const id = 'rtxn_' + Date.now() + '_' + Math.floor(Math.random()*1000)
         try {
           await DB.prepare(`
-            INSERT INTO rent_transactions (
+            INSERT INTO rev360_rent_transactions (
               txn_id, prop_id, period_month, base_rent, maintenance, car_parking, late_fee,
               total_due, is_exception, paid_date, currency, notes, unit_type, created_by, created_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -4765,12 +4775,12 @@ export async function onRequest(ctx) {
         // this property/month/year's logged maintenance_events, so the
         // monthly total always reflects the real itemized log rather
         // than a hand-typed number that could drift out of sync with it.
-        const maintSum = await DB.prepare(`SELECT COALESCE(SUM(amount),0) as total FROM maintenance_events WHERE prop_id = ? AND month = ? AND year = ?`).bind(propId, month, year).first()
+        const maintSum = await DB.prepare(`SELECT COALESCE(SUM(amount),0) as total FROM rev360_maintenance_events WHERE prop_id = ? AND month = ? AND year = ?`).bind(propId, month, year).first()
         const e5 = maintSum?.total || 0
         const total = e1 + e2 + e3 + e4 + e5
         const recId = `PE-${propId}-${year}-${month}`
         await DB.prepare(`
-          INSERT OR REPLACE INTO property_expenses (
+          INSERT OR REPLACE INTO rev360_property_expenses (
             record_id, prop_id, month, year, electricity, water, property_tax, land_tax,
             extra_maintenance, total_expense, notes, created_by, updated_by, created_at, updated_at
           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -4794,14 +4804,14 @@ export async function onRequest(ctx) {
         const id = eventId || ('me_' + Date.now() + '_' + Math.floor(Math.random()*1000))
         if (eventId) {
           await DB.prepare(`
-            UPDATE maintenance_events SET
+            UPDATE rev360_maintenance_events SET
               category = ?, amount = ?, description = ?, event_date = ?,
               updated_by = ?, updated_at = ?
             WHERE event_id = ?
           `).bind(category, amt, description || null, eventDate || null, actor, now(), id).run()
         } else {
           await DB.prepare(`
-            INSERT INTO maintenance_events (
+            INSERT INTO rev360_maintenance_events (
               event_id, prop_id, month, year, category, amount, description, event_date,
               created_by, created_at, updated_by, updated_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
@@ -4812,7 +4822,7 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteMaintenanceEvent') {
         const { eventId } = body; if (!eventId) return err('eventId required')
-        await DB.prepare(`DELETE FROM maintenance_events WHERE event_id = ?`).bind(eventId).run()
+        await DB.prepare(`DELETE FROM rev360_maintenance_events WHERE event_id = ?`).bind(eventId).run()
         return json({ success: true, data: { eventId, deleted: true } })
       }
 
@@ -4827,7 +4837,7 @@ export async function onRequest(ctx) {
         const id = h.historyId || ('hist_' + Date.now() + '_' + Math.floor(Math.random()*1000))
         if (h.historyId) {
           await DB.prepare(`
-            UPDATE tenancy_history SET
+            UPDATE rev360_tenancy_history SET
               tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
               deposit=?, agreed_rent=?, maintenance_fee=?, lease_start=?, lease_end=?,
               country=?, currency=?, status=?, end_reason=?, early_terminated=?, early_termination_date=?,
@@ -4847,7 +4857,7 @@ export async function onRequest(ctx) {
           ).run()
         } else {
           await DB.prepare(`
-            INSERT INTO tenancy_history (
+            INSERT INTO rev360_tenancy_history (
               history_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
               deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
               country, currency, status, end_reason, early_terminated, early_termination_date,
@@ -4871,7 +4881,7 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteTenancyHistory') {
         const { historyId } = body; if (!historyId) return err('historyId required')
-        await DB.prepare(`DELETE FROM tenancy_history WHERE history_id = ?`).bind(historyId).run()
+        await DB.prepare(`DELETE FROM rev360_tenancy_history WHERE history_id = ?`).bind(historyId).run()
         return json({ success: true, data: { historyId, deleted: true } })
       }
 
@@ -4883,11 +4893,11 @@ export async function onRequest(ctx) {
         const t = body
         if (!t.propId) return err('propId required')
         if (!t.tenantName) return err('tenantName required')
-        const existing = await DB.prepare(`SELECT incoming_id FROM incoming_tenants WHERE prop_id = ?`).bind(t.propId).first()
+        const existing = await DB.prepare(`SELECT incoming_id FROM rev360_incoming_tenants WHERE prop_id = ?`).bind(t.propId).first()
         const id = existing?.incoming_id || ('inc_' + Date.now() + '_' + Math.floor(Math.random()*1000))
         if (existing) {
           await DB.prepare(`
-            UPDATE incoming_tenants SET
+            UPDATE rev360_incoming_tenants SET
               tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
               deposit=?, agreed_rent=?, maintenance_fee=?, lease_start=?, lease_end=?,
               country=?, currency=?, notes=?, doc_contract_signed=?, doc_id_captured=?,
@@ -4901,7 +4911,7 @@ export async function onRequest(ctx) {
           ).run()
         } else {
           await DB.prepare(`
-            INSERT INTO incoming_tenants (
+            INSERT INTO rev360_incoming_tenants (
               incoming_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
               deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
               country, currency, notes, doc_contract_signed, doc_id_captured,
@@ -4927,7 +4937,7 @@ export async function onRequest(ctx) {
         const { propId, paid, paidDate, paymentMode } = body
         if (!propId) return err('propId required')
         await DB.prepare(`
-          UPDATE incoming_tenants SET
+          UPDATE rev360_incoming_tenants SET
             deposit_paid = ?, deposit_paid_date = ?, deposit_payment_mode = ?,
             updated_by = ?, updated_at = ?
           WHERE prop_id = ?
@@ -4942,7 +4952,7 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteIncomingTenant') {
         const { propId } = body; if (!propId) return err('propId required')
-        await DB.prepare(`DELETE FROM incoming_tenants WHERE prop_id = ?`).bind(propId).run()
+        await DB.prepare(`DELETE FROM rev360_incoming_tenants WHERE prop_id = ?`).bind(propId).run()
         return json({ success: true, data: { propId, deleted: true } })
       }
 
@@ -4957,8 +4967,8 @@ export async function onRequest(ctx) {
       if (action === 'moveInIncomingTenant') {
         const { propId, endReason } = body
         if (!propId) return err('propId required')
-        const current = await DB.prepare(`SELECT * FROM rental_props WHERE prop_id = ?`).bind(propId).first()
-        const incoming = await DB.prepare(`SELECT * FROM incoming_tenants WHERE prop_id = ?`).bind(propId).first()
+        const current = await DB.prepare(`SELECT * FROM rev360_rental_props WHERE prop_id = ?`).bind(propId).first()
+        const incoming = await DB.prepare(`SELECT * FROM rev360_incoming_tenants WHERE prop_id = ?`).bind(propId).first()
         if (!incoming) return err('No incoming tenant queued for this property')
 
         const histId = 'hist_' + Date.now() + '_' + Math.floor(Math.random()*1000)
@@ -4969,7 +4979,7 @@ export async function onRequest(ctx) {
         // no prior occupant, so current.tenant_name may be empty).
         if (current && current.tenant_name) {
           batch.push(DB.prepare(`
-            INSERT INTO tenancy_history (
+            INSERT INTO rev360_tenancy_history (
               history_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
               deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
               country, currency, status, end_reason, early_terminated, early_termination_date,
@@ -4996,7 +5006,7 @@ export async function onRequest(ctx) {
         // early-termination) that must not carry over from the outgoing
         // tenant onto the new one.
         batch.push(DB.prepare(`
-          UPDATE rental_props SET
+          UPDATE rev360_rental_props SET
             tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
             deposit=?, agreed_rent=?, maintenance_fee=?, lease_start=?, lease_end=?,
             country=?, currency=?, notes=?,
@@ -5015,7 +5025,7 @@ export async function onRequest(ctx) {
         ))
 
         // Step 3 — the incoming record is now consumed.
-        batch.push(DB.prepare(`DELETE FROM incoming_tenants WHERE prop_id = ?`).bind(propId))
+        batch.push(DB.prepare(`DELETE FROM rev360_incoming_tenants WHERE prop_id = ?`).bind(propId))
 
         await DB.batch(batch)
         return json({ success: true, data: { propId, movedInTenant: incoming.tenant_name, archivedOutgoing: !!(current && current.tenant_name) } })
@@ -5024,18 +5034,18 @@ export async function onRequest(ctx) {
 
       // CREATE PROVISIONAL BOOKING — called when guest submits form but no booking exists
       if (action === 'createProvisionalBooking') {
-        const stayId = genStayId(body.villaId || 'dwarka')
+        const stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
         const nights = body.checkInDate && body.checkOutDate
           ? Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))
           : 1
         await DB.prepare(`
-          INSERT INTO stays (
+          INSERT INTO stayvibe_stays (
             stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, gross, net,
             status, created_by, updated_by, created_at, updated_at
           ) VALUES (?,?,?,?,?,?,?,?,?,?,0,0,'pending_review',?,?,?,?)
         `).bind(
-          stayId, body.villaId || 'dwarka', body.source || 'guest_form',
+          stayId, body.villaId || DEFAULT_VILLA_ID, body.source || 'guest_form',
           body.guestName, body.guestPhone || null, body.guestEmail || null,
           body.checkInDate, body.checkOutDate || null, nights,
           parseInt(body.adults) || 1,
@@ -5049,7 +5059,7 @@ export async function onRequest(ctx) {
         const { docId } = body
         if (!docId) return err('docId required')
         await DB.prepare(
-          `UPDATE guest_documents SET folder_created = 1, updated_at = ? WHERE doc_id = ?`
+          `UPDATE stayvibe_guest_documents SET folder_created = 1, updated_at = ? WHERE doc_id = ?`
         ).bind(now(), docId).run()
         return json({ success: true, data: { docId } })
       }
@@ -5068,12 +5078,12 @@ export async function onRequest(ctx) {
         //    14-day sweep that should rarely fire, since those get
         //    explicitly deleted right after confirmed upload already.
         const staleUnprocessed = await DB.prepare(
-          `SELECT COUNT(*) as cnt FROM guest_documents
+          `SELECT COUNT(*) as cnt FROM stayvibe_guest_documents
            WHERE folder_created = 0
              AND created_at < datetime('now', '-14 days')`
         ).first()
         const result = await DB.prepare(
-          `DELETE FROM guest_documents
+          `DELETE FROM stayvibe_guest_documents
            WHERE (doc_type IN ('car_photo','plate_photo') AND created_at < datetime('now', '-5 days'))
               OR (doc_type NOT IN ('car_photo','plate_photo') AND created_at < datetime('now', '-14 days'))`
         ).run()
@@ -5090,7 +5100,7 @@ export async function onRequest(ctx) {
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, drive_folder_id,
                   created_at, folder_created, folder_created_at
-           FROM stays
+           FROM stayvibe_stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
            ORDER BY checkin_date ASC`

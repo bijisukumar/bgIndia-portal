@@ -43,7 +43,7 @@ export default function Login() {
         <div style={styles.logoWrap}>
           <img
             src="/icons/logo.png?v=3"
-            alt="Guruvayur Estates"
+            alt={CONFIG.brandName}
             style={styles.logo}
             onError={e => {
               console.error("Logo failed to load at path:", e.target.src);

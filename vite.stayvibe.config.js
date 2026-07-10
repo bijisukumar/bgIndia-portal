@@ -1,3 +1,4 @@
+import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -7,9 +8,17 @@ import { VitePWA } from 'vite-plugin-pwa'
 // Deploy: stayvibe.luxuryvillasofguruvayur.com
 //         stayvibe-[clientid].luxuryvillasofguruvayur.com
 
+// Per-host config selection (SaaS onboarding) — see hosts/<hostId>/config.js.
+// Defaults to 'dwarka' so existing builds are unaffected; a new host builds
+// with VITE_HOST=<hostId> set before running the build command.
+const host = process.env.VITE_HOST || 'dwarka'
+
 export default defineConfig({
   root: 'src/apps/stayvibe',
   publicDir: '../../../public',
+  resolve: {
+    alias: { '@host-config': path.resolve(process.cwd(), 'hosts', host, 'config.js') }
+  },
   build: {
     outDir: '../../../dist/stayvibe',
     emptyOutDir: true,

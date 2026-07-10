@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 // Preferred Stock Settings — lets the owner set a target stock level per item.
 // The Inventory Stock tab and dashboard flag an item as "low" once
@@ -22,7 +23,7 @@ export default function PreferredStock() {
 
   useEffect(() => {
     let cancelled = false
-    api.getInventory('dwarka').then(rows => {
+    api.getInventory(DEFAULT_VILLA_ID).then(rows => {
       if (cancelled || !Array.isArray(rows)) return
       setItems(rows.map(r => ({ id: r.item_id, name: r.name, unit: r.unit || 'unit' })))
       setLevels(Object.fromEntries(rows.map(r => [r.item_id, r.preferred_stock ?? 10])))
@@ -36,7 +37,7 @@ export default function PreferredStock() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res = await api.saveInventoryPreferredStock({ villaId: 'dwarka', levels })
+      const res = await api.saveInventoryPreferredStock({ villaId: DEFAULT_VILLA_ID, levels })
       if (res?.errors?.length > 0) {
         const first = res.errors[0]
         showToast(`Saved ${res.savedCount}/${res.total} — "${first.itemId}" failed: ${first.error}`, 'error')

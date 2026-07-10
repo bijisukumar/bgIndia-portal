@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 function formatDate(d) {
   if (!d) return '—'
@@ -138,7 +139,7 @@ export default function CheckIn() {
       const farFutureReady = allReadyForCheckin.filter(s => parseLocalDate(s.checkin_date) > fourDaysOut)
 
       // Load all upcoming stays (any non-closed/cancelled status, checkin >= today)
-      const active = await api.getUpcomingStays('dwarka')
+      const active = await api.getUpcomingStays(DEFAULT_VILLA_ID)
       const allUpcoming = Array.isArray(active) ? active : []
       const inhouse = allUpcoming.filter(s => ['checked_in','ready_for_checkout'].includes(s.status))
 
@@ -224,7 +225,7 @@ export default function CheckIn() {
 
       await api.confirmCheckIn({
         stayId:       selected.stay_id,
-        villaId:      'dwarka',
+        villaId:      DEFAULT_VILLA_ID,
         guestName:    selected.guest_name,
         checkInDate:  selected.checkin_date,
         checkOutDate: selected.checkout_date,

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 export default function CarRentalEntry() {
   const navigate = useNavigate()
@@ -19,8 +20,8 @@ export default function CarRentalEntry() {
   const net = (parseFloat(amount)||0) - (parseFloat(commission)||0)
 
   useEffect(() => {
-    api.getActiveStay('dwarka').then(s => { if(s?.stayId) setStay(s) })
-    api.getRecentCheckouts('dwarka').then(d => { if (Array.isArray(d)) setRecentCheckouts(d) }).catch(() => {})
+    api.getActiveStay(DEFAULT_VILLA_ID).then(s => { if(s?.stayId) setStay(s) })
+    api.getRecentCheckouts(DEFAULT_VILLA_ID).then(d => { if (Array.isArray(d)) setRecentCheckouts(d) }).catch(() => {})
   }, [])
 
   const handleSave = async () => {

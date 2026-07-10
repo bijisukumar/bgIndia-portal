@@ -6,8 +6,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
-const LANDING = 'https://www.luxuryvillasofguruvayur.com'
+const LANDING = CONFIG.landingUrl
 const API_BASE = '/api'
 const CHANNELS = ['WhatsApp','Instagram','Facebook','Print','Email','Temple group','Travel agent','Other']
 const CHANNEL_ICON = { 'WhatsApp':'💬','Instagram':'📸','Facebook':'👥','Print':'🖨️',
@@ -37,7 +39,7 @@ function VillaFlyer({ campaign, flyerRef }) {
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(10,8,2,0.55) 0%, rgba(10,8,2,0.15) 38%, rgba(10,8,2,0.1) 60%, rgba(250,247,242,1) 100%)' }} />
         {/* Logo, top-left, on top of the photo */}
-        <img src={LOGO_URL} crossOrigin="anonymous" alt="Guruvayur Estates"
+        <img src={LOGO_URL} crossOrigin="anonymous" alt={CONFIG.brandName}
           style={{ position: 'absolute', top: '14px', left: '16px', width: '52px', height: 'auto', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.5))' }} />
         {/* Title, bottom of hero, over the photo */}
         <div style={{ position: 'absolute', bottom: '14px', left: '20px', right: '20px' }}>
@@ -193,7 +195,7 @@ export default function MarketingCampaigns() {
   async function load() {
     setLoading(true)
     try {
-      const d = await api.getCampaigns('dwarka')
+      const d = await api.getCampaigns(DEFAULT_VILLA_ID)
       setCampaigns(Array.isArray(d) ? d : [])
     } catch(e) { setCampaigns([]) }
     finally { setLoading(false) }
@@ -206,7 +208,7 @@ export default function MarketingCampaigns() {
       const d = await api.createCampaign({
         campaignName: form.campaignName.trim(),
         channel: form.channel,
-        villaId: 'dwarka',
+        villaId: DEFAULT_VILLA_ID,
         notes: form.notes.trim() || null,
       })
       showToast(`✅ Campaign created — token: ${d.token}`)

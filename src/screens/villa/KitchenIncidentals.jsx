@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { INVENTORY_MASTER } from './Inventory'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const CHECKOUT_ITEMS = INVENTORY_MASTER.filter(i => i.category === 'kitchen')
 
@@ -21,7 +22,7 @@ export default function KitchenIncidentals() {
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
 
   useEffect(() => {
-    api.getActiveStay('dwarka')
+    api.getActiveStay(DEFAULT_VILLA_ID)
       .then(s => { 
         if (s && s.stayId) {
           setStay({
@@ -35,7 +36,7 @@ export default function KitchenIncidentals() {
       })
       .catch(() => {})
 
-    api.getRecentCheckouts('dwarka')
+    api.getRecentCheckouts(DEFAULT_VILLA_ID)
       .then(d => { 
         if (Array.isArray(d)) {
           setRecentCheckouts(d)
@@ -43,7 +44,7 @@ export default function KitchenIncidentals() {
       })
       .catch(() => {})
 
-    api.getInventoryPrices?.('dwarka')
+    api.getInventoryPrices?.(DEFAULT_VILLA_ID)
       .then(p => {
         if (p) {
           const flatPrices = {}
@@ -86,7 +87,7 @@ export default function KitchenIncidentals() {
     // 1) Save the incidentals. If this fails, surface the real reason and stop.
     let saveResult
     try {
-      saveResult = await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes, villaId: 'dwarka' })
+      saveResult = await api.saveKitchenEntry({ stayId: stay?.stayId, guestName: stay?.guestName, items, totalAmount: total, notes, villaId: DEFAULT_VILLA_ID })
     } catch (e) {
       showToast(e?.message || 'Failed to save incidentals', 'error')
       setSaving(false)

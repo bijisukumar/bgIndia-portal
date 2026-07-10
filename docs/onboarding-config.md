@@ -1,9 +1,21 @@
 # ============================================================
-# CLIENT ONBOARDING CONFIG — bgIndia Portal
+# ⚠ SUPERSEDED — see docs/ONBOARDING.md instead
 # ============================================================
-# Copy this file when onboarding a new property.
-# Update all values below, then update the CLIENT block
-# in scripts/GuestFormScript.gs with the same values.
+# This file predates Release 2.1's hosts/<hostId>/config.js +
+# platform_tenants/platform_auth_tokens mechanism. It's kept for
+# historical reference (the values below capture what dwarka's actual
+# setup was), but a new host today should:
+#   1. Copy hosts/dwarka/config.js (static/branding config)
+#   2. Fill in scripts/onboard-new-host-seed-template.sql (dynamic config
+#      + auth, seeded into platform_tenants/platform_auth_tokens)
+#   3. Follow docs/ONBOARDING.md's provisioning checklist end to end
+# GuestFormScript.gs no longer has a hand-edited CLIENT block — it loads
+# everything dynamically via getTenantConfig (see the .gs file's own
+# version-history header). Only WORKER_URL/TENANT_ID stay hardcoded there.
+# ============================================================
+#
+# ============================================================
+# CLIENT ONBOARDING CONFIG — bgIndia Portal (historical, dwarka's values)
 # ============================================================
 
 # ── PROPERTY ─────────────────────────────────────────────────

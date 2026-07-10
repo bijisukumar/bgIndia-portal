@@ -2,6 +2,7 @@ import { useState, useEffect, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -1047,8 +1048,8 @@ function VillaDashboardInner() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.getVillaDashboard('dwarka', year).catch(() => MOCK),
-      api.getStays('dwarka', year).catch(() => []),
+      api.getVillaDashboard(DEFAULT_VILLA_ID, year).catch(() => MOCK),
+      api.getStays(DEFAULT_VILLA_ID, year).catch(() => []),
     ]).then(([dashData, staysData]) => {
       setData(dashData)
       setStays(Array.isArray(staysData) ? staysData : [])
@@ -1058,7 +1059,7 @@ function VillaDashboardInner() {
 
   // Load all stays for multi-year charts (now supported via year=all)
   useEffect(() => {
-    api.getStays('dwarka', 'all').catch(() => []).then(all => {
+    api.getStays(DEFAULT_VILLA_ID, 'all').catch(() => []).then(all => {
       setAllStays(Array.isArray(all) ? all : [])
     })
   }, [])

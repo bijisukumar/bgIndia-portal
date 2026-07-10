@@ -1,25 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { localTodayStr } from '../../utils/dates'
 
 const TODAY = localTodayStr()
 
-// Pollachi (coconut) — original lists
-const INCOME_CATS  = ['Mango Harvest Income','Lease income','Govt subsidy','Other income']
-const EXPENSE_CATS = ['Labour wages','Salary','Fertilizer','Pesticide','Tractor / Land tiling',
-  'JCB work','Fencing','Irrigation','Water pump','Electricity bill','Land tax','Transport',
-  'Housing expenses','Soil evaluation & testing','Tree / plant purchase','Maintenance & repairs','Other expense']
-
-// Pavutumuri (rubber) — matches the estate's actual income/sales and expense lines
-const PAVUTUMURI_INCOME_CATS  = ['Rubber Sheet','Ottupal','Coconut','Lease income','Govt subsidy','Other income']
-const PAVUTUMURI_EXPENSE_CATS = ['Rubber Plantation','Coconut Plantation','Overall Farm (gates/fencing/road)',
-  'Rubber Labour','Formic Acid','Fertilizer','Tree waterproofing',
-  'Smoke house repair','Coconut Labour','House maintenance','Transport','Land tax','Other expense']
-
 function catsFor(estate, type) {
-  if (estate === 'pavutumuri') return type === 'income' ? PAVUTUMURI_INCOME_CATS : PAVUTUMURI_EXPENSE_CATS
-  return type === 'income' ? INCOME_CATS : EXPENSE_CATS
+  const cfg = CONFIG.estates.find(e => e.id === estate)
+  const fallback = CONFIG.estates.find(e => e.id === 'pollachi')
+  const source = cfg || fallback
+  return type === 'income' ? source?.incomeCategories : source?.expenseCategories
 }
 
 function fmt(n) { return isNaN(n)||n==='' ? '—' : `₹${Number(n).toLocaleString('en-IN')}` }

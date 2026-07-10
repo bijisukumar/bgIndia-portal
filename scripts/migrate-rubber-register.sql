@@ -1,4 +1,14 @@
 -- ============================================================================
+-- OBSOLETE — superseded by scripts/migrate-rubber-estates-tables-fix.sql
+-- ============================================================================
+-- Discovered 2026-07-09: the base rubber_production/manager_settlements
+-- tables never existed in the ESTATES DB at all (only stale, 0-row copies in
+-- bgindia-db) — this script's ALTER TABLE assumed they did, and its own
+-- --file= command below has a typo'd DB name that doesn't exist
+-- (bgindia-estates-db; the real one is bgindiadb-estates). Do not run this —
+-- migrate-rubber-estates-tables-fix.sql already created both tables with
+-- these columns included. Kept for history only.
+-- ============================================================================
 -- RUBBER PRODUCTION REGISTER COLUMNS (paper-register parity) — run ONCE
 -- ============================================================================
 -- Run: npx wrangler d1 execute bgindia-estates-db --file=scripts/migrate-rubber-register.sql --remote

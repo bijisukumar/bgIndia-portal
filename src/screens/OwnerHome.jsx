@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { parseLocalDate, fmtDate } from '../utils/dates'
 import { channelLabel, channelPillStyle } from '../utils/channel'
+import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
 // Two top-level sections: Hospitality (Villa + Rental) and Estates
 const HOSPITALITY = {
@@ -105,7 +106,7 @@ function MenuSection({ section }) {
 
 // ── YOUR LAST 48 HRS — recent bookings + cancellations, ack with OK ───────
 function Last48Block() {
-  const villaId = 'dwarka'
+  const villaId = DEFAULT_VILLA_ID
   const [items, setItems] = useState([])
   const [acked, setAcked] = useState([])          // ['<stayId>:<kind>', ...]
   const [dismissed, setDismissed] = useState(false)
@@ -415,7 +416,7 @@ function ManualTriggerBlock() {
         checkOutDate: selected.checkOut,
         guestEmail:  selected.email,
         guestPhone:  selected.phone,
-        villaId:     'dwarka',
+        villaId:     DEFAULT_VILLA_ID,
         source:      'manual_trigger',
       })
       showToast('✅ Onboarded — booking created for ' + selected.name)

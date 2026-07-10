@@ -25,6 +25,7 @@ const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expe
 // Extra charge line items — single source of truth in utils/villaPricing
 // (shared with EnquiryDetail quotes) so the two dropdowns can never drift.
 import { EXTRA_ITEMS } from '../../utils/villaPricing'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 // Airbnb-specific fee structure (from confirmation email)
 const EMPTY_AIRBNB = {
@@ -107,7 +108,7 @@ export default function CompleteBooking() {
   async function loadStays() {
     setLoading(true)
     try {
-      const data = await api.getUpcomingStays('dwarka')
+      const data = await api.getUpcomingStays(DEFAULT_VILLA_ID)
       const list = Array.isArray(data) ? data : []
       setStays(list)
       if (list.length > 0) {
@@ -212,7 +213,7 @@ export default function CompleteBooking() {
     try {
       await api.saveVillaRentalIncome({
         stayId:      selected.stay_id,
-        villaId:     'dwarka',
+        villaId:     DEFAULT_VILLA_ID,
         guestName:   selected.guest_name,
         checkInDate:  selected.checkin_date,
         checkOutDate: selected.checkout_date,

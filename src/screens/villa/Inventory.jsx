@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 // Legacy default catalog — used ONLY as first-paint scaffolding before the
 // real DB-driven catalog loads (avoids an empty-screen flash), and as the
@@ -65,7 +66,7 @@ export default function Inventory() {
     let cancelled = false
     ;(async () => {
       try {
-        const rows = await api.getInventory('dwarka')
+        const rows = await api.getInventory(DEFAULT_VILLA_ID)
         if (!cancelled && Array.isArray(rows) && rows.length) {
           setCatalog(rows.map(r => ({
             id: r.item_id, name: r.name, unit: r.unit || 'unit', category: r.category || 'other',
@@ -82,7 +83,7 @@ export default function Inventory() {
         // DB read failed — keep the fallback catalog + empty state, no need to alarm the user on load
       }
       try {
-        const log = await api.getInventoryRestockLog?.('dwarka')
+        const log = await api.getInventoryRestockLog?.(DEFAULT_VILLA_ID)
         if (!cancelled && Array.isArray(log)) setRestockLog(log)
       } catch { /* non-critical */ }
       if (!cancelled) setLoading(false)
@@ -112,7 +113,7 @@ export default function Inventory() {
       const payload = Object.fromEntries(
         catalog.map(i => [i.id, { qty: stock[i.id]?.qty ?? 0, name: i.name }])
       )
-      const res = await api.saveInventoryStock({ villaId: 'dwarka', stock: payload })
+      const res = await api.saveInventoryStock({ villaId: DEFAULT_VILLA_ID, stock: payload })
       if (res?.errors?.length > 0) {
         const first = res.errors[0]
         showToast(`Saved ${res.savedCount}/${res.total} — "${first.itemId}" failed: ${first.error}`, 'error')
@@ -126,7 +127,7 @@ export default function Inventory() {
   const handleSavePrices = async () => {
     setSaving(true)
     try {
-      await api.saveInventoryPrices({ villaId: 'dwarka', prices })
+      await api.saveInventoryPrices({ villaId: DEFAULT_VILLA_ID, prices })
       showToast('Prices saved ✓')
     } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
     finally { setSaving(false) }
@@ -139,7 +140,7 @@ export default function Inventory() {
     if (!entries.length) { showToast('Enter qty for at least one item', 'error'); return }
     setSaving(true)
     try {
-      const res = await api.saveInventoryRestock({ villaId: 'dwarka', entries })
+      const res = await api.saveInventoryRestock({ villaId: DEFAULT_VILLA_ID, entries })
       const failedIds = new Set((res?.errors || []).map(e2 => e2.itemId))
       entries.forEach(e => {
         if (failedIds.has(e.id)) return
@@ -153,7 +154,7 @@ export default function Inventory() {
         showToast('Restock recorded ✓')
       }
       try {
-        const log = await api.getInventoryRestockLog?.('dwarka')
+        const log = await api.getInventoryRestockLog?.(DEFAULT_VILLA_ID)
         if (Array.isArray(log)) setRestockLog(log)
       } catch { /* non-critical */ }
     } catch (e) { showToast(e?.message || 'Failed to save', 'error') }
@@ -166,7 +167,7 @@ export default function Inventory() {
     setAddingItem(true)
     try {
       await api.addInventoryItem({
-        villaId: 'dwarka', name, unit: newItem.unit.trim() || 'unit',
+        villaId: DEFAULT_VILLA_ID, name, unit: newItem.unit.trim() || 'unit',
         category: newItem.category, costPrice: newItem.costPrice, sellPrice: newItem.sellPrice,
       })
       showToast(`${name} added ✓`)
@@ -180,7 +181,7 @@ export default function Inventory() {
   const handleArchiveItem = async (item) => {
     if (!confirm(`Remove "${item.name}" from inventory? Past restock and expense history stays intact — you can restore it later from D1 Explorer if needed.`)) return
     try {
-      await api.archiveInventoryItem({ villaId: 'dwarka', itemId: item.id })
+      await api.archiveInventoryItem({ villaId: DEFAULT_VILLA_ID, itemId: item.id })
       showToast(`${item.name} removed`)
       setCatalog(c => c.filter(i => i.id !== item.id))
     } catch (e) { showToast(e?.message || 'Failed to remove item', 'error') }

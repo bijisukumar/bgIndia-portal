@@ -14,7 +14,7 @@ export const CONTRACTS = [
 
   {
     action: 'getUpcomingStays',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'SELECT',
     columns: [
       'stay_id','guest_name','guest_phone','guest_email',
@@ -34,13 +34,13 @@ export const CONTRACTS = [
   },
   {
     action: 'getStays',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'SELECT',
     columns: ['*'], // SELECT * — all columns
   },
   {
     action: 'getPendingReviewStays',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'SELECT',
     columns: [
       'stay_id','guest_name','checkin_date','checkout_date','nights',
@@ -50,7 +50,7 @@ export const CONTRACTS = [
   },
   {
     action: 'findOpenStay',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'SELECT',
     columns: [
       'stay_id','guest_name','checkin_date','checkout_date','nights','adults','children',
@@ -62,7 +62,7 @@ export const CONTRACTS = [
   },
   {
     action: 'submitGuestCheckIn (UPDATE)',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: [
       'guest_phone','guest_email','dob','gender','nationality',
@@ -81,7 +81,7 @@ export const CONTRACTS = [
   },
   {
     action: 'submitGuestCheckIn (INSERT)',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'INSERT',
     columns: [
       'stay_id','villa_id','source','guest_name','guest_phone','guest_email',
@@ -100,7 +100,7 @@ export const CONTRACTS = [
   },
   {
     action: 'createBooking (UPDATE provisional)',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: [
       'source','airbnb_conf','gross','commission_pct','commission_amt','net',
@@ -111,7 +111,7 @@ export const CONTRACTS = [
   },
   {
     action: 'createBooking (INSERT)',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'INSERT',
     columns: [
       'stay_id','villa_id','source','guest_name','guest_phone','guest_email',
@@ -124,7 +124,7 @@ export const CONTRACTS = [
   },
   {
     action: 'saveVillaRentalIncome',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: [
       'source','tariff_per_night','extra_charges','extra_lines','gross',
@@ -135,7 +135,7 @@ export const CONTRACTS = [
   },
   {
     action: 'updateDriveFolder',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: [
       'drive_folder_id','drive_folder_url','folder_created',
@@ -144,13 +144,13 @@ export const CONTRACTS = [
   },
   {
     action: 'updateStayStatus',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: ['status','updated_by','updated_at'],
   },
   {
     action: 'saveReview',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: [
       'review_rating','review_source','review_date',
@@ -159,19 +159,19 @@ export const CONTRACTS = [
   },
   {
     action: 'markReviewChased',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: ['review_chased_at','review_chase_count','updated_by','updated_at'],
   },
   {
     action: 'closeStayWithReview',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'UPDATE',
     columns: ['status','review_rating','review_source','review_date','updated_by','updated_at'],
   },
   {
     action: 'getReviewChaseList',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'SELECT',
     columns: [
       'stay_id','guest_name','checkin_date','checkout_date','nights','adults',
@@ -181,7 +181,7 @@ export const CONTRACTS = [
   },
   {
     action: 'getVillaDashboard',
-    table: 'stays',
+    table: 'stayvibe_stays',
     type: 'SELECT',
     columns: ['stay_id','guest_name','checkin_date','checkout_date','nights','adults','source','net','gross','commission_amt','status','from_city','city','state','country'],
   },
@@ -190,31 +190,31 @@ export const CONTRACTS = [
 
   {
     action: 'getGuestDocuments',
-    table: 'guest_documents',
+    table: 'stayvibe_guest_documents',
     type: 'SELECT',
     columns: ['doc_id','stay_id','doc_type','file_name','file_b64','folder_created'],
   },
   {
     action: 'getDocumentStatus',
-    table: 'guest_documents',
+    table: 'stayvibe_guest_documents',
     type: 'SELECT',
     columns: ['doc_id','stay_id','doc_type','file_name','folder_created','created_at','updated_at'],
   },
   {
     action: 'submitGuestCheckIn (INSERT docs)',
-    table: 'guest_documents',
+    table: 'stayvibe_guest_documents',
     type: 'INSERT',
     columns: ['doc_id','stay_id','doc_type','file_name','file_b64','folder_created','created_at'],
   },
   {
     action: 'markDocumentUploaded',
-    table: 'guest_documents',
+    table: 'stayvibe_guest_documents',
     type: 'UPDATE',
     columns: ['folder_created','updated_at'],
   },
   {
     action: 'cleanupExpiredDocuments',
-    table: 'guest_documents',
+    table: 'stayvibe_guest_documents',
     type: 'DELETE',
     columns: ['folder_created','created_at'],
   },
@@ -223,31 +223,31 @@ export const CONTRACTS = [
 
   {
     action: 'confirmCheckIn / checkOut',
-    table: 'raman_commissions',
+    table: 'stayvibe_manager_commissions',
     type: 'INSERT',
     columns: ['comm_id','stay_id','guest_name','checkin_date','nights','commission','is_paid','created_by','updated_by','created_at','updated_at'],
   },
   {
     action: 'resolveCheckinLink',
-    table: 'checkin_links',
+    table: 'stayvibe_checkin_links',
     type: 'SELECT',
     columns: ['token','villa_id','partner','label','is_active'],
   },
   {
     action: 'getTenantConfig',
-    table: 'tenants',
+    table: 'platform_tenants',
     type: 'SELECT',
     columns: ['tenant_id','villa_name','phone1','phone2','guest_contact','address','checkin_time','checkout_time','owner_email','owner_email_cc','drive_root_id','breakfast_rate','raman_comm_pct'],
   },
   {
     action: 'saveBreakfastEntry',
-    table: 'guest_requests',
+    table: 'stayvibe_guest_requests',
     type: 'INSERT',
     columns: ['req_id','stay_id','type','detail','status','created_by','updated_by','created_at','updated_at'],
   },
   {
     action: 'getInventory',
-    table: 'inventory',
+    table: 'stayvibe_inventory',
     type: 'SELECT',
     columns: ['item_id','villa_id','name','unit','category','qty_in_stock','cost_price','sell_price','last_restocked'],
   },
@@ -255,9 +255,9 @@ export const CONTRACTS = [
 
 // Tables that must exist in the live DB
 export const REQUIRED_TABLES = [
-  'stays', 'guest_documents', 'guest_requests', 'stay_cars',
-  'stay_incidentals', 'inventory', 'raman_commissions',
-  'rental_props', 'rental_income', 'checkin_links',
-  'tenants', 'auth_tokens', 'duplicate_bookings',
-  'property_details', 'property_documents',
+  'stayvibe_stays', 'stayvibe_guest_documents', 'stayvibe_guest_requests', 'stayvibe_cars',
+  'stayvibe_incidentals', 'stayvibe_inventory', 'stayvibe_manager_commissions',
+  'rev360_rental_props', 'rev360_rental_income', 'stayvibe_checkin_links',
+  'platform_tenants', 'platform_auth_tokens', 'stayvibe_duplicate_bookings',
+  'rev360_property_details', 'rev360_property_documents',
 ]

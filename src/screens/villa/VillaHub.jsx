@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { CONFIG } from '../../config'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const STATUS_COLOR = {
   confirmed:          { bg: 'rgba(52,168,83,0.12)',   text: '#34A853', label: 'Confirmed' },
@@ -30,7 +31,7 @@ export default function VillaHub() {
   const [loadingGuests, setLoadingGuests] = useState(true)
 
   useEffect(() => {
-    api.getUpcomingStays('dwarka')
+    api.getUpcomingStays(DEFAULT_VILLA_ID)
       .then(res => {
         const all = Array.isArray(res) ? res : (res?.data || [])
         setAllUpcoming(all)

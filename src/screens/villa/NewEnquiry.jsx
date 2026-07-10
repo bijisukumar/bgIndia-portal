@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
 import { parseLocalDate, fmtDate } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS,
@@ -35,7 +36,7 @@ export default function NewEnquiry() {
   // Load the villa's rate card once on mount (falls back to the hardcoded
   // table if the fetch fails, so the Get Pricing button still works offline-ish)
   useEffect(() => {
-    api.getRateCard('dwarka').then(d => {
+    api.getRateCard(DEFAULT_VILLA_ID).then(d => {
       if (d?.rateCard?.length) setRateCard(d.rateCard)
     }).catch(() => {})
   }, [])
@@ -90,7 +91,7 @@ export default function NewEnquiry() {
     if (!form.checkInDate || !form.checkOutDate || form.checkOutDate <= form.checkInDate) { setAvail(undefined); return }
     let stale = false
     setAvail('loading')
-    api.checkAvailability({ villaId: 'dwarka', checkIn: form.checkInDate, checkOut: form.checkOutDate })
+    api.checkAvailability({ villaId: DEFAULT_VILLA_ID, checkIn: form.checkInDate, checkOut: form.checkOutDate })
       .then(d => { if (!stale) setAvail(d || undefined) })
       .catch(() => { if (!stale) setAvail(undefined) })
     return () => { stale = true }
@@ -146,7 +147,7 @@ export default function NewEnquiry() {
     try {
       const result = await api.saveEnquiry({
         enquiryId: isEdit ? enquiryId : undefined,
-        villaId: 'dwarka',
+        villaId: DEFAULT_VILLA_ID,
         guestId: match?.guest?.guest_id,
         guestName: form.guestName, phone: form.phone, email: form.email,
         source: form.source, checkInDate: form.checkInDate, checkOutDate: form.checkOutDate,

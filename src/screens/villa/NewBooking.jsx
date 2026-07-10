@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const TODAY    = localTodayStr()
 const CHANNELS = ['Direct', 'Airbnb', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Expedia', 'VRBO', 'Other']
@@ -65,7 +66,7 @@ export default function NewBooking() {
     try {
       // Map form fields to what the Worker / D1 schema expects
       const res = await api.createBooking({
-        villaId:        'dwarka',
+        villaId:        DEFAULT_VILLA_ID,
         source:         form.channel,
         guestName:      form.bookerName,       // Worker expects guestName (not bookerName)
         guestPhone:     form.guestPhone || null,

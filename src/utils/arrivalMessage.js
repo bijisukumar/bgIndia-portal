@@ -11,18 +11,25 @@
 //   - Raman's screen: src/screens/villa/CheckIn.jsx
 // ============================================================
 
+import { CONFIG } from '../config'
 import { parseLocalDate } from './dates'
 
-const VILLA_MAPS_LINK = 'https://maps.app.goo.gl/fjfe4eS4BJmaHh62A'
-const VILLA_FULL_NAME = 'Dvaraka - Luxury Villas of Guruvayur'
-const VILLA_ADDRESS   = 'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680506, India'
+// Villa facts for the booking-info block, sourced from the per-host config
+// (hosts/<hostId>/config.js). Constant lookup here is fine while Dwarka is
+// the only property; multi-villa selection is a separate, later concern.
+const villa = CONFIG.villas[0]
+const VILLA_MAPS_LINK = villa.mapsLink
+const VILLA_FULL_NAME = villa.arrivalFullName
+const VILLA_ADDRESS   = villa.address
 // Host (Biji) WhatsApp — for any change requests only. Guest should NOT contact
 // Raman for date/guest-count/request changes, only Biji can approve those.
-const HOST_WA_NUMBER  = '+1 972.876.5101'
+const HOST_WA_NUMBER  = CONFIG.ownerWhatsApp
+const VILLA_BEDROOMS  = villa.bedrooms
 
-// Villa facts for the booking-info block. Bedrooms belongs in villa_settings
-// once multi-villa lands; constant is fine while Dwarka is the only property.
-const VILLA_BEDROOMS  = 4
+// NOT sourced from CONFIG: these already duplicate tenants.checkin_time /
+// checkout_time (D1, served via the getTenantConfig worker action) used by
+// GuestFormScript.gs. Reconciling this file to read the live tenant value
+// would mean making message-building async; left as a known follow-up.
 const CHECKIN_TIME    = 'after 4:00 PM'
 const CHECKOUT_TIME   = 'by 11:00 AM'
 

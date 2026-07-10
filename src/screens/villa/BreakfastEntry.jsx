@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { localTodayStr } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 export default function BreakfastEntry() {
   const navigate   = useNavigate()
@@ -19,13 +20,13 @@ export default function BreakfastEntry() {
   const total = guestCount * rate
 
   useEffect(() => {
-    api.getActiveStay('dwarka').then(s => {
+    api.getActiveStay(DEFAULT_VILLA_ID).then(s => {
       if (s?.stayId) {
         setStay(s)
         setCount(parseInt(s.adults||s.guestCount||0))
       }
     })
-    api.getRecentCheckouts('dwarka').then(d => { if (Array.isArray(d)) setRecentCheckouts(d) }).catch(() => {})
+    api.getRecentCheckouts(DEFAULT_VILLA_ID).then(d => { if (Array.isArray(d)) setRecentCheckouts(d) }).catch(() => {})
   }, [])
 
   const handleSave = async () => {

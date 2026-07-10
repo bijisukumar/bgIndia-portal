@@ -1,8 +1,17 @@
+import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Per-host config selection (SaaS onboarding) — see hosts/<hostId>/config.js.
+// Defaults to 'dwarka' so existing builds are unaffected; a new host builds
+// with VITE_HOST=<hostId> set before running the build command.
+const host = process.env.VITE_HOST || 'dwarka'
+
 export default defineConfig({
+  resolve: {
+    alias: { '@host-config': path.resolve(process.cwd(), 'hosts', host, 'config.js') }
+  },
   server: {
     proxy: {
       // During local dev, proxy /api/* to Cloudflare Pages preview

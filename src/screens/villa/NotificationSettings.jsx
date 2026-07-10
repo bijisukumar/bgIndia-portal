@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 // alert_log.created_at is stored as 'YYYY-MM-DD HH:MM:SS' in UTC (server
 // time), with no timezone marker. Browsers parse a bare string like that
@@ -23,7 +24,7 @@ function fmtLocalTime(utcStr) {
 // backend redeploy is needed, since the table already supports arbitrary keys.
 export default function NotificationSettings() {
   const navigate = useNavigate()
-  const villaId  = 'dwarka'
+  const villaId  = DEFAULT_VILLA_ID
 
   const [ownerEmailAlert, setOwnerEmailAlert] = useState('')
   const [loading, setLoading] = useState(true)

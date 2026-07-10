@@ -16,14 +16,16 @@
 //   guests (i.e. comfortably supports up to 16 before flagging it as outside
 //   the recommended range — booking is still allowed, just surfaced as a note).
 
-export const OVERFLOW_PER_GUEST_PER_NIGHT = 750
-export const OVERFLOW_MAX_RECOMMENDED = 4
-export const RATE_CARD_MAX_GUESTS = 12
+import { CONFIG } from '../config'
 
-// Dwarka has 4 bedrooms, ~2 guests/bedroom as a simple display estimate (not an
-// occupancy rule) — once billable guests exceed 8 (4 bedrooms x 2), the bedroom
-// count shown just stays capped at 4 rather than implying more bedrooms exist.
-export const VILLA_BEDROOMS = { dwarka: 4 }
+export const OVERFLOW_PER_GUEST_PER_NIGHT = CONFIG.pricing.overflowPerGuestPerNight
+export const OVERFLOW_MAX_RECOMMENDED = CONFIG.pricing.overflowMaxRecommended
+export const RATE_CARD_MAX_GUESTS = CONFIG.pricing.rateCardMaxGuests
+
+// ~2 guests/bedroom as a simple display estimate (not an occupancy rule) —
+// once billable guests exceed 2x a villa's bedroom count, the bedroom count
+// shown just stays capped rather than implying more bedrooms exist.
+export const VILLA_BEDROOMS = Object.fromEntries(CONFIG.villas.map(v => [v.id, v.bedrooms]))
 export const GUESTS_PER_BEDROOM = 2
 
 export function getBedroomEstimate(villaId, billableGuests) {
@@ -35,14 +37,7 @@ export function getBedroomEstimate(villaId, billableGuests) {
 // Fallback rate card used only if the backend rate-card fetch hasn't completed yet
 // or fails — mirrors the seeded `villa_rate_cards` table exactly. The backend table
 // is the source of truth; this just avoids a blank UI on a slow/failed fetch.
-export const FALLBACK_RATE_CARDS = {
-  dwarka: [
-    { guests: 1, tariff: 4896 }, { guests: 2, tariff: 4896 }, { guests: 3, tariff: 6037 },
-    { guests: 4, tariff: 7178 }, { guests: 5, tariff: 8319 }, { guests: 6, tariff: 9460 },
-    { guests: 7, tariff: 10601 }, { guests: 8, tariff: 11743 }, { guests: 9, tariff: 12884 },
-    { guests: 10, tariff: 14025 }, { guests: 11, tariff: 15166 }, { guests: 12, tariff: 16307 },
-  ],
-}
+export const FALLBACK_RATE_CARDS = CONFIG.pricing.fallbackRateCards
 
 /**
  * Look up the per-night tariff for a given villa + billable guest count.
@@ -98,13 +93,7 @@ export function getTariffEstimate(rateCard, { adults = 0, children = 0, nights =
 // ── DISCOUNT CATEGORIES ───────────────────────────────────────
 // Mutually exclusive — an enquiry has at most one of these (or none).
 // Defaults are starting points the owner can tune per enquiry or globally later.
-export const DISCOUNT_CATEGORIES = [
-  { id: 'loyal_patron', label: 'Loyal Patron / Valued Return Guest / Preferred Guest', defaultPct: 10 },
-  { id: 'elite_guest', label: 'Elite Guest', defaultPct: 15 },
-  { id: 'platinum_guest', label: 'Platinum Guest', defaultPct: 20 },
-  { id: 'b2b_india', label: 'B2B – India', defaultPct: 10 },
-  { id: 'b2b_intl', label: 'B2B – International', defaultPct: 20 },
-]
+export const DISCOUNT_CATEGORIES = CONFIG.pricing.discountCategories
 
 export function getDefaultDiscountPct(categoryId) {
   return DISCOUNT_CATEGORIES.find(c => c.id === categoryId)?.defaultPct ?? 0
@@ -114,16 +103,4 @@ export function getDefaultDiscountPct(categoryId) {
 // Shared preset list for ad-hoc priced line items (e.g. "Additional Guest"),
 // used both on confirmed stays (CompleteBooking.jsx) and on enquiry quotes
 // (EnquiryDetail.jsx) before a booking is confirmed.
-export const EXTRA_ITEMS = [
-  { label: 'Early Check-in',              amount: 500  },
-  { label: 'Late Check-out',              amount: 500  },
-  { label: 'Early Check-in + Late Check-out', amount: 1000 },
-  { label: 'Additional Day',              amount: 0    },
-  { label: 'Breakfast',                   amount: 0    },
-  { label: 'Floor Bed',                   amount: 750  },
-  { label: 'Additional Guest',            amount: 0    },
-  { label: 'Taxi Pick-up',                amount: 0    },
-  { label: 'Drop-off & Pick-up',          amount: 0    },
-  { label: 'Cleaning Fee',                amount: 1000 },
-  { label: 'Other',                       amount: 0    },
-]
+export const EXTRA_ITEMS = CONFIG.pricing.extraItems

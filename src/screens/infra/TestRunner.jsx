@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const TEST_PREFIX = 'TEST-' + new Date().toISOString().split('T')[0]
 const TEST_GUEST  = 'Test Guest (DELETE ME)'
@@ -11,7 +12,7 @@ const TESTS = [
   {
     id: 1, name: 'API Connection', group: 'Infrastructure',
     fn: async () => {
-      const stays = await api.getStays('dwarka', new Date().getFullYear())
+      const stays = await api.getStays(DEFAULT_VILLA_ID, new Date().getFullYear())
       if (!Array.isArray(stays)) throw new Error('Invalid response from API')
       return 'API connected and responding ✓'
     }
@@ -20,7 +21,7 @@ const TESTS = [
     id: 2, name: 'Create Booking (New Booking screen)', group: 'Owner Flow',
     fn: async () => {
       const res = await api.createBooking({
-        bookerName: TEST_GUEST, villaId: 'dwarka',
+        bookerName: TEST_GUEST, villaId: DEFAULT_VILLA_ID,
         checkInDate: TEST_DATE_IN, checkOutDate: TEST_DATE_OUT,
         nights: 1, guestCount: 2, channel: 'Direct',
         gross: 1, commPct: 0, commAmt: 0, net: 1,
@@ -43,7 +44,7 @@ const TESTS = [
     id: 4, name: 'Confirm Check-in', group: 'Raman Flow',
     fn: async () => {
       const res = await api.confirmCheckIn({
-        villaId: 'dwarka',
+        villaId: DEFAULT_VILLA_ID,
         guestName: TEST_GUEST, bookerName: TEST_GUEST,
         checkInDate: TEST_DATE_IN, checkOutDate: TEST_DATE_OUT,
         adultsCount: 2, childrenCount: 0, infantsCount: 0,
@@ -61,7 +62,7 @@ const TESTS = [
   {
     id: 5, name: 'Get Active Stay', group: 'Raman Flow',
     fn: async () => {
-      const stay = await api.getActiveStay('dwarka')
+      const stay = await api.getActiveStay(DEFAULT_VILLA_ID)
       if (!stay?.stayId) throw new Error('No active stay found')
       return `Active: ${stay.guestName} (${stay.stayId}) ✓`
     }
@@ -69,7 +70,7 @@ const TESTS = [
   {
     id: 6, name: 'Save Kitchen Entry', group: 'Raman Flow',
     fn: async () => {
-      const stay = await api.getActiveStay('dwarka')
+      const stay = await api.getActiveStay(DEFAULT_VILLA_ID)
       await api.saveKitchenEntry({
         stayId: stay?.stayId, guestName: stay?.guestName,
         items: [{ name:'Water', qty:2, price:1, subtotal:2 }],
@@ -81,7 +82,7 @@ const TESTS = [
   {
     id: 7, name: 'Save Breakfast Entry', group: 'Raman Flow',
     fn: async () => {
-      const stay = await api.getActiveStay('dwarka')
+      const stay = await api.getActiveStay(DEFAULT_VILLA_ID)
       await api.saveBreakfastEntry({
         stayId: stay?.stayId, guestName: stay?.guestName,
         date: TEST_DATE_IN, guestCount: 2, ratePerPerson: 1, total: 1,
@@ -92,7 +93,7 @@ const TESTS = [
   {
     id: 8, name: 'Save Car Rental', group: 'Raman Flow',
     fn: async () => {
-      const stay = await api.getActiveStay('dwarka')
+      const stay = await api.getActiveStay(DEFAULT_VILLA_ID)
       await api.saveCarRental({
         stayId: stay?.stayId, guestName: stay?.guestName,
         date: TEST_DATE_IN, destination: 'Test Destination',
@@ -104,7 +105,7 @@ const TESTS = [
   {
     id: 9, name: 'Get Stays (Dashboard data)', group: 'Owner Dashboard',
     fn: async () => {
-      const stays = await api.getStays('dwarka', new Date().getFullYear())
+      const stays = await api.getStays(DEFAULT_VILLA_ID, new Date().getFullYear())
       if (!Array.isArray(stays)) throw new Error('Not an array')
       return `${stays.length} stay(s) loaded for this year ✓`
     }
@@ -112,7 +113,7 @@ const TESTS = [
   {
     id: 10, name: 'Get Villa Dashboard', group: 'Owner Dashboard',
     fn: async () => {
-      const d = await api.getVillaDashboard('dwarka', 2023)
+      const d = await api.getVillaDashboard(DEFAULT_VILLA_ID, 2023)
       if (!d?.months) throw new Error('No months data returned')
       const total = Object.values(d.months).reduce((s,m) => s+(m.revenue||0), 0)
       const bookings = Object.values(d.months).reduce((s,m) => s+(m.bookings||0), 0)
@@ -147,7 +148,7 @@ const TESTS = [
     id: 14, name: 'Save Villa Expense', group: 'Owner Flow',
     fn: async () => {
       await api.saveVillaExpense({
-        villaId: 'dwarka', date: TEST_DATE_IN,
+        villaId: DEFAULT_VILLA_ID, date: TEST_DATE_IN,
         category: 'TEST-EXPENSE-DELETE-ME', amount: 1, paidTo: 'Test', description: 'Test only',
       })
       return 'Villa expense saved ✓'

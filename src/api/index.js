@@ -5,6 +5,7 @@
 //  401 responses trigger automatic logout.
 // ============================================================
 import { logger } from '../utils/logger.js'
+import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
 const BASE = '/api'
 
@@ -219,10 +220,10 @@ export const api = {
   getGuests:            ()       => get('getGuests'),
 
   // ── TENANT CONFIG ─────────────────────────────────────────
-  getTenantConfig:      (tenantId) => get('getTenantConfig', { tenantId: tenantId || 'dwarka' }),
+  getTenantConfig:      (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
 
   // ── RAMAN ────────────────────────────────────────────────
-  getRamanTodo:         (villaId)=> get('getRamanTodo', { villaId: villaId || 'dwarka' }),
+  getRamanTodo:         (villaId)=> get('getRamanTodo', { villaId: villaId || DEFAULT_VILLA_ID }),
   getRamanUnpaid:       ()       => get('getRamanUnpaid'),
   getRamanDashboard:    ()       => get('getRamanDashboard'),
   getRamanReport:       ()       => get('getRamanReport'),
@@ -235,7 +236,7 @@ export const api = {
   trackCampaignClick:   (data)     => post('trackCampaignClick', data),
   trackCampaignAction:  (data)     => post('trackCampaignAction', data),
 
-  getMarketingStats:    (villaId, statYear) => get('getMarketingStats', { villaId: villaId || 'dwarka', ...(statYear ? { statYear: String(statYear) } : {}) }),
+  getMarketingStats:    (villaId, statYear) => get('getMarketingStats', { villaId: villaId || DEFAULT_VILLA_ID, ...(statYear ? { statYear: String(statYear) } : {}) }),
   getRamanHistory:      ()       => get('getRamanHistory'),
   markRamanPaid:        (data)   => post('markRamanPaid', data),
 

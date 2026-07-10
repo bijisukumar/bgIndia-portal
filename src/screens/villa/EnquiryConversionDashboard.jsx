@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { SOURCES, LOST_REASONS } from './EnquiryTracker'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 
@@ -24,8 +25,8 @@ export default function EnquiryConversionDashboard() {
   useEffect(() => {
     let cancelled = false
     Promise.all([
-      api.getEnquiryDashboard('dwarka', year),
-      api.getEnquiryFollowUps('dwarka'),
+      api.getEnquiryDashboard(DEFAULT_VILLA_ID, year),
+      api.getEnquiryFollowUps(DEFAULT_VILLA_ID),
     ]).then(([dash, fu]) => {
       if (cancelled) return
       setData(dash)

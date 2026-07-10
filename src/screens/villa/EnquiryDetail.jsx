@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 import DatePicker from '../../components/DatePicker'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
@@ -54,7 +55,7 @@ function quoteCore(e) {
     finalTotal: e.final_offer_amount || e.quote_amount || 0,
     quoteAmount: e.quote_amount || 0,
     discountAmount: e.discount_amount || 0,
-    bedroomCount: getBedroomEstimate(e.villa_id || 'dwarka', billableGuests),
+    bedroomCount: getBedroomEstimate(e.villa_id || DEFAULT_VILLA_ID, billableGuests),
     firstName: (e.guest_name || '').trim().split(' ')[0] || 'there',
     fullName: (e.guest_name || '').trim() || 'there',
     guestCount: e.guests_count || billableGuests || 1,
@@ -279,7 +280,7 @@ export default function EnquiryDetail() {
   useEffect(() => { load() }, [enquiryId])
 
   useEffect(() => {
-    api.getRateCard('dwarka').then(d => {
+    api.getRateCard(DEFAULT_VILLA_ID).then(d => {
       if (d?.rateCard?.length) setRateCard(d.rateCard)
     }).catch(() => {})
   }, [])
@@ -335,7 +336,7 @@ export default function EnquiryDetail() {
     try {
       const isCategory = !!discountParams.discountCategory
       await api.saveEnquiry({
-        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        enquiryId, villaId: e.villa_id || DEFAULT_VILLA_ID, guestId: e.guest_id,
         guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
         checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
         adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
@@ -361,7 +362,7 @@ export default function EnquiryDetail() {
     setPhoneBusy(true)
     try {
       await api.saveEnquiry({
-        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        enquiryId, villaId: e.villa_id || DEFAULT_VILLA_ID, guestId: e.guest_id,
         guestName: e.guest_name, phone: phoneDraft.trim(), email: e.email, source: e.source,
         checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
         adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
@@ -384,7 +385,7 @@ export default function EnquiryDetail() {
     setExtraBusy(true)
     try {
       await api.saveEnquiry({
-        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        enquiryId, villaId: e.villa_id || DEFAULT_VILLA_ID, guestId: e.guest_id,
         guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
         checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
         adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
@@ -406,7 +407,7 @@ export default function EnquiryDetail() {
     try {
       // saveEnquiry needs the full payload — re-send everything as-is, only status changes.
       await api.saveEnquiry({
-        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        enquiryId, villaId: e.villa_id || DEFAULT_VILLA_ID, guestId: e.guest_id,
         guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
         checkInDate: e.checkin_date, checkOutDate: e.checkout_date,
         adults: e.adults, children: e.children, infants: e.infants, guestsCount: e.guests_count,
@@ -458,7 +459,7 @@ export default function EnquiryDetail() {
       const discountPct = e.discount_category ? (e.discount_pct || 0) : (e.repeat_discount_pct || 0)
       const discountAmount = Math.round(estimate.total * discountPct) / 100
       await api.saveEnquiry({
-        enquiryId, villaId: e.villa_id || 'dwarka', guestId: e.guest_id,
+        enquiryId, villaId: e.villa_id || DEFAULT_VILLA_ID, guestId: e.guest_id,
         guestName: e.guest_name, phone: e.phone, email: e.email, source: e.source,
         checkInDate: pricingParams.checkInDate, checkOutDate: pricingParams.checkOutDate,
         adults: adultsNum, children: childrenNum, infants: infantsNum, guestsCount: totalGuests,

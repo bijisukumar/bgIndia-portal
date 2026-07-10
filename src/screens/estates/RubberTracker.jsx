@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { localTodayStr, parseLocalDate } from '../../utils/dates'
+
+const PAVUTUMURI = CONFIG.estates.find(e => e.id === 'pavutumuri')
+const DEFAULT_TAPPING_RATE = String(PAVUTUMURI?.tappingRate ?? 2.75)
 
 function mondayOf(dateStr) {
   const d = parseLocalDate(dateStr) || new Date()
@@ -35,7 +39,7 @@ function wkTotals(w) {
 export default function RubberTracker() {
   const navigate = useNavigate()
   const [weekStart, setWeekStart] = useState(mondayOf(localTodayStr()))
-  const [workers, setWorkers] = useState([{ name: 'Satishan', rate: '2.75', days: emptyDays(mondayOf(localTodayStr())) }])
+  const [workers, setWorkers] = useState([{ name: 'Satishan', rate: DEFAULT_TAPPING_RATE, days: emptyDays(mondayOf(localTodayStr())) }])
   const [active, setActive] = useState(0)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -51,12 +55,12 @@ export default function RubberTracker() {
     if (!names.length) names = ['Satishan']
     return names.map(name => {
       // Tapping rate: captured once per tapper — prefill from the most recent
-      // saved row for this worker, default 2.75 Rs/tree
+      // saved row for this worker, default from CONFIG
       const workerRows = rows.filter(r => r.worker_name === name)
       const lastRate = workerRows.map(r => r.tapping_rate).filter(x => x > 0).pop()
       return {
         name,
-        rate: lastRate ? String(lastRate) : '2.75',
+        rate: lastRate ? String(lastRate) : DEFAULT_TAPPING_RATE,
         days: emptyDays(weekStart).map(cell => {
           const hit = workerRows.find(r => r.prod_date === cell.date)
           return hit
@@ -159,7 +163,7 @@ export default function RubberTracker() {
             <label className="field-label">Tapper name &amp; rate (₹/tree)</label>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input className="field-input" style={{ flex: 1 }} placeholder="e.g. Satishan" value={cur?.name || ''} onChange={e => setName(active, e.target.value)} />
-              <input className="field-input" type="number" inputMode="decimal" step="0.05" placeholder="2.75"
+              <input className="field-input" type="number" inputMode="decimal" step="0.05" placeholder={DEFAULT_TAPPING_RATE}
                 style={{ flex: '0 0 84px', textAlign: 'center' }} value={cur?.rate || ''} onChange={e => setRate(active, e.target.value)} />
               {workers.length > 1 && (
                 <button onClick={() => removeWorker(active)} style={{ padding: '0 14px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#EF4444', cursor: 'pointer' }}>Remove</button>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 // ── PRESET QUERIES ────────────────────────────────────────
 const PRESET_QUERIES = [
@@ -21,15 +22,18 @@ const PRESET_QUERIES = [
 
 const QUICK_SQL = [
   { label: 'All tables',         sql: `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name` },
-  { label: 'raman_commissions',  sql: `SELECT * FROM raman_commissions ORDER BY checkin_date DESC LIMIT 50` },
-  { label: 'stays (recent 20)',  sql: `SELECT stay_id, guest_name, checkin_date, nights, source, net, status FROM stays ORDER BY checkin_date DESC LIMIT 20` },
-  { label: 'inventory',          sql: `SELECT * FROM inventory WHERE villa_id = 'dwarka' ORDER BY category, name` },
-  { label: 'unpaid commissions', sql: `SELECT guest_name, checkin_date, nights, commission FROM raman_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC` },
-  { label: 'revenue by year',    sql: `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as stays, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stays WHERE status != 'cancelled' GROUP BY year ORDER BY year DESC` },
-  { label: 'stays by source',    sql: `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stays WHERE status != 'cancelled' GROUP BY source ORDER BY total_net DESC` },
-  { label: 'recent reviews',     sql: `SELECT stay_id, guest_name, checkin_date, review_rating, review_date, review_text, review_highlights FROM stays WHERE review_rating > 0 ORDER BY review_date DESC LIMIT 5` },
-  { label: 'coconut harvests',   sql: `SELECT * FROM coconut_harvests ORDER BY harvest_date DESC` },
-  { label: 'rental income',      sql: `SELECT * FROM rental_income ORDER BY year DESC, month DESC LIMIT 30` },
+  { label: 'manager commissions', sql: `SELECT * FROM stayvibe_manager_commissions ORDER BY checkin_date DESC LIMIT 50` },
+  { label: 'stays (recent 20)',  sql: `SELECT stay_id, guest_name, checkin_date, nights, source, net, status FROM stayvibe_stays ORDER BY checkin_date DESC LIMIT 20` },
+  { label: 'inventory',          sql: `SELECT * FROM stayvibe_inventory WHERE villa_id = '${DEFAULT_VILLA_ID}' ORDER BY category, name` },
+  { label: 'unpaid commissions', sql: `SELECT guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC` },
+  { label: 'revenue by year',    sql: `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as stays, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stayvibe_stays WHERE status != 'cancelled' GROUP BY year ORDER BY year DESC` },
+  { label: 'stays by source',    sql: `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stayvibe_stays WHERE status != 'cancelled' GROUP BY source ORDER BY total_net DESC` },
+  { label: 'recent reviews',     sql: `SELECT stay_id, guest_name, checkin_date, review_rating, review_date, review_text, review_highlights FROM stayvibe_stays WHERE review_rating > 0 ORDER BY review_date DESC LIMIT 5` },
+  // 'coconut harvests' quick query removed: that table lived only as a stale
+  // copy in this DB (bgindia-db) — the real data is in bgindiadb-estates
+  // (estate360_coconut_harvests), a different D1 binding this screen
+  // doesn't query. See scripts/migrate-v2.1-drop-stale-estate-tables.sql.
+  { label: 'rental income',      sql: `SELECT * FROM rev360_rental_income ORDER BY year DESC, month DESC LIMIT 30` },
 ]
 
 const CATS = ['All', 'Villa', 'Raman', 'Inventory', 'Estates', 'Rental']
@@ -169,7 +173,7 @@ function SavedQueryModal({ initial, onSave, onCancel }) {
               lineHeight: '1.6', padding: '10px 12px', resize: 'vertical',
               outline: 'none', boxSizing: 'border-box',
             }}
-            placeholder="SELECT * FROM stays WHERE ..." />
+            placeholder="SELECT * FROM stayvibe_stays WHERE ..." />
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -202,7 +206,7 @@ export default function D1Explorer() {
   const [results, setResults]       = useState(null)
   const [running, setRunning]       = useState(false)
   const [queryError, setQueryError] = useState(null)
-  const [sql, setSql]               = useState('SELECT stay_id, guest_name, checkin_date, checkout_date, status FROM stays ORDER BY checkin_date DESC LIMIT 20')
+  const [sql, setSql]               = useState('SELECT stay_id, guest_name, checkin_date, checkout_date, status FROM stayvibe_stays ORDER BY checkin_date DESC LIMIT 20')
   const [savedQueries, setSavedQueries] = useState(loadSaved)
   const [editingQuery, setEditingQuery] = useState(null)   // null | 'new' | {id,name,sql,cat}
   const [activeQueryId, setActiveQueryId] = useState(null)
@@ -278,16 +282,18 @@ export default function D1Explorer() {
   })
 
   const SCHEMA_TABLES = [
-    { name: 'stays',             cols: 'stay_id · villa_id · source · airbnb_conf · guest_name · checkin_date · checkout_date · nights · gross · commission_amt · net · status · extra_lines' },
-    { name: 'raman_commissions', cols: 'comm_id · stay_id · guest_name · checkin_date · nights · commission · is_paid · paid_date' },
-    { name: 'inventory',         cols: 'item_id · villa_id · name · category · qty_in_stock · cost_price · sell_price' },
-    { name: 'stay_incidentals',  cols: 'item_id · stay_id · name · qty · price_per_unit · total' },
-    { name: 'guest_requests',    cols: 'req_id · stay_id · type · detail · status' },
-    { name: 'stay_cars',         cols: 'car_id · stay_id · plate_no · photo_url' },
-    { name: 'rental_props',      cols: 'prop_id · name · tenant_name · lease_start · lease_end · monthly_rent' },
-    { name: 'rental_income',     cols: 'record_id · prop_id · month · year · rent · car_parking · maintenance · electricity · water · net' },
-    { name: 'coconut_harvests',  cols: 'harvest_id · estate_id · harvest_date · total_nuts · net_income · balance_due' },
-    { name: 'rubber_harvests',   cols: 'harvest_id · estate_id · harvest_date · weight_kg · net' },
+    { name: 'stayvibe_stays',              cols: 'stay_id · villa_id · source · airbnb_conf · guest_name · checkin_date · checkout_date · nights · gross · commission_amt · net · status · extra_lines' },
+    { name: 'stayvibe_manager_commissions', cols: 'comm_id · stay_id · guest_name · checkin_date · nights · commission · is_paid · paid_date' },
+    { name: 'stayvibe_inventory',           cols: 'item_id · villa_id · name · category · qty_in_stock · cost_price · sell_price' },
+    { name: 'stayvibe_incidentals',         cols: 'item_id · stay_id · name · qty · price_per_unit · total' },
+    { name: 'stayvibe_guest_requests',      cols: 'req_id · stay_id · type · detail · status' },
+    { name: 'stayvibe_cars',                cols: 'car_id · stay_id · plate_no · photo_url' },
+    { name: 'rev360_rental_props',          cols: 'prop_id · name · tenant_name · lease_start · lease_end · monthly_rent' },
+    { name: 'rev360_rental_income',         cols: 'record_id · prop_id · month · year · rent · car_parking · maintenance · electricity · water · net' },
+    // coconut_harvests/rubber_harvests removed: those live in bgindiadb-estates
+    // (estate360_coconut_harvests/estate360_rubber_harvests), a different D1
+    // binding this screen doesn't query — see D1Explorer's 'coconut harvests'
+    // quick-query removal note above for the same reason.
   ]
   // Fallback list shown only if the live schema fetch hasn't completed/failed —
   // kept as a static reference so the tab never renders fully empty, but the
@@ -449,12 +455,12 @@ export default function D1Explorer() {
               <div style={{ marginTop: '8px' }}>
                 <div className="card-section-label">SUGGESTED STARTERS — tap to save</div>
                 {[
-                  { name: 'Overdue open stays',       cat: 'Villa',   sql: `SELECT stay_id, guest_name, checkin_date, checkout_date, status FROM stays WHERE checkout_date < date('now') AND status NOT IN ('closed','cancelled','checked_out') ORDER BY checkout_date DESC` },
-                  { name: 'Cleanup test records',     cat: 'Cleanup', sql: `SELECT stay_id, guest_name, checkin_date, status FROM stays WHERE guest_name LIKE '%test%' OR guest_name LIKE '%AAB%' OR guest_name LIKE '%Biju%' ORDER BY created_at DESC LIMIT 20` },
-                  { name: 'All stays this year',      cat: 'Villa',   sql: `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, net, status FROM stays WHERE strftime('%Y', checkin_date) = strftime('%Y', 'now') ORDER BY checkin_date DESC` },
-                  { name: 'Review chase candidates',  cat: 'Villa',   sql: `SELECT stay_id, guest_name, checkout_date, status, review_rating FROM stays WHERE status IN ('checked_out','pending_review') AND checkout_date < date('now') AND (review_rating IS NULL OR review_rating = 0) ORDER BY checkout_date DESC` },
-                  { name: 'Raman quarterly summary',  cat: 'Raman',   sql: `SELECT strftime('%Y-Q', checkin_date) || CAST((CAST(strftime('%m', checkin_date) AS INTEGER) + 2) / 3 AS TEXT) as quarter, COUNT(*) as stays, SUM(commission) as total_comm, SUM(CASE WHEN is_paid THEN commission ELSE 0 END) as paid FROM raman_commissions GROUP BY quarter ORDER BY quarter DESC` },
-                  { name: 'Check extra_lines column', cat: 'Debug',   sql: `SELECT stay_id, guest_name, extra_charges, extra_lines FROM stays WHERE extra_lines IS NOT NULL ORDER BY updated_at DESC LIMIT 20` },
+                  { name: 'Overdue open stays',       cat: 'Villa',   sql: `SELECT stay_id, guest_name, checkin_date, checkout_date, status FROM stayvibe_stays WHERE checkout_date < date('now') AND status NOT IN ('closed','cancelled','checked_out') ORDER BY checkout_date DESC` },
+                  { name: 'Cleanup test records',     cat: 'Cleanup', sql: `SELECT stay_id, guest_name, checkin_date, status FROM stayvibe_stays WHERE guest_name LIKE '%test%' OR guest_name LIKE '%AAB%' OR guest_name LIKE '%Biju%' ORDER BY created_at DESC LIMIT 20` },
+                  { name: 'All stays this year',      cat: 'Villa',   sql: `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, net, status FROM stayvibe_stays WHERE strftime('%Y', checkin_date) = strftime('%Y', 'now') ORDER BY checkin_date DESC` },
+                  { name: 'Review chase candidates',  cat: 'Villa',   sql: `SELECT stay_id, guest_name, checkout_date, status, review_rating FROM stayvibe_stays WHERE status IN ('checked_out','pending_review') AND checkout_date < date('now') AND (review_rating IS NULL OR review_rating = 0) ORDER BY checkout_date DESC` },
+                  { name: 'Raman quarterly summary',  cat: 'Raman',   sql: `SELECT strftime('%Y-Q', checkin_date) || CAST((CAST(strftime('%m', checkin_date) AS INTEGER) + 2) / 3 AS TEXT) as quarter, COUNT(*) as stays, SUM(commission) as total_comm, SUM(CASE WHEN is_paid THEN commission ELSE 0 END) as paid FROM stayvibe_manager_commissions GROUP BY quarter ORDER BY quarter DESC` },
+                  { name: 'Check extra_lines column', cat: 'Debug',   sql: `SELECT stay_id, guest_name, extra_charges, extra_lines FROM stayvibe_stays WHERE extra_lines IS NOT NULL ORDER BY updated_at DESC LIMIT 20` },
                 ].map((s, i) => (
                   <button key={i} onClick={() => persistAndSet([...savedQueries, { id: Date.now().toString() + i, ...s, createdAt: new Date().toISOString() }])}
                     style={{
@@ -504,7 +510,7 @@ export default function D1Explorer() {
                   fontSize: '0.78rem', lineHeight: '1.6', padding: '12px',
                   resize: 'vertical', outline: 'none', boxSizing: 'border-box',
                 }}
-                placeholder="SELECT * FROM stays LIMIT 10"
+                placeholder="SELECT * FROM stayvibe_stays LIMIT 10"
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
                 <span style={{ color: '#3C5060', fontSize: '0.68rem' }}>Ctrl+Enter to run</span>

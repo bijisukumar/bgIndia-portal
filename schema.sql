@@ -1,284 +1,378 @@
 -- ============================================================
--- bgIndia Portal — Cloudflare D1 Schema (SQLite)
+-- bgIndia Portal — Cloudflare D1 Schema (SQLite), bgindia-db
 -- Deploy: wrangler d1 execute bgindia-db --file=schema.sql --remote
 --
--- AUDIT COLUMNS — every table carries four audit fields:
---   created_by   TEXT  — who created the record
---   created_at   TEXT  — when it was created (UTC)
---   updated_by   TEXT  — who last modified it
---   updated_at   TEXT  — when it was last modified (UTC)
+-- RELEASE 2.1: table names carry an app-scoped prefix —
+-- stayvibe_ (villa hospitality), rev360_ (rental), infra_ (cross-cutting).
+-- Estate tables live entirely in bgindiadb-estates (schema-estates.sql) —
+-- the 5 stale pre-split copies that used to live here
+-- (coconut_harvests/estate_transactions/manager_settlements/
+-- rubber_harvests/rubber_production) have been removed; see
+-- scripts/migrate-v2.1-drop-stale-estate-tables.sql.
 --
--- Allowed values for created_by / updated_by:
---   'owner'   — Biji (logged in as owner PIN)
---   'raman'   — RamananKutty (manager PIN)
---   'pradosh' — Pradosh (estate_manager PIN)
---   'auto'    — Automated / AI process (Airbnb poller, email trigger, etc.)
---   'system'  — Internal system operation (seed scripts, migrations)
+-- This file was regenerated from the live production schema (2026-07)
+-- rather than hand-maintained — the previous version of this file had
+-- drifted significantly out of sync with production (many columns and
+-- 12 whole tables added via scripts/migrate-*.sql over time were never
+-- back-filled here). Column bodies below are the live, exact definitions.
 --
--- Goal: as automation matures, ~80% of records should show 'auto'.
+-- AUDIT COLUMNS — most tables carry created_by/created_at/updated_by/
+-- updated_at. Allowed values for created_by / updated_by:
+--   'owner' | 'raman' | 'pradosh' | 'auto' | 'system'
 -- ============================================================
 
--- ── STAYS ─────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS stays (
-  stay_id          TEXT PRIMARY KEY,
-  villa_id         TEXT NOT NULL DEFAULT 'dwarka',
-  source           TEXT NOT NULL DEFAULT 'direct',
-  guest_name       TEXT NOT NULL,
-  guest_phone      TEXT,
-  guest_email      TEXT,
-  checkin_date     TEXT,
-  checkout_date    TEXT,
-  nights           INTEGER DEFAULT 1,
-  adults           INTEGER DEFAULT 1,
-  children         INTEGER DEFAULT 0,
+-- ════════════════════════════════════════════════════════════
+-- stayvibe_ — villa hospitality (24 tables)
+-- ════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS stayvibe_stays (
+  stay_id       TEXT PRIMARY KEY,
+  villa_id      TEXT NOT NULL DEFAULT 'dwarka',
+  source        TEXT NOT NULL DEFAULT 'direct',
+  airbnb_conf   TEXT,
+  guest_name    TEXT NOT NULL,
+  guest_phone   TEXT,
+  guest_email   TEXT,
+  checkin_date  TEXT,
+  checkout_date TEXT,
+  nights        INTEGER DEFAULT 1,
+  adults        INTEGER DEFAULT 1,
+  children      INTEGER DEFAULT 0,
   tariff_per_night REAL DEFAULT 0,
-  extra_charges    REAL DEFAULT 0,
-  gross            REAL DEFAULT 0,
-  commission_pct   REAL DEFAULT 0,
-  commission_amt   REAL DEFAULT 0,
-  net              REAL DEFAULT 0,
-  status           TEXT DEFAULT 'confirmed',
-  drive_folder_id  TEXT,             -- D1 folder ID (without full URL)
-  drive_folder_url TEXT,             -- full Drive URL for quick access
-  review_rating    INTEGER DEFAULT 0, -- star rating 1-5 (0 = no review yet)
-  review_source    TEXT,             -- 'airbnb' | 'google'
-  review_date      TEXT,             -- YYYY-MM-DD
-  airbnb_conf      TEXT,             -- Airbnb confirmation code (for email matching)
+  extra_charges REAL DEFAULT 0,
+  gross         REAL DEFAULT 0,
+  commission_pct REAL DEFAULT 0,
+  commission_amt REAL DEFAULT 0,
+  net           REAL DEFAULT 0,
+  status        TEXT DEFAULT 'confirmed',
+  drive_folder_id TEXT,
   converted_to_direct INTEGER DEFAULT 0,
-  -- Identity links (Phase 1) — written by resolveGuest / upsertStay going
-  -- forward; backfilled from bookings for historical rows.
-  guest_id         TEXT,              -- -> guests.guest_id
-  enquiry_id       TEXT,              -- -> enquiries.enquiry_id
-  hold_confirmation INTEGER DEFAULT 0, -- 1 = flagged; poller holds the guest confirmation (Phase 3b)
-  -- Audit
-  created_by  TEXT DEFAULT 'owner',   -- owner | raman | pradosh | auto | system
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'owner',
-  updated_at  TEXT DEFAULT (datetime('now'))
-);
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT DEFAULT (datetime('now'))
+, created_by TEXT DEFAULT 'owner', updated_by TEXT DEFAULT 'owner', drive_folder_url TEXT, review_rating    INTEGER DEFAULT 0, review_source    TEXT, review_date      TEXT, home_address TEXT, city TEXT, state TEXT, country TEXT DEFAULT 'India', from_city TEXT, pincode TEXT, govt_id_type TEXT, govt_id_num TEXT, cleaning_fee REAL DEFAULT 0, host_service_fee REAL DEFAULT 0, you_earn REAL DEFAULT 0, guest_service_fee REAL DEFAULT 0, night_fee REAL DEFAULT 0, guest_paid_total REAL DEFAULT 0, dob TEXT, gender TEXT, nationality TEXT DEFAULT 'Indian', purpose_of_visit TEXT, mode_of_transport TEXT, vehicle_number TEXT, eta TEXT, guest_list TEXT, passport_number TEXT, passport_issue_date TEXT, passport_issue_place TEXT, passport_expiry TEXT, visa_number TEXT, visa_type TEXT, visa_issue_date TEXT, visa_issue_place TEXT, arrival_date_india TEXT, port_of_arrival TEXT, next_destination TEXT, home_country_address TEXT, checkin_form_submitted INTEGER DEFAULT 0, checkin_form_submitted_at TEXT, request_early_checkin  INTEGER DEFAULT 0, request_late_checkout  INTEGER DEFAULT 0, request_breakfast      INTEGER DEFAULT 0, breakfast_choice       TEXT, request_cab            INTEGER DEFAULT 0, special_requests       TEXT, folder_created_at TEXT, processing_log    TEXT, folder_created INTEGER DEFAULT 0, request_extra_beds INTEGER DEFAULT 0, extra_beds_count   INTEGER DEFAULT 0, extra_lines TEXT DEFAULT NULL, review_text TEXT DEFAULT NULL, review_note TEXT DEFAULT NULL, review_highlights TEXT DEFAULT NULL, review_chased_at TEXT DEFAULT NULL, review_chase_count INTEGER DEFAULT 0, review_closed INTEGER DEFAULT 0, notes TEXT, home_country TEXT, booked_by_guest_id TEXT, booked_by_name TEXT, is_foreigner INTEGER DEFAULT 0, cform_status TEXT DEFAULT 'not_required', cform_due_at TEXT, guest_id   TEXT, enquiry_id TEXT, hold_confirmation INTEGER DEFAULT 0);
 
--- ── GUEST REQUESTS ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS guest_requests (
-  req_id      TEXT PRIMARY KEY,
-  stay_id     TEXT REFERENCES stays(stay_id),
-  type        TEXT,
-  detail      TEXT,
-  status      TEXT DEFAULT 'pending',
-  -- Audit
-  created_by  TEXT DEFAULT 'raman',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'raman',
-  updated_at  TEXT DEFAULT (datetime('now'))
-);
-
--- ── STAY CARS ──────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS stay_cars (
-  car_id      TEXT PRIMARY KEY,
-  stay_id     TEXT REFERENCES stays(stay_id),
-  plate_no    TEXT,
-  photo_url   TEXT,
-  -- Audit
-  created_by  TEXT DEFAULT 'raman',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'raman',
-  updated_at  TEXT DEFAULT (datetime('now'))
-);
-
--- ── INVENTORY ──────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS inventory (
-  item_id        TEXT PRIMARY KEY,
-  villa_id       TEXT NOT NULL DEFAULT 'dwarka',
-  name           TEXT NOT NULL,
-  unit           TEXT,
-  category       TEXT,
-  qty_in_stock   INTEGER DEFAULT 0,
-  preferred_stock INTEGER DEFAULT 10,
-  cost_price     REAL DEFAULT 0,
-  sell_price     REAL DEFAULT 0,
-  last_restocked TEXT,
-  active         INTEGER DEFAULT 1,    -- 0 = archived/no longer stocked; hidden from all screens, history preserved
-  -- Audit
+CREATE TABLE IF NOT EXISTS stayvibe_guests (
+  guest_id      TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  phone         TEXT,
+  email         TEXT,
+  address       TEXT,
+  from_city     TEXT,
+  state         TEXT,
+  country       TEXT,
+  total_stays   INTEGER DEFAULT 0,
+  total_nights  INTEGER DEFAULT 0,
+  total_revenue REAL DEFAULT 0,
+  first_seen_at TEXT DEFAULT (datetime('now')),
+  last_seen_at  TEXT DEFAULT (datetime('now')),
   created_by  TEXT DEFAULT 'system',
   created_at  TEXT DEFAULT (datetime('now')),
+  updated_by  TEXT DEFAULT 'system',
+  updated_at  TEXT DEFAULT (datetime('now'))
+, pincode TEXT);
+
+CREATE TABLE IF NOT EXISTS stayvibe_enquiries (
+  enquiry_id        TEXT PRIMARY KEY,
+  villa_id          TEXT NOT NULL DEFAULT 'dwarka',
+  guest_id          TEXT REFERENCES stayvibe_guests(guest_id),
+  date_received     TEXT DEFAULT (datetime('now')),
+  guest_name        TEXT NOT NULL,
+  phone             TEXT,
+  email             TEXT,
+  source            TEXT NOT NULL DEFAULT 'website',
+  checkin_date      TEXT,
+  checkout_date     TEXT,
+  nights            INTEGER DEFAULT 0,
+  guests_count      INTEGER DEFAULT 1,
+  purpose           TEXT,
+  quote_amount      REAL DEFAULT 0,
+  is_repeat_guest   INTEGER DEFAULT 0,
+  previous_stays    INTEGER DEFAULT 0,
+  repeat_discount_pct REAL DEFAULT 0,
+  discount_amount   REAL DEFAULT 0,
+  final_offer_amount REAL DEFAULT 0,
+  status            TEXT NOT NULL DEFAULT 'new',
+  last_contact_date TEXT,
+  follow_up_due     TEXT,
+  booking_confirmed INTEGER DEFAULT 0,
+  booking_value     REAL DEFAULT 0,
+  lost_reason       TEXT,
+  assigned_to       TEXT DEFAULT 'owner',
+  notes             TEXT,
+  created_by  TEXT DEFAULT 'owner',
+  created_at  TEXT DEFAULT (datetime('now')),
   updated_by  TEXT DEFAULT 'owner',
   updated_at  TEXT DEFAULT (datetime('now'))
-);
+, reminder_2day_sent_at TEXT, reminder_5day_sent_at TEXT, adults            INTEGER DEFAULT 0, children          INTEGER DEFAULT 0, infants           INTEGER DEFAULT 0, discount_category TEXT, discount_pct      REAL DEFAULT 0, extra_charges REAL DEFAULT 0, extra_lines   TEXT DEFAULT NULL);
 
--- ── INVENTORY RESTOCK LOG ───────────────────────────────────
--- Transaction history for inventory restocks (qty bought, total cost, date)
--- Separate from `inventory.qty_in_stock` which only holds the current snapshot.
-CREATE TABLE IF NOT EXISTS inventory_restock_log (
-  id             TEXT PRIMARY KEY,
-  villa_id       TEXT NOT NULL DEFAULT 'dwarka',
-  item_id        TEXT REFERENCES inventory(item_id),
-  item_name      TEXT,
-  qty_bought     REAL NOT NULL DEFAULT 0,
-  total_cost     REAL NOT NULL DEFAULT 0,
-  price_per_unit REAL DEFAULT 0,
-  -- Audit
+CREATE TABLE IF NOT EXISTS stayvibe_bookings (
+  booking_id   TEXT PRIMARY KEY,
+  enquiry_id   TEXT NOT NULL REFERENCES stayvibe_enquiries(enquiry_id),
+  guest_id     TEXT REFERENCES stayvibe_guests(guest_id),
+  stay_id      TEXT REFERENCES stayvibe_stays(stay_id),
+  booking_value REAL DEFAULT 0,
+  confirmed_at TEXT DEFAULT (datetime('now')),
   created_by  TEXT DEFAULT 'owner',
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_restock_log_villa_item
-  ON inventory_restock_log(villa_id, item_id);
+CREATE TABLE IF NOT EXISTS stayvibe_manager_commissions (
+  comm_id       TEXT PRIMARY KEY,
+  stay_id       TEXT,
+  guest_name    TEXT NOT NULL,
+  checkin_date  TEXT NOT NULL,
+  nights        INTEGER DEFAULT 1,
+  commission    REAL NOT NULL,
+  is_paid       INTEGER DEFAULT 0,
+  paid_date     TEXT,
+  created_at    TEXT DEFAULT (datetime('now'))
+, created_by TEXT DEFAULT 'system', updated_by TEXT DEFAULT 'owner', updated_at TEXT);
 
--- ── STAY INCIDENTALS ───────────────────────────────────────
-CREATE TABLE IF NOT EXISTS stay_incidentals (
-  item_id        TEXT PRIMARY KEY,
-  stay_id        TEXT REFERENCES stays(stay_id),
-  inv_item_id    TEXT REFERENCES inventory(item_id),
-  name           TEXT,
-  qty            INTEGER DEFAULT 1,
+CREATE TABLE IF NOT EXISTS stayvibe_inventory (
+  item_id         TEXT PRIMARY KEY,
+  villa_id        TEXT NOT NULL DEFAULT 'dwarka',
+  name            TEXT NOT NULL,
+  unit            TEXT,
+  category        TEXT,
+  qty_in_stock    INTEGER DEFAULT 0,
+  cost_price      REAL DEFAULT 0,
+  sell_price      REAL DEFAULT 0,
+  last_restocked  TEXT
+, created_by TEXT DEFAULT 'system', created_at TEXT, updated_by TEXT DEFAULT 'owner', updated_at TEXT, preferred_stock INTEGER DEFAULT 10, active INTEGER DEFAULT 1);
+
+CREATE TABLE IF NOT EXISTS stayvibe_inventory_restock_log (
+  id             TEXT PRIMARY KEY,
+  villa_id       TEXT NOT NULL DEFAULT 'dwarka',
+  item_id        TEXT REFERENCES stayvibe_inventory(item_id),
+  item_name      TEXT,
+  qty_bought     REAL NOT NULL DEFAULT 0,
+  total_cost     REAL NOT NULL DEFAULT 0,
   price_per_unit REAL DEFAULT 0,
-  total          REAL DEFAULT 0,
-  -- Audit
-  created_by  TEXT DEFAULT 'raman',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'raman',
-  updated_at  TEXT DEFAULT (datetime('now'))
+  created_by  TEXT DEFAULT 'owner',
+  created_at  TEXT DEFAULT (datetime('now'))
 );
 
--- ── RENTAL PROPERTIES (master / lease details) ─────────────
-CREATE TABLE IF NOT EXISTS rental_props (
-  prop_id         TEXT PRIMARY KEY,
-  name            TEXT,
-  location        TEXT,
-  tenant_name     TEXT,
-  tenant_phone    TEXT,
-  deposit         REAL DEFAULT 0,       -- security deposit
-  agreed_rent     REAL DEFAULT 0,       -- monthly agreed rent
-  maintenance_fee REAL DEFAULT 0,       -- monthly maintenance fee
-  lease_start     TEXT,                 -- YYYY-MM-DD
-  lease_end       TEXT,                 -- YYYY-MM-DD (60-day renewal alert trigger)
-  notes           TEXT,                 -- special terms, contact, parking slot etc.
-  monthly_rent    REAL DEFAULT 0,       -- kept for backward compat; prefer agreed_rent
-  -- Audit
+CREATE TABLE IF NOT EXISTS stayvibe_cars (
+  car_id      TEXT PRIMARY KEY,
+  stay_id     TEXT REFERENCES stayvibe_stays(stay_id),
+  plate_no    TEXT,
+  photo_url   TEXT,
+  captured_at TEXT DEFAULT (datetime('now'))
+, created_by TEXT DEFAULT 'raman', created_at TEXT, updated_by TEXT DEFAULT 'raman', updated_at TEXT);
+
+CREATE TABLE IF NOT EXISTS stayvibe_incidentals (
+  item_id       TEXT PRIMARY KEY,
+  stay_id       TEXT REFERENCES stayvibe_stays(stay_id),
+  inv_item_id   TEXT REFERENCES stayvibe_inventory(item_id),
+  name          TEXT,
+  qty           INTEGER DEFAULT 1,
+  price_per_unit REAL DEFAULT 0,
+  total         REAL DEFAULT 0,
+  created_at    TEXT DEFAULT (datetime('now'))
+, created_by TEXT DEFAULT 'raman', updated_by TEXT DEFAULT 'raman', updated_at TEXT);
+
+CREATE TABLE IF NOT EXISTS stayvibe_guest_requests (
+  req_id      TEXT PRIMARY KEY,
+  stay_id     TEXT REFERENCES stayvibe_stays(stay_id),
+  type        TEXT,
+  detail      TEXT,
+  status      TEXT DEFAULT 'pending',
+  created_at  TEXT DEFAULT (datetime('now'))
+, created_by TEXT DEFAULT 'raman', updated_by TEXT DEFAULT 'raman', updated_at TEXT);
+
+CREATE TABLE IF NOT EXISTS stayvibe_guest_documents (
+  doc_id TEXT PRIMARY KEY, stay_id TEXT NOT NULL, doc_type TEXT, file_name TEXT, file_b64 TEXT,
+  created_at TEXT DEFAULT (datetime('now')), expires_at TEXT, folder_created INTEGER DEFAULT 0, updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_villa_settings (
+  villa_id     TEXT NOT NULL,
+  key          TEXT NOT NULL,
+  value        TEXT,
+  updated_by   TEXT,
+  updated_at   TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (villa_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_villa_expenses (
+  txn_id       TEXT PRIMARY KEY,
+  villa_id     TEXT NOT NULL DEFAULT 'dwarka',
+  date         TEXT NOT NULL,
+  category     TEXT NOT NULL,
+  amount       REAL NOT NULL,
+  paid_to      TEXT,
+  description  TEXT,
+  created_by   TEXT,
+  updated_by   TEXT,
+  created_at   TEXT DEFAULT (datetime('now')),
+  updated_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_villa_rate_cards (
+  villa_id      TEXT NOT NULL DEFAULT 'dwarka',
+  guest_count   INTEGER NOT NULL,
+  tariff_per_night REAL NOT NULL,
   created_by  TEXT DEFAULT 'owner',
   created_at  TEXT DEFAULT (datetime('now')),
   updated_by  TEXT DEFAULT 'owner',
-  updated_at  TEXT DEFAULT (datetime('now'))
+  updated_at  TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (villa_id, guest_count)
 );
 
--- ── RENTAL INCOME (monthly entries) ───────────────────────
-CREATE TABLE IF NOT EXISTS rental_income (
-  record_id         TEXT PRIMARY KEY,
-  prop_id           TEXT REFERENCES rental_props(prop_id),
-  month             INTEGER,
-  year              INTEGER,
-  rent              REAL DEFAULT 0,
-  car_parking       REAL DEFAULT 0,
-  maintenance       REAL DEFAULT 0,
-  electricity       REAL DEFAULT 0,
-  water             REAL DEFAULT 0,
-  property_tax      REAL DEFAULT 0,
-  land_tax          REAL DEFAULT 0,
-  extra_maintenance REAL DEFAULT 0,
-  net               REAL DEFAULT 0,
-  notes             TEXT,
-  -- Audit
-  created_by  TEXT DEFAULT 'owner',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'owner',
-  updated_at  TEXT DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS stayvibe_marketing_campaigns (
+  id            TEXT PRIMARY KEY,
+  campaign_name TEXT NOT NULL,
+  unique_token  TEXT NOT NULL UNIQUE,
+  channel       TEXT DEFAULT 'whatsapp',
+  villa_id      TEXT DEFAULT 'dwarka',
+  is_active     INTEGER DEFAULT 1,
+  notes         TEXT,
+  created_by    TEXT DEFAULT 'owner',
+  created_at    TEXT DEFAULT (datetime('now'))
 );
 
--- ── COCONUT HARVESTS ───────────────────────────────────────
-CREATE TABLE IF NOT EXISTS coconut_harvests (
-  harvest_id             TEXT PRIMARY KEY,
-  estate_id              TEXT DEFAULT 'pollachi',
-  harvester_name         TEXT,
-  harvest_date           TEXT,
-  final_payment_date     TEXT,
-  total_nuts             INTEGER DEFAULT 0,
-  net_good_nuts          INTEGER DEFAULT 0,
-  nuts_rejected          INTEGER DEFAULT 0,
-  additional_unaccounted INTEGER DEFAULT 0,
-  total_weight_kg        REAL DEFAULT 0,
-  price_per_kg           REAL DEFAULT 0,
-  avg_weight_per_nut     REAL DEFAULT 0,
-  earnings_main          REAL DEFAULT 0,
-  nuts_rejected_b2       INTEGER DEFAULT 0,
-  rejection_revenue      REAL DEFAULT 0,
-  husk_count_sold        INTEGER DEFAULT 0,
-  husk_cost_per_nut      REAL DEFAULT 0,
-  husk_earnings          REAL DEFAULT 0,
-  other_earnings         REAL DEFAULT 0,
-  total_earnings         REAL DEFAULT 0,
-  harvest_nuts           INTEGER DEFAULT 0,
-  harvest_cost_nut       REAL DEFAULT 0,
-  harvest_expense        REAL DEFAULT 0,
-  dehusk_nuts            INTEGER DEFAULT 0,
-  dehusk_cost_nut        REAL DEFAULT 0,
-  dehusk_expense         REAL DEFAULT 0,
-  tractor_expense        REAL DEFAULT 0,
-  other_expense          REAL DEFAULT 0,
-  total_expense          REAL DEFAULT 0,
-  net_income             REAL DEFAULT 0,
-  advance_payment        REAL DEFAULT 0,
-  advance_date           TEXT,
-  second_payment         REAL DEFAULT 0,
-  final_settlement       REAL DEFAULT 0,
-  balance_due            REAL DEFAULT 0,
-  next_harvest_date      TEXT,
-  notes                  TEXT,
-  -- Audit
-  created_by  TEXT DEFAULT 'pradosh',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'pradosh',
-  updated_at  TEXT DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS stayvibe_campaign_analytics (
+  id          TEXT PRIMARY KEY,
+  campaign_id TEXT NOT NULL REFERENCES stayvibe_marketing_campaigns(id),
+  event_type  TEXT NOT NULL CHECK(event_type IN ('click','inquiry','booking')),
+  country     TEXT,
+  region      TEXT,
+  city        TEXT,
+  user_agent  TEXT,
+  referrer    TEXT,
+  ts          TEXT DEFAULT (datetime('now'))
 );
 
--- ── RUBBER HARVESTS ────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS rubber_harvests (
-  harvest_id   TEXT PRIMARY KEY,
-  estate_id    TEXT DEFAULT 'pavutumuri',
-  harvest_date TEXT,
-  weight_kg    REAL DEFAULT 0,
-  price_per_kg REAL DEFAULT 0,
-  gross        REAL DEFAULT 0,
-  expense      REAL DEFAULT 0,
-  net          REAL DEFAULT 0,
-  notes        TEXT,
-  -- Audit
-  created_by  TEXT DEFAULT 'raman',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'raman',
-  updated_at  TEXT DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS stayvibe_booking_line_items (
+  line_id      TEXT PRIMARY KEY,
+  stay_id      TEXT NOT NULL,
+  villa_id     TEXT,
+  item_type    TEXT NOT NULL,
+  direction    TEXT NOT NULL,
+  gross_amount REAL NOT NULL DEFAULT 0,
+  tax_amount   REAL NOT NULL DEFAULT 0,
+  note         TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
 );
 
--- ── RAMAN COMMISSIONS ──────────────────────────────────────
-CREATE TABLE IF NOT EXISTS raman_commissions (
+CREATE TABLE IF NOT EXISTS stayvibe_channels (
+  channel_id  TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  is_direct   INTEGER DEFAULT 0,
+  default_commission_pct REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_payouts (
+  payout_id       TEXT PRIMARY KEY,
+  channel_id      TEXT,
+  payout_ref      TEXT,
+  payout_date     TEXT,
+  amount_received REAL DEFAULT 0,
+  created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_payout_map (
+  map_id           TEXT PRIMARY KEY,
+  payout_id        TEXT NOT NULL,
+  stay_id          TEXT NOT NULL,
+  line_id          TEXT,
+  allocated_amount REAL DEFAULT 0,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_checkin_links (
+  token      TEXT PRIMARY KEY,
+  villa_id   TEXT NOT NULL DEFAULT 'dwarka',
+  partner    TEXT NOT NULL DEFAULT 'direct',
+  label      TEXT,
+  is_active  INTEGER DEFAULT 1,
+  use_count  INTEGER DEFAULT 0,
+  created_by TEXT DEFAULT 'owner',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stayvibe_duplicate_bookings (
+  dup_id              TEXT PRIMARY KEY,
+  villa_id            TEXT NOT NULL DEFAULT 'dwarka',
+  detected_at         TEXT DEFAULT (datetime('now')),
+  existing_stay_id    TEXT NOT NULL,
+  existing_guest      TEXT,
+  existing_checkin    TEXT,
+  existing_checkout   TEXT,
+  existing_source     TEXT,
+  existing_booked_at  TEXT,
+  new_guest           TEXT,
+  new_checkin         TEXT,
+  new_checkout        TEXT,
+  new_source          TEXT,
+  new_airbnb_conf     TEXT,
+  overlap_nights      INTEGER DEFAULT 0,
+  notes               TEXT
+, resolved    INTEGER DEFAULT 0, resolved_by TEXT, resolved_at TEXT, resolution  TEXT);
+
+CREATE TABLE IF NOT EXISTS stayvibe_communication_log (
   comm_id      TEXT PRIMARY KEY,
-  stay_id      TEXT,                   -- FK to stays
-  guest_name   TEXT NOT NULL,
-  checkin_date TEXT NOT NULL,
-  nights       INTEGER DEFAULT 1,
-  commission   REAL NOT NULL,
-  is_paid      INTEGER DEFAULT 0,      -- 0=unpaid  1=paid
-  paid_date    TEXT,
-  -- Audit
-  created_by  TEXT DEFAULT 'system',   -- auto-created at checkout by Worker
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'owner',    -- owner marks paid
-  updated_at  TEXT DEFAULT (datetime('now'))
+  enquiry_id   TEXT NOT NULL REFERENCES stayvibe_enquiries(enquiry_id),
+  type         TEXT NOT NULL,
+  notes        TEXT,
+  occurred_at  TEXT DEFAULT (datetime('now')),
+  created_by  TEXT DEFAULT 'owner',
+  created_at  TEXT DEFAULT (datetime('now'))
 );
 
--- ── INDEXES ────────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_stays_checkin   ON stays(checkin_date);
-CREATE INDEX IF NOT EXISTS idx_stays_status    ON stays(status);
-CREATE INDEX IF NOT EXISTS idx_stays_guest     ON stays(guest_name);
-CREATE INDEX IF NOT EXISTS idx_stays_source    ON stays(source);
-CREATE INDEX IF NOT EXISTS idx_stays_audit     ON stays(created_by, updated_by);
-CREATE INDEX IF NOT EXISTS idx_stays_guest_id  ON stays(guest_id);
-CREATE INDEX IF NOT EXISTS idx_stays_enquiry   ON stays(enquiry_id);
-CREATE INDEX IF NOT EXISTS idx_harvests_date   ON coconut_harvests(harvest_date);
-CREATE INDEX IF NOT EXISTS idx_rental_income   ON rental_income(prop_id, year, month);
-CREATE INDEX IF NOT EXISTS idx_raman_paid      ON raman_commissions(is_paid, checkin_date);
-CREATE INDEX IF NOT EXISTS idx_incidentals_stay ON stay_incidentals(stay_id);
+CREATE TABLE IF NOT EXISTS stayvibe_cform_filings (
+  filing_id  TEXT PRIMARY KEY,
+  stay_id    TEXT NOT NULL,
+  villa_id   TEXT,
+  phase      TEXT NOT NULL,     -- 'checkin' | 'checkout'
+  ack_number TEXT,
+  filed_by   TEXT,
+  filed_at   TEXT DEFAULT (datetime('now')),
+  notes      TEXT
+);
 
--- ── INVENTORY SEED (default items, qty=10 each) ────────────
-INSERT OR IGNORE INTO inventory
+-- ── stayvibe_ indexes ──────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_checkin ON stayvibe_stays(checkin_date);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_status ON stayvibe_stays(status);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_guest ON stayvibe_stays(guest_name);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_source ON stayvibe_stays(source);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_audit ON stayvibe_stays(created_by, updated_by);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_guest_id ON stayvibe_stays(guest_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_stays_enquiry ON stayvibe_stays(enquiry_id);
+CREATE UNIQUE INDEX IF NOT EXISTS stayvibe_idx_unique_stay ON stayvibe_stays(villa_id, guest_name, checkin_date) WHERE status NOT IN ('cancelled', 'closed');
+CREATE INDEX IF NOT EXISTS stayvibe_idx_guests_phone ON stayvibe_guests(phone);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_guests_email ON stayvibe_guests(email);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_enquiries_status ON stayvibe_enquiries(status);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_enquiries_guest ON stayvibe_enquiries(guest_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_enquiries_source ON stayvibe_enquiries(source);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_enquiries_followup ON stayvibe_enquiries(follow_up_due);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_enquiries_received ON stayvibe_enquiries(date_received);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_bookings_enquiry ON stayvibe_bookings(enquiry_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_bookings_guest ON stayvibe_bookings(guest_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_bookings_stay ON stayvibe_bookings(stay_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_manager_commissions_paid ON stayvibe_manager_commissions(is_paid, checkin_date);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_restock_log_villa_item ON stayvibe_inventory_restock_log(villa_id, item_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_incidentals_stay ON stayvibe_incidentals(stay_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_campaigns_token ON stayvibe_marketing_campaigns(unique_token);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_campaigns_villa ON stayvibe_marketing_campaigns(villa_id, is_active);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_analytics_campaign ON stayvibe_campaign_analytics(campaign_id, event_type);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_analytics_ts ON stayvibe_campaign_analytics(ts);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_bli_stay ON stayvibe_booking_line_items(stay_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_bli_type ON stayvibe_booking_line_items(item_type);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_bli_villa ON stayvibe_booking_line_items(villa_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_pmap_payout ON stayvibe_payout_map(payout_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_pmap_stay ON stayvibe_payout_map(stay_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_checkin_links_villa ON stayvibe_checkin_links(villa_id, is_active);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_dup_detected ON stayvibe_duplicate_bookings(detected_at DESC);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_dup_source ON stayvibe_duplicate_bookings(new_source, detected_at DESC);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_duplicate_bookings_resolved ON stayvibe_duplicate_bookings(resolved);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_comm_log_enquiry ON stayvibe_communication_log(enquiry_id, occurred_at);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_cform_filings_stay ON stayvibe_cform_filings(stay_id);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_villa_expenses_villa_date ON stayvibe_villa_expenses(villa_id, date DESC);
+
+-- ── stayvibe_ seed data ─────────────────────────────────────────
+INSERT OR IGNORE INTO stayvibe_inventory
   (item_id, villa_id, name, unit, category, qty_in_stock, cost_price, sell_price, created_by, updated_by)
 VALUES
   ('water_bottle',    'dwarka', 'Water bottles',      'bottle', 'kitchen',  10, 18, 30, 'system', 'system'),
@@ -295,309 +389,299 @@ VALUES
   ('tissue',          'dwarka', 'Tissue/toilet paper', 'roll',   'bathroom', 10, 25,  0, 'system', 'system'),
   ('bed_essential',   'dwarka', 'Bedroom essentials',  'set',    'bedroom',  10,  0,  0, 'system', 'system');
 
--- Estate income/expense ledger
--- Covers both Pollachi (coconut) and Pavutumuri (rubber) estates
--- Recurring villa operating expenses (electricity, maintenance, repairs,
--- laundry, deep cleaning, pest control, appliance/AC service, landscaping,
--- painting, water systems, bulk supplies, etc.) — separate from the
--- per-stay extra_lines/extra_charges on `stays`, which are guest-billed.
--- Logged by owner or Raman; emails the owner on save (see sendAlert).
--- Per-villa configurable settings — key/value so new settings can be added
--- for future SaaS tenants (new villa onboarding) without any schema change
--- or code deploy. First use: 'owner_email_alert' — where notification
--- emails for that villa get sent. Add more keys freely (e.g.
--- 'alert_from_name', 'whatsapp_host_number') as they come up.
--- Persistent record of every outbound owner-alert email attempt (success or
--- failure), so failures are visible without needing wrangler tail / live
--- Cloudflare Logs access — queryable via the D1 Explorer screen like any
--- other table.
-CREATE TABLE IF NOT EXISTS alert_log (
-  log_id       TEXT PRIMARY KEY,
-  villa_id     TEXT,
-  subject      TEXT,
-  to_email     TEXT,
-  success      INTEGER NOT NULL,          -- 1 = MailChannels accepted it, 0 = rejected/threw
-  status_code  INTEGER,                   -- HTTP status from MailChannels, if we got one
-  error_detail TEXT,                      -- response body / exception message, truncated
-  created_at   TEXT DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_alert_log_created ON alert_log(created_at DESC);
-
--- Temporary staging for guest-submitted / Raman-captured documents (ID,
--- passport, car photo, plate photo) before GuestFormScript.gs uploads them
--- to the guest's Drive folder and deletes the D1 copy. folder_created=0
--- means still pending upload; cleanupExpiredDocuments sweeps anything
--- left after 14 days as a failure backstop, not the normal path.
--- NOTE: this table already exists on the live DB (predates this schema.sql
--- entry) — this is documentation, not a migration. See
--- scripts/migrate-folder-flag.sql and
--- scripts/migrate-guest-documents-updated-at.sql for its actual history.
-CREATE TABLE IF NOT EXISTS guest_documents (
-  doc_id         TEXT PRIMARY KEY,
-  stay_id        TEXT NOT NULL,
-  doc_type       TEXT NOT NULL,        -- 'govt_id' | 'passport' | 'car_photo' | 'plate_photo'
-  file_name      TEXT,
-  file_b64       TEXT,
-  folder_created INTEGER DEFAULT 0,
-  expires_at     TEXT,
-  created_at     TEXT DEFAULT (datetime('now')),
-  updated_at     TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_guest_documents_stay ON guest_documents(stay_id);
-
-CREATE TABLE IF NOT EXISTS villa_settings (
-  villa_id     TEXT NOT NULL,
-  key          TEXT NOT NULL,
-  value        TEXT,
-  updated_by   TEXT,
-  updated_at   TEXT DEFAULT (datetime('now')),
-  PRIMARY KEY (villa_id, key)
-);
-
-CREATE TABLE IF NOT EXISTS villa_expenses (
-  txn_id       TEXT PRIMARY KEY,
-  villa_id     TEXT NOT NULL DEFAULT 'dwarka',
-  date         TEXT NOT NULL,              -- YYYY-MM-DD
-  category     TEXT NOT NULL,
-  amount       REAL NOT NULL,
-  paid_to      TEXT,
-  description  TEXT,
-  created_by   TEXT,
-  updated_by   TEXT,
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_villa_expenses_villa_date ON villa_expenses(villa_id, date DESC);
-
-CREATE TABLE IF NOT EXISTS estate_transactions (
-  txn_id       TEXT PRIMARY KEY,
-  estate       TEXT NOT NULL,              -- 'pollachi' | 'pavutumuri'
-  type         TEXT NOT NULL,              -- 'income' | 'expense'
-  date         TEXT NOT NULL,             -- YYYY-MM-DD
-  category     TEXT NOT NULL,
-  amount       REAL NOT NULL,
-  paid_to      TEXT,                      -- party name (payer or payee)
-  description  TEXT,
-  created_by   TEXT DEFAULT 'pradosh',
-  updated_by   TEXT DEFAULT 'pradosh',
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_estate_txn_estate_date ON estate_transactions(estate, date DESC);
-CREATE INDEX IF NOT EXISTS idx_estate_txn_type        ON estate_transactions(estate, type, date DESC);
-
--- ── DUPLICATE PROTECTION (added 2026-05-24) ─────────────────────────────
--- Prevents duplicate active bookings for same guest + checkin date per villa.
--- Excludes cancelled and closed stays so historical records are unaffected.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_stay
-  ON stays(villa_id, guest_name, checkin_date)
-  WHERE status NOT IN ('cancelled', 'closed');
-
--- ════════════════════════════════════════════════════════════
--- GUEST ENQUIRY MANAGEMENT (CRM)
--- ════════════════════════════════════════════════════════════
-
--- ── GUESTS (master record) ──────────────────────────────────
--- One row per real person, matched primarily by phone, then email.
--- Backfilled once from `stays` (see scripts/backfill-guests-crm.sql);
--- new enquiries/bookings going forward write here directly so repeat-guest
--- detection no longer depends on exact guest_name string matches.
-CREATE TABLE IF NOT EXISTS guests (
-  guest_id      TEXT PRIMARY KEY,
-  name          TEXT NOT NULL,
-  phone         TEXT,                 -- normalized (digits only, no +91/spaces) for matching
-  email         TEXT,                 -- lowercased for matching
-  address       TEXT,
-  from_city     TEXT,
-  state         TEXT,
-  country       TEXT,
-  total_stays   INTEGER DEFAULT 0,    -- denormalized counters, refreshed on each confirmed booking
-  total_nights  INTEGER DEFAULT 0,
-  total_revenue REAL DEFAULT 0,
-  first_seen_at TEXT DEFAULT (datetime('now')),
-  last_seen_at  TEXT DEFAULT (datetime('now')),
-  -- Audit
-  created_by  TEXT DEFAULT 'system',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'system',
-  updated_at  TEXT DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_guests_phone ON guests(phone);
-CREATE INDEX IF NOT EXISTS idx_guests_email ON guests(email);
-
--- ── VILLA RATE CARD ──────────────────────────────────────────
--- Base per-night tariff by villa + billable guest count (adults+children; infants free).
--- Reusable beyond the enquiry screen — e.g. a future guest-facing quick-pricing page
--- can read the same table via getRateCard.
-CREATE TABLE IF NOT EXISTS villa_rate_cards (
-  villa_id      TEXT NOT NULL DEFAULT 'dwarka',
-  guest_count   INTEGER NOT NULL,         -- 1..12 today; villa-specific curve, not assumed shared
-  tariff_per_night REAL NOT NULL,
-  -- Audit
-  created_by  TEXT DEFAULT 'owner',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'owner',
-  updated_at  TEXT DEFAULT (datetime('now')),
-  PRIMARY KEY (villa_id, guest_count)
-);
-
--- Seed: Dwarka rate card, guests 1-12 (per night, INR). Beyond 12 guests, the app
--- computes guest12Tariff + (extraGuests * 750)/night in code (villaPricing.js) rather
--- than storing every possible row — floor-bed overflow, recommended max 4 extra guests.
-INSERT OR IGNORE INTO villa_rate_cards (villa_id, guest_count, tariff_per_night) VALUES
+INSERT OR IGNORE INTO stayvibe_villa_rate_cards (villa_id, guest_count, tariff_per_night) VALUES
   ('dwarka', 1, 4896), ('dwarka', 2, 4896), ('dwarka', 3, 6037), ('dwarka', 4, 7178),
   ('dwarka', 5, 8319), ('dwarka', 6, 9460), ('dwarka', 7, 10601), ('dwarka', 8, 11743),
   ('dwarka', 9, 12884), ('dwarka', 10, 14025), ('dwarka', 11, 15166), ('dwarka', 12, 16307);
 
--- ── ENQUIRIES ────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS enquiries (
-  enquiry_id        TEXT PRIMARY KEY,
-  villa_id          TEXT NOT NULL DEFAULT 'dwarka',
-  guest_id          TEXT REFERENCES guests(guest_id),   -- set once matched/created
-  date_received     TEXT DEFAULT (datetime('now')),
-  guest_name        TEXT NOT NULL,
-  phone             TEXT,
-  email             TEXT,
-  source            TEXT NOT NULL DEFAULT 'website',    -- website|airbnb|booking_com|whatsapp|phone|referral
-  checkin_date      TEXT,
-  checkout_date     TEXT,
-  nights            INTEGER DEFAULT 0,                  -- recomputed from dates on save
-  guests_count      INTEGER DEFAULT 1,                    -- adults + children + infants (kept for back-compat with reporting)
-  adults            INTEGER DEFAULT 0,
-  children          INTEGER DEFAULT 0,                    -- ages 1-12
-  infants           INTEGER DEFAULT 0,                    -- 1 yr and under, free, excluded from pricing lookup
-  purpose           TEXT,                                -- vacation|wedding|temple_visit|family_function|other
-  quote_amount      REAL DEFAULT 0,
-  extra_charges     REAL DEFAULT 0,                      -- sum of extra_lines; added on top of quote_amount, not discounted
-  extra_lines       TEXT,                                -- JSON: [{label, amount}] e.g. Additional Guest, Floor Bed
-  is_repeat_guest   INTEGER DEFAULT 0,
-  previous_stays    INTEGER DEFAULT 0,
-  repeat_discount_pct REAL DEFAULT 0,                     -- legacy field, kept as-is; not replaced by discount_category
-  discount_category TEXT,                                 -- loyal_patron|elite_guest|platinum_guest|b2b_india|b2b_intl (mutually exclusive, optional)
-  discount_pct      REAL DEFAULT 0,                       -- % tied to discount_category; defaults on category select, editable
-  discount_amount   REAL DEFAULT 0,                      -- = quote_amount * discount_pct / 100 (falls back to repeat_discount_pct if no category set)
-  final_offer_amount REAL DEFAULT 0,                      -- = quote_amount - discount_amount
-  status            TEXT NOT NULL DEFAULT 'new',          -- new|quoted|follow_up_needed|negotiating|confirmed|lost|cancelled
-  last_contact_date TEXT,
-  follow_up_due     TEXT,
-  booking_confirmed INTEGER DEFAULT 0,
-  booking_value     REAL DEFAULT 0,
-  lost_reason       TEXT,                                 -- price|dates_unavailable|chose_another|change_of_plans|no_response|other
-  assigned_to       TEXT DEFAULT 'owner',
-  notes             TEXT,
-  -- Audit
-  created_by  TEXT DEFAULT 'owner',
-  created_at  TEXT DEFAULT (datetime('now')),
-  updated_by  TEXT DEFAULT 'owner',
-  updated_at  TEXT DEFAULT (datetime('now'))
-);
+-- ════════════════════════════════════════════════════════════
+-- rev360_ — rental property management (12 tables)
+-- ════════════════════════════════════════════════════════════
 
-CREATE INDEX IF NOT EXISTS idx_enquiries_status   ON enquiries(status);
-CREATE INDEX IF NOT EXISTS idx_enquiries_guest    ON enquiries(guest_id);
-CREATE INDEX IF NOT EXISTS idx_enquiries_source   ON enquiries(source);
-CREATE INDEX IF NOT EXISTS idx_enquiries_followup ON enquiries(follow_up_due);
-CREATE INDEX IF NOT EXISTS idx_enquiries_received ON enquiries(date_received);
+CREATE TABLE IF NOT EXISTS rev360_rental_props (
+  prop_id      TEXT PRIMARY KEY,
+  name         TEXT,
+  location     TEXT,
+  tenant_name  TEXT,
+  tenant_phone TEXT,
+  lease_start  TEXT,
+  lease_end    TEXT,
+  monthly_rent REAL DEFAULT 0
+, deposit         REAL DEFAULT 0, agreed_rent     REAL DEFAULT 0, maintenance_fee REAL DEFAULT 0, notes           TEXT, created_by      TEXT DEFAULT 'owner', created_at      TEXT, updated_by      TEXT DEFAULT 'owner', updated_at      TEXT, status TEXT DEFAULT 'Active', country TEXT DEFAULT 'IN', currency TEXT DEFAULT 'INR', tenant_email TEXT DEFAULT NULL, drive_folder_url TEXT DEFAULT NULL, next_renewal_date    TEXT, early_terminated      INTEGER DEFAULT 0, early_termination_date TEXT, doc_contract_signed INTEGER DEFAULT 0, doc_id_captured     INTEGER DEFAULT 0, doc_move_in         INTEGER DEFAULT 0, doc_move_out        INTEGER DEFAULT 0, doc_damage_report   INTEGER DEFAULT 0, tenant_address TEXT, tenant_pan     TEXT, stage         TEXT DEFAULT 'Signed Up', is_delinquent INTEGER DEFAULT 0, end_reason    TEXT, is_month_to_month     INTEGER DEFAULT 0, month_to_month_since  TEXT, parking_tenant_name  TEXT, parking_tenant_phone TEXT, parking_fee          REAL DEFAULT 0, parking_deposit      REAL DEFAULT 0, parking_lease_start  TEXT, parking_lease_end    TEXT, parking_currency     TEXT DEFAULT 'INR', has_separate_parking INTEGER DEFAULT 0, parking_paid_in_full INTEGER DEFAULT 0);
 
--- ── COMMUNICATION LOG ────────────────────────────────────────
--- Every interaction tied to an enquiry — quote sent, follow-up, call, note.
-CREATE TABLE IF NOT EXISTS communication_log (
-  comm_id      TEXT PRIMARY KEY,
-  enquiry_id   TEXT NOT NULL REFERENCES enquiries(enquiry_id),
-  type         TEXT NOT NULL,         -- email|whatsapp|phone_call|sms|internal_note|status_change
+CREATE TABLE IF NOT EXISTS rev360_rental_income (
+  record_id    TEXT PRIMARY KEY,
+  prop_id      TEXT REFERENCES rev360_rental_props(prop_id),
+  month        INTEGER,
+  year         INTEGER,
+  rent         REAL DEFAULT 0,
+  car_parking  REAL DEFAULT 0,
+  maintenance  REAL DEFAULT 0,
+  electricity  REAL DEFAULT 0,
+  water        REAL DEFAULT 0,
+  property_tax REAL DEFAULT 0,
+  land_tax     REAL DEFAULT 0,
+  extra_maintenance REAL DEFAULT 0,
+  net          REAL DEFAULT 0,
   notes        TEXT,
-  occurred_at  TEXT DEFAULT (datetime('now')),
-  -- Audit
-  created_by  TEXT DEFAULT 'owner',
-  created_at  TEXT DEFAULT (datetime('now'))
+  created_at   TEXT DEFAULT (datetime('now'))
+, created_by TEXT DEFAULT 'owner', updated_by TEXT DEFAULT 'owner', updated_at TEXT);
+
+CREATE TABLE IF NOT EXISTS rev360_rent_transactions (
+  txn_id        TEXT PRIMARY KEY,
+  prop_id       TEXT NOT NULL,
+  period_month  TEXT NOT NULL,
+  base_rent     REAL NOT NULL DEFAULT 0,
+  maintenance   REAL NOT NULL DEFAULT 0,
+  late_fee      REAL NOT NULL DEFAULT 0,
+  total_due     REAL NOT NULL DEFAULT 0,
+  is_exception  INTEGER NOT NULL DEFAULT 0,
+  paid_date     TEXT NOT NULL,
+  currency      TEXT NOT NULL DEFAULT 'INR',
+  notes         TEXT,
+  created_by    TEXT DEFAULT 'owner',
+  created_at    TEXT DEFAULT (datetime('now'))
+, car_parking REAL NOT NULL DEFAULT 0, unit_type TEXT NOT NULL DEFAULT 'main');
+
+CREATE TABLE IF NOT EXISTS rev360_tenancy_history (
+  history_id      TEXT PRIMARY KEY,
+  prop_id         TEXT NOT NULL,
+  tenant_name     TEXT NOT NULL,
+  tenant_email    TEXT,
+  tenant_phone    TEXT,
+  tenant_address  TEXT,
+  tenant_pan      TEXT,
+  deposit         REAL DEFAULT 0,
+  agreed_rent     REAL DEFAULT 0,
+  maintenance_fee REAL DEFAULT 0,
+  lease_start     TEXT,
+  lease_end       TEXT,
+  country         TEXT DEFAULT 'IN',
+  currency        TEXT DEFAULT 'INR',
+  status          TEXT DEFAULT 'Completed',
+  end_reason      TEXT,
+  early_terminated INTEGER DEFAULT 0,
+  early_termination_date TEXT,
+  notes           TEXT,
+  drive_folder_url TEXT,
+  doc_contract_signed INTEGER DEFAULT 0,
+  doc_id_captured     INTEGER DEFAULT 0,
+  doc_move_in         INTEGER DEFAULT 0,
+  doc_move_out        INTEGER DEFAULT 0,
+  doc_damage_report   INTEGER DEFAULT 0,
+  created_by      TEXT DEFAULT 'owner',
+  created_at      TEXT DEFAULT (datetime('now')),
+  updated_by      TEXT DEFAULT 'owner',
+  updated_at      TEXT DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_comm_log_enquiry ON communication_log(enquiry_id, occurred_at);
+CREATE TABLE IF NOT EXISTS rev360_incoming_tenants (
+  incoming_id     TEXT PRIMARY KEY,
+  prop_id         TEXT NOT NULL,
+  tenant_name     TEXT NOT NULL,
+  tenant_email    TEXT,
+  tenant_phone    TEXT,
+  tenant_address  TEXT,
+  tenant_pan      TEXT,
+  deposit         REAL DEFAULT 0,
+  agreed_rent     REAL DEFAULT 0,
+  maintenance_fee REAL DEFAULT 0,
+  lease_start     TEXT,
+  lease_end       TEXT,
+  country         TEXT DEFAULT 'IN',
+  currency        TEXT DEFAULT 'INR',
+  notes           TEXT,
+  doc_contract_signed INTEGER DEFAULT 0,
+  doc_id_captured     INTEGER DEFAULT 0,
+  created_by      TEXT DEFAULT 'owner',
+  created_at      TEXT DEFAULT (datetime('now')),
+  updated_by      TEXT DEFAULT 'owner',
+  updated_at      TEXT DEFAULT (datetime('now'))
+, deposit_paid        INTEGER DEFAULT 0, deposit_paid_date   TEXT, deposit_payment_mode TEXT);
 
--- ── BOOKINGS (link table) ────────────────────────────────────
--- Created when an enquiry is marked Confirmed. Points at the stays row
--- that was auto-created so dashboard/calendar pick it up immediately —
--- this table does NOT duplicate stay financials, just the enquiry link.
-CREATE TABLE IF NOT EXISTS bookings (
-  booking_id   TEXT PRIMARY KEY,
-  enquiry_id   TEXT NOT NULL REFERENCES enquiries(enquiry_id),
-  guest_id     TEXT REFERENCES guests(guest_id),
-  stay_id      TEXT REFERENCES stays(stay_id),
-  booking_value REAL DEFAULT 0,
-  confirmed_at TEXT DEFAULT (datetime('now')),
-  -- Audit
-  created_by  TEXT DEFAULT 'owner',
-  created_at  TEXT DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS rev360_property_details (
+  prop_id TEXT PRIMARY KEY,
+  address_line1 TEXT, address_line2 TEXT, city TEXT,
+  state_province TEXT, postal_code TEXT, country TEXT DEFAULT 'IN',
+  elec_provider TEXT, elec_consumer_id TEXT, elec_account_number TEXT,
+  elec_portal_url TEXT, elec_monthly_avg REAL DEFAULT 0,
+  water_provider TEXT, water_consumer_id TEXT, water_account_number TEXT,
+  water_portal_url TEXT, water_monthly_avg REAL DEFAULT 0,
+  gas_provider TEXT, gas_consumer_id TEXT, gas_account_number TEXT,
+  gas_portal_url TEXT, gas_monthly_avg REAL DEFAULT 0,
+  internet_provider TEXT, internet_account TEXT, internet_monthly REAL DEFAULT 0,
+  hoa_name TEXT, hoa_account TEXT, hoa_monthly REAL DEFAULT 0,
+  other_utility_name TEXT, other_utility_id TEXT, other_utility_monthly REAL DEFAULT 0,
+  tax_parcel_id TEXT, tax_authority TEXT, tax_annual REAL DEFAULT 0, tax_portal_url TEXT,
+  loan_lender TEXT, loan_account TEXT, loan_original REAL DEFAULT 0,
+  loan_outstanding REAL DEFAULT 0, loan_monthly_emi REAL DEFAULT 0,
+  loan_interest_rate REAL DEFAULT 0, loan_start_date TEXT, loan_end_date TEXT, loan_portal_url TEXT,
+  purchase_price REAL DEFAULT 0, purchase_date TEXT,
+  estimated_value REAL DEFAULT 0, estimated_value_date TEXT, currency TEXT DEFAULT 'INR',
+  insurance_provider TEXT, insurance_policy_no TEXT,
+  insurance_annual REAL DEFAULT 0, insurance_expiry TEXT,
+  notes TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+, unit_no       TEXT, floor         TEXT, building_name TEXT, has_parking   INTEGER DEFAULT 0, furnishing    TEXT);
+
+CREATE TABLE IF NOT EXISTS rev360_property_documents (
+  doc_id TEXT PRIMARY KEY, prop_id TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Other', doc_name TEXT NOT NULL,
+  drive_url TEXT, drive_folder_url TEXT, file_type TEXT,
+  doc_date TEXT, notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_bookings_enquiry ON bookings(enquiry_id);
-CREATE INDEX IF NOT EXISTS idx_bookings_guest   ON bookings(guest_id);
-CREATE INDEX IF NOT EXISTS idx_bookings_stay    ON bookings(stay_id);
+CREATE TABLE IF NOT EXISTS rev360_property_expenses (
+  record_id          TEXT PRIMARY KEY,
+  prop_id            TEXT NOT NULL,
+  month              INTEGER NOT NULL,
+  year               INTEGER NOT NULL,
+  electricity        REAL NOT NULL DEFAULT 0,
+  water              REAL NOT NULL DEFAULT 0,
+  property_tax       REAL NOT NULL DEFAULT 0,
+  land_tax           REAL NOT NULL DEFAULT 0,
+  extra_maintenance  REAL NOT NULL DEFAULT 0,
+  total_expense      REAL NOT NULL DEFAULT 0,
+  notes              TEXT,
+  created_by         TEXT DEFAULT 'owner',
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_by         TEXT DEFAULT 'owner',
+  updated_at         TEXT DEFAULT (datetime('now'))
+);
 
--- ── PROCESSING LOG ────────────────────────────────────────────
--- Generic error/event log written by the Worker. Two current writers:
---   1. submitGuestCheckIn's crash handler (stay_id='unknown' on parse errors)
---   2. logScriptEvent action (Apps Script execution logging — stay_id is
---      either a real enquiry_id/stay_id, or 'script:<function name>')
--- Confirmed missing in production via a sqlite_master check on 2026-06-24
--- (zero rows returned) despite being referenced since at least the
--- original submitGuestCheckIn implementation — created here and added to
--- tracked schema so this gap isn't rediscovered again later.
-CREATE TABLE IF NOT EXISTS processing_log (
+CREATE TABLE IF NOT EXISTS rev360_maintenance_events (
+  event_id     TEXT PRIMARY KEY,
+  prop_id      TEXT NOT NULL,
+  month        INTEGER NOT NULL,
+  year         INTEGER NOT NULL,
+  category     TEXT NOT NULL,
+  amount       REAL NOT NULL DEFAULT 0,
+  description  TEXT,
+  event_date   TEXT,
+  created_by   TEXT DEFAULT 'owner',
+  created_at   TEXT DEFAULT (datetime('now')),
+  updated_by   TEXT DEFAULT 'owner',
+  updated_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rev360_lease_losses (
+  loss_id            TEXT PRIMARY KEY,
+  prop_id            TEXT REFERENCES rev360_rental_props(prop_id),
+  lease_snapshot     TEXT,
+  item_category      TEXT NOT NULL CHECK(item_category IN ('Rent','Damage','Cleaning','Legal','Other')),
+  description        TEXT NOT NULL,
+  amount             REAL NOT NULL DEFAULT 0,
+  currency           TEXT DEFAULT 'INR',
+  evidence_file_name TEXT,
+  evidence_drive_url TEXT,
+  evidence_timestamp TEXT,
+  status             TEXT DEFAULT 'Estimated' CHECK(status IN ('Estimated','Claimed','Recovered','Unrecoverable')),
+  created_by         TEXT DEFAULT 'owner',
+  created_at         TEXT DEFAULT (datetime('now')),
+  updated_at         TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rev360_hoa_history (
+  id TEXT PRIMARY KEY, prop_id TEXT NOT NULL,
+  effective_date TEXT NOT NULL, monthly_amount REAL NOT NULL DEFAULT 0,
+  currency TEXT DEFAULT 'INR', notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rev360_tax_history (
+  id TEXT PRIMARY KEY, prop_id TEXT NOT NULL,
+  tax_year INTEGER NOT NULL, annual_amount REAL NOT NULL DEFAULT 0,
+  currency TEXT DEFAULT 'INR', parcel_id TEXT, tax_authority TEXT,
+  due_date TEXT, paid_date TEXT, paid_amount REAL DEFAULT 0,
+  receipt_ref TEXT, notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ── rev360_ indexes ──────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS rev360_idx_rental_income ON rev360_rental_income(prop_id, year, month);
+CREATE INDEX IF NOT EXISTS rev360_idx_rent_txn_period ON rev360_rent_transactions(period_month);
+CREATE INDEX IF NOT EXISTS rev360_idx_rent_txn_prop ON rev360_rent_transactions(prop_id, period_month);
+CREATE UNIQUE INDEX IF NOT EXISTS rev360_idx_rent_txn_unique_period ON rev360_rent_transactions(prop_id, period_month, unit_type);
+CREATE INDEX IF NOT EXISTS rev360_idx_tenancy_history_prop ON rev360_tenancy_history(prop_id, lease_end);
+CREATE UNIQUE INDEX IF NOT EXISTS rev360_idx_incoming_tenant_one_per_prop ON rev360_incoming_tenants(prop_id);
+CREATE INDEX IF NOT EXISTS rev360_idx_property_docs_prop ON rev360_property_documents(prop_id, category);
+CREATE INDEX IF NOT EXISTS rev360_idx_property_expenses_prop ON rev360_property_expenses(prop_id, year, month);
+CREATE INDEX IF NOT EXISTS rev360_idx_maintenance_events_prop_period ON rev360_maintenance_events(prop_id, year, month);
+CREATE INDEX IF NOT EXISTS rev360_idx_lease_losses_prop ON rev360_lease_losses(prop_id, status);
+CREATE INDEX IF NOT EXISTS rev360_idx_hoa_history_prop ON rev360_hoa_history(prop_id, effective_date DESC);
+CREATE INDEX IF NOT EXISTS rev360_idx_tax_history_prop ON rev360_tax_history(prop_id, tax_year DESC);
+
+-- ════════════════════════════════════════════════════════════
+-- infra_ — cross-cutting logs (3 tables)
+-- ════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS infra_alert_log (
+  log_id       TEXT PRIMARY KEY,
+  villa_id     TEXT,
+  subject      TEXT,
+  to_email     TEXT,
+  success      INTEGER NOT NULL,
+  status_code  INTEGER,
+  error_detail TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS infra_processing_log (
   log_id     TEXT PRIMARY KEY,
-  event_type TEXT NOT NULL DEFAULT 'info',   -- info|success|warning|error
+  event_type TEXT NOT NULL DEFAULT 'info',
   stay_id    TEXT,
   note       TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_processing_log_created ON processing_log(created_at);
-CREATE INDEX IF NOT EXISTS idx_processing_log_stay    ON processing_log(stay_id);
-
--- Duplicate-booking incidents (was created directly on the live DB and never
--- tracked here; synced now, including the Phase 3 resolve columns).
-CREATE TABLE IF NOT EXISTS duplicate_bookings (
-  dup_id             TEXT PRIMARY KEY,
-  villa_id           TEXT,
-  detected_at        TEXT DEFAULT (datetime('now')),
-  existing_stay_id   TEXT,
-  existing_guest     TEXT,
-  existing_checkin   TEXT,
-  existing_checkout  TEXT,
-  existing_source    TEXT,
-  existing_booked_at TEXT,
-  new_guest          TEXT,
-  new_checkin        TEXT,
-  new_checkout       TEXT,
-  new_source         TEXT,
-  new_airbnb_conf    TEXT,
-  overlap_nights     INTEGER DEFAULT 0,
-  resolved           INTEGER DEFAULT 0,   -- Phase 3
-  resolved_by        TEXT,
-  resolved_at        TEXT,
-  resolution         TEXT
+CREATE TABLE IF NOT EXISTS infra_deletion_log (
+  del_id TEXT PRIMARY KEY, stay_id TEXT, villa_id TEXT, action TEXT,
+  guest_name TEXT, checkin_date TEXT, checkout_date TEXT, reason TEXT,
+  snapshot TEXT, actor TEXT, created_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_duplicate_bookings_villa    ON duplicate_bookings(villa_id);
-CREATE INDEX IF NOT EXISTS idx_duplicate_bookings_resolved ON duplicate_bookings(resolved);
 
--- Tombstone log: every void or hard-delete records who/when/why + a snapshot,
--- so a record is always traceable even after a hard delete removed the row.
-CREATE TABLE IF NOT EXISTS deletion_log (
-  del_id        TEXT PRIMARY KEY,
-  stay_id       TEXT,
-  villa_id      TEXT,
-  action        TEXT,                -- 'void' | 'cancelled' | 'delete'
-  guest_name    TEXT,
-  checkin_date  TEXT,
-  checkout_date TEXT,
-  reason        TEXT,
-  snapshot      TEXT,                -- JSON snapshot of the stay at resolution time
-  actor         TEXT,
-  created_at    TEXT DEFAULT (datetime('now'))
+-- ── infra_ indexes ──────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS infra_idx_alert_log_created ON infra_alert_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS infra_idx_processing_log_created ON infra_processing_log(created_at);
+CREATE INDEX IF NOT EXISTS infra_idx_processing_log_stay ON infra_processing_log(stay_id);
+CREATE INDEX IF NOT EXISTS infra_idx_deletion_log_stay ON infra_deletion_log(stay_id);
+CREATE INDEX IF NOT EXISTS infra_idx_deletion_log_villa ON infra_deletion_log(villa_id);
+
+-- ════════════════════════════════════════════════════════════
+-- platform_ — SaaS tenancy + auth (2 tables)
+-- ════════════════════════════════════════════════════════════
+
+-- Cross-cutting SaaS tenancy + auth — used by every app AND by the
+-- externally-deployed scripts/GuestFormScript.gs (via the worker's
+-- getTenantConfig action, not directly — confirmed the .gs file itself
+-- needs no change).
+CREATE TABLE IF NOT EXISTS platform_tenants (
+  tenant_id         TEXT PRIMARY KEY,
+  villa_name        TEXT,
+  owner_email       TEXT,
+  owner_email_cc    TEXT,
+  drive_root_id     TEXT,
+  airbnb_email      TEXT,
+  phone1            TEXT,
+  phone2            TEXT,
+  guest_contact     TEXT,
+  address           TEXT,
+  logo_url          TEXT,
+  checkin_time      TEXT DEFAULT '16:00',
+  checkout_time     TEXT DEFAULT '11:00',
+  breakfast_rate    INTEGER DEFAULT 275,
+  raman_comm_pct    INTEGER DEFAULT 10,
+  plan              TEXT DEFAULT 'starter',
+  active            INTEGER DEFAULT 1,
+  created_at        TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_deletion_log_stay ON deletion_log(stay_id);
-CREATE INDEX IF NOT EXISTS idx_deletion_log_villa ON deletion_log(villa_id);
+
+CREATE TABLE IF NOT EXISTS platform_auth_tokens (
+  token       TEXT PRIMARY KEY,
+  tenant_id   TEXT,
+  role        TEXT,
+  label       TEXT,
+  active      INTEGER DEFAULT 1,
+  created_at  TEXT
+);
+-- platform_tenants / platform_auth_tokens have no indexes today (verified live).

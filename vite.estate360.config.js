@@ -1,3 +1,4 @@
+import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -6,9 +7,17 @@ import { VitePWA } from 'vite-plugin-pwa'
 // Build: vite build --config vite.estate360.config.js
 // Deploy: estate360.luxuryvillasofguruvayur.com
 
+// Per-host config selection (SaaS onboarding) — see hosts/<hostId>/config.js.
+// Defaults to 'dwarka' so existing builds are unaffected; a new host builds
+// with VITE_HOST=<hostId> set before running the build command.
+const host = process.env.VITE_HOST || 'dwarka'
+
 export default defineConfig({
   root: 'src/apps/estate360',
   publicDir: '../../../public',
+  resolve: {
+    alias: { '@host-config': path.resolve(process.cwd(), 'hosts', host, 'config.js') }
+  },
   build: {
     outDir: '../../../dist/estate360',
     emptyOutDir: true,

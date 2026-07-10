@@ -10,5 +10,9 @@
 -- else (chat, issue trackers, etc).
 --
 -- Run: npx wrangler d1 execute bgindia-db --file=scripts/migrate-resend-key-stopgap.sql --remote
-INSERT OR REPLACE INTO villa_settings (villa_id, key, value, updated_by, updated_at)
+--
+-- Already applied to production 2026-07-01 (row confirmed present,
+-- 2026-07-10) — this file is kept as a reusable template for re-seeding
+-- or seeding a new host's key, not something that needs re-running as-is.
+INSERT OR REPLACE INTO stayvibe_villa_settings (villa_id, key, value, updated_by, updated_at)
 VALUES ('dwarka', '_resend_api_key', 'YOUR_RESEND_API_KEY_HERE', 'system', datetime('now'));

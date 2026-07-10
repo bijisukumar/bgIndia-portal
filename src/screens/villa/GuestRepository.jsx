@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 // ── SEGMENT DEFINITIONS ───────────────────────────────────────────────────
 const SEGMENTS = {
@@ -283,7 +284,7 @@ function MarketingTab() {
 
   useEffect(() => {
     setLoading(true)
-    api.getMarketingStats('dwarka', statYear)
+    api.getMarketingStats(DEFAULT_VILLA_ID, statYear)
       .then(d => { setStats(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [statYear])

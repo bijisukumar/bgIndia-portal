@@ -7,8 +7,10 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
+import { CONFIG } from '../config'
+import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
-const VILLA_NAMES = { dwarka: 'Guruvayur Villa (Dwarka)' }
+const VILLA_NAMES = Object.fromEntries(CONFIG.villas.map(v => [v.id, v.full || v.name]))
 
 function LogoImg() {
   const [failed, setFailed] = useState(false)
@@ -20,7 +22,7 @@ function LogoImg() {
   return (
     <img
       src="/icons/logo-black.png"
-      alt="Guruvayur Estates"
+      alt={CONFIG.brandName}
       onError={() => setFailed(true)}
       style={{ width:'56px', height:'56px', borderRadius:'12px', objectFit:'cover',
         border:'1px solid rgba(200,144,58,0.3)', boxShadow:'0 4px 12px rgba(200,144,58,0.15)' }}
@@ -136,7 +138,7 @@ export default function GuestCheckIn() {
   const stayId      = params.get('stay') || ''
 
   // Resolved from token or fallback to query params
-  const [villaId,     setVillaId]     = useState(params.get('villa')   || 'dwarka')
+  const [villaId,     setVillaId]     = useState(params.get('villa')   || DEFAULT_VILLA_ID)
   const [partner,     setPartner]     = useState(params.get('partner') || 'direct')
   const [linkLoading, setLinkLoading] = useState(!!linkToken)
   const [linkError,   setLinkError]   = useState('')

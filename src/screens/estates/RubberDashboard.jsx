@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { useAuth } from '../../hooks/useAuth'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
 const CUR_YEAR = new Date().getFullYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
+
+const PAVUTUMURI = CONFIG.estates.find(e => e.id === 'pavutumuri')
+const DEFAULT_SHEET_RATE    = String(PAVUTUMURI?.sheetRatePerKg ?? 200)
+const DEFAULT_OTTUPAL_RATE  = String(PAVUTUMURI?.ottupalRatePerKg ?? 150)
+const SHEET_WEIGHT_KG       = PAVUTUMURI?.sheetWeightKg ?? 0.6
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -364,7 +370,7 @@ function MonthlyRegister() {
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
   const [saleOpen, setSaleOpen] = useState(false)
-  const [sale, setSale] = useState({ sheets: '', weightKg: '', ratePerKg: '200', ottupalKg: '', ottupalRate: '150' })
+  const [sale, setSale] = useState({ sheets: '', weightKg: '', ratePerKg: DEFAULT_SHEET_RATE, ottupalKg: '', ottupalRate: DEFAULT_OTTUPAL_RATE })
   const [toast, setToast] = useState(null)
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -373,11 +379,12 @@ function MonthlyRegister() {
 
   const setS = (k, v) => setSale(f => {
     const n = { ...f, [k]: v }
-    // 600 g per sheet default — auto-fill weight from sheet count unless the
-    // user has typed a weight themselves (only overwrite when it tracks)
+    // Sheet weight default (CONFIG.estates) — auto-fill weight from sheet
+    // count unless the user has typed a weight themselves (only overwrite
+    // when it tracks)
     if (k === 'sheets') {
-      const auto = Math.round((parseFloat(v) || 0) * 0.6 * 100) / 100
-      const prevAuto = Math.round((parseFloat(f.sheets) || 0) * 0.6 * 100) / 100
+      const auto = Math.round((parseFloat(v) || 0) * SHEET_WEIGHT_KG * 100) / 100
+      const prevAuto = Math.round((parseFloat(f.sheets) || 0) * SHEET_WEIGHT_KG * 100) / 100
       if (!f.weightKg || parseFloat(f.weightKg) === prevAuto) n.weightKg = auto ? String(auto) : ''
     }
     return n
@@ -399,7 +406,7 @@ function MonthlyRegister() {
         description: `${sale.ottupalKg} kg loose rubber @ ₹${sale.ottupalRate}/kg`,
       })
       showToast(`Sale recorded — ₹${(incomeA + incomeB).toLocaleString('en-IN')} ✓`)
-      setSale({ sheets: '', weightKg: '', ratePerKg: '200', ottupalKg: '', ottupalRate: '150' })
+      setSale({ sheets: '', weightKg: '', ratePerKg: DEFAULT_SHEET_RATE, ottupalKg: '', ottupalRate: DEFAULT_OTTUPAL_RATE })
       setSaleOpen(false); load()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
     setBusy(false)

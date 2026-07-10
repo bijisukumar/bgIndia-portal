@@ -4,6 +4,7 @@ import { api } from '../api'
 import { CONFIG } from '../config'
 import TopBar from '../components/TopBar'
 import { parseLocalDate } from '../utils/dates'
+import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmtDate(d) {
@@ -163,9 +164,9 @@ export default function RamanHome() {
 
   useEffect(() => {
     Promise.all([
-      api.getActiveStay('dwarka'),
+      api.getActiveStay(DEFAULT_VILLA_ID),
       api.getPendingCheckIns(),
-      api.getRamanTodo('dwarka'),
+      api.getRamanTodo(DEFAULT_VILLA_ID),
     ]).then(([stay, pending, todoData]) => {
       setActiveStay(stay || null)
       setReadyCount(Array.isArray(pending) ? pending.length : 0)
@@ -249,7 +250,7 @@ export default function RamanHome() {
 
   return (
     <div className="screen">
-      <TopBar title={CONFIG.villaName || 'Guruvayur Estates'} sub="RAMAN · VILLA MANAGER" />
+      <TopBar title={CONFIG.villas[0]?.full || CONFIG.villas[0]?.name || CONFIG.brandName} sub="RAMAN · VILLA MANAGER" />
 
       <div className="screen-body">
 

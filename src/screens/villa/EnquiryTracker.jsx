@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { daysFromToday } from '../../utils/dates'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 export const SOURCES = [
   { id: 'website',     label: 'Website' },
@@ -146,7 +147,7 @@ export default function EnquiryTracker() {
 
   useEffect(() => {
     let cancelled = false
-    api.getEnquiries('dwarka').then(rows => {
+    api.getEnquiries(DEFAULT_VILLA_ID).then(rows => {
       if (!cancelled && Array.isArray(rows)) setEnquiries(rows)
     }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }

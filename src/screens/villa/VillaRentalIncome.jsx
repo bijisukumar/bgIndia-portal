@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const TODAY = new Date().toISOString().split('T')[0]
 const CHANNELS = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Other']
@@ -35,7 +36,7 @@ export default function VillaRentalIncome() {
     }
     setSaving(true)
     try {
-      await api.saveVillaRentalIncome({...form,nights,gross,commPct,commAmt,net,villaId:'dwarka'})
+      await api.saveVillaRentalIncome({...form,nights,gross,commPct,commAmt,net,villaId:DEFAULT_VILLA_ID})
       showToast('Income record saved ✓')
       setTimeout(()=>navigate(-1),1500)
     } catch { showToast('Failed to save. Check connection.','error') }

@@ -921,6 +921,63 @@ function DuplicateBookingsBlock() {
   )
 }
 
+function ChannelMixBlock() {
+  const [data, setData] = useState(null)
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    api.getChannelMixInsight(DEFAULT_VILLA_ID).then(d => {
+      if (d && Array.isArray(d.channels)) setData(d)
+    }).catch(() => {})
+  }, [])
+
+  const nonDirect = data?.channels.filter(c => c.channel !== 'direct') || []
+  if (!data || nonDirect.length === 0) return null
+
+  const inr = n => `₹${Math.round(n).toLocaleString('en-IN')}`
+
+  return (
+    <div style={{ marginBottom: '16px', background: 'rgba(133,183,235,0.06)',
+      border: '1px solid rgba(133,183,235,0.25)', borderRadius: '12px', overflow: 'hidden' }}>
+      <div onClick={() => setExpanded(!expanded)}
+        style={{ padding: '10px 14px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span>💡</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: '700', color: '#85B7EB', letterSpacing: '1.5px' }}>
+          CHANNEL MIX — THIS MONTH
+        </span>
+        <span style={{ marginLeft: 'auto', background: 'rgba(133,183,235,0.2)', color: '#85B7EB',
+          fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
+          {inr(data.totalCommission)} commission
+        </span>
+        <span style={{ color: '#85B7EB', fontSize: '0.8rem' }}>{expanded ? '▼' : '▶'}</span>
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 14px 14px' }}>
+          {data.channels.map((c, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '8px 0', borderBottom: i < data.channels.length - 1 ? '1px solid rgba(133,183,235,0.1)' : 'none' }}>
+              <span style={{ fontSize: '0.6rem', fontWeight: '700', padding: '1px 7px', borderRadius: '9px',
+                ...channelPillStyle(c.channel) }}>{channelLabel(c.channel)}</span>
+              <span style={{ fontSize: '0.75rem', color: '#9AA5B4' }}>{c.bookings} booking{c.bookings > 1 ? 's' : ''}</span>
+              <span style={{ fontSize: '0.75rem', color: '#F0F0F0' }}>{inr(c.gross)} gross</span>
+              <span style={{ fontSize: '0.75rem', color: '#85B7EB', fontWeight: '600' }}>{inr(c.commission)} commission</span>
+            </div>
+          ))}
+          <div style={{ marginTop: '10px', padding: '10px 12px', background: 'rgba(133,183,235,0.08)',
+            borderRadius: '8px', fontSize: '0.72rem', color: '#9AA5B4', lineHeight: '1.5' }}>
+            Illustrative: even a direct-booking incentive worth half that commission —{' '}
+            <span style={{ color: '#F0F0F0', fontWeight: '600' }}>{inr(data.illustrativeDiscountCost)}</span>
+            {' '}— would still net you{' '}
+            <span style={{ color: '#34A853', fontWeight: '700' }}>{inr(data.illustrativeNetSavings)}</span>
+            {' '}more than paying the commission.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function OwnerHome() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -973,6 +1030,9 @@ export default function OwnerHome() {
 
         {/* Your last 48 hrs — recent bookings + cancellations, ack with OK */}
         <Last48Block />
+
+        {/* Channel mix — commission cost this month, direct-booking savings hint */}
+        <ChannelMixBlock />
 
         <MenuSection section={HOSPITALITY} />
         <MenuSection section={PEOPLE} />

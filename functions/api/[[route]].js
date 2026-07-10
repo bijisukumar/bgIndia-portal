@@ -1219,6 +1219,52 @@ export async function onRequest(ctx) {
         }})
       }
 
+      // ── CHANNEL-MIX INSIGHT (owner dashboard card) ───────────────────
+      // Shows what OTA commission actually cost this month, per channel,
+      // plus an illustrative "what a direct-booking discount would've
+      // cost instead" line. Pure aggregation over stayvibe_stays — no AI
+      // call needed, commission_amt is already kept accurate by
+      // syncStayLedger() on every financial write, so summing it directly
+      // is reliable without joining stayvibe_channels.
+      if (action === 'getChannelMixInsight') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const now2    = new Date()
+        const month   = url.searchParams.get('month') || String(now2.getMonth() + 1).padStart(2, '0')
+        const year    = url.searchParams.get('year')  || now2.getFullYear()
+        const { results: stays } = await DB.prepare(
+          `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
+        ).bind(villaId, `${year}-${month}%`).all()
+
+        // Same defensive gross derivation as getVillaDashboard — some
+        // Airbnb-imported rows understate the stored `gross` column.
+        const grossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
+
+        const byChannel = {}
+        for (const s of stays) {
+          const key = s.source || 'direct'
+          if (!byChannel[key]) byChannel[key] = { channel: key, bookings: 0, gross: 0, commission: 0 }
+          byChannel[key].bookings++
+          byChannel[key].gross      += grossOf(s)
+          byChannel[key].commission += (s.commission_amt || 0)
+        }
+        const channels = Object.values(byChannel)
+        const totalCommission = channels.reduce((s, c) => s + c.commission, 0)
+
+        // Illustrative only — assumes a direct-booking incentive worth HALF
+        // of the actual commission paid, not a flat % of gross. A flat %
+        // of gross overshoots for low-commission channels (e.g. Airbnb's
+        // ~3% commission vs. a flat 5%-of-gross guess), which can produce a
+        // nonsensical negative "savings" number. Basing it on actual
+        // commission paid instead guarantees this is always a real saving.
+        const illustrativeDiscountCost = totalCommission * 0.5
+
+        return json({ success: true, data: {
+          month, year, channels, totalCommission,
+          illustrativeDiscountCost,
+          illustrativeNetSavings: totalCommission - illustrativeDiscountCost,
+        } })
+      }
+
       if (action === 'getRamanUnpaid') {
         const { results } = await DB.prepare(
           `SELECT rc.*, COALESCE(s.review_rating, 0) as review_rating

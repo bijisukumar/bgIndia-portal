@@ -50,11 +50,43 @@ Update this file at every release milestone — never re-tell the story in chat.
   tapping/maintenance/rain; sale calculator → estate_transactions.
 
 ## CURRENT STATUS (update me!)  — as of 2026-07-10
-- **Deployed/live production is still on commit `076f486`. Everything below
-  is uncommitted, on branch `release/2.1-tables` (67 files changed), never
-  pushed, never run against production.** Release 2.1 (`docs/RELEASE-2.1-PLAN.md`)
-  is essentially code-complete; what's left is entirely the deploy step.
-- **Done this session, in order:**
+- **Release 2.1 is deployed and live on production** (merged to `main`,
+  migrations run against production D1, worker + all 4 frontends deployed).
+  `main` HEAD is `dde5c03`. Table-namespace prefixes, per-host config,
+  `DEFAULT_VILLA_ID` de-hardcode, `platform_tenants`/`platform_auth_tokens`
+  naming — all live. TestRunner suite passed post-deploy (15/15; the 1
+  earlier "failure" was a stale duplicate-booking dashboard alert from
+  TestRunner's own prior test run, not a bug — resolved via the existing
+  "Mark resolved" control).
+- **Post-deploy fixes shipped** (commits `926a42f` → `dde5c03`, all on `main`):
+  - `926a42f` — added "Event & Culinary Services" to `hosts/dwarka/config.js`
+    pricing extra-items list.
+  - `294d8bb` — enquiry quote per-night rate was including one-time extras
+    in the divisor (inflated ₹/night); fixed to room-only, and WhatsApp quote
+    messages now itemize per-night rate + each extra line separately instead
+    of one lumped "(all inclusive)" total.
+  - `eab48e9` — Inventory Restock tab redone: Qty × Rate/Unit + GST% (pre-
+    populated, overwritable) → computed Total Cost + Net ₹/Unit, replacing
+    the old (confusing) Qty+TotalCost÷ flow. Catalog curated to 11 items in
+    an explicit order via `sort_order`/`gst_pct` columns
+    (`scripts/migrate-inventory-catalog-curated-2026-07-10.sql`, run against
+    production — 5 stale items soft-archived, 3 new ones added, zero history
+    lost). Also fixed a `GuestRepository.jsx` channel-badge bug (Booking.com
+    guests showing "Other" — key mismatch `booking.com` vs `booking_com`)
+    by switching to the shared `utils/channel.js` helper everywhere.
+  - `dde5c03` — `KitchenIncidentals.jsx` (Raman's check-out screen) was
+    still reading a hardcoded `INVENTORY_MASTER` snapshot instead of the
+    live catalog, so it kept showing archived items regardless of the
+    migration above. Switched to `api.getInventory()` (same pattern as
+    `Inventory.jsx`/`PreferredStock.jsx`), added stock-on-hand + low-stock
+    warning per item. Removed the now-fully-unused `INVENTORY_MASTER` export.
+- **Push works directly now** — Windows Credential Manager has cached
+  git credentials, so `git push origin main` succeeds without needing a
+  token handed over in-session. (Earlier in the release-2.1 work, embedding
+  a token in the push command or a temp credential file was blocked by the
+  safety classifier as a secret-handling risk — that workaround is no
+  longer needed.)
+- **Done during the Release 2.1 branch work itself, in order:**
   1. File-based per-host config: `hosts/dwarka/config.js` (+ `hosts/demovilla/config.js`,
      a throwaway simulation host — see below), `src/config.js` collapsed to a
      1-line re-export via a `@host-config` Vite alias (all 4 vite.*.config.js).
@@ -108,15 +140,24 @@ Update this file at every release milestone — never re-tell the story in chat.
     `CONFIG` — fixed. `RamanHome.jsx` also referenced a `CONFIG.villaName`
     field that never existed. Added `CONFIG.landingUrl` (was hardcoded to
     dwarka's real domain inside campaign tracking links).
-- **What's NOT done — the actual next step**: run the migrations against
-  production D1 + merge/deploy the branch, in one IST-night window (per
-  `docs/RELEASE-2.1-PLAN.md` §3 — DB and worker must land together). Also
-  still open: confirming `platform_tenants`/`platform_auth_tokens` naming
-  decision with the owner one more time before it's locked in production
-  (proceeded with `platform_` per owner's "keep going" pacing when the
-  direct question went unanswered — cheap to change now, expensive after).
-  `index.html`/PWA manifest brand strings across all 4 apps are still
-  static, not `CONFIG`-driven — known, documented, deferred gap.
+- **What's NOT done / still open:**
+  - `scripts/migrate-resend-key-stopgap.sql` cleanup — deliberately deferred
+    by the owner until after demo-onboarding was proven; that's now done,
+    so this is fair game whenever someone picks it up. The real Resend key
+    is already live in production (seeded 2026-07-01); the file itself is
+    back to a placeholder.
+  - `index.html`/PWA manifest brand strings across all 4 apps are still
+    static, not `CONFIG`-driven — known, documented, deferred gap.
+  - Tenant-onboarding *mechanism* (an actual in-app onboarding screen/flow
+    for adding a new host, vs. today's manual "write `hosts/<id>/config.js`
+    + run `scripts/onboard-new-host-seed-template.sql` by hand") — owner is
+    planning to walk through adding a dummy host manually first (what goes
+    in config vs. DB, how to seed it) before deciding whether/how to build
+    a real onboarding screen.
+  - Config-driven "starter catalog" for onboarding a new host's inventory —
+    noted as a good future idea during the Inventory redesign, not built;
+    today a new host starts with an empty `stayvibe_inventory` and uses the
+    in-app "+ Add new item" controls.
 - Parked: Step E contract test, receipt OCR test (Llama 4 Scout), payouts UI,
   GST (Booking.com), guest-merge repository consolidation, Last48-style raw
   `new Date(str)` audit on other screens.

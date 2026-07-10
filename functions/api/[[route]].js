@@ -1463,8 +1463,8 @@ export async function onRequest(ctx) {
         const includeInactive = url.searchParams.get('includeInactive') === '1'
         const { results } = await DB.prepare(
           includeInactive
-            ? `SELECT * FROM stayvibe_inventory WHERE villa_id = ? ORDER BY category, name`
-            : `SELECT * FROM stayvibe_inventory WHERE villa_id = ? AND (active IS NULL OR active = 1) ORDER BY category, name`
+            ? `SELECT * FROM stayvibe_inventory WHERE villa_id = ? ORDER BY sort_order, name`
+            : `SELECT * FROM stayvibe_inventory WHERE villa_id = ? AND (active IS NULL OR active = 1) ORDER BY sort_order, name`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }
@@ -3525,16 +3525,21 @@ export async function onRequest(ctx) {
         const errors = []
         let savedCount = 0
         for (const e of entries) {
-          const qty       = parseFloat(e.qty) || 0
-          const totalCost = parseFloat(e.totalCost) || 0
+          const qty          = parseFloat(e.qty) || 0
+          const ratePerUnit  = parseFloat(e.ratePerUnit) || 0
+          const gstPct       = parseFloat(e.gstPct) || 0
           if (qty <= 0) continue
-          const pricePerUnit = qty > 0 ? totalCost / qty : 0
+          // Rate/Qty is pre-tax, as entered; GST is added on top. Computed
+          // server-side (not trusted from the client) so the log always
+          // reflects qty x rate x (1+gst%) consistently.
+          const totalCost    = Math.round(qty * ratePerUnit * (1 + gstPct / 100) * 100) / 100
+          const pricePerUnit = qty > 0 ? Math.round((totalCost / qty) * 100) / 100 : 0
           try {
             await DB.prepare(`
               INSERT INTO stayvibe_inventory_restock_log
-                (id, villa_id, item_id, item_name, qty_bought, total_cost, price_per_unit, created_by, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).bind(genId('RSTK'), villaId, e.id, e.name || e.id, qty, totalCost, pricePerUnit, actor, now()).run()
+                (id, villa_id, item_id, item_name, qty_bought, total_cost, price_per_unit, rate_per_unit, gst_pct, created_by, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(genId('RSTK'), villaId, e.id, e.name || e.id, qty, totalCost, pricePerUnit, ratePerUnit, gstPct, actor, now()).run()
 
             const result = await DB.prepare(`
               UPDATE stayvibe_inventory
@@ -3601,6 +3606,7 @@ export async function onRequest(ctx) {
         const category = body.category || 'other'
         const sellPrice = parseFloat(body.sellPrice) || 0
         const costPrice = parseFloat(body.costPrice) || 0
+        const gstPct    = parseFloat(body.gstPct) || 0
         // Slugify the name into an item_id, de-duping against any existing
         // id (including archived ones — item_id is a bare PK, so reusing
         // an archived item's id would collide on INSERT).
@@ -3611,9 +3617,9 @@ export async function onRequest(ctx) {
           itemId = `${baseId}_${suffix}`; suffix++
         }
         await DB.prepare(`
-          INSERT INTO stayvibe_inventory (item_id, villa_id, name, unit, category, cost_price, sell_price, qty_in_stock, preferred_stock, active, created_by, updated_by, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 10, 1, ?, ?, ?, ?)
-        `).bind(itemId, villaId, name, unit, category, costPrice, sellPrice, actor, actor, now(), now()).run()
+          INSERT INTO stayvibe_inventory (item_id, villa_id, name, unit, category, cost_price, sell_price, gst_pct, qty_in_stock, preferred_stock, active, created_by, updated_by, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 10, 1, ?, ?, ?, ?)
+        `).bind(itemId, villaId, name, unit, category, costPrice, sellPrice, gstPct, actor, actor, now(), now()).run()
         return json({ success: true, data: { itemId } })
       }
 

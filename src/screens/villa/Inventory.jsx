@@ -70,6 +70,7 @@ export default function Inventory() {
         if (!cancelled && Array.isArray(rows) && rows.length) {
           setCatalog(rows.map(r => ({
             id: r.item_id, name: r.name, unit: r.unit || 'unit', category: r.category || 'other',
+            gstPct: r.gst_pct ?? 0,
           })))
           setStock(Object.fromEntries(rows.map(r => [r.item_id, {
             qty: r.qty_in_stock ?? 0, preferredStock: r.preferred_stock ?? 10,
@@ -77,7 +78,14 @@ export default function Inventory() {
           setPrices(Object.fromEntries(rows.map(r => [r.item_id, {
             costPrice: r.cost_price ?? 0, sellPrice: r.sell_price ?? 0,
           }])))
-          setRestock(Object.fromEntries(rows.map(r => [r.item_id, { qty: '', totalCost: '' }])))
+          // Rate/Qty prepopulates from the item's cost_price (convenience
+          // default, overwritable); GST% prepopulates from the item's own
+          // gst_pct default (also overwritable per transaction).
+          setRestock(Object.fromEntries(rows.map(r => [r.item_id, {
+            qty: '',
+            ratePerUnit: r.cost_price ? String(r.cost_price) : '',
+            gstPct: String(r.gst_pct ?? 0),
+          }])))
         }
       } catch {
         // DB read failed — keep the fallback catalog + empty state, no need to alarm the user on load
@@ -97,11 +105,22 @@ export default function Inventory() {
 
   const setStockQty = (id, qty) => setStock(s => ({ ...s, [id]: { ...s[id], qty: Math.max(0, parseInt(qty) || 0) } }))
   const setPrice    = (id, field, val) => setPrices(p => ({ ...p, [id]: { ...p[id], [field]: parseFloat(val) || 0 } }))
+  // Rate/Qty is pre-tax, as entered; GST% is added on top.
+  // Total Cost = Qty x Rate/Qty x (1 + GST% / 100)
+  // Net Rs/Unit = Total Cost / Qty (effective landed cost per unit, tax included)
   const setRestockField = (id, field, val) => {
     setRestock(r => {
       const next = { ...r[id], [field]: val }
-      if (next.qty && next.totalCost) {
-        next.pricePerUnit = (parseFloat(next.totalCost) / parseFloat(next.qty)).toFixed(2)
+      const qty  = parseFloat(next.qty)
+      const rate = parseFloat(next.ratePerUnit)
+      const gst  = parseFloat(next.gstPct) || 0
+      if (qty > 0 && rate >= 0) {
+        const total = qty * rate * (1 + gst / 100)
+        next.totalCost  = total.toFixed(2)
+        next.netPerUnit = (total / qty).toFixed(2)
+      } else {
+        next.totalCost  = ''
+        next.netPerUnit = ''
       }
       return { ...r, [id]: next }
     })
@@ -146,7 +165,9 @@ export default function Inventory() {
         if (failedIds.has(e.id)) return
         setStock(s => ({ ...s, [e.id]: { ...s[e.id], qty: (s[e.id]?.qty || 0) + parseFloat(e.qty) } }))
       })
-      setRestock(r => Object.fromEntries(Object.keys(r).map(k => [k, failedIds.has(k) ? r[k] : { qty: '', totalCost: '' }])))
+      setRestock(r => Object.fromEntries(Object.keys(r).map(k =>
+        [k, failedIds.has(k) ? r[k] : { ...r[k], qty: '', totalCost: '', netPerUnit: '' }]
+      )))
       if (res?.errors?.length > 0) {
         const first = res.errors[0]
         showToast(`Saved ${res.savedCount}/${res.total} — "${first.itemId}" failed: ${first.error}`, 'error')
@@ -333,7 +354,7 @@ export default function Inventory() {
           <>
             <div className="card-section-label">ENTER QUANTITIES PURCHASED</div>
             <div style={{ color: '#5C7080', fontSize: '0.75rem', marginBottom: '10px', padding: '0 4px' }}>
-              Enter qty bought + total cost → price/unit is auto-calculated
+              Enter qty + rate/unit (GST% prefills, editable) → total cost and net ₹/unit are auto-calculated
             </div>
             <div className="card">
               {filtered.map((item, i) => {
@@ -346,25 +367,40 @@ export default function Inventory() {
                     <div style={{ color: 'var(--text)', fontSize: '0.85rem', fontWeight: '500', marginBottom: '6px' }}>
                       {item.name} <span style={{ color: '#5C7080', fontSize: '0.7rem' }}>· per {item.unit}</span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '70px 70px 1fr', gap: '6px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '55px 70px 60px', gap: '6px', marginBottom: '6px' }}>
                       <div>
-                        <div style={{ color: '#5C7080', fontSize: '0.65rem', marginBottom: '2px' }}>QTY BOUGHT</div>
+                        <div style={{ color: '#5C7080', fontSize: '0.62rem', marginBottom: '2px' }}>QTY</div>
                         <input type="number" placeholder="0"
                           value={r.qty || ''}
                           onChange={e => setRestockField(item.id, 'qty', e.target.value)}
                           style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-dim)', borderRadius: '6px', color: 'var(--gold)', fontWeight: '600', fontSize: '0.85rem', padding: '6px 8px' }} />
                       </div>
                       <div>
-                        <div style={{ color: '#5C7080', fontSize: '0.65rem', marginBottom: '2px' }}>TOTAL COST (₹)</div>
+                        <div style={{ color: '#5C7080', fontSize: '0.62rem', marginBottom: '2px' }}>RATE/QTY (₹)</div>
                         <input type="number" placeholder="0"
-                          value={r.totalCost || ''}
-                          onChange={e => setRestockField(item.id, 'totalCost', e.target.value)}
+                          value={r.ratePerUnit || ''}
+                          onChange={e => setRestockField(item.id, 'ratePerUnit', e.target.value)}
                           style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-dim)', borderRadius: '6px', color: '#EF9A9A', fontWeight: '600', fontSize: '0.85rem', padding: '6px 8px' }} />
                       </div>
                       <div>
-                        <div style={{ color: '#5C7080', fontSize: '0.65rem', marginBottom: '2px' }}>₹/UNIT</div>
+                        <div style={{ color: '#5C7080', fontSize: '0.62rem', marginBottom: '2px' }}>GST %</div>
+                        <input type="number" placeholder="0"
+                          value={r.gstPct ?? ''}
+                          onChange={e => setRestockField(item.id, 'gstPct', e.target.value)}
+                          style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-dim)', borderRadius: '6px', color: '#85B7EB', fontWeight: '600', fontSize: '0.85rem', padding: '6px 8px' }} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                      <div>
+                        <div style={{ color: '#5C7080', fontSize: '0.62rem', marginBottom: '2px' }}>TOTAL COST (₹)</div>
+                        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-dim)', borderRadius: '6px', color: 'var(--text)', fontWeight: '700', fontSize: '0.85rem', padding: '6px 8px', textAlign: 'center' }}>
+                          {r.totalCost ? `₹${r.totalCost}` : '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ color: '#5C7080', fontSize: '0.62rem', marginBottom: '2px' }}>NET ₹/UNIT</div>
                         <div style={{ background: 'rgba(52,168,83,0.06)', border: '1px solid rgba(52,168,83,0.15)', borderRadius: '6px', color: '#34A853', fontWeight: '700', fontSize: '0.85rem', padding: '6px 8px', textAlign: 'center' }}>
-                          {r.pricePerUnit ? `₹${r.pricePerUnit}` : '—'}
+                          {r.netPerUnit ? `₹${r.netPerUnit}` : '—'}
                         </div>
                       </div>
                     </div>
@@ -437,7 +473,10 @@ export default function Inventory() {
                     }}>
                       <div>
                         <div style={{ color: 'var(--text)', fontSize: '0.82rem', fontWeight: '500' }}>{r.item_name}</div>
-                        <div style={{ color: '#5C7080', fontSize: '0.68rem' }}>{r.qty_bought} units · {fmt(r.total_cost)} · {r.created_at}</div>
+                        <div style={{ color: '#5C7080', fontSize: '0.68rem' }}>
+                          {r.qty_bought} units{r.rate_per_unit != null ? ` @ ${fmt(r.rate_per_unit)}` : ''}
+                          {r.gst_pct ? ` +${r.gst_pct}% GST` : ''} = {fmt(r.total_cost)} · {r.created_at}
+                        </div>
                       </div>
                       <div style={{ color: '#34A853', fontSize: '0.8rem', fontWeight: '600' }}>{fmt(r.price_per_unit)}/unit</div>
                     </div>

@@ -551,7 +551,7 @@ export async function onRequest(ctx) {
     // TEMPORARY DIAGNOSTIC — reveals presence/length only, never the value.
     // User-approved, to isolate why PIN_MASTER_OWNER keeps failing despite
     // being reset via both the CLI and the Cloudflare dashboard. Remove
-    // once resolved.
+    // once resolved. (redeploy-forcing touch: 2026-07-10b)
     if (pin === '__DEBUG_MASTER_PIN_CHECK__') {
       return json({ success: false, debug: {
         hasMasterPin: !!env.PIN_MASTER_OWNER,

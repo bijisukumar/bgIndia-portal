@@ -25,11 +25,6 @@ const INVENTORY_SEED_FALLBACK = [
   { id: 'bed_essential',  name: 'Bedroom essentials', unit: 'set',     category: 'bedroom',  costPrice: 0,  sellPrice: 0  },
 ]
 
-// Kept exported for PreferredStock.jsx during the transition — it now
-// fetches its own live catalog the same way, so this is unused there too,
-// but left in case anything else still imports it.
-export const INVENTORY_MASTER = INVENTORY_SEED_FALLBACK
-
 const CATEGORIES = [
   { id: 'all',      label: 'All' },
   { id: 'kitchen',  label: '🍳 Kitchen' },

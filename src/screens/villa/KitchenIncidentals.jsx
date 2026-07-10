@@ -1,18 +1,26 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
-import { INVENTORY_MASTER } from './Inventory'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
-const CHECKOUT_ITEMS = INVENTORY_MASTER.filter(i => i.category === 'kitchen')
+// Low-stock threshold matches Inventory.jsx's Stock tab exactly (10% of
+// preferred level) so both screens agree on what counts as "low."
+function isLowStock(qtyInStock, preferred) {
+  const threshold = Math.ceil((preferred || 0) * 0.1)
+  return (preferred || 0) > 0 && (qtyInStock || 0) <= threshold
+}
 
 export default function KitchenIncidentals() {
   const navigate  = useNavigate()
   const [stay, setStay]     = useState(null)
   const [cart, setCart]     = useState({})
-  const [prices, setPrices] = useState(() =>
-    Object.fromEntries(CHECKOUT_ITEMS.map(i => [i.id, i.sellPrice]))
-  )
+  // Live catalog (kitchen category, active items only) — was previously a
+  // hardcoded import-time snapshot that never reflected archived/renamed/
+  // added items from the Inventory screen. Now fetched the same way
+  // Inventory.jsx and PreferredStock.jsx already do.
+  const [checkoutItems, setCheckoutItems] = useState([])
+  const [prices, setPrices] = useState({})
+  const [stock, setStock]   = useState({})
   const [notes, setNotes]   = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast]         = useState(null)
@@ -44,31 +52,27 @@ export default function KitchenIncidentals() {
       })
       .catch(() => {})
 
-    api.getInventoryPrices?.(DEFAULT_VILLA_ID)
-      .then(p => {
-        if (p) {
-          const flatPrices = {}
-          Object.keys(p).forEach(itemId => {
-            if (p[itemId] && typeof p[itemId] === 'object') {
-              flatPrices[itemId] = p[itemId].sellPrice || p[itemId].sell_price || 0
-            } else {
-              flatPrices[itemId] = p[itemId]
-            }
-          })
-          setPrices(prev => ({ ...prev, ...flatPrices }))
-        }
+    api.getInventory(DEFAULT_VILLA_ID)
+      .then(rows => {
+        if (!Array.isArray(rows)) return
+        const kitchenRows = rows.filter(r => (r.category || 'other') === 'kitchen')
+        setCheckoutItems(kitchenRows.map(r => ({ id: r.item_id, name: r.name, unit: r.unit || 'unit', sellPrice: r.sell_price ?? 0 })))
+        setPrices(Object.fromEntries(kitchenRows.map(r => [r.item_id, r.sell_price ?? 0])))
+        setStock(Object.fromEntries(kitchenRows.map(r => [r.item_id, {
+          qtyInStock: r.qty_in_stock ?? 0, preferredStock: r.preferred_stock ?? 10,
+        }])))
       })
       .catch(() => {})
   }, [])
 
   const setQty = (id, qty) => setCart(c => ({ ...c, [id]: Math.max(0, qty) }))
   const itemTotal = (id) => (cart[id] || 0) * (Number(prices[id]) || 0)
-  const total = CHECKOUT_ITEMS.reduce((s, i) => s + itemTotal(i.id), 0)
+  const total = checkoutItems.reduce((s, i) => s + itemTotal(i.id), 0)
     + (custom.qty || 0) * (parseFloat(custom.price) || 0)
 
   const handleSave = async () => {
     const items = [
-      ...CHECKOUT_ITEMS
+      ...checkoutItems
         .filter(i => (cart[i.id] || 0) > 0)
         .map(i => ({
           itemId: i.id, name: i.name, qty: cart[i.id],
@@ -190,15 +194,18 @@ export default function KitchenIncidentals() {
           <span style={{ color: '#5C7080', fontWeight: 400, fontSize: '0.7rem', marginLeft: '6px' }}>prices from inventory</span>
         </div>
         <div className="card">
-          {CHECKOUT_ITEMS.map((item, i) => {
+          {checkoutItems.map((item, i) => {
             const qty   = cart[item.id] || 0
             const price = Number(prices[item.id]) || item.sellPrice
             const sub   = qty * price
+            const s     = stock[item.id] || {}
+            const preferred = s.preferredStock ?? 10
+            const low   = isLowStock(s.qtyInStock, preferred)
             return (
               <div key={item.id} style={{
                 display: 'grid', gridTemplateColumns: '1fr auto',
                 paddingBottom: '12px', marginBottom: '12px',
-                borderBottom: i < CHECKOUT_ITEMS.length - 1 ? '1px solid var(--border-dim)' : 'none',
+                borderBottom: i < checkoutItems.length - 1 ? '1px solid var(--border-dim)' : 'none',
                 alignItems: 'center', gap: '8px',
               }}>
                 <div style={{ minWidth: 0 }}>
@@ -206,6 +213,10 @@ export default function KitchenIncidentals() {
                   <div style={{ color: '#5C7080', fontSize: '0.72rem', display: 'flex', flexWrap: 'wrap', columnGap: '6px', rowGap: '2px' }}>
                     <span style={{ whiteSpace: 'nowrap' }}>₹{price} / {item.unit}</span>
                     {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', whiteSpace: 'nowrap' }}>= ₹{sub.toLocaleString('en-IN')}</span>}
+                    <span style={{ whiteSpace: 'nowrap', color: low ? '#EF9A9A' : '#5C7080' }}>
+                      · {s.qtyInStock ?? 0} in stock
+                    </span>
+                    {low && <span style={{ color: '#EF9A9A', fontSize: '0.7rem' }}>⚠️ Low (target {preferred})</span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -248,7 +259,7 @@ export default function KitchenIncidentals() {
         </div>
 
         <div className="net-box">
-          {CHECKOUT_ITEMS.filter(i => (cart[i.id] || 0) > 0).map(i => (
+          {checkoutItems.filter(i => (cart[i.id] || 0) > 0).map(i => (
             <div key={i.id} className="net-row">
               <span className="net-label">{i.name} × {cart[i.id]}</span>
               <span className="net-val pos">₹{itemTotal(i.id).toLocaleString('en-IN')}</span>

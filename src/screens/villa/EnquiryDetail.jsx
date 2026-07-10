@@ -47,20 +47,50 @@ function fmtQuoteDate(d) {
 }
 
 // Shared pieces every quote variant needs, computed once.
+// roomOnlyTotal/perNight deliberately exclude extraLines — those are
+// one-time add-ons (event services, cleaning fee, extra guest, etc.), not
+// a nightly recurring cost, so folding them in inflates the per-night rate
+// shown to the guest.
 function quoteCore(e) {
   const nights = e.nights || 1
   const billableGuests = (e.adults || 0) + (e.children || 0)
+  let extraLines = []
+  try { extraLines = e.extra_lines ? JSON.parse(e.extra_lines) : [] } catch { extraLines = [] }
+  extraLines = extraLines.filter(l => (parseFloat(l.amount) || 0) > 0)
+  const extraTotal = extraLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
+  const roomOnlyTotal = (e.quote_amount || 0) - (e.discount_amount || 0)
   return {
     nights,
     finalTotal: e.final_offer_amount || e.quote_amount || 0,
     quoteAmount: e.quote_amount || 0,
     discountAmount: e.discount_amount || 0,
+    roomOnlyTotal,
+    perNight: Math.round(roomOnlyTotal / nights),
+    extraLines,
+    extraTotal,
     bedroomCount: getBedroomEstimate(e.villa_id || DEFAULT_VILLA_ID, billableGuests),
     firstName: (e.guest_name || '').trim().split(' ')[0] || 'there',
     fullName: (e.guest_name || '').trim() || 'there',
     guestCount: e.guests_count || billableGuests || 1,
     nightsLabel: nights === 1 ? 'the night' : `${nights} nights`,
   }
+}
+
+// Pricing block lines shared by all 3 quote variants — per-night rate ×
+// nights = subtotal, one-time extras itemized separately, total last (so
+// the guest sees the per-night rate first, not one big lump number).
+// iconPrefix already includes the trailing space (e.g. ic.money, ic.sparkle).
+function pricingLines(c, iconPrefix, rateLabel) {
+  const lines = [
+    `${iconPrefix}${rateLabel}: ${fmt(c.perNight)}/night × ${c.nights} night${c.nights !== 1 ? 's' : ''} = ${fmt(c.roomOnlyTotal)}`,
+  ]
+  for (const l of c.extraLines) {
+    lines.push(`+ ${l.label}: ${fmt(l.amount)}`)
+  }
+  if (c.extraLines.length > 0) {
+    lines.push(`Total: ${fmt(c.finalTotal)} (all inclusive)`)
+  }
+  return lines
 }
 
 // rich=true (Generate & copy): full colorful emoji — safe for copy/paste,
@@ -138,7 +168,7 @@ function buildQuoteDefault(e, rich) {
     ``,
     `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `${ic.guests}Guests: ${c.guestCount}`,
-    `${ic.money}Your Direct Booking Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    ...pricingLines(c, ic.money, 'Your Direct Booking Rate'),
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
     ...familiesBlock(ic),
@@ -173,7 +203,7 @@ function buildQuoteRepeatDiscount(e, rich) {
     `${ic.gift}As a ${label}, we're delighted to offer you a special discounted rate this time!`,
     `${ic.money}Regular Tariff: ${fmt(c.quoteAmount)}`,
     `${ic.gift}${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
-    `${ic.sparkle}Your Special Rate: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    ...pricingLines(c, ic.sparkle, 'Your Special Rate'),
     `(includes early check-in / late check-out flexibility where possible)`,
     ``,
     `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again.${rich ? ' 🌿' : ''}`,
@@ -205,7 +235,7 @@ function buildQuoteB2B(e, rich) {
     `${ic.handshake}As our valued ${label}, here's your special partner pricing:`,
     `${ic.money}Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
     `${ic.handshake}Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
-    `${ic.check}Net Payable to Us: ${fmt(c.finalTotal)} (all inclusive for ${c.nightsLabel})`,
+    ...pricingLines(c, ic.check, 'Net Payable to Us'),
     ``,
     `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking!${rich ? ' 🌿' : ''}`,
     ``,
@@ -608,8 +638,8 @@ export default function EnquiryDetail() {
             <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(e.final_offer_amount)}</span></div>
             {(e.nights || 0) > 0 && (
               <div className="net-row">
-                <span className="net-label">≈ per night ({e.nights}n)</span>
-                <span className="net-val">{fmt(Math.round((e.final_offer_amount || e.quote_amount || 0) / e.nights))}</span>
+                <span className="net-label">≈ per night ({e.nights}n, room only)</span>
+                <span className="net-val">{fmt(Math.round(((e.quote_amount || 0) - (e.discount_amount || 0)) / e.nights))}</span>
               </div>
             )}
             {e.status === 'confirmed' && (

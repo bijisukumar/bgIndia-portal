@@ -1265,6 +1265,45 @@ export async function onRequest(ctx) {
         } })
       }
 
+      // ── OCCUPANCY GAP ALERTS (owner dashboard card) ──────────────────
+      // Flags unbooked stretches of 2+ nights in the next 60 days so the
+      // host can act (discount, win-back message, promo). No rate-calendar
+      // or pricing-flow changes — this villa is a single unit, so occupancy
+      // per night is binary; there's no partial-occupancy signal to base a
+      // rate-increase suggestion on. Pure date-overlap aggregation, same
+      // half-open-interval semantics as the duplicate-booking checker.
+      if (action === 'getOccupancyGaps') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        const windowDays = 60
+        const { results: stays } = await DB.prepare(
+          `SELECT checkin_date, checkout_date FROM stayvibe_stays
+            WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
+              AND checkin_date < date('now', '+' || ? || ' days') AND checkout_date > date('now')`
+        ).bind(villaId, windowDays).all()
+
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        const fmt = d => d.toISOString().slice(0, 10)
+        const isOccupied = dateStr => stays.some(s => s.checkin_date <= dateStr && dateStr < s.checkout_date)
+
+        const gaps = []
+        let gapStart = null
+        for (let i = 0; i <= windowDays; i++) {
+          const d = new Date(today); d.setDate(d.getDate() + i)
+          const dateStr = fmt(d)
+          const free = i < windowDays && !isOccupied(dateStr)
+          if (free && gapStart === null) gapStart = dateStr
+          if (!free && gapStart !== null) {
+            const nights = Math.round((new Date(dateStr) - new Date(gapStart)) / 86400000)
+            if (nights >= 2) {
+              const leadDays = Math.round((new Date(gapStart) - today) / 86400000)
+              gaps.push({ start: gapStart, end: dateStr, nights, leadDays })
+            }
+            gapStart = null
+          }
+        }
+        return json({ success: true, data: { windowDays, gaps } })
+      }
+
       if (action === 'getRamanUnpaid') {
         const { results } = await DB.prepare(
           `SELECT rc.*, COALESCE(s.review_rating, 0) as review_rating

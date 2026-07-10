@@ -217,6 +217,7 @@ export const api = {
   // ── DASHBOARDS ───────────────────────────────────────────
   getVillaDashboard:    (vId, y) => get('getVillaDashboard', { villaId: vId, year: y }),
   getChannelMixInsight: (villaId) => get('getChannelMixInsight', { villaId: villaId || DEFAULT_VILLA_ID }),
+  getOccupancyGaps:     (villaId) => get('getOccupancyGaps', { villaId: villaId || DEFAULT_VILLA_ID }),
   getStays:             (vId, y) => get('getStays', { villaId: vId, year: y }),
   getGuests:            ()       => get('getGuests'),
 

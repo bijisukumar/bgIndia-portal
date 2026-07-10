@@ -978,6 +978,68 @@ function ChannelMixBlock() {
   )
 }
 
+function GapAlertBlock() {
+  const [data, setData] = useState(null)
+  const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    api.getOccupancyGaps(DEFAULT_VILLA_ID).then(d => {
+      if (d && Array.isArray(d.gaps)) setData(d)
+    }).catch(() => {})
+  }, [])
+
+  if (!data) return null
+
+  const fmt = d => fmtDate(d, { day: 'numeric', month: 'short' })
+
+  if (data.gaps.length === 0) return (
+    <div style={{ marginBottom: '16px', background: 'rgba(52,168,83,0.06)',
+      border: '1px solid rgba(52,168,83,0.2)', borderRadius: '12px',
+      padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <span>✅</span>
+      <span style={{ fontSize: '0.8rem', color: '#34A853' }}>
+        Fully booked — no gaps of 2+ nights in the next {data.windowDays} days
+      </span>
+    </div>
+  )
+
+  return (
+    <div style={{ marginBottom: '16px', background: 'rgba(133,183,235,0.06)',
+      border: '1px solid rgba(133,183,235,0.25)', borderRadius: '12px', overflow: 'hidden' }}>
+      <div onClick={() => setExpanded(!expanded)}
+        style={{ padding: '10px 14px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span>📅</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: '700', color: '#85B7EB', letterSpacing: '1.5px' }}>
+          UPCOMING GAPS — NEXT {data.windowDays} DAYS
+        </span>
+        <span style={{ marginLeft: 'auto', background: 'rgba(133,183,235,0.2)', color: '#85B7EB',
+          fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
+          {data.gaps.length}
+        </span>
+        <span style={{ color: '#85B7EB', fontSize: '0.8rem' }}>{expanded ? '▼' : '▶'}</span>
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 14px 14px' }}>
+          <div style={{ fontSize: '0.72rem', color: '#9AA5B4', marginBottom: '10px' }}>
+            Unbooked stretches — consider a limited-time discount or a win-back message to past guests:
+          </div>
+          {data.gaps.map((g, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '8px 0', borderBottom: i < data.gaps.length - 1 ? '1px solid rgba(133,183,235,0.1)' : 'none' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: '600', color: '#F0F0F0' }}>
+                {fmt(g.start)} → {fmt(g.end)}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: '#9AA5B4' }}>{g.nights} nights</span>
+              <span style={{ fontSize: '0.75rem', color: '#85B7EB' }}>in {g.leadDays} days</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function OwnerHome() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -1033,6 +1095,9 @@ export default function OwnerHome() {
 
         {/* Channel mix — commission cost this month, direct-booking savings hint */}
         <ChannelMixBlock />
+
+        {/* Occupancy gaps — unbooked 2+ night stretches in the next 60 days */}
+        <GapAlertBlock />
 
         <MenuSection section={HOSPITALITY} />
         <MenuSection section={PEOPLE} />

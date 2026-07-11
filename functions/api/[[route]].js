@@ -1110,7 +1110,7 @@ export async function onRequest(ctx) {
         // processed checked_out/closed stays follow, capped at 7 days so
         // a stale one from a slow period doesn't linger as "recent".
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, status, adults, nights
+          `SELECT stay_id, guest_name, guest_phone, checkin_date, checkout_date, status, adults, nights
            FROM stayvibe_stays WHERE villa_id = ?
            AND (
              status = 'ready_for_checkout'

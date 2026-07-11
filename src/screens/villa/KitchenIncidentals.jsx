@@ -21,6 +21,28 @@ function guestLabel(g) {
   return `${g.guestName} — checked out ${g.checkoutDate}`
 }
 
+// Builds a wa.me deep-link pre-filled with the itemized incidentals
+// breakup, same pattern as EnquiryDetail.jsx's quote-sending link — opens
+// the guest's WhatsApp chat with the message ready, Raman still taps send
+// himself (never auto-sent).
+function buildInvoiceWaLink(stay, lines, total) {
+  const phone = stay?.guestPhone
+  if (!phone) return null
+  const raw = String(phone).replace(/\D/g, '')
+  const num = raw.startsWith('91') ? raw : (raw.length === 10 ? `91${raw}` : raw)
+  const firstName = (stay.guestName || '').trim().split(' ')[0] || 'there'
+  const message = [
+    `Hi ${firstName}, here's your check-out incidentals summary:`,
+    '',
+    ...lines,
+    '',
+    `Total: ₹${total.toLocaleString('en-IN')}`,
+    '',
+    'Thank you for staying with us!',
+  ].join('\n')
+  return `https://wa.me/${num}?text=${encodeURIComponent(message)}`
+}
+
 export default function KitchenIncidentals() {
   const navigate  = useNavigate()
   const [stay, setStay]     = useState(null)
@@ -52,11 +74,12 @@ export default function KitchenIncidentals() {
       const options = [
         ...(active && active.stayId ? [{
           stayId: active.stayId, guestName: active.guestName || 'Active Guest',
+          guestPhone: active.guest_phone || '',
           checkoutDate: active.checkoutDate || '—', nights: active.nights || '—',
           status: 'checked_in', isHistoricalSession: false,
         }] : []),
         ...(Array.isArray(checkouts) ? checkouts.map(c => ({
-          stayId: c.stay_id, guestName: c.guest_name,
+          stayId: c.stay_id, guestName: c.guest_name, guestPhone: c.guest_phone || '',
           checkoutDate: c.checkout_date, nights: c.nights || 1,
           status: c.status, isHistoricalSession: c.status !== 'ready_for_checkout',
         })) : []),
@@ -82,6 +105,14 @@ export default function KitchenIncidentals() {
   const itemTotal = (id) => (cart[id] || 0) * (Number(prices[id]) || 0)
   const total = checkoutItems.reduce((s, i) => s + itemTotal(i.id), 0)
     + (custom.qty || 0) * (parseFloat(custom.price) || 0)
+  const invoiceLines = [
+    ...checkoutItems.filter(i => (cart[i.id] || 0) > 0)
+      .map(i => `${i.name} × ${cart[i.id]} = ₹${itemTotal(i.id).toLocaleString('en-IN')}`),
+    ...(custom.qty > 0 && custom.name
+      ? [`${custom.name} × ${custom.qty} = ₹${(custom.qty * (parseFloat(custom.price) || 0)).toLocaleString('en-IN')}`]
+      : []),
+  ]
+  const invoiceWaLink = total > 0 ? buildInvoiceWaLink(stay, invoiceLines, total) : null
 
   const handleSave = async () => {
     const items = [
@@ -198,8 +229,8 @@ export default function KitchenIncidentals() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: 'var(--text)', fontSize: '0.88rem', fontWeight: '500' }}>{item.name}</div>
                   <div style={{ color: '#5C7080', fontSize: '0.72rem', display: 'flex', flexWrap: 'wrap', columnGap: '6px', rowGap: '2px' }}>
-                    <span style={{ whiteSpace: 'nowrap' }}>₹{price} / {item.unit}</span>
-                    {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', whiteSpace: 'nowrap' }}>= ₹{sub.toLocaleString('en-IN')}</span>}
+                    <span style={{ whiteSpace: 'nowrap' }}><span className="rupee">₹</span>{price} / {item.unit}</span>
+                    {sub > 0 && <span style={{ color: 'var(--gold)', fontWeight: '700', whiteSpace: 'nowrap' }}>= <span className="rupee">₹</span>{sub.toLocaleString('en-IN')}</span>}
                     <span style={{ whiteSpace: 'nowrap', color: low ? '#EF9A9A' : '#5C7080' }}>
                       · {s.qtyInStock ?? 0} in stock
                     </span>
@@ -249,26 +280,44 @@ export default function KitchenIncidentals() {
           {checkoutItems.filter(i => (cart[i.id] || 0) > 0).map(i => (
             <div key={i.id} className="net-row">
               <span className="net-label">{i.name} × {cart[i.id]}</span>
-              <span className="net-val pos">₹{itemTotal(i.id).toLocaleString('en-IN')}</span>
+              <span className="net-val pos"><span className="rupee">₹</span>{itemTotal(i.id).toLocaleString('en-IN')}</span>
             </div>
           ))}
           {custom.qty > 0 && custom.name && (
             <div className="net-row">
               <span className="net-label">{custom.name} × {custom.qty}</span>
-              <span className="net-val pos">₹{(custom.qty * (parseFloat(custom.price) || 0)).toLocaleString('en-IN')}</span>
+              <span className="net-val pos"><span className="rupee">₹</span>{(custom.qty * (parseFloat(custom.price) || 0)).toLocaleString('en-IN')}</span>
             </div>
           )}
           {total > 0 && <div className="net-divider" />}
           <div className="net-row">
             <span style={{ color: 'var(--text)', fontWeight: '700', fontSize: '1rem' }}>Total incidentals</span>
-            <span className="net-val big">₹{total.toLocaleString('en-IN')}</span>
+            <span className="net-val big"><span className="rupee">₹</span>{total.toLocaleString('en-IN')}</span>
           </div>
         </div>
 
         <button className="btn btn-gold" onClick={handleSave} disabled={saving || total === 0 || !stay}>
-          {saving ? 'Saving...' : !stay ? 'Select a guest context above' : total > 0 ? `Save · ₹${total.toLocaleString('en-IN')} →` : 'Add items above'}
+          {saving ? 'Saving...' : !stay ? 'Select a guest context above' : total > 0 ? <>Save · <span className="rupee">₹</span>{total.toLocaleString('en-IN')} →</> : 'Add items above'}
         </button>
         <p className="btn-email-note">📧 Owner notified on save</p>
+
+        {total > 0 && (
+          invoiceWaLink ? (
+            <a href={invoiceWaLink} target="_blank" rel="noreferrer"
+              className="btn"
+              style={{
+                marginTop: '8px', display: 'block', textAlign: 'center', textDecoration: 'none',
+                background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)',
+                color: '#25D366', fontWeight: '700',
+              }}>
+              📲 Send invoice on WhatsApp
+            </a>
+          ) : (
+            <p style={{ marginTop: '8px', textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+              No phone number on file — can't send invoice
+            </p>
+          )
+        )}
       </div>
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>

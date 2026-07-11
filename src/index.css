@@ -265,6 +265,13 @@ textarea.field-input { resize: vertical; min-height: 80px; }
 .net-val.neg  { color: var(--red); }
 .net-val.big  { font-size: 1.4rem; font-weight: 700; color: var(--green); }
 
+/* Some mobile browsers fall back to a different font just for the ₹
+   glyph (DM Sans doesn't include it), and that fallback's advance-width
+   can visually overlap the digit right after it — worse at larger font
+   sizes. Wrapping ₹ in its own inline-block with a real margin guarantees
+   box-model spacing that can't be eaten by a font's glyph metrics. */
+.rupee { display: inline-block; margin-right: 2px; }
+
 /* ── STAY ID STRIP ──────────────────────── */
 .stay-id-strip {
   background: rgba(200,144,58,0.06);

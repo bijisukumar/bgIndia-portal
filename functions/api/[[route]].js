@@ -548,17 +548,6 @@ export async function onRequest(ctx) {
     const { pin } = await request.json().catch(() => ({}))
     if (!pin) return err('PIN required', 400)
 
-    // TEMPORARY DIAGNOSTIC — reveals presence/length only, never the value.
-    // User-approved, to isolate why PIN_MASTER_OWNER keeps failing despite
-    // being reset via both the CLI and the Cloudflare dashboard. Remove
-    // once resolved. (redeploy-forcing touch: 2026-07-10b)
-    if (pin === '__DEBUG_MASTER_PIN_CHECK__') {
-      return json({ success: false, debug: {
-        hasMasterPin: !!env.PIN_MASTER_OWNER,
-        masterPinLength: (env.PIN_MASTER_OWNER || '').length,
-      } })
-    }
-
     // Platform-level bypass: the master owner isn't tenant data, so this
     // PIN lives as an env secret (like JWT_SECRET), not a DB row.
     // propertyIds: null means "every property, every tenant" — checked

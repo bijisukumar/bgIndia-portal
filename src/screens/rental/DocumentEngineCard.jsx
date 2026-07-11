@@ -18,8 +18,14 @@
 //  after generating. See formatChoice.js for the centralized wiring.
 // ============================================================
 import { useState } from 'react'
-import { generateMoveReportAny, generateLeaseDeedAny } from '../../utils/formatChoice'
 import FormatToggle from './FormatToggle'
+
+// formatChoice.js pulls in docx/pdf-lib, which reference Node.js builtins
+// (stream, process.binding) that don't exist in a browser — bundled
+// statically, that code executes on every page load (even if this button
+// is never clicked) and crashes the app before React ever mounts, in any
+// build that doesn't code-split it out. Dynamic import here means it's
+// only fetched and executed when a document is actually generated.
 
 const BTN = {
   base: {
@@ -77,7 +83,10 @@ export default function DocumentEngineCard({ agreement, property, country, saved
             busy={busy === 'lease'}
             disabled={readOnly || !saved}
             color="#185FA5"
-            onClick={() => run('lease', () => generateLeaseDeedAny(!useDocxLease, agreement, property), `📄 Lease deed generated for ${agreement?.tenant_name}`)}
+            onClick={() => run('lease', async () => {
+              const { generateLeaseDeedAny } = await import('../../utils/formatChoice')
+              return generateLeaseDeedAny(!useDocxLease, agreement, property)
+            }, `📄 Lease deed generated for ${agreement?.tenant_name}`)}
           />
           <FormatToggle useDocx={useDocxLease} onChange={setUseDocxLease} idSuffix="lease" />
         </>
@@ -97,7 +106,10 @@ export default function DocumentEngineCard({ agreement, property, country, saved
         busy={busy === 'movein'}
         disabled={readOnly || !saved}
         color="#34A853"
-        onClick={() => run('movein', () => generateMoveReportAny(!useDocxMoveIn, 'move-in', agreement, property), `🔑 Move-in report generated for ${agreement?.tenant_name}`)}
+        onClick={() => run('movein', async () => {
+              const { generateMoveReportAny } = await import('../../utils/formatChoice')
+              return generateMoveReportAny(!useDocxMoveIn, 'move-in', agreement, property)
+            }, `🔑 Move-in report generated for ${agreement?.tenant_name}`)}
       />
       <FormatToggle useDocx={useDocxMoveIn} onChange={setUseDocxMoveIn} idSuffix="movein" />
 
@@ -107,7 +119,10 @@ export default function DocumentEngineCard({ agreement, property, country, saved
         busy={busy === 'moveout'}
         disabled={readOnly || !saved}
         color="#5C7080"
-        onClick={() => run('moveout', () => generateMoveReportAny(!useDocxMoveOut, 'move-out', agreement, property), `📦 Move-out report generated for ${agreement?.tenant_name}`)}
+        onClick={() => run('moveout', async () => {
+              const { generateMoveReportAny } = await import('../../utils/formatChoice')
+              return generateMoveReportAny(!useDocxMoveOut, 'move-out', agreement, property)
+            }, `📦 Move-out report generated for ${agreement?.tenant_name}`)}
       />
       <FormatToggle useDocx={useDocxMoveOut} onChange={setUseDocxMoveOut} idSuffix="moveout" />
 

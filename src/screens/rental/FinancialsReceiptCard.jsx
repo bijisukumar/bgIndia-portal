@@ -18,9 +18,12 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { fmtDate, localTodayStr } from '../../utils/dates'
-import { downloadDepositReceipt, downloadRentReceipt } from '../../utils/generateReceipt'
-import { generateDepositReceipt, generateRentReceipt } from '../../utils/formatChoice'
 import FormatToggle from './FormatToggle'
+
+// formatChoice.js pulls in docx/pdf-lib, which reference Node.js builtins
+// (stream, process.binding) that don't exist in a browser — imported
+// dynamically (only when a receipt is actually generated) rather than
+// statically, so this code doesn't execute on every page load.
 
 function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
@@ -119,6 +122,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
     if (!saved) { showToast('Save the agreement first', 'error'); return }
     setGeneratingReceipt('deposit')
     try {
+      const { generateDepositReceipt } = await import('../../utils/formatChoice')
       await generateDepositReceipt(!useDocxDeposit, agreement, property)
       showToast('🧾 Deposit receipt generated')
     } catch (e) { showToast(e.message, 'error') }
@@ -128,6 +132,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
   async function handleRentReceipt(txn) {
     setGeneratingReceipt(txn.txn_id)
     try {
+      const { generateRentReceipt } = await import('../../utils/formatChoice')
       await generateRentReceipt(!useDocxRent, txn, agreement, property)
       showToast(`🧾 Receipt generated for ${txn.period_month}`)
     } catch (e) { showToast(e.message, 'error') }
@@ -146,6 +151,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
     // separate advances ledger table to post into yet.
     setGeneratingReceipt('advance')
     try {
+      const { generateDepositReceipt } = await import('../../utils/formatChoice')
       await generateDepositReceipt(!useDocxAdvance, {
         ...agreement,
         deposit: parseFloat(advanceAmount),

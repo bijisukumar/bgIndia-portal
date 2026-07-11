@@ -14,10 +14,12 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { fmtDate, localTodayStr } from '../../utils/dates'
-import { downloadDepositReceipt } from '../../utils/generateReceipt'
-import { downloadMoveReport } from '../../utils/generateMoveReport'
-import { generateDepositReceipt, generateMoveReportAny } from '../../utils/formatChoice'
 import FormatToggle from './FormatToggle'
+
+// formatChoice.js pulls in docx/pdf-lib, which reference Node.js builtins
+// (stream, process.binding) that don't exist in a browser — imported
+// dynamically (only when a document is actually generated) rather than
+// statically, so this code doesn't execute on every page load.
 
 function fmt(n, currency='INR') {
   if (!n && n !== 0) return '—'
@@ -158,6 +160,7 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
       // amount, address, and recorded payment date/mode — never the
       // previous tenant's. property is passed through unchanged since
       // the address/building is the same regardless of who's moving in.
+      const { generateDepositReceipt } = await import('../../utils/formatChoice')
       await generateDepositReceipt(!useDocxDeposit, {
         tenant_name: record.tenant_name,
         tenant_address: record.tenant_address,
@@ -180,6 +183,7 @@ export default function IncomingTenantCard({ propId, propCountry, property, curr
       // clause is anchored to, reflect the real date the tenant actually
       // takes possession, not whatever day this button happens to be
       // clicked.
+      const { generateMoveReportAny } = await import('../../utils/formatChoice')
       await generateMoveReportAny(!useDocxMoveIn, 'move-in', { tenant_name: record.tenant_name }, property, record.lease_start)
       showToast(`🔑 Move-in document generated for ${record.tenant_name}`)
     } catch (e) { showToast(e.message, 'error') }

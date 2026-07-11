@@ -1,25 +1,21 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useState } from 'react'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
+import { restoreActiveVillaId, clearActiveVillaId } from '../../utils/villaContext'
+import AccessDenied from '../../components/AccessDenied'
 import '../../index.css'
 
 // Root screens
 import Login          from '../../screens/Login'
+import PropertyPicker from '../../screens/PropertyPicker'
 import OwnerHome      from '../../screens/OwnerHome'
-import EstateManagerHome from '../../screens/EstateManagerHome'
-import RamanHome      from '../../screens/RamanHome'
 import RDashboard         from '../../screens/RDashboard'
-import RDashboardSnapshot from '../../screens/RDashboardSnapshot'
 
 // Villa screens
 import VillaHub          from '../../screens/villa/VillaHub'
-import VillaRentalIncome from '../../screens/villa/VillaRentalIncome'
 import CompleteBooking    from '../../screens/villa/CompleteBooking'
 import VillaDashboard    from '../../screens/villa/VillaDashboard'
 import NewBooking        from '../../screens/villa/NewBooking'
-import CheckIn           from '../../screens/villa/CheckIn'
-import KitchenIncidentals from '../../screens/villa/KitchenIncidentals'
-import BreakfastEntry    from '../../screens/villa/BreakfastEntry'
-import CarRentalEntry    from '../../screens/villa/CarRentalEntry'
 import GuestRepository      from '../../screens/villa/GuestRepository'
 import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
 import Inventory         from '../../screens/villa/Inventory'
@@ -56,13 +52,37 @@ import SchemaValidation  from '../../screens/infra/SchemaValidation'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
+  // A tenant with just 1 property (today's real Dwarka case) never sees
+  // this — restoreActiveVillaId() resolves instantly from a prior pick
+  // this session, or the picker resolves it in one round-trip on first
+  // load and it's never shown again until "Switch property" is used.
+  const [resolved, setResolved] = useState(() => !!restoreActiveVillaId())
+
   if (!user) return <Navigate to="/login" replace />
-  const role = user.role
+  // manage.* is the super-user console — only master_owner gets in.
+  // Every other role (including a tenant's own owner/manager PIN) has
+  // its own dedicated app (stayvibe.*/estate360.*/rev360.*) instead.
+  if (user.role !== 'master_owner') return <AccessDenied />
+  if (!resolved) return <PropertyPicker onResolved={() => setResolved(true)} />
+
+  const showSwitcher = user.propertyIds == null || (user.propertyIds && user.propertyIds.length > 1)
 
   return (
+    <>
+    {showSwitcher && (
+      <button
+        onClick={() => { clearActiveVillaId(); setResolved(false) }}
+        style={{ position: 'fixed', top: 10, right: 10, zIndex: 1000,
+          background: 'rgba(200,144,58,0.15)', border: '1px solid rgba(200,144,58,0.4)',
+          borderRadius: '8px', color: '#C8903A', fontSize: '0.7rem', fontWeight: '700',
+          padding: '6px 10px', cursor: 'pointer' }}>
+        ⇄ Switch property
+      </button>
+    )}
     <Routes>
-      {/* ── OWNER ──────────────────────────────────── */}
-      {role === 'owner' && <>
+      {/* Only master_owner ever reaches here (gated above) — always true,
+          kept explicit rather than an unconditional fragment. */}
+      {user.role === 'master_owner' && <>
         <Route path="/"                       element={<OwnerHome />} />
         {/* Villa */}
         <Route path="/owner/villa"            element={<VillaHub />} />
@@ -105,30 +125,9 @@ function ProtectedRoutes() {
         <Route path="/infra/d1"               element={<D1Explorer />} />
       </>}
 
-      {/* ── PRADOSH (estate manager) ───────────────── */}
-      {role === 'estate_manager' && <>
-        <Route path="/"                       element={<EstateManagerHome />} />
-        <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
-        <Route path="/pollachi/ledger"        element={<EstateLedger estate="pollachi" />} />
-        <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />
-      </>}
-
-      {/* ── RAMAN (villa manager) ──────────────────── */}
-      {role === 'manager' && <>
-        <Route path="/"                       element={<RamanHome />} />
-        <Route path="/raman/checkin"          element={<CheckIn />} />
-        <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
-        <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
-        <Route path="/raman/carrental"        element={<CarRentalEntry />} />
-        <Route path="/raman/expenses"         element={<VillaExpenses />} />
-        <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
-        <Route path="/pavutumuri/rubber"      element={<RubberTracker />} />
-        <Route path="/pavutumuri/settlement"  element={<ManagerSettlement estate="pavutumuri" />} />
-        <Route path="/pavutumuri/ledger"      element={<EstateLedger estate="pavutumuri" />} />
-      </>}
-
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   )
 }
 

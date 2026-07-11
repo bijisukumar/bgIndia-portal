@@ -4,6 +4,7 @@
 // ============================================================
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
+import AccessDenied from '../../components/AccessDenied'
 import '../../index.css'
 
 import Login            from '../../screens/Login'
@@ -18,6 +19,11 @@ import D1Explorer       from '../../screens/infra/D1Explorer'
 function ProtectedRoutes() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
+  // This app had no role check at all — any valid PIN (Raman's,
+  // Pradosh's, anyone's) could see the full rental financials. Neither
+  // of them should: Raman is the villa manager (stayvibe.*), Pradosh is
+  // the estate manager (estate360.*) — rental is owner-only for now.
+  if (user.role !== 'owner' && user.role !== 'master_owner') return <AccessDenied />
 
   return (
     <Routes>

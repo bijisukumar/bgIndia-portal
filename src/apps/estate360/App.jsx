@@ -5,6 +5,7 @@
 // ============================================================
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
+import AccessDenied from '../../components/AccessDenied'
 import '../../index.css'
 
 import Login           from '../../screens/Login'
@@ -26,6 +27,10 @@ function ProtectedRoutes() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
   const role = user.role
+  // Only owner/estate_manager have any route here — anyone else (e.g. a
+  // villa manager PIN, which belongs on stayvibe.*) previously fell
+  // through to "/" with no matching route and redirect-looped forever.
+  if (role !== 'owner' && role !== 'estate_manager') return <AccessDenied />
 
   return (
     <Routes>

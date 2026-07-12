@@ -50,15 +50,24 @@ export default function DebugPanel() {
     setLogs(logger.getAll())
   }
 
+  // Tests the real Cloudflare Worker (same origin, /api/*) — this used to
+  // hit an old Google Apps Script web-app URL (CONFIG.appsScriptUrl),
+  // left over from before the D1/Worker migration. That URL pointed at a
+  // since-retired backend, so this button was silently testing the wrong
+  // system and always reporting "connected" regardless of whether the
+  // real API was reachable.
   const testApi = async () => {
     setTesting(true)
     setApiTest(null)
     const start = Date.now()
     try {
-      const res = await fetch(CONFIG.appsScriptUrl + '?action=ping')
+      const token = sessionStorage.getItem('ge_token') || ''
+      const res = await fetch('/api/getTenantConfig?tenantId=dwarka', {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      })
       const ms  = Date.now() - start
       const json = await res.json()
-      setApiTest({ ok: true, ms, status: res.status, data: json })
+      setApiTest({ ok: res.ok && json.success, ms, status: res.status, data: json })
       logger.info('DebugPanel', 'API test succeeded', { ms })
     } catch (err) {
       const ms = Date.now() - start
@@ -86,7 +95,7 @@ export default function DebugPanel() {
         <div className="card-section-label">API CONNECTION</div>
         <div className="card">
           <div style={{fontSize:'0.78rem',color:'var(--text-dim)',marginBottom:'10px',wordBreak:'break-all'}}>
-            {CONFIG.appsScriptUrl.slice(0,60)}...
+            /api/getTenantConfig (this origin)
           </div>
           <button className="btn btn-blue" onClick={testApi} disabled={testing} style={{marginBottom: apiTest ? '12px' : 0}}>
             {testing ? 'Testing...' : 'Test API connection'}

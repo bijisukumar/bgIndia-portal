@@ -1,5 +1,5 @@
 // ============================================================
-// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.2
+// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.4
 // ============================================================
 // Paste into Apps Script editor of:
 //   "GVR Registration-Check-In form (Responses)"
@@ -9,6 +9,28 @@
 // via getTenantConfig (see v2.1 below).
 //
 // ── VERSION HISTORY (newest first) — bump on every change ──
+// v2.4  2026-07-12  Unified email log: sendCheckinConfirmationEmails
+//                    no longer calls GmailApp.sendEmail directly for
+//                    the guest/owner/CC check-in confirmation — it
+//                    now calls the Worker's new sendGuestEmail action
+//                    (sendEmailViaWorker helper below), which sends
+//                    via the same Resend pipeline as every owner
+//                    alert AND logs every send into infra_alert_log
+//                    (with a category tag) so there's one place to
+//                    browse/truncate all sent email instead of guest
+//                    email being a second, unlogged system. Added
+//                    testSendGuestEmail() — run once manually before
+//                    trusting this for a real guest. Run this BEFORE
+//                    running any real check-in.
+// v2.3  2026-07-12  Guest confirmation email: subject now says
+//                    "Completed"; STAY DETAILS now shows a bedroom
+//                    count derived from guest count (~2 guests/
+//                    bedroom, capped at villa's actual bedroom
+//                    count — same formula as getBedroomEstimate()
+//                    in src/utils/villaPricing.js) + early check-in/
+//                    late check-out confirmation note; added
+//                    pre-arrival timing/guest-count reminder
+//                    paragraph before sign-off.
 // v2.2  2026-07-02  Car/plate check-in photos: added
 //                    processPendingDocumentUploads() to upload them
 //                    to the guest's Drive folder; left in D1 for 5
@@ -64,6 +86,7 @@ function getClient() {
         checkinTime:      resp.data.checkinTime  || '16:00',
         checkoutTime:     resp.data.checkoutTime || '11:00',
         breakfastRate:    resp.data.breakfastRate || 275,
+        bedroomCount:     resp.data.bedroomCount  || 4,
       };
       Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
       return _CLIENT;
@@ -85,6 +108,7 @@ function getClient() {
     checkinTime:       '16:00',
     checkoutTime:      '11:00',
     breakfastRate:     275,
+    bedroomCount:      4,
   };
   return _CLIENT;
 }
@@ -594,6 +618,15 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     return (h > 12 ? h-12 : h) + ':' + m + ' ' + (h >= 12 ? 'PM' : 'AM');
   }
 
+  // Same formula as getBedroomEstimate() in src/utils/villaPricing.js
+  // (~2 guests/bedroom, capped at the villa's actual bedroom count) —
+  // duplicated here since this standalone Apps Script can't import
+  // frontend modules.
+  var billableGuests = adults + children;
+  var bedroomCount = billableGuests > 0
+    ? Math.min(CLIENT.bedroomCount, Math.ceil(billableGuests / 2))
+    : CLIENT.bedroomCount;
+
   var guestBody =
     'Dear ' + guestName + ',\n\n' +
     'Thank you for completing your check-in registration. ' +
@@ -602,7 +635,9 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     '  Check-in :  ' + checkIn  + ' (after ' + fmt(CLIENT.checkinTime)  + ')\n' +
     '  Check-out:  ' + checkOut + ' (by '    + fmt(CLIENT.checkoutTime) + ')\n' +
     '  Nights   :  ' + nights + '\n' +
-    (eta ? '  ETA      :  ' + eta + '\n' : '') + '\n' +
+    '  Bedrooms :  ' + bedroomCount + ' bedrooms (Indian Queen Size bed)\n' +
+    (eta ? '  ETA      :  ' + eta + '\n' : '') +
+    '  ** If you have been approved for an Early Check-in/Late Check-out, please confirm with Hosts.\n\n' +
     'GUEST DETAILS\n' +
     '  Adults   :  ' + adults + (children > 0 ? '\n  Children :  ' + children : '') + '\n' +
     (phone      ? '  Phone    :  ' + phone      + '\n' : '') +
@@ -610,6 +645,10 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     '\n' + reqSection +
     'If anything looks incorrect, please contact us at ' + CLIENT.guestContactPhone + '.\n\n' +
     'We look forward to welcoming you to ' + CLIENT.villaName + '!\n\n' +
+    'Just a friendly reminder before you arrive:\n\n' +
+    'Timing Matters: Our turnaround schedule between guests is very tight. Please stick strictly to the scheduled check-in and check-out times. Just as an extra hour taken by a previous guest would delay your clean check-in, any shift impacts the guests arriving right after you.\n\n' +
+    'Guest Counts: Final guest counts will be validated upon arrival.\n\n' +
+    'We appreciate your cooperation in helping us get the space perfect for you and our upcoming guests!\n\n' +
     'Warm regards,\n' + CLIENT.villaName + '\n' +
     CLIENT.phone1 + '  |  ' + CLIENT.guestContactPhone;
 
@@ -630,12 +669,57 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     'Drive folder: ' + folderUrl + '\n\n' +
     '>> ACTION REQUIRED: Review and approve in the Owner Portal <<';
 
-  try { GmailApp.sendEmail(CLIENT.ownerEmail, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody); } catch(e) { Logger.log('Owner email error: ' + e.message); }
-  try { GmailApp.sendEmail(CLIENT.ownerEmailCC, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody); } catch(e) { Logger.log('CC email error: ' + e.message); }
+  sendEmailViaWorker(CLIENT.ownerEmail, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody, 'owner_booking', CLIENT.villaId);
+  sendEmailViaWorker(CLIENT.ownerEmailCC, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody, 'owner_booking', CLIENT.villaId);
   if (guestEmail) {
-    try { GmailApp.sendEmail(guestEmail, 'Your Check-in Registration — ' + CLIENT.villaName, guestBody); Logger.log('Guest email sent to ' + guestEmail); }
-    catch(e) { Logger.log('Guest email error: ' + e.message); }
+    var sent = sendEmailViaWorker(guestEmail, 'Your Check-in Registration Completed — ' + CLIENT.villaName, guestBody, 'guest_checkin', CLIENT.villaId);
+    Logger.log(sent ? 'Guest email sent to ' + guestEmail : 'Guest email FAILED for ' + guestEmail);
   }
+}
+
+// ── UNIFIED EMAIL SEND (via Worker → Resend → infra_alert_log) ───────────
+// Replaces direct GmailApp.sendEmail calls for the guest confirmation flow
+// so every email — guest-facing or owner-facing — lands in the same D1
+// log (infra_alert_log, browsable via getAlertLog / D1 Explorer) with a
+// category tag, instead of guest email being an unlogged second system
+// living only in this Gmail account's Sent folder. Uses the same
+// SYSTEM_TOKEN-authenticated callWorker() already proven working
+// elsewhere in this file — no new auth setup needed.
+// Returns true/false rather than throwing, so a failed send never
+// interrupts the rest of processPendingCheckInForms (matches the old
+// try/catch-and-log-only behaviour of the GmailApp calls it replaces).
+function sendEmailViaWorker(to, subject, body, category, villaId) {
+  try {
+    var resp = callWorker('POST', 'sendGuestEmail', {
+      to: to, subject: subject, body: body,
+      villaId: villaId || null, category: category || 'general',
+    });
+    if (!resp || !resp.success) {
+      Logger.log('sendEmailViaWorker (' + category + ' → ' + to + ') failed: ' + JSON.stringify(resp));
+      return false;
+    }
+    return true;
+  } catch(e) {
+    Logger.log('sendEmailViaWorker (' + category + ' → ' + to + ') error: ' + e.message);
+    return false;
+  }
+}
+
+// ── ONE-TIME MANUAL TEST — run this from the script editor once, before
+// trusting the pipeline for a real guest, to confirm SYSTEM_TOKEN auth +
+// Worker + Resend + D1 logging all work end to end. Sends a real test
+// email to CLIENT.ownerEmailCC (your own address).
+function testSendGuestEmail() {
+  var CLIENT = getClient();
+  var sent = sendEmailViaWorker(
+    CLIENT.ownerEmailCC,
+    '[TEST] Unified email pipeline check',
+    'This is a manual test of sendEmailViaWorker → sendGuestEmail → Resend → infra_alert_log.\n\n' +
+    'If you received this, the pipeline is working end to end.',
+    'guest_checkin',
+    CLIENT.villaId
+  );
+  Logger.log(sent ? '✅ Test email sent — check ' + CLIENT.ownerEmailCC + ' and getAlertLog' : '❌ Test email failed — check logs above');
 }
 
 // ── DRIVE FOLDER ──────────────────────────────────────────
@@ -714,4 +798,145 @@ function testConnection() {
 function testPendingStays() {
   var resp = callWorker('POST', 'getPendingReviewStays', {});
   Logger.log('Response: ' + JSON.stringify(resp));
+}
+
+// ============================================================
+// ENQUIRY FOLLOW-UP REMINDERS (2-day / 5-day) — moved here from the
+// old Main-GVR-AppScripts project (2026-07-12) so that project can be
+// retired. This was the one genuinely live, working piece left in it —
+// everything else there had gone stale or was already broken (401s
+// from an unauthenticated Worker call). Logic unchanged from the
+// original; only the email send now goes through sendEmailViaWorker
+// (unified log) instead of a local GmailApp.sendEmail, and
+// callWorkerWithSystemToken() was dropped in favour of this file's own
+// callWorker(), which was already correctly Bearer-authenticated.
+//
+// SETUP REQUIRED after pasting: Triggers → Add Trigger →
+// sendEnquiryFollowUpReminders → Time-driven → Day timer → 9am-10am
+// (or run setupEnquiryReminderTrigger() once instead). Then, in the
+// OLD Main-GVR-AppScripts project, delete its own
+// sendEnquiryFollowUpReminders trigger so it doesn't also fire and
+// double-send reminders.
+// ============================================================
+
+function setupEnquiryReminderTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'sendEnquiryFollowUpReminders') {
+      ScriptApp.deleteTrigger(t);
+      Logger.log('Removed existing trigger');
+    }
+  });
+  ScriptApp.newTrigger('sendEnquiryFollowUpReminders')
+    .timeBased().everyDays(1).atHour(9).create();
+  Logger.log('✅ Trigger installed: sendEnquiryFollowUpReminders (daily ~9am)');
+}
+
+function sendEnquiryFollowUpReminders() {
+  var CLIENT = getClient();
+  var resp = callWorker('GET', 'getStaleEnquiries', {});
+  if (!resp || !resp.success) {
+    Logger.log('sendEnquiryFollowUpReminders: getStaleEnquiries failed: ' + JSON.stringify(resp));
+    logScriptEvent('sendEnquiryFollowUpReminders', 'error', 'getStaleEnquiries failed or returned no response');
+    return;
+  }
+
+  var rows = resp.data || [];
+  Logger.log('sendEnquiryFollowUpReminders: ' + rows.length + ' stale enquiry(ies) found');
+  logScriptEvent('sendEnquiryFollowUpReminders', 'info', rows.length + ' stale enquiry(ies) found this run');
+
+  rows.forEach(function(enq) {
+    var days = enq.days_since_contact;
+    var threshold = (days >= 5 && !enq.reminder_5day_sent_at) ? '5day'
+                   : (days >= 2 && !enq.reminder_2day_sent_at) ? '2day'
+                   : null;
+    if (!threshold) return;
+
+    var waLink = buildEnquiryWaLink(enq.phone, enq.guest_name);
+    var stayInfo = (enq.checkin_date && enq.checkout_date)
+      ? enq.checkin_date + ' → ' + enq.checkout_date + ' · ' + (enq.nights || 0) + 'n · ' + (enq.guests_count || 1) + 'p'
+      : 'Dates not yet set';
+    var amount = enq.final_offer_amount || enq.quote_amount || 0;
+
+    var subjectLabel = threshold === '5day' ? '5+ days, no response' : '2+ days, no response';
+    var subject = '🔔 Enquiry follow-up: ' + enq.guest_name + ' — ' + subjectLabel;
+
+    var body =
+      'This enquiry has gone ' + days + ' day' + (days === 1 ? '' : 's') + ' without any contact logged.\n\n' +
+      'GUEST\n' +
+      '  Name    :  ' + enq.guest_name + '\n' +
+      (enq.phone ? '  Phone   :  ' + enq.phone + '\n' : '') +
+      (enq.email ? '  Email   :  ' + enq.email + '\n' : '') +
+      '  Source  :  ' + (enq.source || '—') + '\n' +
+      '  Status  :  ' + (enq.status || '—') + '\n\n' +
+      'STAY\n' +
+      '  ' + stayInfo + '\n' +
+      (amount ? '  Quoted/offered: ₹' + Math.round(amount).toLocaleString('en-IN') + '\n' : '') +
+      (enq.notes ? '\nNOTES\n  ' + enq.notes + '\n' : '') +
+      '\n------------------------------------------------------------\n' +
+      'Tap to message them on WhatsApp (asks if they had any\n' +
+      'questions, or if they\'ve decided to go another way — either\n' +
+      'way, we\'d appreciate knowing):\n\n' +
+      (waLink || '(no phone number on file — reach out by email instead)') +
+      '\n------------------------------------------------------------\n\n' +
+      'Quicker responses tend to convert better — worth a check-in.';
+
+    try {
+      var sent = sendEmailViaWorker(CLIENT.ownerEmail, subject, body, 'enquiry_reminder', CLIENT.villaId);
+      if (!sent) {
+        Logger.log('WARNING: reminder email failed for ' + enq.enquiry_id + ' — will still mark as sent to avoid retry storms');
+      }
+      var markResp = callWorker('POST', 'markReminderSent', { enquiryId: enq.enquiry_id, threshold: threshold });
+      if (!markResp || !markResp.success) {
+        Logger.log('WARNING: markReminderSent failed for ' + enq.enquiry_id + ' — this enquiry may get re-emailed tomorrow: ' + JSON.stringify(markResp));
+        logScriptEvent('sendEnquiryFollowUpReminders', 'warning',
+          'markReminderSent failed for ' + enq.guest_name + ' (' + threshold + ') — may re-email tomorrow', enq.enquiry_id);
+      }
+      Logger.log('Sent ' + threshold + ' reminder for ' + enq.guest_name + ' (' + enq.enquiry_id + ')');
+      logScriptEvent('sendEnquiryFollowUpReminders', 'success',
+        'Sent ' + threshold + ' reminder for ' + enq.guest_name + ' (' + days + ' days since contact)', enq.enquiry_id);
+    } catch(e) {
+      Logger.log('sendEnquiryFollowUpReminders: failed for ' + enq.enquiry_id + ': ' + e.message);
+      logScriptEvent('sendEnquiryFollowUpReminders', 'error',
+        'Exception for ' + enq.guest_name + ': ' + e.message, enq.enquiry_id);
+    }
+  });
+}
+
+// Builds a wa.me link from a raw phone string. Only assumes India's '91'
+// country code for a bare <=10-digit number with no '+' in the original
+// string — anything that already looks international (has a '+', or is
+// already longer than 10 digits) is left untouched.
+function buildEnquiryWaLink(rawPhone, guestName) {
+  var raw = String(rawPhone || '').trim();
+  if (!raw) return null;
+  var digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+  var looksInternational = raw.indexOf('+') >= 0 || digits.length > 10;
+  var num = looksInternational ? digits : ('91' + digits);
+  var firstName = String(guestName || '').split(' ')[0] || 'there';
+  var msg = encodeURIComponent(
+    'Hi ' + firstName + ', just checking in — were you able to look over the details for your stay? ' +
+    'Happy to answer any questions you have. And if you\'ve decided to go a different way, no worries at all, ' +
+    'just let us know so we can keep things updated on our end. Thank you! 🙏'
+  );
+  return 'https://wa.me/' + num + '?text=' + msg;
+}
+
+// Writes a structured log entry into the Worker's processing_log table
+// (D1) via the logScriptEvent action — same table already used for
+// check-in error logging, viewable from D1 Admin / the D1 console at any
+// time rather than only from Apps Script's own Executions panel.
+// Best-effort: a logging failure should never break the calling
+// function, so this never throws.
+function logScriptEvent(source, eventType, note, refId) {
+  try {
+    var resp = callWorker('POST', 'logScriptEvent', {
+      source: source, eventType: eventType, note: note, refId: refId || null,
+    });
+    if (!resp || !resp.success) {
+      Logger.log('logScriptEvent: failed to write to D1, falling back to Logger only — ' + JSON.stringify(resp));
+    }
+  } catch(e) {
+    Logger.log('logScriptEvent error: ' + e.message);
+  }
 }

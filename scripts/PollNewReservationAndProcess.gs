@@ -32,6 +32,15 @@
 // ============================================================
 
 // ── CHANGELOG (newest first — this file is the source of truth for live) ────
+// v1.2  2026-07-12
+//   • Unified email log: sendAlert() now routes through the Worker's
+//     sendGuestEmail action (Resend + infra_alert_log) instead of
+//     GmailApp.sendEmail directly — every owner alert this file sends
+//     (booking imported, cancellation, review, errors) now lands in
+//     the same D1 log as the guest-facing check-in emails, instead of
+//     only being visible in this Gmail account's Sent folder. No
+//     change to Gmail reading/parsing or booking create/cancel/review
+//     logic — only sendAlert()'s internals changed.
 // v1.1  2026-07-05
 //   • pollAirbnbCancellations(): reads Airbnb "Canceled: Reservation <code>"
 //     emails and cancels the matching stay via the cancelByConfirmation
@@ -797,9 +806,25 @@ function callWorker(method, action, payload) {
   }
 }
 
+// Unified email log (2026-07-12): routes through the Worker's
+// sendGuestEmail action (Resend + infra_alert_log) instead of calling
+// GmailApp.sendEmail directly, so these owner-facing Airbnb alerts land
+// in the same D1 log as every other email instead of only being
+// visible in this Gmail account's Sent folder. Every pollAirbnbBookings
+// / pollAirbnbCancellations / pollAirbnbReviews call site is unchanged —
+// they all just call sendAlert(subject, body) as before; only this
+// function's internals changed. The actual Gmail-reading, parsing, and
+// booking create/cancel/review-save logic elsewhere in this file is
+// completely untouched.
 function sendAlert(subject, body) {
   try {
-    GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ' + subject, body);
+    var resp = callWorker('POST', 'sendGuestEmail', {
+      to: OWNER_EMAIL, subject: '[GVR Portal] ' + subject, body: body,
+      villaId: 'dwarka', category: 'owner_airbnb',
+    });
+    if (!resp || !resp.success) {
+      Logger.log('sendAlert (via Worker) failed: ' + JSON.stringify(resp));
+    }
   } catch(e) {
     Logger.log('sendAlert failed: ' + e.message);
   }

@@ -163,7 +163,7 @@ const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // DB/villaId are optional — when passed, every attempt (success or failure)
 // is logged to alert_log so you can check delivery without live Cloudflare
 // Logs access. Browse it via D1 Explorer like any other table.
-async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
+async function sendAlert(env, subject, lines, toEmail, DB, villaId, category) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
@@ -207,8 +207,8 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId) {
   }
   if (DB) {
     try {
-      await DB.prepare(`INSERT INTO infra_alert_log (log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at) VALUES (?,?,?,?,?,?,?,?)`)
-        .bind(genId('AL'), villaId || null, subject, recipient, ok ? 1 : 0, statusCode, detail ? detail.slice(0, 500) : null, new Date().toISOString().slice(0, 19).replace('T', ' '))
+      await DB.prepare(`INSERT INTO infra_alert_log (log_id, villa_id, subject, to_email, success, status_code, error_detail, category, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .bind(genId('AL'), villaId || null, subject, recipient, ok ? 1 : 0, statusCode, detail ? detail.slice(0, 500) : null, category || 'general', new Date().toISOString().slice(0, 19).replace('T', ' '))
         .run()
     } catch (e) { console.error('alert_log insert failed:', e?.message || e) }
   }
@@ -2324,7 +2324,7 @@ export async function onRequest(ctx) {
       if (action === 'getAlertLog') {
         const limit = Math.min(parseInt(url.searchParams.get('limit')) || 50, 200)
         const { results } = await DB.prepare(
-          `SELECT log_id, villa_id, subject, to_email, success, status_code, error_detail, created_at
+          `SELECT log_id, villa_id, subject, to_email, success, status_code, error_detail, category, created_at
            FROM infra_alert_log ORDER BY created_at DESC LIMIT ?`
         ).bind(limit).all()
         return json({ success: true, data: results })
@@ -3133,6 +3133,44 @@ export async function onRequest(ctx) {
           `[${source}] ${note}`,
         ).run()
         return json({ success: true })
+      }
+
+      // Send a guest- or owner-facing email via Resend, logged into the same
+      // infra_alert_log table as every other alert email (unified log — see
+      // scripts/migrate-unified-email-log.sql). Replaces GmailApp.sendEmail
+      // calls in GuestFormScript.gs / PollNewReservationAndProcess.gs so
+      // guest-facing email isn't a second, unlogged system anymore. Only
+      // reachable with SYSTEM_TOKEN auth (same as logScriptEvent above).
+      if (action === 'sendGuestEmail') {
+        const { to, subject, body: emailBody, villaId, category } = body
+        if (!to || !subject || !emailBody) return err('to, subject, and body required')
+        await sendAlert(env, subject, [emailBody], to, DB, villaId || null, category || 'guest_checkin')
+        return json({ success: true })
+      }
+
+      // Deletes infra_alert_log rows older than each tenant's configured
+      // retention window (platform_tenants.email_retention_days, default
+      // 90 — the "customer pays more for extended retention" knob). Rows
+      // with no villa_id (or an unrecognised one) fall back to a hardcoded
+      // 90-day default so nothing is retained forever by omission. Called
+      // once daily from the same script that runs the enquiry reminders.
+      if (action === 'cleanupOldEmailLogs') {
+        const tenants = await DB.prepare(`SELECT tenant_id, email_retention_days FROM platform_tenants`).all()
+        let deleted = 0
+        for (const t of (tenants.results || [])) {
+          const days = t.email_retention_days || 90
+          const res = await DB.prepare(
+            `DELETE FROM infra_alert_log WHERE villa_id = ? AND created_at < datetime('now', ?)`
+          ).bind(t.tenant_id, `-${days} days`).run()
+          deleted += res.meta?.changes || 0
+        }
+        // Rows with no villa_id at all — orphaned/legacy alerts — use the
+        // hardcoded 90-day fallback since there's no tenant to look up.
+        const orphanRes = await DB.prepare(
+          `DELETE FROM infra_alert_log WHERE villa_id IS NULL AND created_at < datetime('now', '-90 days')`
+        ).run()
+        deleted += orphanRes.meta?.changes || 0
+        return json({ success: true, data: { deleted } })
       }
 
       // Mark an enquiry Lost with a reason

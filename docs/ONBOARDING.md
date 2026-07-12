@@ -84,6 +84,10 @@ by frontend routing.
 5. Google: deploy the 3 Apps Script projects under host's Gmail; set
    `WORKER_URL`/`TENANT_ID` (2 lines, per `scripts/GuestFormScript.gs`'s
    own header) — everything else loads dynamically via `getTenantConfig`.
+   In the check-in **Form editor** (not the responses sheet — that setting
+   lives on the Form itself, not in any script), mark the ID/passport
+   upload question **Required** — easy to forget per-host, and without it
+   guests can submit check-in with no ID on file.
 6. Acceptance: run /infra TestRunner (full) + SchemaValidation → all green.
    A local dry run against `wrangler pages dev --local` before ever
    touching the real deployment is cheap insurance — see the Release 2.1

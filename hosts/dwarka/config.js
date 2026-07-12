@@ -22,7 +22,6 @@ export const CONFIG = {
   landingUrl: 'https://www.luxuryvillasofguruvayur.com',
 
   // Google integration
-  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbzpW7u02Ss_uUkd7539Ja2RrjzanBrIWIfC8b6Q9wCZa7X4xDLjWHnJiRmr7m9VE1DK/exec',
   driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
   ownerEmail:    'bijisukumar@gmail.com',
   // Owner WhatsApp — for guest change requests only (arrival message routes

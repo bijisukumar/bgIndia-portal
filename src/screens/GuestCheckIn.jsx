@@ -297,10 +297,12 @@ export default function GuestCheckIn() {
     if (!transport)        return 'Mode of transport is required'
     if (!isForeign && !idType)   return 'Please select your ID type'
     if (!isForeign && !idNumber) return 'Please enter your ID number'
+    if (!isForeign && !idPreview) return 'Please upload a photo or scan of your ID document'
     if (isForeign && !homeCountryAddr.trim()) return 'Permanent address in home country is required'
     if (isForeign && !country)   return 'Please select your country'
     if (isForeign && !passportNo)     return 'Passport number is required'
     if (isForeign && !passportExpiry) return 'Passport expiry date is required'
+    if (isForeign && !docsLater && !passportPreview) return 'Please upload your passport photo page'
     if (isForeign && !visaNo && !docsLater)   return 'Visa number is required (or check "I will submit later")'
     if (isForeign && !visaType && !docsLater) return 'Visa type is required'
     return null
@@ -613,7 +615,7 @@ export default function GuestCheckIn() {
                 idType==='Driving License' ? 'KA-0119XXXXXXXX' : 'Enter ID number'
               } />
           </Field>
-          <Field label="Upload ID document" hint="Photo or scan of front of your ID">
+          <Field label="Upload ID document" required hint="Photo or scan of front of your ID">
             <UploadBox label="Tap to upload ID" preview={idPreview}
               onClick={() => idRef.current?.click()}
               hint="Aadhaar / PAN / Licence — photo or PDF" />

@@ -581,6 +581,20 @@ export default function EnquiryDetail() {
 
           {/* Extra charge line items — e.g. Additional Guest, added on top of quote, not discounted */}
           <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border-dim)' }}>
+            {(e.nights || 0) > 0 && (() => {
+              const perNight = Math.round(((e.quote_amount || 0) - (e.discount_amount || 0)) / e.nights)
+              return (
+                <div style={{
+                  display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '10px',
+                  padding: '8px 10px', borderRadius: '8px', background: 'rgba(200,144,58,0.06)',
+                  border: '1px solid rgba(200,144,58,0.15)', fontSize: '0.72rem', color: 'var(--text-dim)',
+                }}>
+                  <span>Per night: <strong style={{ color: 'var(--gold)' }}>{fmt(perNight)}</strong></span>
+                  <span>25%: <strong style={{ color: 'var(--gold)' }}>{fmt(Math.round(perNight * 0.25))}</strong></span>
+                  <span>50%: <strong style={{ color: 'var(--gold)' }}>{fmt(Math.round(perNight * 0.5))}</strong></span>
+                </div>
+              )
+            })()}
             <div className="field" style={{ marginBottom: extraLines.length ? '8px' : 0 }}>
               <div className="field-label">Add extra charge</div>
               <select className="field-input" value="" onChange={e2 => {

@@ -1067,7 +1067,7 @@ export default function OwnerHome({ sections }) {
   return (
     <div className="screen">
       <div style={styles.header}>
-        <img src="/icons/logo-black.png" alt="GE" style={styles.logo}
+        <img src="/icons/logo-emblem.png" alt="GE" style={styles.logo}
           onError={e => e.target.style.display = 'none'} />
         <div style={styles.headerText}>
           <div style={styles.brandName}>{CONFIG.brandName}</div>

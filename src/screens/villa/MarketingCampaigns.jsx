@@ -23,7 +23,7 @@ function QRCode({ value, size = 160 }) {
 
 // ── Flyer component (printable / canvas-exportable) ───────────
 const VILLA_IMG_BASE = 'https://www.luxuryvillasofguruvayur.com/images'
-const LOGO_URL = 'https://manage.luxuryvillasofguruvayur.com/icons/logo-dark.png'
+const LOGO_URL = 'https://manage.luxuryvillasofguruvayur.com/icons/logo-dark-emblem.png'
 
 function VillaFlyer({ campaign, flyerRef }) {
   const trackUrl = `${LANDING}?ref=${campaign.unique_token}`

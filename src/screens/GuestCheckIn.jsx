@@ -21,7 +21,7 @@ function LogoImg() {
   )
   return (
     <img
-      src="/icons/logo-black.png"
+      src="/icons/logo-emblem.png"
       alt={CONFIG.brandName}
       onError={() => setFailed(true)}
       style={{ width:'56px', height:'56px', borderRadius:'12px', objectFit:'cover',

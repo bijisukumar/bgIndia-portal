@@ -42,16 +42,10 @@ export default function Login() {
         {/* Logo */}
         <div style={styles.logoWrap}>
           <img
-            src="/icons/logo.png?v=3"
+            src="/icons/logo-emblem.png?v=5"
             alt={CONFIG.brandName}
             style={styles.logo}
-            onError={e => {
-              console.error("Logo failed to load at path:", e.target.src);
-              // Fallback to secondary asset if primary logo.png fails
-              if (!e.target.src.includes('bg-logo.png')) {
-                e.target.src = '/icons/bg-logo.png?v=3';
-              }
-            }}
+            onError={e => console.error("Logo failed to load at path:", e.target.src)}
           />
         </div>
 

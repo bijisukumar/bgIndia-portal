@@ -4558,6 +4558,20 @@ export async function onRequest(ctx) {
         if ((tgt.gross || 0) > 0 || (tgt.net || 0) > 0) {
           return err('Target already has financials — refusing to overwrite. Clear one side first to avoid double counting.')
         }
+        // Move (not delete) the source's ledger line items to the target —
+        // the detailed P&L card joins on stayvibe_booking_line_items
+        // separately from the stay's own gross/net columns, so dropping
+        // these here would silently undercount the transferred amount
+        // there even though the simple month-by-month dashboard (which
+        // reads gross/net directly off the stay row) looked correct.
+        const { results: srcLineItems } = await DB.prepare(
+          `SELECT item_type, direction, gross_amount, tax_amount, note FROM stayvibe_booking_line_items WHERE stay_id = ?`
+        ).bind(sourceStayId).all()
+        const lineItemStmts = (srcLineItems || []).map(li => DB.prepare(`
+          INSERT INTO stayvibe_booking_line_items (line_id, stay_id, villa_id, item_type, direction, gross_amount, tax_amount, note, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        `).bind(`${targetStayId}:${li.item_type}`, targetStayId, tgt.villa_id, li.item_type, li.direction, li.gross_amount, li.tax_amount,
+          `${li.note || ''} | moved from duplicate ${sourceStayId}`.trim()))
         await DB.batch([
           DB.prepare(`UPDATE stayvibe_stays SET
               source = ?, airbnb_conf = COALESCE(?, airbnb_conf),
@@ -4578,6 +4592,7 @@ export async function onRequest(ctx) {
               notes = TRIM(COALESCE(notes,'') || ' | Voided as duplicate — financials moved to ' || ?),
               updated_by = ?, updated_at = datetime('now')
             WHERE stay_id = ?`).bind(targetStayId, actor, sourceStayId),
+          ...lineItemStmts,
           DB.prepare(`DELETE FROM stayvibe_booking_line_items WHERE stay_id = ?`).bind(sourceStayId),
           DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'merge', ?, ?, datetime('now'))`)
             .bind(genId('LOG'), targetStayId,

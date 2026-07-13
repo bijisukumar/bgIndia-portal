@@ -391,6 +391,24 @@ export default function CompleteBooking() {
     setAbsorbBusy(false)
   }
 
+  // Nest an agent/booker's own placeholder stay under the real guest's stay
+  // in the list — same exact-name-match rule as the villa dashboard's
+  // BOOKINGS BY MONTH view, so the same duplicate isn't listed twice here.
+  const linkedByParent = {}
+  const absorbedIds = new Set()
+  stays.forEach(bookerStay => {
+    const bn = (bookerStay.booked_by_name || '').trim()
+    if (!bn) return
+    const agentStay = stays.find(a => a.stay_id !== bookerStay.stay_id && (a.guest_name||'').trim().toLowerCase() === bn.toLowerCase())
+    if (agentStay && !absorbedIds.has(agentStay.stay_id)) {
+      absorbedIds.add(agentStay.stay_id)
+      if (!linkedByParent[bookerStay.stay_id]) linkedByParent[bookerStay.stay_id] = []
+      linkedByParent[bookerStay.stay_id].push(agentStay)
+    }
+  })
+  // In merge mode both stays must stay selectable/tickable as top-level rows.
+  const visibleStays = mergeMode ? stays : stays.filter(s => !absorbedIds.has(s.stay_id))
+
   const s = selected
   const meta = s ? (STATUS_META[s.status] || STATUS_META.booked) : null
   const days = s ? daysFromNow(s.checkin_date) : null
@@ -450,57 +468,84 @@ export default function CompleteBooking() {
               </div>
             )}
             <div style={{background:'var(--dark-card)',borderRadius:'12px',border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'14px'}}>
-              {stays.map((stay, i) => {
+              {visibleStays.map((stay, i) => {
                 const m   = STATUS_META[stay.status] || STATUS_META.booked
                 const d   = daysFromNow(stay.checkin_date)
                 const sel = selected?.stay_id === stay.stay_id
                 const checked = mergeChecked.includes(stay.stay_id)
+                const linked = mergeMode ? [] : (linkedByParent[stay.stay_id] || [])
+                const isLast = i === visibleStays.length - 1 && linked.length === 0
                 return (
-                  <div key={stay.stay_id}
-                    onClick={() => mergeMode ? toggleMergeCheck(stay.stay_id) : selectStay(stay)}
-                    style={{
-                      padding:'12px 16px', cursor:'pointer',
-                      borderBottom: i < stays.length-1 ? '1px solid var(--border-dim)' : 'none',
-                      background: mergeMode ? (checked ? 'rgba(133,183,235,0.1)' : 'transparent')
-                        : (sel ? 'rgba(200,144,58,0.07)' : 'transparent'),
-                      display:'flex', justifyContent:'space-between', alignItems:'center',
-                    }}>
-                    {mergeMode && (
-                      <input type="checkbox" checked={checked} readOnly
-                        style={{marginRight:'10px', width:'16px', height:'16px', accentColor:'#85B7EB', flexShrink:0}} />
-                    )}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'3px'}}>
-                        {!mergeMode && sel && <span style={{color:'var(--gold)'}}>✓</span>}
-                        <span style={{fontWeight:'600',fontSize:'0.9rem',
-                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                          {stay.guest_name}
-                        </span>
-                        <span style={{fontSize:'0.6rem',fontWeight:'700',padding:'1px 7px',
-                          borderRadius:'9px',flexShrink:0, ...channelPillStyle(stay.source)}}>
-                          {channelLabel(stay.source)}
-                        </span>
-                        {stay.booked_by_name && (
-                          <span style={{fontSize:'0.65rem',color:'#85B7EB',flexShrink:0}}>
-                            🔗 booked by {stay.booked_by_name}
+                  <div key={stay.stay_id}>
+                    <div
+                      onClick={() => mergeMode ? toggleMergeCheck(stay.stay_id) : selectStay(stay)}
+                      style={{
+                        padding:'12px 16px', cursor:'pointer',
+                        borderBottom: isLast ? 'none' : '1px solid var(--border-dim)',
+                        background: mergeMode ? (checked ? 'rgba(133,183,235,0.1)' : 'transparent')
+                          : (sel ? 'rgba(200,144,58,0.07)' : 'transparent'),
+                        display:'flex', justifyContent:'space-between', alignItems:'center',
+                      }}>
+                      {mergeMode && (
+                        <input type="checkbox" checked={checked} readOnly
+                          style={{marginRight:'10px', width:'16px', height:'16px', accentColor:'#85B7EB', flexShrink:0}} />
+                      )}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'3px'}}>
+                          {!mergeMode && sel && <span style={{color:'var(--gold)'}}>✓</span>}
+                          <span style={{fontWeight:'600',fontSize:'0.9rem',
+                            overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            {stay.guest_name}
                           </span>
-                        )}
-                      </div>
-                      <div style={{fontSize:'0.73rem',color:'var(--text-dim)'}}>
-                        {fmtDate(stay.checkin_date)} → {fmtDate(stay.checkout_date)}
-                        {d !== null && (
-                          <span style={{marginLeft:'8px',color: d<0?'#e74c3c':d<=2?'#e67e22':'var(--text-dim)'}}>
-                            {d<0?`${Math.abs(d)}d ago`:`in ${d}d`}
+                          <span style={{fontSize:'0.6rem',fontWeight:'700',padding:'1px 7px',
+                            borderRadius:'9px',flexShrink:0, ...channelPillStyle(stay.source)}}>
+                            {channelLabel(stay.source)}
                           </span>
-                        )}
+                          {stay.booked_by_name && (
+                            <span style={{fontSize:'0.65rem',color:'#85B7EB',flexShrink:0}}>
+                              🔗 booked by {stay.booked_by_name}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{fontSize:'0.73rem',color:'var(--text-dim)'}}>
+                          {fmtDate(stay.checkin_date)} → {fmtDate(stay.checkout_date)}
+                          {d !== null && (
+                            <span style={{marginLeft:'8px',color: d<0?'#e74c3c':d<=2?'#e67e22':'var(--text-dim)'}}>
+                              {d<0?`${Math.abs(d)}d ago`:`in ${d}d`}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      <span style={{
+                        fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',
+                        background:m.bg, color:m.color, flexShrink:0, marginLeft:'8px',
+                      }}>
+                        {m.label}
+                      </span>
                     </div>
-                    <span style={{
-                      fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',
-                      background:m.bg, color:m.color, flexShrink:0, marginLeft:'8px',
-                    }}>
-                      {m.label}
-                    </span>
+                    {linked.map((agentStay, j) => {
+                      const am = STATUS_META[agentStay.status] || STATUS_META.booked
+                      const hasMoney = (agentStay.gross || 0) > 0 || (agentStay.net || 0) > 0
+                      return (
+                        <div key={agentStay.stay_id} onClick={() => selectStay(agentStay)}
+                          style={{ padding:'8px 16px 10px 34px', cursor:'pointer',
+                            borderBottom: (i === visibleStays.length-1 && j === linked.length-1) ? 'none' : '1px solid var(--border-dim)',
+                            background: selected?.stay_id === agentStay.stay_id ? 'rgba(200,144,58,0.07)' : 'rgba(133,183,235,0.04)',
+                            display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <span style={{fontSize:'0.78rem',color:'var(--text-dim)'}}>
+                              ↳ {agentStay.guest_name} <span style={{opacity:0.7}}>
+                                {hasMoney ? '(booked this stay — has the financials, not yet moved)' : '(booked this stay)'}
+                              </span>
+                            </span>
+                          </div>
+                          <span style={{fontSize:'0.65rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',
+                            background:am.bg, color:am.color, flexShrink:0, marginLeft:'8px'}}>
+                            {am.label}
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}

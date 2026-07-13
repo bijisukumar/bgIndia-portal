@@ -145,13 +145,43 @@ export default function EnquiryTracker() {
   const [nudging, setNudging] = useState(null)   // enquiry_id currently being nudged, for a brief disabled state
   const [archiveOpen, setArchiveOpen] = useState(false)
 
+  // Enquiries that likely already turned into a real stay without going
+  // through this enquiry's own Confirm flow (e.g. guest gave a shorter name
+  // at enquiry time, fuller name at check-in). Human-reviewed: the owner
+  // eyeballs each one and either links it or dismisses it for this session.
+  const [matches, setMatches] = useState([])
+  const [dismissedMatches, setDismissedMatches] = useState(() => new Set())
+  const [linkingMatch, setLinkingMatch] = useState(null)
+
   useEffect(() => {
     let cancelled = false
     api.getEnquiries(DEFAULT_VILLA_ID).then(rows => {
       if (!cancelled && Array.isArray(rows)) setEnquiries(rows)
     }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false) })
+    api.getEnquiryMatchCandidates(DEFAULT_VILLA_ID).then(rows => {
+      if (!cancelled && Array.isArray(rows)) setMatches(rows)
+    }).catch(() => {})
     return () => { cancelled = true }
   }, [])
+
+  const visibleMatches = matches.filter(m => !dismissedMatches.has(`${m.enquiryId}:${m.stayId}`))
+
+  async function handleLinkMatch(m) {
+    setLinkingMatch(m.enquiryId)
+    try {
+      await api.linkEnquiryToExistingStay({ enquiryId: m.enquiryId, stayId: m.stayId })
+      setMatches(prev => prev.filter(x => x.enquiryId !== m.enquiryId))
+      setEnquiries(prev => prev.map(e => e.enquiry_id === m.enquiryId ? { ...e, status: 'confirmed', booking_confirmed: 1 } : e))
+    } catch (err) {
+      alert(err.message || 'Could not link — try again.')
+    } finally {
+      setLinkingMatch(null)
+    }
+  }
+
+  function handleDismissMatch(m) {
+    setDismissedMatches(prev => new Set(prev).add(`${m.enquiryId}:${m.stayId}`))
+  }
 
   async function handleNudge(e, enq) {
     e.stopPropagation()   // don't trigger the card's own onClick (navigate to detail)
@@ -223,6 +253,33 @@ export default function EnquiryTracker() {
             📊 Conversion Dashboard
           </button>
         </div>
+
+        {visibleMatches.length > 0 && (
+          <div style={{ marginBottom: '14px' }}>
+            <div className="card-section-label" style={{ color: 'var(--gold)' }}>🔗 POSSIBLE MATCHES — SAME GUEST?</div>
+            {visibleMatches.map(m => (
+              <div key={`${m.enquiryId}:${m.stayId}`} className="card" style={{ marginBottom: '10px', padding: '14px' }}>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text)', marginBottom: '4px' }}>
+                  Enquiry <strong>{m.enquiryGuestName}</strong> ({SOURCES.find(s => s.id === m.enquirySource)?.label || m.enquirySource}) vs.
+                  stay <strong>{m.stayGuestName}</strong> ({m.stayChannel || 'direct'}, {m.stayStatus})
+                </div>
+                <div style={{ color: '#5C7080', fontSize: '0.72rem', marginBottom: '10px' }}>
+                  Same dates: {fmtDate(m.checkinDate)} → {fmtDate(m.checkoutDate)}
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => handleLinkMatch(m)} disabled={linkingMatch === m.enquiryId}
+                    style={{ flex: 1, background: 'rgba(52,168,83,0.12)', border: '1px solid rgba(52,168,83,0.35)', borderRadius: '8px', color: '#34A853', fontWeight: '700', fontSize: '0.75rem', padding: '8px', cursor: linkingMatch === m.enquiryId ? 'default' : 'pointer', opacity: linkingMatch === m.enquiryId ? 0.6 : 1 }}>
+                    {linkingMatch === m.enquiryId ? 'Linking…' : '✓ Same guest — link'}
+                  </button>
+                  <button onClick={() => handleDismissMatch(m)}
+                    style={{ flex: 1, background: 'transparent', border: '1px solid var(--border-dim)', borderRadius: '8px', color: '#5C7080', fontWeight: '600', fontSize: '0.75rem', padding: '8px', cursor: 'pointer' }}>
+                    Not a match
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <input className="field-input" placeholder="Search by name, phone, or email…"
           value={search} onChange={e => setSearch(e.target.value)}

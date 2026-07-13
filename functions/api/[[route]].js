@@ -3340,6 +3340,53 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, linked: true } })
       }
 
+      // Surfaces open enquiries that likely already turned into a real stay
+      // without ever going through this enquiry's own "Confirm" flow — e.g.
+      // guest gave just a first name at enquiry time ("Karthikeyan") then a
+      // fuller name at check-in ("Karthikeyan Dhanasekaran"). Deliberately a
+      // human-reviewed to-do list, not an auto-link: matching is by exact
+      // check-in+check-out dates (a strong signal) plus a loose name-word
+      // overlap (a weak signal on its own), same-villa, any channel. The
+      // owner eyeballs each candidate and clicks through to confirm or
+      // dismiss — nothing is merged automatically.
+      if (action === 'getEnquiryMatchCandidates') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results: openEnquiries } = await DB.prepare(
+          `SELECT enquiry_id, guest_name, checkin_date, checkout_date, source, status
+           FROM stayvibe_enquiries WHERE villa_id = ? AND status NOT IN ('confirmed','lost','cancelled')`
+        ).bind(villaId).all()
+        if (!openEnquiries.length) return json({ success: true, data: [] })
+
+        const { results: candidateStays } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, source, status
+           FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void')`
+        ).bind(villaId).all()
+
+        const nameWords = n => (n || '').toLowerCase().trim().split(/\s+/).filter(Boolean)
+        const namesOverlap = (a, b) => {
+          const wa = nameWords(a), wb = nameWords(b)
+          if (!wa.length || !wb.length) return false
+          const [shorter, longer] = wa.length <= wb.length ? [wa, wb] : [wb, wa]
+          return shorter.every(w => longer.includes(w))
+        }
+
+        const candidates = []
+        for (const enq of openEnquiries) {
+          if (!enq.checkin_date || !enq.checkout_date) continue
+          for (const stay of candidateStays) {
+            if (stay.checkin_date !== enq.checkin_date || stay.checkout_date !== enq.checkout_date) continue
+            if (!namesOverlap(enq.guest_name, stay.guest_name)) continue
+            candidates.push({
+              enquiryId: enq.enquiry_id, enquiryGuestName: enq.guest_name, enquirySource: enq.source, enquiryStatus: enq.status,
+              stayId: stay.stay_id, stayGuestName: stay.guest_name, stayChannel: stay.source, stayStatus: stay.status,
+              checkinDate: enq.checkin_date, checkoutDate: enq.checkout_date,
+            })
+          }
+        }
+        return json({ success: true, data: candidates })
+      }
+
       // ── RESOLVE / VOID A STAY (soft — default) ───────────────────────
       // Marks a stay void/cancelled, keeps the row (excluded from active
       // views), logs a tombstone, and reverses an UNPAID commission. A PAID

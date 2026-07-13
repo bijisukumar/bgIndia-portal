@@ -292,6 +292,22 @@ CREATE TABLE IF NOT EXISTS stayvibe_checkin_links (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Self-serve quote links for travel agents / sales partners (stayvibe only).
+-- Same shape as stayvibe_checkin_links (a per-partner token gating access
+-- without a full account) but for the public quote calculator at
+-- /quote/:token instead of the guest check-in form.
+CREATE TABLE IF NOT EXISTS stayvibe_agent_links (
+  token        TEXT PRIMARY KEY,
+  villa_id     TEXT NOT NULL DEFAULT 'dwarka',
+  agent_name   TEXT NOT NULL,
+  discount_pct INTEGER DEFAULT 0,
+  is_active    INTEGER DEFAULT 1,
+  use_count    INTEGER DEFAULT 0,
+  created_by   TEXT DEFAULT 'owner',
+  created_at   TEXT DEFAULT (datetime('now')),
+  updated_at   TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS stayvibe_duplicate_bookings (
   dup_id              TEXT PRIMARY KEY,
   villa_id            TEXT NOT NULL DEFAULT 'dwarka',

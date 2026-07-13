@@ -25,6 +25,12 @@ const HOSPITALITY = {
       path: '/owner/marketing',
     },
     {
+      id: 'agentlinks', icon: '🤝', bg: 'rgba(52,168,83,0.08)', arrow: '#34A853',
+      title: 'Agent quote links',
+      sub: 'Self-serve quotes for travel agents & sales partners',
+      path: '/owner/villa/agent-links',
+    },
+    {
       id: 'rental', icon: '🏢', bg: 'rgba(24,95,165,0.08)', arrow: '#185FA5',
       title: 'Passive rental income',
       sub: 'Monthly tracker · Dashboard · Renewal alerts',

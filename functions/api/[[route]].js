@@ -937,6 +937,69 @@ export async function onRequest(ctx) {
     return json({ success: true, data: { villaId: link.villa_id, partner: link.partner, label: link.label } })
   }
 
+  // Self-serve quote for travel agents / sales partners (stayvibe only).
+  // PUBLIC by design (same pre-auth-guard placement as resolveCheckinLink)
+  // so an agent's link works without a real login — but deliberately
+  // returns only the COMPUTED quote for the agent's specific query, never
+  // the raw rate card, so a leaked link can't be used to scrape the full
+  // pricing table.
+  if (action === 'getAgentQuote' && method === 'POST') {
+    const qBody = await request.json().catch(() => ({}))
+    const { token: agentToken, checkinDate: qCheckin, checkoutDate: qCheckout, adults: qAdults, children: qChildren } = qBody
+    if (!agentToken) return err('token required')
+    const link = await DB.prepare(
+      `SELECT token, villa_id, agent_name, discount_pct, is_active FROM stayvibe_agent_links WHERE token = ?`
+    ).bind(agentToken).first()
+    if (!link) return json({ success: false, error: 'Invalid link' }, 404)
+    if (!link.is_active) return json({ success: false, error: 'Link deactivated' }, 403)
+
+    const ci = qCheckin ? new Date(qCheckin) : null
+    const co = qCheckout ? new Date(qCheckout) : null
+    if (!ci || !co || isNaN(ci) || isNaN(co) || co <= ci) return err('Valid checkinDate/checkoutDate required')
+    const nights = Math.round((co - ci) / 86400000)
+
+    const adults = Math.max(0, parseInt(qAdults) || 0)
+    const children = Math.max(0, parseInt(qChildren) || 0)
+    const billableGuests = adults + children
+
+    const { results: rateCardRows } = await DB.prepare(
+      `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+    ).bind(link.villa_id).all()
+    const rateCard = (rateCardRows || []).map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night }))
+
+    const OVERFLOW_PER_GUEST_PER_NIGHT = 750, OVERFLOW_MAX_RECOMMENDED = 4
+    const VILLA_BEDROOMS = { dwarka: 4 }
+    let tariffPerNight = 0, overflowGuests = 0, withinRecommended = true
+    if (rateCard.length && billableGuests > 0) {
+      const maxRow = rateCard[rateCard.length - 1]
+      const exact = rateCard.find(r => r.guests === billableGuests)
+      if (exact) {
+        tariffPerNight = exact.tariff
+      } else if (billableGuests < rateCard[0].guests) {
+        tariffPerNight = rateCard[0].tariff
+      } else {
+        overflowGuests = billableGuests - maxRow.guests
+        tariffPerNight = maxRow.tariff + overflowGuests * OVERFLOW_PER_GUEST_PER_NIGHT
+        withinRecommended = overflowGuests <= OVERFLOW_MAX_RECOMMENDED
+      }
+    }
+    const bedroomEstimate = billableGuests > 0
+      ? Math.min(VILLA_BEDROOMS[link.villa_id] || 4, Math.ceil(billableGuests / 2))
+      : (VILLA_BEDROOMS[link.villa_id] || 4)
+
+    const subtotal = tariffPerNight * nights
+    const discountPct = link.discount_pct || 0
+    const total = Math.round(subtotal * (1 - discountPct / 100))
+
+    await DB.prepare(`UPDATE stayvibe_agent_links SET use_count = use_count + 1, updated_at = ? WHERE token = ?`).bind(new Date().toISOString().slice(0, 19).replace('T', ' '), agentToken).run()
+
+    return json({ success: true, data: {
+      agentName: link.agent_name, nights, billableGuests, bedroomEstimate,
+      tariffPerNight, subtotal, discountPct, total,
+      overflowGuests, withinRecommended,
+    } })
+  }
+
   // ── AUTH GUARD — verify JWT on every other request ─────
   const authHeader = request.headers.get('Authorization') || ''
   const token      = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
@@ -2565,6 +2628,44 @@ export async function onRequest(ctx) {
       if (action === 'getCheckinLinks') {
         const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM stayvibe_checkin_links ORDER BY villa_id, partner`).all()
         return json({ success: true, data: results })
+      }
+
+      // ── AGENT QUOTE LINKS (stayvibe only) ─────────────────────────────
+      // Each approved travel agent / sales partner gets their own token —
+      // same shape as the guest check-in links above — that opens a
+      // self-serve quote calculator (see the public getAgentQuote action)
+      // without needing a real account. Owner-managed: create, list, toggle.
+      if (action === 'getAgentLinks') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results } = await DB.prepare(
+          `SELECT token, villa_id, agent_name, discount_pct, is_active, use_count, created_at FROM stayvibe_agent_links WHERE villa_id = ? ORDER BY created_at DESC`
+        ).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
+      if (action === 'createAgentLink') {
+        const { agentName, discountPct, villaId } = body
+        if (!agentName?.trim()) return err('agentName required')
+        const vId = villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const slug = agentName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20)
+        const agentToken = `${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+        const pct = Math.max(0, Math.min(100, parseInt(discountPct) || 0))
+        await DB.prepare(
+          `INSERT INTO stayvibe_agent_links (token, villa_id, agent_name, discount_pct, created_by) VALUES (?, ?, ?, ?, ?)`
+        ).bind(agentToken, vId, agentName.trim(), pct, actor).run()
+        return json({ success: true, data: { token: agentToken, agentName: agentName.trim(), discountPct: pct } })
+      }
+
+      if (action === 'toggleAgentLink') {
+        const { token: agentToken } = body
+        if (!agentToken) return err('token required')
+        const link = await DB.prepare(`SELECT villa_id FROM stayvibe_agent_links WHERE token = ?`).bind(agentToken).first()
+        if (!link) return err('Link not found', 404)
+        assertPropertyAccess(payload, link.villa_id)
+        await DB.prepare(`UPDATE stayvibe_agent_links SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_at = ? WHERE token = ?`).bind(now(), agentToken).run()
+        return json({ success: true })
       }
 
 

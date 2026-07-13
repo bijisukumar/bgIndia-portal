@@ -18,6 +18,7 @@ import VillaDashboard    from '../../screens/villa/VillaDashboard'
 import NewBooking        from '../../screens/villa/NewBooking'
 import GuestRepository      from '../../screens/villa/GuestRepository'
 import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
+import AgentLinks           from '../../screens/villa/AgentLinks'
 import Inventory         from '../../screens/villa/Inventory'
 import PreferredStock    from '../../screens/villa/PreferredStock'
 import VillaExpenses     from '../../screens/villa/VillaExpenses'
@@ -122,6 +123,7 @@ function ProtectedRoutes() {
         <Route path="/owner/maintenance"      element={<Maintenance />} />
         <Route path="/owner/maintenance/schema" element={<SchemaValidation />} />
         <Route path="/owner/marketing"            element={<MarketingCampaigns />} />
+        <Route path="/owner/villa/agent-links"    element={<AgentLinks />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
       </>}
 

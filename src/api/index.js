@@ -93,6 +93,12 @@ export const api = {
   createCheckinLink:  (data)   => post('createCheckinLink', data),
   toggleCheckinLink:  (data)   => post('toggleCheckinLink', data),
 
+  // ── AGENT QUOTE LINKS (stayvibe only) ───────────────────────
+  getAgentLinks:   (vId)  => get('getAgentLinks', { villaId: vId }),
+  createAgentLink: (data) => post('createAgentLink', data),
+  toggleAgentLink: (data) => post('toggleAgentLink', data),
+  getAgentQuote:   (data) => post('getAgentQuote', data),
+
   // ── GUEST CHECK-IN FORM (public) ───────────────────────────
   submitGuestCheckIn:       (data)   => post('submitGuestCheckIn', data),
 

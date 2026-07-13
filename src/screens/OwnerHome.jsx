@@ -1064,6 +1064,15 @@ export default function OwnerHome({ sections }) {
   const people       = filterSection(PEOPLE, sections)
   const estates      = filterSection(ESTATES, sections)
 
+  // The alert blocks below (duplicate bookings, review chase, check-in
+  // links, channel mix, occupancy gaps, etc.) are all villa-guest-booking
+  // concepts — they only make sense for apps that actually have the
+  // 'villa' section (manage.* with no allow-list, and stayvibe.*).
+  // estate360.* (agriculture) and any future rental-only app previously
+  // saw these unconditionally since only the menu tiles below were ever
+  // scoped by `sections`.
+  const showVillaBlocks = !sections || sections.includes('villa')
+
   return (
     <div className="screen">
       <div style={styles.header}>
@@ -1079,40 +1088,42 @@ export default function OwnerHome({ sections }) {
       </div>
 
       <div className="screen-body">
-        {/* Needs Attention — urgent items at top of page */}
-        <NeedsAttentionBlock refreshKey={pendingRefreshKey} />
+        {showVillaBlocks && <>
+          {/* Needs Attention — urgent items at top of page */}
+          <NeedsAttentionBlock refreshKey={pendingRefreshKey} />
 
-        {/* Duplicate Bookings — channel sync health check */}
-        <DuplicateBookingsBlock />
+          {/* Duplicate Bookings — channel sync health check */}
+          <DuplicateBookingsBlock />
 
-        {/* Pending Review — provisional bookings awaiting approval */}
-        <PendingReviewBlock onApproved={() => setPendingRefreshKey(k => k + 1)} />
+          {/* Pending Review — provisional bookings awaiting approval */}
+          <PendingReviewBlock onApproved={() => setPendingRefreshKey(k => k + 1)} />
 
-        {/* Review Chase — past-checkout stays with no review yet */}
-        <ReviewChaseBlock />
+          {/* Review Chase — past-checkout stays with no review yet */}
+          <ReviewChaseBlock />
 
-        {/* Manual Trigger — DISABLED: this block fetched a Google Sheet CSV
-            export directly from the browser for manual onboarding fallback.
-            That sheet is no longer publicly shared (now redirects to a Google
-            login page), so every page load threw a CORS error + "Failed to
-            fetch" into the console. Google Sheets isn't part of the workflow
-            anymore (replaced by the Enquiry/CRM flow), so disabling the
-            render rather than fixing the broken link. The function itself
-            (ManualTriggerBlock, below) is left intact in case this is ever
-            revisited — just not rendered. */}
-        {/* <ManualTriggerBlock /> */}
+          {/* Manual Trigger — DISABLED: this block fetched a Google Sheet CSV
+              export directly from the browser for manual onboarding fallback.
+              That sheet is no longer publicly shared (now redirects to a Google
+              login page), so every page load threw a CORS error + "Failed to
+              fetch" into the console. Google Sheets isn't part of the workflow
+              anymore (replaced by the Enquiry/CRM flow), so disabling the
+              render rather than fixing the broken link. The function itself
+              (ManualTriggerBlock, below) is left intact in case this is ever
+              revisited — just not rendered. */}
+          {/* <ManualTriggerBlock /> */}
 
-        {/* Check-in Links — always visible for owner */}
-        <CheckinLinksBlock />
+          {/* Check-in Links — always visible for owner */}
+          <CheckinLinksBlock />
 
-        {/* Your last 48 hrs — recent bookings + cancellations, ack with OK */}
-        <Last48Block />
+          {/* Your last 48 hrs — recent bookings + cancellations, ack with OK */}
+          <Last48Block />
 
-        {/* Channel mix — commission cost this month, direct-booking savings hint */}
-        <ChannelMixBlock />
+          {/* Channel mix — commission cost this month, direct-booking savings hint */}
+          <ChannelMixBlock />
 
-        {/* Occupancy gaps — unbooked 2+ night stretches in the next 60 days */}
-        <GapAlertBlock />
+          {/* Occupancy gaps — unbooked 2+ night stretches in the next 60 days */}
+          <GapAlertBlock />
+        </>}
 
         {hospitality.rows.length > 0 && <MenuSection section={hospitality} />}
         {people.rows.length > 0 && <MenuSection section={people} />}

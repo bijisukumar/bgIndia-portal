@@ -35,7 +35,7 @@ function ProtectedRoutes() {
   return (
     <Routes>
       {role === 'owner' && <>
-        <Route path="/"                       element={<OwnerHome />} />
+        <Route path="/"                       element={<OwnerHome sections={['pollachi', 'pavutumuri']} />} />
         <Route path="/owner/pollachi"         element={<PollachiHub />} />
         <Route path="/pollachi/coconut"       element={<CoconutTracker />} />
         <Route path="/pollachi/dashboard"     element={<CoconutDashboard />} />

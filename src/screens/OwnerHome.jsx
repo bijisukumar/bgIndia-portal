@@ -78,6 +78,17 @@ const ESTATES = {
 // ── SHEET ID for Registration Responses ──────────────────────────────────
 const REG_SHEET_ID = '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0'
 
+// Filters a section's rows down to only the given row ids. No allow-list
+// (manage.* — the master aggregate view) means show everything, unchanged.
+// Used so each SaaS-facing app only shows tiles that route somewhere real
+// in that app — previously Estates/Rental (Hospitality+People rows too,
+// in estate360's case) were dead links there, silently redirect-looping
+// back to "/" since those apps have no matching route at all.
+function filterSection(section, allowed) {
+  if (!allowed) return section
+  return { ...section, rows: section.rows.filter(r => allowed.includes(r.id)) }
+}
+
 function MenuSection({ section }) {
   const navigate = useNavigate()
   return (
@@ -1040,7 +1051,7 @@ function GapAlertBlock() {
   )
 }
 
-export default function OwnerHome() {
+export default function OwnerHome({ sections }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   // Bumped whenever PendingReviewBlock approves a guest, so
@@ -1048,6 +1059,10 @@ export default function OwnerHome() {
   // getPendingReviewStays endpoint) re-fetches instead of staying stale
   // until a manual page reload.
   const [pendingRefreshKey, setPendingRefreshKey] = useState(0)
+
+  const hospitality = filterSection(HOSPITALITY, sections)
+  const people       = filterSection(PEOPLE, sections)
+  const estates      = filterSection(ESTATES, sections)
 
   return (
     <div className="screen">
@@ -1099,9 +1114,9 @@ export default function OwnerHome() {
         {/* Occupancy gaps — unbooked 2+ night stretches in the next 60 days */}
         <GapAlertBlock />
 
-        <MenuSection section={HOSPITALITY} />
-        <MenuSection section={PEOPLE} />
-        <MenuSection section={ESTATES} />
+        {hospitality.rows.length > 0 && <MenuSection section={hospitality} />}
+        {people.rows.length > 0 && <MenuSection section={people} />}
+        {estates.rows.length > 0 && <MenuSection section={estates} />}
 
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
           <button className="logout-btn" style={{ flex: 1 }} onClick={logout}>Log out</button>

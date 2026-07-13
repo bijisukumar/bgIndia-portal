@@ -55,7 +55,7 @@ function ProtectedRoutes() {
     <Routes>
       {/* ── OWNER ── */}
       {(role === 'owner' || role === 'master_owner') && <>
-        <Route path="/"                       element={<OwnerHome />} />
+        <Route path="/"                       element={<OwnerHome sections={['villa', 'marketing', 'guests', 'dbadmin', 'rdashboard']} />} />
         <Route path="/owner/villa"            element={<VillaHub />} />
         <Route path="/owner/villa/booking"    element={<NewBooking />} />
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />

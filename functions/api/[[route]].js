@@ -1198,9 +1198,14 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const year    = url.searchParams.get('year') || new Date().getFullYear()
-        const { results: stays } = await DB.prepare(
-          `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
-        ).bind(villaId, `${year}%`).all()
+        const isAllYears = year === 'all'
+        const { results: stays } = isAllYears
+          ? await DB.prepare(
+              `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void')`
+            ).bind(villaId).all()
+          : await DB.prepare(
+              `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
+            ).bind(villaId, `${year}%`).all()
 
         // Robust per-stay figures. Many rows (especially Airbnb-imported) have
         // an empty nights/gross column — which made nights show 0 and net
@@ -1230,10 +1235,15 @@ export async function onRequest(ctx) {
 
         let kitchenByMonth = {}
         try {
-          const { results: kitchenRows } = await DB.prepare(
-            `SELECT strftime('%m', created_at) as month, SUM(total) as total
-             FROM stayvibe_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
-          ).bind(String(year)).all()
+          const { results: kitchenRows } = isAllYears
+            ? await DB.prepare(
+                `SELECT strftime('%m', created_at) as month, SUM(total) as total
+                 FROM stayvibe_incidentals GROUP BY month`
+              ).all()
+            : await DB.prepare(
+                `SELECT strftime('%m', created_at) as month, SUM(total) as total
+                 FROM stayvibe_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
+              ).bind(String(year)).all()
           kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month), r.total||0]))
         } catch(e) {}
 
@@ -1241,18 +1251,30 @@ export async function onRequest(ctx) {
         // and a per-item sales summary, for the dashboard's inventory revenue view.
         let kitchenSummary = { revenue: 0, cost: 0, profit: 0, items: [] }
         try {
-          const { results: itemRows } = await DB.prepare(`
-            SELECT si.inv_item_id as item_id,
-                   COALESCE(i.name, si.name) as name,
-                   SUM(si.qty) as qty_sold,
-                   SUM(si.total) as revenue,
-                   SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
-            FROM stayvibe_incidentals si
-            LEFT JOIN stayvibe_inventory i ON i.item_id = si.inv_item_id
-            WHERE strftime('%Y', si.created_at) = ?
-            GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
-            ORDER BY revenue DESC
-          `).bind(String(year)).all()
+          const { results: itemRows } = isAllYears
+            ? await DB.prepare(`
+                SELECT si.inv_item_id as item_id,
+                       COALESCE(i.name, si.name) as name,
+                       SUM(si.qty) as qty_sold,
+                       SUM(si.total) as revenue,
+                       SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
+                FROM stayvibe_incidentals si
+                LEFT JOIN stayvibe_inventory i ON i.item_id = si.inv_item_id
+                GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
+                ORDER BY revenue DESC
+              `).all()
+            : await DB.prepare(`
+                SELECT si.inv_item_id as item_id,
+                       COALESCE(i.name, si.name) as name,
+                       SUM(si.qty) as qty_sold,
+                       SUM(si.total) as revenue,
+                       SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
+                FROM stayvibe_incidentals si
+                LEFT JOIN stayvibe_inventory i ON i.item_id = si.inv_item_id
+                WHERE strftime('%Y', si.created_at) = ?
+                GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
+                ORDER BY revenue DESC
+              `).bind(String(year)).all()
           const items = (itemRows||[]).map(r => ({
             itemId: r.item_id, name: r.name, qtySold: r.qty_sold || 0,
             revenue: r.revenue || 0, cost: r.cost || 0, profit: (r.revenue||0) - (r.cost||0),
@@ -1324,16 +1346,26 @@ export async function onRequest(ctx) {
         // dashboard still renders everything else unchanged.
         let pnl = null
         try {
-          const { results: lg } = await DB.prepare(`
-            SELECT b.item_type, ROUND(SUM(b.gross_amount),2) AS total
-            FROM stayvibe_booking_line_items b JOIN stayvibe_stays s ON s.stay_id = b.stay_id
-            WHERE s.villa_id = ? AND s.checkin_date LIKE ? AND s.status NOT IN ('cancelled','void')
-            GROUP BY b.item_type`).bind(villaId, `${year}%`).all()
+          const { results: lg } = isAllYears
+            ? await DB.prepare(`
+                SELECT b.item_type, ROUND(SUM(b.gross_amount),2) AS total
+                FROM stayvibe_booking_line_items b JOIN stayvibe_stays s ON s.stay_id = b.stay_id
+                WHERE s.villa_id = ? AND s.status NOT IN ('cancelled','void')
+                GROUP BY b.item_type`).bind(villaId).all()
+            : await DB.prepare(`
+                SELECT b.item_type, ROUND(SUM(b.gross_amount),2) AS total
+                FROM stayvibe_booking_line_items b JOIN stayvibe_stays s ON s.stay_id = b.stay_id
+                WHERE s.villa_id = ? AND s.checkin_date LIKE ? AND s.status NOT IN ('cancelled','void')
+                GROUP BY b.item_type`).bind(villaId, `${year}%`).all()
           const t = {}
           ;(lg || []).forEach(r => { t[r.item_type] = r.total || 0 })
           const r2 = x => Math.round((Number(x) || 0) * 100) / 100
-          const staffRow = await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions WHERE strftime('%Y', checkin_date) = ?`).bind(String(year)).first()
-          const expRow   = await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM stayvibe_villa_expenses WHERE villa_id = ? AND strftime('%Y', date) = ?`).bind(villaId, String(year)).first()
+          const staffRow = isAllYears
+            ? await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions`).first()
+            : await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions WHERE strftime('%Y', checkin_date) = ?`).bind(String(year)).first()
+          const expRow   = isAllYears
+            ? await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM stayvibe_villa_expenses WHERE villa_id = ?`).bind(villaId).first()
+            : await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM stayvibe_villa_expenses WHERE villa_id = ? AND strftime('%Y', date) = ?`).bind(villaId, String(year)).first()
           const upsell            = r2(t.extra_charge)
           const grossLedger       = r2((t.room_fee || 0) + (t.cleaning_fee || 0) + (t.extra_charge || 0) - (t.discount || 0))
           const channelCommission = r2(t.channel_commission)
@@ -3281,6 +3313,31 @@ export async function onRequest(ctx) {
         await DB.batch(stmts)
         await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId, bookingId } })
+      }
+
+      // Companion to confirmEnquiry's same_guest_existing_stay error: the
+      // guest already has a real stay (created directly via New Booking or
+      // the online check-in form, bypassing this enquiry entirely) — rather
+      // than creating a second stay, just mark the enquiry confirmed and
+      // point it at the stay that already exists. No stay/booking rows are
+      // touched here on purpose; the stay is left exactly as it is.
+      if (action === 'linkEnquiryToExistingStay') {
+        const { enquiryId, stayId } = body
+        if (!enquiryId || !stayId) return err('enquiryId and stayId required')
+        const enquiry = await DB.prepare(`SELECT villa_id, final_offer_amount, quote_amount FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        if (!enquiry) return err('Enquiry not found', 404)
+        assertPropertyAccess(payload, enquiry.villa_id || DEFAULT_VILLA_ID)
+        const stay = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        const bookingValue = enquiry.final_offer_amount || enquiry.quote_amount || 0
+        await DB.prepare(`
+          UPDATE stayvibe_enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+        `).bind(bookingValue, actor, now(), enquiryId).run()
+        await DB.prepare(`
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
+          VALUES (?, ?, 'status_change', ?, ?)
+        `).bind(genId('COMM'), enquiryId, `Linked to existing stay ${stayId} (booked directly, not via this enquiry)`, actor).run()
+        return json({ success: true, data: { stayId, linked: true } })
       }
 
       // ── RESOLVE / VOID A STAY (soft — default) ───────────────────────

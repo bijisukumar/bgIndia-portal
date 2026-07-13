@@ -66,8 +66,17 @@ async function post(action, payload) {
     // 4xx/5xx (e.g. the double-booking message on a 409). Surface that rather
     // than a bare "HTTP 409".
     const data = await res.json().catch(() => null)
-    if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status} on ${action}`)
-    if (data?.success === false) throw new Error(data.error || `Failed: ${action}`)
+    if (!res.ok || data?.success === false) {
+      // Some 4xx responses carry structured detail beyond the message (e.g.
+      // confirmEnquiry's 409 same_guest_existing_stay, with the conflicting
+      // stay id) — attach it to the thrown Error so callers can branch on
+      // err.code instead of pattern-matching err.message.
+      const e = new Error((data && data.error) || `HTTP ${res.status} on ${action}`)
+      if (data?.code) e.code = data.code
+      if (data?.existingStayId) e.existingStayId = data.existingStayId
+      if (data?.conflict) e.conflict = data.conflict
+      throw e
+    }
     logger.info('API:POST', `${action} OK`)
     // See matching note in get() above — same fix, same reason.
     return (data && typeof data === 'object' && 'data' in data) ? data.data : data
@@ -273,6 +282,7 @@ export const api = {
   logCommunication:     (data)        => post('logCommunication', data),
   markEnquiryLost:      (data)        => post('markEnquiryLost', data),
   confirmEnquiry:       (data)        => post('confirmEnquiry', data),
+  linkEnquiryToExistingStay: (data)   => post('linkEnquiryToExistingStay', data),
   getEnquiryDashboard:  (vId, year)   => get('getEnquiryDashboard', year ? { villaId: vId, year } : { villaId: vId }),
   getEnquiryFollowUps:  (vId)         => get('getEnquiryFollowUps', { villaId: vId }),
   getRateCard:          (vId)         => get('getRateCard', { villaId: vId }),

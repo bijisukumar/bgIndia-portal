@@ -29,6 +29,7 @@ import EnquiryTracker from '../../screens/villa/EnquiryTracker'
 import NewEnquiry     from '../../screens/villa/NewEnquiry'
 import EnquiryDetail  from '../../screens/villa/EnquiryDetail'
 import EnquiryConversionDashboard from '../../screens/villa/EnquiryConversionDashboard'
+import MarketingCampaigns from '../../screens/villa/MarketingCampaigns'
 import RDashboard     from '../../screens/RDashboard'
 import D1Explorer     from '../../screens/infra/D1Explorer'
 
@@ -57,6 +58,7 @@ function ProtectedRoutes() {
       {(role === 'owner' || role === 'master_owner') && <>
         <Route path="/"                       element={<OwnerHome sections={['villa', 'marketing', 'guests', 'dbadmin', 'rdashboard']} />} />
         <Route path="/owner/villa"            element={<VillaHub />} />
+        <Route path="/owner/marketing"        element={<MarketingCampaigns />} />
         <Route path="/owner/villa/booking"    element={<NewBooking />} />
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />

@@ -102,7 +102,7 @@ function StatusBadge({ status }) {
 
 function GuestsTab({ stays, loading, year, onYearChange }) {
   const [filter, setFilter] = useState('all')
-  const [selMonth, setSelMonth] = useState('all')
+  const [selMonth, setSelMonth] = useState(CUR_MONTH)
 
   const today = new Date()
   today.setHours(0,0,0,0)
@@ -118,8 +118,30 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
 
   const upcoming   = parsed.filter(s => s.checkInDate > today && s.status !== 'cancelled').sort((a,b) => a.checkInDate - b.checkInDate)
   const active     = parsed.filter(s => s.status === 'active')
-  const unclosed   = parsed.filter(s => !['closed','checked_out','cancelled'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate))
+  const unclosed   = parsed.filter(s => !['closed','checked_out','cancelled','void'].includes(s.status) && s.checkOutDate < today && !isNaN(s.checkOutDate))
+
+  // Linked bookings: a stay can record who booked it via booked_by_name
+  // (e.g. a travel agent), and that same agent name sometimes also has its
+  // own stay row — an exact guest_name match — which is really the same
+  // booking showing up twice. Nest that agent row under the real guest's
+  // row instead of listing both separately. Only an exact (trimmed,
+  // case-insensitive) name match qualifies — no fuzzy matching — to avoid
+  // mis-grouping unrelated guests who happen to share a similar name.
+  const linkedByParent = {}
+  const absorbedIds = new Set()
+  parsed.forEach(bookerStay => {
+    const bn = (bookerStay.booked_by_name || '').trim()
+    if (!bn) return
+    const agentStay = parsed.find(a => a.stayId !== bookerStay.stayId && (a.guestName||'').trim().toLowerCase() === bn.toLowerCase())
+    if (agentStay && !absorbedIds.has(agentStay.stayId)) {
+      absorbedIds.add(agentStay.stayId)
+      if (!linkedByParent[bookerStay.stayId]) linkedByParent[bookerStay.stayId] = []
+      linkedByParent[bookerStay.stayId].push(agentStay)
+    }
+  })
+
   const byMonth    = parsed.filter(s => {
+    if (absorbedIds.has(s.stayId)) return false
     if (selMonth === 'all') return s.checkInDate.getFullYear() === year
     return s.checkInDate.getMonth() === selMonth && s.checkInDate.getFullYear() === year
   })
@@ -270,6 +292,15 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
                     {s.net ? <span style={{ color:'var(--green)', fontSize:'0.78rem', fontWeight:'600' }}>{fmt(s.net)}</span> : null}
                   </div>
                 </div>
+                {(linkedByParent[s.stayId] || []).map(link => (
+                  <div key={link.stayId} style={{ marginTop:'8px', marginLeft:'16px', paddingLeft:'10px', borderLeft:'2px solid rgba(200,144,58,0.3)' }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <span style={{ color:'var(--text-dim)', fontSize:'0.78rem' }}>↳ {link.guestName || link.bookerName} <span style={{ opacity:0.7 }}>(booked this stay)</span></span>
+                      <StatusBadge status={link.status} />
+                    </div>
+                    <div style={{ color:'var(--text-dim)', fontSize:'0.7rem' }}>{link.stayId} · {link.channel||'Direct'}</div>
+                  </div>
+                ))}
               </div>
               )
             })}
@@ -712,7 +743,25 @@ function MonthlyTrendChart({ stays, currentYear }) {
 
 // ── TAB: FINANCIALS ──────────────────────────────────────────────────────────
 
-function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange, stays }) {
+function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthChange, year, onYearChange, stays }) {
+  // "All years" is a local override — it doesn't touch the shared `year`
+  // state (Guests tab also reads that and expects a real numeric year).
+  const [showAllYears, setShowAllYears] = useState(false)
+  const [allYearsData, setAllYearsData] = useState(null)
+  const [allYearsLoading, setAllYearsLoading] = useState(false)
+
+  useEffect(() => {
+    if (!showAllYears || allYearsData) return
+    setAllYearsLoading(true)
+    api.getVillaDashboard(DEFAULT_VILLA_ID, 'all')
+      .then(setAllYearsData)
+      .catch(() => setAllYearsData({}))
+      .finally(() => setAllYearsLoading(false))
+  }, [showAllYears])
+
+  const data    = showAllYears ? allYearsData : dataProp
+  const loading = showAllYears ? allYearsLoading : loadingProp
+
   // When month==='fy', aggregate all months
   const monthData = month === 'fy'
     ? Object.values(data?.months || {}).reduce((acc, m) => ({
@@ -729,7 +778,7 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
           events:    (acc.breakdown?.events||0)    + (m.breakdown?.events||0),
         }
       }), { revenue:0, fees:0, bookings:0, profit:0, breakdown:{} })
-    : (data?.months?.[month] || {})
+    : (data?.months?.[month + 1] || {})
 
   const totalBookings = month === 'fy'
     ? Object.values(data?.months || {}).reduce((s,m) => s+(m.bookings||0), 0)
@@ -757,11 +806,17 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
     <div>
       {/* Year + Month selectors */}
       <div style={{ display:'flex', gap:'6px', marginBottom:'10px', flexWrap:'wrap' }}>
+        <button onClick={() => setShowAllYears(true)}
+          style={{ padding:'5px 12px', borderRadius:'20px', border:`1px solid ${showAllYears?'var(--gold)':'rgba(255,255,255,0.08)'}`,
+            background: showAllYears?'rgba(200,144,58,0.15)':'transparent',
+            color: showAllYears?'var(--gold)':'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer' }}>
+          All
+        </button>
         {YEARS.map(y => (
-          <button key={y} onClick={() => onYearChange(y)}
-            style={{ padding:'5px 12px', borderRadius:'20px', border:`1px solid ${year===y?'var(--gold)':'rgba(255,255,255,0.08)'}`,
-              background: year===y?'rgba(200,144,58,0.15)':'transparent',
-              color: year===y?'var(--gold)':'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer' }}>
+          <button key={y} onClick={() => { setShowAllYears(false); onYearChange(y) }}
+            style={{ padding:'5px 12px', borderRadius:'20px', border:`1px solid ${!showAllYears && year===y?'var(--gold)':'rgba(255,255,255,0.08)'}`,
+              background: !showAllYears && year===y?'rgba(200,144,58,0.15)':'transparent',
+              color: !showAllYears && year===y?'var(--gold)':'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer' }}>
             {y}
           </button>
         ))}
@@ -889,8 +944,17 @@ function FinancialsTab({ data, loading, month, onMonthChange, year, onYearChange
         )}
       </div>
 
+    </div>
+  )
+}
+
+// ── TAB: STATISTICS ──────────────────────────────────────────────────────────
+
+function StatisticsTab({ stays, year }) {
+  return (
+    <div>
       <MonthlyTrendChart stays={stays} currentYear={year} />
-      <EarningsComparisonChart allStays={stays} selectedYears={YEARS.slice(0,2)} />
+      <EarningsComparisonChart allStays={stays} selectedYears={YEARS.filter(y => y !== 'all').slice(0,2)} />
       <BookingLeadTimeChart allStays={stays} />
     </div>
   )
@@ -1037,8 +1101,8 @@ function MarketingTab({ data, stays, loading, year }) {
 
 function VillaDashboardInner() {
   const navigate = useNavigate()
-  const [tab,    setTab]    = useState('guests')
-  const [month,  setMonth]  = useState('fy')
+  const [tab,    setTab]    = useState('financials')
+  const [month,  setMonth]  = useState(CUR_MONTH)
   const [year,   setYear]   = useState(CUR_YEAR)
   const [data,     setData]     = useState(null)
   const [stays,    setStays]    = useState([])
@@ -1065,9 +1129,10 @@ function VillaDashboardInner() {
   }, [])
 
   const TABS = [
-    { key:'guests',     label:'Guests',     icon:'👥' },
-    { key:'financials', label:'Financials', icon:'💰' },
-    { key:'marketing',  label:'Marketing',  icon:'📣' },
+    { key:'financials',  label:'Financials',  icon:'💰' },
+    { key:'marketing',   label:'Marketing',   icon:'📣' },
+    { key:'guests',      label:'Guests',      icon:'👥' },
+    { key:'statistics',  label:'Statistics',  icon:'📊' },
   ]
 
   return (
@@ -1078,7 +1143,7 @@ function VillaDashboardInner() {
           <div className="topbar-title">Villa dashboard</div>
           <div className="topbar-sub">DWARKA · GVR · {year}</div>
         </div>
-        <div style={{width:34}}/>
+        <button className="back-btn" onClick={() => navigate('/')} title="Home">🏠</button>
       </div>
 
       {/* Tab bar */}
@@ -1097,9 +1162,10 @@ function VillaDashboardInner() {
       </div>
 
       <div className="screen-body">
-        {tab === 'guests'     && <GuestsTab     stays={stays} loading={loading} year={year} onYearChange={setYear}/>}
         {tab === 'financials' && <FinancialsTab  data={data}  loading={loading} month={month} onMonthChange={setMonth} year={year} onYearChange={setYear} stays={allStays}/>}
         {tab === 'marketing'  && <MarketingTab   data={data}  stays={stays} loading={loading} year={year}/>}
+        {tab === 'guests'     && <GuestsTab     stays={stays} loading={loading} year={year} onYearChange={setYear}/>}
+        {tab === 'statistics' && <StatisticsTab stays={allStays} year={year}/>}
       </div>
     </div>
   )

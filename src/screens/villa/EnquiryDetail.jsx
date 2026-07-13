@@ -338,7 +338,30 @@ export default function EnquiryDetail() {
       showToast(`Booking confirmed ✓ Stay ${result.stayId}`)
       setShowConfirmPicker(false)
       load()
-    } catch (err) { showToast(err.message || 'Failed to confirm — check for date conflicts', 'error') }
+    } catch (err) {
+      // This guest already has a real stay — created directly via New
+      // Booking or the online check-in form, bypassing this enquiry
+      // entirely (the actual cause of enquiries stuck on "Quoted" forever
+      // even after the guest's stay is long confirmed/checked-in). Offer
+      // to link this enquiry to that existing stay instead of blocking.
+      if (err.code === 'same_guest_existing_stay' && err.existingStayId) {
+        const ok = window.confirm(
+          `${e?.guest_name || 'This guest'} already has a stay on record (${err.existingStayId}) — ` +
+          `probably booked directly instead of through this enquiry.\n\n` +
+          `Mark this enquiry Confirmed and link it to that existing stay?`
+        )
+        if (ok) {
+          try {
+            await api.linkEnquiryToExistingStay({ enquiryId, stayId: err.existingStayId })
+            showToast(`Linked to existing stay ${err.existingStayId} ✓`)
+            setShowConfirmPicker(false)
+            load()
+          } catch (linkErr) { showToast(linkErr.message || 'Failed to link', 'error') }
+        }
+      } else {
+        showToast(err.message || 'Failed to confirm — check for date conflicts', 'error')
+      }
+    }
     finally { setBusy(false) }
   }
 

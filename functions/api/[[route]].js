@@ -469,6 +469,39 @@ async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, e
   }
 }
 
+// A stay can be cancelled/voided from several places (Complete Booking's
+// Cancel/Void buttons, an Airbnb cancellation email, absorbDuplicateStay) —
+// none of them touched the enquiry that originated it, since the two
+// tables have no enforced link. Left unchecked, the enquiry keeps showing
+// "Confirmed" forever even after the actual booking is dead (this is what
+// happened to Anusha's enquiry — the stay was cancelled via Complete
+// Booking, but the enquiry never found out). Mirrors
+// cancelConfirmedEnquiry's own enquiry→stay direction, just reversed.
+// Best-effort: never let a sync failure block the actual stay-status change.
+async function syncEnquiryOnStayCancel(DB, stayId, actor, reason) {
+  try {
+    const booking = await DB.prepare(`SELECT enquiry_id FROM stayvibe_bookings WHERE stay_id = ? ORDER BY created_at DESC LIMIT 1`).bind(stayId).first()
+    let enquiry = null
+    if (booking?.enquiry_id) {
+      enquiry = await DB.prepare(`SELECT enquiry_id, status FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(booking.enquiry_id).first()
+    } else {
+      const stay = await DB.prepare(`SELECT villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+      if (stay) {
+        enquiry = await DB.prepare(
+          `SELECT enquiry_id, status FROM stayvibe_enquiries WHERE villa_id = ? AND checkin_date = ? AND checkout_date = ? AND status = 'confirmed' LIMIT 1`
+        ).bind(stay.villa_id, stay.checkin_date, stay.checkout_date).first()
+      }
+    }
+    if (!enquiry || enquiry.status !== 'confirmed') return
+    await DB.batch([
+      DB.prepare(`UPDATE stayvibe_enquiries SET status = 'cancelled', updated_by = ?, updated_at = datetime('now') WHERE enquiry_id = ?`)
+        .bind(actor, enquiry.enquiry_id),
+      DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by) VALUES (?, ?, 'status_change', ?, ?)`)
+        .bind(genId('COMM'), enquiry.enquiry_id, `Linked stay ${stayId} was cancelled: ${reason || 'no reason given'}`, actor),
+    ])
+  } catch (e) { console.error('syncEnquiryOnStayCancel failed:', e?.message || e) }
+}
+
 // ── ROUTER ────────────────────────────────────────────────
 export async function onRequest(ctx) {
   const { request, env } = ctx
@@ -3595,6 +3628,7 @@ export async function onRequest(ctx) {
         ]
         if (!paidComm) stmts.push(DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId))
         await DB.batch(stmts)
+        await syncEnquiryOnStayCancel(DB, stayId, actor, `${newStatus}: ${reason}`)
         return json({ success: true, data: { stayId, status: newStatus, paidCommissionKept: !!paidComm } })
       }
 
@@ -3661,6 +3695,7 @@ export async function onRequest(ctx) {
           DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'cancellation', ?, ?, datetime('now'))`)
             .bind(genId('LOG'), stay.stay_id, `Airbnb cancellation (${conf}) — ${stay.guest_name} ${stay.checkin_date} → ${stay.checkout_date}. Status set to cancelled.`),
         ])
+        await syncEnquiryOnStayCancel(DB, stay.stay_id, 'auto', `Airbnb cancellation (${conf})`)
         return json({ success: true, data: { matched: true, stayId: stay.stay_id, cancelled: true, guestName: stay.guest_name } })
       }
 
@@ -4691,6 +4726,7 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         if (!['booked','confirmed','docs_uploaded','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed','cancelled'].includes(status)) return err(`Invalid status: ${status}`)
         await DB.prepare(`UPDATE stayvibe_stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
+        if (status === 'cancelled') await syncEnquiryOnStayCancel(DB, stayId, actor, 'cancelled from Complete Booking')
         if (status === 'checked_out') {
           const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
           if (stay) {

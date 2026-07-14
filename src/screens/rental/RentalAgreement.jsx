@@ -641,7 +641,7 @@ export default function RentalAgreement() {
               </div>
             )}
 
-            {saved && form.leaseEnd && !form.isMonthToMonth && (form.stage === 'Active' || form.stage === 'Notice Given') && (
+            {saved && form.leaseEnd && (form.stage === 'Active' || form.stage === 'Notice Given') && (
               <button onClick={handleRenewContract} style={{
                 width:'100%', padding:'10px 14px', borderRadius:'10px', marginBottom:'12px', cursor:'pointer',
                 border:'1px solid rgba(52,168,83,0.4)', background:'rgba(52,168,83,0.1)',

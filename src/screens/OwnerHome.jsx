@@ -507,13 +507,35 @@ function CheckinLinksBlock() {
   const [open,     setOpen]     = useState(false)
   const [copied,   setCopied]   = useState(null)
   const [toggling, setToggling] = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [form, setForm]         = useState({ partner: '', label: '' })
+  const [creating, setCreating] = useState(false)
+  const [createErr, setCreateErr] = useState(null)
   const BASE = window.location.origin
 
-  useEffect(() => {
+  const load = () => {
     api.getCheckinLinks().then(data => {
       if (Array.isArray(data)) setLinks(data)
     }).catch(() => setLinks([]))
-  }, [])
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function handleCreate() {
+    if (!form.partner.trim()) { setCreateErr('Partner name required'); return }
+    setCreating(true); setCreateErr(null)
+    try {
+      await api.createCheckinLink({
+        partner: form.partner.trim(),
+        label:   form.label.trim() || null,
+        villaId: DEFAULT_VILLA_ID,
+      })
+      setShowCreate(false)
+      setForm({ partner: '', label: '' })
+      load()
+    } catch (e) { setCreateErr(e.message || 'Create failed') }
+    finally { setCreating(false) }
+  }
 
   async function copyLink(lnk) {
     const url = `${BASE}/checkin/${lnk.token}`
@@ -552,12 +574,52 @@ function CheckinLinksBlock() {
             background:'rgba(139,92,246,0.12)', padding:'2px 8px', borderRadius:'10px' }}>
             {activeCount} active
           </span>
+          {open && (
+            <button onClick={(e) => { e.stopPropagation(); setShowCreate(s => !s); setCreateErr(null) }}
+              style={{ fontSize:'0.68rem', color:'#8B5CF6', fontWeight:'700', background:'rgba(139,92,246,0.12)',
+                border:'1px solid rgba(139,92,246,0.3)', borderRadius:'8px', padding:'3px 8px', cursor:'pointer' }}>
+              {showCreate ? '✕' : '+ New'}
+            </button>
+          )}
           <span style={{ color:'var(--text-dim)', fontSize:'0.85rem' }}>{open ? '▼' : '▶'}</span>
         </div>
       </div>
 
       {/* Collapsible content */}
       {open && (
+        <>
+        {showCreate && (
+          <div style={{ background:'rgba(139,92,246,0.06)', border:'1px solid rgba(139,92,246,0.25)',
+            borderRadius:'12px', padding:'14px', marginBottom:'10px' }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'10px' }}>
+              <div>
+                <label style={{ display:'block', fontSize:'0.65rem', color:'var(--text-dim)', letterSpacing:'0.5px', marginBottom:'4px' }}>
+                  PARTNER *
+                </label>
+                <input value={form.partner} onChange={e => setForm(f => ({ ...f, partner: e.target.value }))}
+                  placeholder="e.g. vrbo"
+                  style={{ width:'100%', padding:'8px 10px', borderRadius:'7px', boxSizing:'border-box',
+                    background:'var(--dark-input)', border:'1px solid var(--border-dim)', color:'var(--text)', fontSize:'0.85rem' }} />
+              </div>
+              <div>
+                <label style={{ display:'block', fontSize:'0.65rem', color:'var(--text-dim)', letterSpacing:'0.5px', marginBottom:'4px' }}>
+                  LABEL
+                </label>
+                <input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))}
+                  placeholder="e.g. VRBO"
+                  style={{ width:'100%', padding:'8px 10px', borderRadius:'7px', boxSizing:'border-box',
+                    background:'var(--dark-input)', border:'1px solid var(--border-dim)', color:'var(--text)', fontSize:'0.85rem' }} />
+              </div>
+            </div>
+            {createErr && <div style={{ fontSize:'0.72rem', color:'#EF4444', marginBottom:'8px' }}>{createErr}</div>}
+            <button onClick={handleCreate} disabled={creating || !form.partner.trim()}
+              style={{ width:'100%', padding:'9px', borderRadius:'8px', border:'none', background:'#8B5CF6',
+                color:'#fff', fontWeight:'700', fontSize:'0.8rem', cursor:'pointer',
+                opacity: creating || !form.partner.trim() ? 0.6 : 1 }}>
+              {creating ? 'Creating…' : 'Create link'}
+            </button>
+          </div>
+        )}
         <div style={{ background:'rgba(139,92,246,0.05)', border:'1px solid rgba(139,92,246,0.2)',
           borderRadius:'12px', overflow:'hidden' }}>
           {links.map((lnk, i) => (
@@ -593,6 +655,7 @@ function CheckinLinksBlock() {
             </div>
           ))}
         </div>
+        </>
       )}
     </div>
   )

@@ -135,13 +135,21 @@ export default function CompleteBooking() {
 
     // night_fee in DB is the TOTAL night fee (e.g. ₹9,650 for 2 nights).
     // tariff_per_night is the per-night rate (e.g. ₹4,825).
-    // Prefer tariff_per_night from DB; if missing, derive from night_fee / nights.
+    // Prefer tariff_per_night from DB; if missing, derive from night_fee / nights;
+    // if THAT'S also blank (e.g. a stay whose gross/net were set some other way —
+    // absorbed from a duplicate, backfilled, etc. — but tariff_per_night itself
+    // was never entered), fall back to deriving it from gross/nights so this
+    // screen's live preview matches the real stored total instead of showing a
+    // misleading ₹0 that would silently zero out real money if Save is clicked.
     const stayNights  = stay.checkout_date
       ? Math.max(1, Math.round((parseLocalDate(stay.checkout_date)-parseLocalDate(stay.checkin_date))/(1000*60*60*24)))
       : (parseInt(stay.nights) || 1)
     const totalNightFee = parseFloat(stay.night_fee || stay.nightFee || 0)
     const perNightFromFee = totalNightFee && stayNights ? Math.round(totalNightFee / stayNights) : 0
-    const tariffPerNight  = parseFloat(stay.tariff_per_night || stay.tariffPerNight || 0) || perNightFromFee || 0
+    const grossVal = parseFloat(stay.gross || stay.net || 0)
+    const extraChargesVal = parseFloat(stay.extra_charges || stay.extraCharges || 0)
+    const perNightFromGross = grossVal && stayNights ? Math.round((grossVal - extraChargesVal) / stayNights) : 0
+    const tariffPerNight  = parseFloat(stay.tariff_per_night || stay.tariffPerNight || 0) || perNightFromFee || perNightFromGross || 0
 
     setForm({
       channel:        ch,

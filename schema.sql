@@ -423,7 +423,7 @@ CREATE TABLE IF NOT EXISTS rev360_rental_props (
   lease_start  TEXT,
   lease_end    TEXT,
   monthly_rent REAL DEFAULT 0
-, deposit         REAL DEFAULT 0, agreed_rent     REAL DEFAULT 0, maintenance_fee REAL DEFAULT 0, notes           TEXT, created_by      TEXT DEFAULT 'owner', created_at      TEXT, updated_by      TEXT DEFAULT 'owner', updated_at      TEXT, status TEXT DEFAULT 'Active', country TEXT DEFAULT 'IN', currency TEXT DEFAULT 'INR', tenant_email TEXT DEFAULT NULL, drive_folder_url TEXT DEFAULT NULL, next_renewal_date    TEXT, early_terminated      INTEGER DEFAULT 0, early_termination_date TEXT, doc_contract_signed INTEGER DEFAULT 0, doc_id_captured     INTEGER DEFAULT 0, doc_move_in         INTEGER DEFAULT 0, doc_move_out        INTEGER DEFAULT 0, doc_damage_report   INTEGER DEFAULT 0, tenant_address TEXT, tenant_pan     TEXT, stage         TEXT DEFAULT 'Signed Up', is_delinquent INTEGER DEFAULT 0, end_reason    TEXT, is_month_to_month     INTEGER DEFAULT 0, month_to_month_since  TEXT, parking_tenant_name  TEXT, parking_tenant_phone TEXT, parking_fee          REAL DEFAULT 0, parking_deposit      REAL DEFAULT 0, parking_lease_start  TEXT, parking_lease_end    TEXT, parking_currency     TEXT DEFAULT 'INR', has_separate_parking INTEGER DEFAULT 0, parking_paid_in_full INTEGER DEFAULT 0);
+, deposit         REAL DEFAULT 0, agreed_rent     REAL DEFAULT 0, maintenance_fee REAL DEFAULT 0, notes           TEXT, created_by      TEXT DEFAULT 'owner', created_at      TEXT, updated_by      TEXT DEFAULT 'owner', updated_at      TEXT, status TEXT DEFAULT 'Active', country TEXT DEFAULT 'IN', currency TEXT DEFAULT 'INR', tenant_email TEXT DEFAULT NULL, drive_folder_url TEXT DEFAULT NULL, next_renewal_date    TEXT, early_terminated      INTEGER DEFAULT 0, early_termination_date TEXT, doc_contract_signed INTEGER DEFAULT 0, doc_id_captured     INTEGER DEFAULT 0, doc_move_in         INTEGER DEFAULT 0, doc_move_out        INTEGER DEFAULT 0, doc_damage_report   INTEGER DEFAULT 0, tenant_address TEXT, tenant_pan     TEXT, stage         TEXT DEFAULT 'Signed Up', is_delinquent INTEGER DEFAULT 0, end_reason    TEXT, is_month_to_month     INTEGER DEFAULT 0, month_to_month_since  TEXT, parking_tenant_name  TEXT, parking_tenant_phone TEXT, parking_fee          REAL DEFAULT 0, parking_deposit      REAL DEFAULT 0, parking_lease_start  TEXT, parking_lease_end    TEXT, parking_currency     TEXT DEFAULT 'INR', has_separate_parking INTEGER DEFAULT 0, parking_paid_in_full INTEGER DEFAULT 0, move_out_doc_shared INTEGER DEFAULT 0, move_out_docs_received INTEGER DEFAULT 0, damage_charges_deducted REAL DEFAULT 0, deposit_refunded REAL DEFAULT 0);
 
 CREATE TABLE IF NOT EXISTS rev360_rental_income (
   record_id    TEXT PRIMARY KEY,
@@ -485,6 +485,10 @@ CREATE TABLE IF NOT EXISTS rev360_tenancy_history (
   doc_move_in         INTEGER DEFAULT 0,
   doc_move_out        INTEGER DEFAULT 0,
   doc_damage_report   INTEGER DEFAULT 0,
+  move_out_doc_shared     INTEGER DEFAULT 0,
+  move_out_docs_received  INTEGER DEFAULT 0,
+  damage_charges_deducted REAL DEFAULT 0,
+  deposit_refunded        REAL DEFAULT 0,
   created_by      TEXT DEFAULT 'owner',
   created_at      TEXT DEFAULT (datetime('now')),
   updated_by      TEXT DEFAULT 'owner',

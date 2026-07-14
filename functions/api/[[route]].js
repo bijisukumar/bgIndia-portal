@@ -5235,6 +5235,10 @@ export async function onRequest(ctx) {
           doc_move_out:        d.docMoveOut        ? 1 : 0,
           doc_damage_report:   d.docDamageReport   ? 1 : 0,
         }
+        const moveOutDocShared    = d.moveOutDocShared    ? 1 : 0
+        const moveOutDocsReceived = d.moveOutDocsReceived ? 1 : 0
+        const damageChargesDeducted = parseFloat(d.damageChargesDeducted) || 0
+        const depositRefunded       = parseFloat(d.depositRefunded) || 0
 
         if (existing) {
           await DB.prepare(`
@@ -5248,6 +5252,7 @@ export async function onRequest(ctx) {
               early_terminated = ?, early_termination_date = ?,
               is_month_to_month = ?, month_to_month_since = ?,
               doc_contract_signed = ?, doc_id_captured = ?, doc_move_in = ?, doc_move_out = ?, doc_damage_report = ?,
+              move_out_doc_shared = ?, move_out_docs_received = ?, damage_charges_deducted = ?, deposit_refunded = ?,
               has_separate_parking = ?,
               parking_tenant_name = ?, parking_tenant_phone = ?,
               parking_fee = ?, parking_deposit = ?,
@@ -5265,6 +5270,7 @@ export async function onRequest(ctx) {
             earlyTerminated, earlyTerminationDt,
             isMonthToMonth, monthToMonthSince,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
+            moveOutDocShared, moveOutDocsReceived, damageChargesDeducted, depositRefunded,
             d.hasSeparateParking ? 1 : 0,
             d.parkingTenantName || null, d.parkingTenantPhone || null,
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
@@ -5282,11 +5288,12 @@ export async function onRequest(ctx) {
               next_renewal_date, early_terminated, early_termination_date,
               is_month_to_month, month_to_month_since,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              move_out_doc_shared, move_out_docs_received, damage_charges_deducted, deposit_refunded,
               has_separate_parking, parking_tenant_name, parking_tenant_phone,
               parking_fee, parking_deposit, parking_lease_start, parking_lease_end, parking_currency,
               parking_paid_in_full,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
@@ -5295,6 +5302,7 @@ export async function onRequest(ctx) {
             nextRenewal, earlyTerminated, earlyTerminationDt,
             isMonthToMonth, monthToMonthSince,
             docFlags.doc_contract_signed, docFlags.doc_id_captured, docFlags.doc_move_in, docFlags.doc_move_out, docFlags.doc_damage_report,
+            moveOutDocShared, moveOutDocsReceived, damageChargesDeducted, depositRefunded,
             d.hasSeparateParking ? 1 : 0,
             d.parkingTenantName || null, d.parkingTenantPhone || null,
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
@@ -5682,8 +5690,9 @@ export async function onRequest(ctx) {
               country, currency, status, end_reason, early_terminated, early_termination_date,
               notes, drive_folder_url,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              move_out_doc_shared, move_out_docs_received, damage_charges_deducted, deposit_refunded,
               created_by, created_at, updated_by, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             histId, propId, current.tenant_name, current.tenant_email, current.tenant_phone,
             current.tenant_address, current.tenant_pan,
@@ -5694,6 +5703,8 @@ export async function onRequest(ctx) {
             current.notes, current.drive_folder_url,
             current.doc_contract_signed||0, current.doc_id_captured||0, current.doc_move_in||0,
             current.doc_move_out||0, current.doc_damage_report||0,
+            current.move_out_doc_shared||0, current.move_out_docs_received||0,
+            current.damage_charges_deducted||0, current.deposit_refunded||0,
             actor, now(), actor, now()
           ))
         }
@@ -5710,6 +5721,7 @@ export async function onRequest(ctx) {
             stage='Active', is_delinquent=0, end_reason=NULL, status='Active',
             early_terminated=0, early_termination_date=NULL,
             doc_contract_signed=?, doc_id_captured=?, doc_move_in=0, doc_move_out=0, doc_damage_report=0,
+            move_out_doc_shared=0, move_out_docs_received=0, damage_charges_deducted=0, deposit_refunded=0,
             next_renewal_date=?, updated_by=?, updated_at=?
           WHERE prop_id=?
         `).bind(
@@ -5728,6 +5740,61 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { propId, movedInTenant: incoming.tenant_name, archivedOutgoing: !!(current && current.tenant_name) } })
       }
 
+      // Close out a tenant with NO replacement lined up yet — e.g. Tritvam
+      // expecting a vacancy gap before the next tenant is found. Same
+      // archive-to-history step as moveInIncomingTenant, but instead of
+      // swapping in an incoming tenant, clears rental_props back to a
+      // vacant/Signed-Up state so a brand new tenant can be entered fresh
+      // via the normal form, without the departed tenant's data lingering.
+      if (action === 'closeOutTenant') {
+        const { propId, endReason } = body
+        if (!propId) return err('propId required')
+        const current = await DB.prepare(`SELECT * FROM rev360_rental_props WHERE prop_id = ?`).bind(propId).first()
+        if (!current) return err('Property not found', 404)
+        if (!current.tenant_name) return err('No current tenant to close out')
+
+        const histId = 'hist_' + Date.now() + '_' + Math.floor(Math.random()*1000)
+        await DB.batch([
+          DB.prepare(`
+            INSERT INTO rev360_tenancy_history (
+              history_id, prop_id, tenant_name, tenant_email, tenant_phone, tenant_address, tenant_pan,
+              deposit, agreed_rent, maintenance_fee, lease_start, lease_end,
+              country, currency, status, end_reason, early_terminated, early_termination_date,
+              notes, drive_folder_url,
+              doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
+              move_out_doc_shared, move_out_docs_received, damage_charges_deducted, deposit_refunded,
+              created_by, created_at, updated_by, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          `).bind(
+            histId, propId, current.tenant_name, current.tenant_email, current.tenant_phone,
+            current.tenant_address, current.tenant_pan,
+            current.deposit||0, current.agreed_rent||0, current.maintenance_fee||0,
+            current.lease_start, current.lease_end,
+            current.country||'IN', current.currency||'INR', 'Completed', endReason || 'Lease Ended',
+            current.early_terminated||0, current.early_termination_date,
+            current.notes, current.drive_folder_url,
+            current.doc_contract_signed||0, current.doc_id_captured||0, current.doc_move_in||0,
+            current.doc_move_out||0, current.doc_damage_report||0,
+            current.move_out_doc_shared||0, current.move_out_docs_received||0,
+            current.damage_charges_deducted||0, current.deposit_refunded||0,
+            actor, now(), actor, now()
+          ),
+          DB.prepare(`
+            UPDATE rev360_rental_props SET
+              tenant_name='', tenant_email=NULL, tenant_phone=NULL, tenant_address=NULL, tenant_pan=NULL,
+              deposit=0, agreed_rent=0, maintenance_fee=0, lease_start=NULL, lease_end=NULL,
+              notes=NULL, drive_folder_url=NULL,
+              stage='Signed Up', is_delinquent=0, end_reason=NULL, status='Signed Up',
+              early_terminated=0, early_termination_date=NULL,
+              is_month_to_month=0, month_to_month_since=NULL, next_renewal_date=NULL,
+              doc_contract_signed=0, doc_id_captured=0, doc_move_in=0, doc_move_out=0, doc_damage_report=0,
+              move_out_doc_shared=0, move_out_docs_received=0, damage_charges_deducted=0, deposit_refunded=0,
+              updated_by=?, updated_at=?
+            WHERE prop_id=?
+          `).bind(actor, now(), propId),
+        ])
+        return json({ success: true, data: { propId, closedOutTenant: current.tenant_name } })
+      }
 
       // CREATE PROVISIONAL BOOKING — called when guest submits form but no booking exists
       if (action === 'createProvisionalBooking') {

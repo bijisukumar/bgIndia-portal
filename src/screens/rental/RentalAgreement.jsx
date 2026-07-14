@@ -66,6 +66,7 @@ const EMPTY_FORM = {
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
   isMonthToMonth:false, monthToMonthSince:'',
   docContractSigned:false, docIdCaptured:false, docMoveIn:false, docMoveOut:false, docDamageReport:false,
+  moveOutDocShared:false, moveOutDocsReceived:false, damageChargesDeducted:'', depositRefunded:'',
   hasSeparateParking:false,
   parkingTenantName:'', parkingTenantPhone:'',
   parkingFee:'', parkingDeposit:'',
@@ -87,6 +88,9 @@ export default function RentalAgreement() {
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
   const [toast, setToast]     = useState(null)
+  const [closingOut, setClosingOut] = useState(false)
+  const [closeOutReason, setCloseOutReason] = useState('')
+  const [closeOutBusy, setCloseOutBusy] = useState(false)
   const [showAddProp, setShowAddProp] = useState(false)
   const [newProp, setNewProp] = useState({ name:'', location:'', country:'IN', currency:'INR' })
   const [addingProp, setAddingProp] = useState(false)
@@ -167,6 +171,10 @@ export default function RentalAgreement() {
       docMoveIn:         !!a.doc_move_in,
       docMoveOut:        !!a.doc_move_out,
       docDamageReport:   !!a.doc_damage_report,
+      moveOutDocShared:    !!a.move_out_doc_shared,
+      moveOutDocsReceived: !!a.move_out_docs_received,
+      damageChargesDeducted: a.damage_charges_deducted || '',
+      depositRefunded:       a.deposit_refunded || '',
       hasSeparateParking:   !!a.has_separate_parking,
       parkingTenantName:  a.parking_tenant_name  || '',
       parkingTenantPhone: a.parking_tenant_phone || '',
@@ -277,6 +285,36 @@ export default function RentalAgreement() {
     showToast(`Renewal drafted: ${fmt(newStart)} → ${fmt(newEnd)} — review below and Save to confirm`)
   }
 
+  // Closes out the current tenant with NO replacement lined up yet (e.g.
+  // Tritvam expecting a vacancy gap). Archives them to Past Tenants —
+  // same as the Incoming Tenant "Move In Now" swap, just without a new
+  // tenant to swap in — and clears this property's form back to blank so
+  // a fresh tenant can be entered whenever one's found, instead of the
+  // departed tenant's data lingering here.
+  async function handleCloseOut() {
+    if (!closeOutReason) return
+    setCloseOutBusy(true)
+    try {
+      const outgoingName = form.tenantName
+      await api.closeOutTenant({ propId: selectedProp, endReason: closeOutReason })
+      showToast(`${outgoingName} closed out and archived — ${prop?.name} is now vacant`)
+      setAgreements(prev => ({...prev, [selectedProp]: {
+        ...prev[selectedProp],
+        tenant_name:'', tenant_email:'', tenant_phone:'', tenant_address:'', tenant_pan:'',
+        deposit:0, agreed_rent:0, maintenance_fee:0, lease_start:null, lease_end:null,
+        notes:null, drive_folder_url:null,
+        stage:'Signed Up', status:'Signed Up', is_delinquent:0, end_reason:null,
+        early_terminated:0, early_termination_date:null,
+        is_month_to_month:0, month_to_month_since:null, next_renewal_date:null,
+        doc_contract_signed:0, doc_id_captured:0, doc_move_in:0, doc_move_out:0, doc_damage_report:0,
+        move_out_doc_shared:0, move_out_docs_received:0, damage_charges_deducted:0, deposit_refunded:0,
+      }}))
+      setForm({ ...EMPTY_FORM, country: form.country, currency: form.currency })
+      setClosingOut(false); setCloseOutReason('')
+    } catch (e) { showToast(e.message || 'Close out failed', 'error') }
+    finally { setCloseOutBusy(false) }
+  }
+
   async function handleSave() {
     setError('')
     if (!form.tenantName.trim()) { setError('Tenant name is required'); return }
@@ -316,6 +354,10 @@ export default function RentalAgreement() {
         docMoveIn:         form.docMoveIn,
         docMoveOut:        form.docMoveOut,
         docDamageReport:   form.docDamageReport,
+        moveOutDocShared:      form.moveOutDocShared,
+        moveOutDocsReceived:   form.moveOutDocsReceived,
+        damageChargesDeducted: parseFloat(form.damageChargesDeducted) || 0,
+        depositRefunded:       parseFloat(form.depositRefunded) || 0,
         hasSeparateParking:   form.hasSeparateParking,
         parkingTenantName:  form.parkingTenantName.trim(),
         parkingTenantPhone: form.parkingTenantPhone.trim(),
@@ -341,6 +383,8 @@ export default function RentalAgreement() {
         is_month_to_month:form.isMonthToMonth?1:0, month_to_month_since:form.monthToMonthSince,
         doc_contract_signed:form.docContractSigned?1:0, doc_id_captured:form.docIdCaptured?1:0,
         doc_move_in:form.docMoveIn?1:0, doc_move_out:form.docMoveOut?1:0, doc_damage_report:form.docDamageReport?1:0,
+        move_out_doc_shared:form.moveOutDocShared?1:0, move_out_docs_received:form.moveOutDocsReceived?1:0,
+        damage_charges_deducted:parseFloat(form.damageChargesDeducted)||0, deposit_refunded:parseFloat(form.depositRefunded)||0,
         has_separate_parking:form.hasSeparateParking?1:0,
         parking_tenant_name:form.parkingTenantName, parking_tenant_phone:form.parkingTenantPhone,
         parking_fee:parseFloat(form.parkingFee)||0, parking_deposit:parseFloat(form.parkingDeposit)||0,
@@ -651,6 +695,53 @@ export default function RentalAgreement() {
               </button>
             )}
 
+            {/* Close out with no replacement lined up yet — archives the
+                tenant to Past Tenants and clears this property to vacant,
+                separate from Incoming Tenant's "Move In Now" swap (which
+                requires a queued replacement already on file). */}
+            {saved && form.tenantName && (form.stage === 'Active' || form.stage === 'Notice Given') && (
+              !closingOut ? (
+                <button onClick={()=>{ setClosingOut(true); setCloseOutReason('') }} style={{
+                  width:'100%', padding:'10px 14px', borderRadius:'10px', marginBottom:'12px', cursor:'pointer',
+                  border:'1px solid rgba(239,68,68,0.35)', background:'rgba(239,68,68,0.08)',
+                  color:'#EF4444', fontWeight:'700', fontSize:'0.85rem',
+                }}>
+                  🚪 Close out — no new tenant yet
+                </button>
+              ) : (
+                <div style={{padding:'14px', borderRadius:'10px', marginBottom:'12px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.3)'}}>
+                  <div style={{fontSize:'0.8rem', fontWeight:'700', color:'#EF4444', marginBottom:'8px'}}>
+                    How did this tenancy end?
+                  </div>
+                  <div style={{display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'10px'}}>
+                    {END_REASONS.map(r => (
+                      <button key={r} onClick={()=>setCloseOutReason(r)} style={{
+                        padding:'5px 10px', borderRadius:'20px', cursor:'pointer', fontSize:'0.68rem', fontWeight:'600',
+                        border:`1px solid ${closeOutReason===r?'#EF4444':'rgba(255,255,255,0.1)'}`,
+                        background: closeOutReason===r?'rgba(239,68,68,0.14)':'transparent',
+                        color: closeOutReason===r?'#EF4444':'#5C7080',
+                      }}>{r}</button>
+                    ))}
+                  </div>
+                  <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginBottom:'10px'}}>
+                    This archives <strong>{form.tenantName}</strong> to Past Tenants and clears {prop?.name} to vacant.
+                    You can enter a new tenant here whenever one's ready. This can't be undone from here.
+                  </div>
+                  <div style={{display:'flex', gap:'8px'}}>
+                    <button onClick={()=>setClosingOut(false)} style={{flex:1, padding:'9px', borderRadius:'8px', border:'1px solid var(--border-dim)', background:'transparent', color:'var(--text-dim)', cursor:'pointer'}}>
+                      Cancel
+                    </button>
+                    <button onClick={handleCloseOut} disabled={!closeOutReason || closeOutBusy} style={{
+                      flex:1, padding:'9px', borderRadius:'8px', border:'none', background:'#EF4444', color:'#fff',
+                      fontWeight:'700', cursor:'pointer', opacity: (!closeOutReason || closeOutBusy) ? 0.6 : 1,
+                    }}>
+                      {closeOutBusy ? 'Closing out…' : 'Confirm Close Out'}
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
+
             <TenantProfileCard form={form} setField={setField} onTenantNameChange={handleTenantNameChange} readOnly={false}/>
 
             <div className="card">
@@ -757,6 +848,53 @@ export default function RentalAgreement() {
               </div>
 
               {error && <div style={{color:'#EF9A9A',fontSize:'0.82rem',marginTop:'10px',background:'rgba(198,40,40,0.1)',padding:'8px 10px',borderRadius:'8px'}}>❌ {error}</div>}
+            </div>
+
+            {/* ── MOVE-OUT CHECKLIST — filled in as the tenant is leaving,
+                whether or not a replacement is lined up yet. Saved via the
+                same Save button below; archived alongside the tenant's
+                record when Close Out runs. ───────────────────────────── */}
+            <div className="card" style={{marginTop:'12px'}}>
+              <div className="card-section-label">🚚 Move-Out Checklist</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginTop:'4px',marginBottom:'12px'}}>
+                {[
+                  { key:'moveOutDocShared',    label:'📤 Move-out doc shared' },
+                  { key:'moveOutDocsReceived', label:'📥 Received move-out docs' },
+                ].map(item => (
+                  <label key={item.key} onClick={()=>setField(item.key, !form[item.key])} style={{
+                    display:'flex', alignItems:'center', gap:'8px', cursor:'pointer',
+                    padding:'8px 10px', borderRadius:'8px',
+                    background: form[item.key] ? 'rgba(52,168,83,0.1)' : 'var(--dark-input)',
+                    border: `1px solid ${form[item.key] ? 'rgba(52,168,83,0.35)' : 'var(--border-dim)'}`,
+                  }}>
+                    <input type="checkbox" checked={form[item.key]} onChange={()=>{}} style={{width:15,height:15,flexShrink:0}}/>
+                    <span style={{fontSize:'0.78rem', color: form[item.key] ? '#34A853' : 'var(--text-dim)'}}>{item.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="grid-2">
+                <div>
+                  <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>
+                    REPAIRS / DAMAGE CHARGES DEDUCTED ({form.currency==='USD'?'$':'₹'})
+                  </label>
+                  <input type="number" min="0" value={form.damageChargesDeducted} onChange={e=>setField('damageChargesDeducted',e.target.value)}
+                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
+                </div>
+                <div>
+                  <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>
+                    DEPOSIT AMOUNT PAID BACK ({form.currency==='USD'?'$':'₹'})
+                  </label>
+                  <input type="number" min="0" value={form.depositRefunded} onChange={e=>setField('depositRefunded',e.target.value)}
+                    placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'#34A853',fontSize:'0.9rem'}}/>
+                </div>
+              </div>
+              {parseFloat(form.deposit) > 0 && (
+                <div style={{fontSize:'0.68rem',color:'#5C7080',marginTop:'6px'}}>
+                  Deposit on file: {form.currency==='USD'?'$':'₹'}{Number(form.deposit).toLocaleString()}
+                  {parseFloat(form.damageChargesDeducted) > 0 && ` − ${form.currency==='USD'?'$':'₹'}${Number(form.damageChargesDeducted).toLocaleString()} deducted`}
+                  {' = '}{form.currency==='USD'?'$':'₹'}{Math.max(0, (parseFloat(form.deposit)||0) - (parseFloat(form.damageChargesDeducted)||0)).toLocaleString()} expected back
+                </div>
+              )}
             </div>
 
             {/* ── CAR PARKING SUB-TENANCY ─────────────────────────────── */}

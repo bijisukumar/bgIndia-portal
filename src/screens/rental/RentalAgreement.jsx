@@ -252,6 +252,31 @@ export default function RentalAgreement() {
     } catch(e) { showToast('Could not update checklist', 'error'); setField(field, currentValue) }
   }
 
+  // Pre-fills a fresh lease term starting from the current lease end,
+  // defaulting to 11 months (the standard Indian residential term — long
+  // enough to avoid needing a new tenant search, short enough to dodge the
+  // mandatory registration/stamp-duty threshold that kicks in at 12+
+  // months). Only drafts the new dates into the form — nothing is saved
+  // until the owner reviews them in Lease Terms below and hits Save, same
+  // as any other edit on this screen.
+  function handleRenewContract() {
+    const base = parseLocalDate(form.leaseEnd)
+    if (!base) return
+    const newStart = new Date(base)
+    const newEnd = new Date(base)
+    newEnd.setMonth(newEnd.getMonth() + 11)
+    const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    setForm(f => ({
+      ...f,
+      leaseStart: fmt(newStart),
+      leaseEnd: fmt(newEnd),
+      isMonthToMonth: false,
+      monthToMonthSince: '',
+      nextRenewalDate: '',
+    }))
+    showToast(`Renewal drafted: ${fmt(newStart)} → ${fmt(newEnd)} — review below and Save to confirm`)
+  }
+
   async function handleSave() {
     setError('')
     if (!form.tenantName.trim()) { setError('Tenant name is required'); return }
@@ -614,6 +639,16 @@ export default function RentalAgreement() {
               <div style={{background:`${renewalColor}18`,border:`1px solid ${renewalColor}55`,borderRadius:'10px',padding:'10px 14px',marginBottom:'12px',color:renewalColor,fontSize:'0.85rem',fontWeight:'600'}}>
                 {renewalMsg}
               </div>
+            )}
+
+            {saved && form.leaseEnd && !form.isMonthToMonth && (form.stage === 'Active' || form.stage === 'Notice Given') && (
+              <button onClick={handleRenewContract} style={{
+                width:'100%', padding:'10px 14px', borderRadius:'10px', marginBottom:'12px', cursor:'pointer',
+                border:'1px solid rgba(52,168,83,0.4)', background:'rgba(52,168,83,0.1)',
+                color:'#34A853', fontWeight:'700', fontSize:'0.85rem',
+              }}>
+                🔄 Renew contract (+11 months)
+              </button>
             )}
 
             <TenantProfileCard form={form} setField={setField} onTenantNameChange={handleTenantNameChange} readOnly={false}/>

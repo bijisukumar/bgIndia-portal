@@ -3400,6 +3400,13 @@ export async function onRequest(ctx) {
         const villaId = enquiry.villa_id || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const bookingValue = parseFloat(body.bookingValue) || enquiry.final_offer_amount || enquiry.quote_amount || 0
+        // Room-only per-night rate (excludes extras, matches the enquiry's own
+        // "Per night" pricing box) — a starting point for Complete Booking's
+        // Tariff/night field, not a final answer; the owner can always adjust
+        // it there afterward (e.g. the actual channel differed, or services
+        // were added on top).
+        const roomOnlyTotal = (enquiry.quote_amount || 0) - (enquiry.discount_amount || 0)
+        const enquiryTariffPerNight = Math.round(roomOnlyTotal / (enquiry.nights || 1)) || 0
 
         // ── Idempotency / partial-write recovery ──────────────────────
         // The writes below are now atomic (DB.batch), but earlier confirms
@@ -3448,12 +3455,12 @@ export async function onRequest(ctx) {
             INSERT INTO stayvibe_stays (
               stay_id, villa_id, source, guest_name, guest_phone, guest_email,
               checkin_date, checkout_date, nights, adults, children,
-              gross, net, status, created_by, updated_by
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
+              gross, net, tariff_per_night, status, created_by, updated_by
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
           `).bind(
             stayId, villaId, enquiry.source || 'direct', enquiry.guest_name, enquiry.phone, enquiry.email,
             enquiry.checkin_date, enquiry.checkout_date, enquiry.nights || 1, enquiry.guests_count || 1, 0,
-            bookingValue, bookingValue, actor, actor
+            bookingValue, bookingValue, enquiryTariffPerNight, actor, actor
           ),
           DB.prepare(`
             INSERT INTO stayvibe_bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
@@ -3487,25 +3494,41 @@ export async function onRequest(ctx) {
       // guest already has a real stay (created directly via New Booking or
       // the online check-in form, bypassing this enquiry entirely) — rather
       // than creating a second stay, just mark the enquiry confirmed and
-      // point it at the stay that already exists. No stay/booking rows are
-      // touched here on purpose; the stay is left exactly as it is.
+      // point it at the stay that already exists.
       if (action === 'linkEnquiryToExistingStay') {
         const { enquiryId, stayId } = body
         if (!enquiryId || !stayId) return err('enquiryId and stayId required')
-        const enquiry = await DB.prepare(`SELECT villa_id, final_offer_amount, quote_amount FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        const enquiry = await DB.prepare(`SELECT villa_id, final_offer_amount, quote_amount, discount_amount, nights FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
         if (!enquiry) return err('Enquiry not found', 404)
         assertPropertyAccess(payload, enquiry.villa_id || DEFAULT_VILLA_ID)
-        const stay = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const stay = await DB.prepare(`SELECT stay_id, gross, net FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
         const bookingValue = enquiry.final_offer_amount || enquiry.quote_amount || 0
-        await DB.prepare(`
-          UPDATE stayvibe_enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
-        `).bind(bookingValue, actor, now(), enquiryId).run()
-        await DB.prepare(`
-          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
-          VALUES (?, ?, 'status_change', ?, ?)
-        `).bind(genId('COMM'), enquiryId, `Linked to existing stay ${stayId} (booked directly, not via this enquiry)`, actor).run()
-        return json({ success: true, data: { stayId, linked: true } })
+        const stmts = [
+          DB.prepare(`
+            UPDATE stayvibe_enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
+          `).bind(bookingValue, actor, now(), enquiryId),
+          DB.prepare(`
+            INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
+            VALUES (?, ?, 'status_change', ?, ?)
+          `).bind(genId('COMM'), enquiryId, `Linked to existing stay ${stayId} (booked directly, not via this enquiry)`, actor),
+        ]
+        // The stay is otherwise left exactly as it is — this only fills in a
+        // starting tariff/gross/net when the stay side is still blank (e.g.
+        // it came from the public check-in form, which never asks for
+        // pricing), never overwriting real financials someone already
+        // entered in Complete Booking.
+        let financialsBackfilled = false
+        if (!stay.gross && !stay.net) {
+          const roomOnlyTotal = (enquiry.quote_amount || 0) - (enquiry.discount_amount || 0)
+          const tariffPerNight = Math.round(roomOnlyTotal / (enquiry.nights || 1)) || 0
+          stmts.push(DB.prepare(`
+            UPDATE stayvibe_stays SET gross = ?, net = ?, tariff_per_night = ?, updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?
+          `).bind(bookingValue, bookingValue, tariffPerNight, actor, stayId))
+          financialsBackfilled = true
+        }
+        await DB.batch(stmts)
+        return json({ success: true, data: { stayId, linked: true, financialsBackfilled } })
       }
 
       // A confirmed booking can still fall through afterward (host couldn't

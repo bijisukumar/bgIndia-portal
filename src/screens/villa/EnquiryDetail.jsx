@@ -14,6 +14,18 @@ import {
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 function fmtDateTime(d) { if (!d) return ''; return String(d).replace('T', ' ').slice(0, 16) }
 
+// Same loose word-containment check as the worker's getEnquiryMatchCandidates —
+// "Karthikeyan" is fully contained in "Karthikeyan Dhanasekaran". Used here to
+// decide whether a same-dates double-booking conflict is actually the same
+// guest under a different name/contact, not a real stranger conflict.
+function namesOverlap(a, b) {
+  const words = n => (n || '').toLowerCase().trim().split(/\s+/).filter(Boolean)
+  const wa = words(a), wb = words(b)
+  if (!wa.length || !wb.length) return false
+  const [shorter, longer] = wa.length <= wb.length ? [wa, wb] : [wb, wa]
+  return shorter.every(w => longer.includes(w))
+}
+
 const COMM_TYPES = [
   { id: 'whatsapp',      label: 'WhatsApp' },
   { id: 'email',         label: 'Email' },
@@ -354,6 +366,28 @@ export default function EnquiryDetail() {
           try {
             await api.linkEnquiryToExistingStay({ enquiryId, stayId: err.existingStayId })
             showToast(`Linked to existing stay ${err.existingStayId} ✓`)
+            setShowConfirmPicker(false)
+            load()
+          } catch (linkErr) { showToast(linkErr.message || 'Failed to link', 'error') }
+        }
+      } else if (err.code === 'double_booking' && err.conflict && namesOverlap(e?.guest_name, err.conflict.guest_name)) {
+        // The server's strict same-guest check (guest_id/phone/email/exact
+        // name) missed this one — e.g. enquiry came in on a family member's
+        // phone, guest checked in on their own — so it 409'd as a stranger
+        // double-booking instead. The names still clearly overlap though
+        // (same pattern as the enquiry/stay match review list), so offer the
+        // same link-instead-of-block resolution rather than a dead-end error.
+        const c = err.conflict
+        const ok = window.confirm(
+          `${e?.guest_name || 'This guest'} didn't exactly match, but "${c.guest_name}" already has a stay ` +
+          `on these same dates (${c.stay_id}: ${c.checkin_date} → ${c.checkout_date}) — likely the same guest, ` +
+          `enquired and checked in with different contact details.\n\n` +
+          `Mark this enquiry Confirmed and link it to that existing stay?`
+        )
+        if (ok) {
+          try {
+            await api.linkEnquiryToExistingStay({ enquiryId, stayId: c.stay_id })
+            showToast(`Linked to existing stay ${c.stay_id} ✓`)
             setShowConfirmPicker(false)
             load()
           } catch (linkErr) { showToast(linkErr.message || 'Failed to link', 'error') }

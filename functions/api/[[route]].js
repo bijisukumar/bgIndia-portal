@@ -2630,6 +2630,40 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // Frontend has called these two since OwnerHome's CheckinLinksBlock was
+      // built, but no matching action ever existed server-side — the
+      // Activate/Deactivate button silently failed, and there was no way to
+      // create a new check-in link except by hand-inserting SQL. Token
+      // follows the same deterministic 'gvr-{partner-slug}' convention as the
+      // existing seeded rows (gvr-direct, gvr-airbnb, ...) rather than a
+      // random suffix, so it stays short and readable in a check-in URL.
+      if (action === 'createCheckinLink') {
+        const { partner, label, villaId } = body
+        if (!partner?.trim()) return err('partner required')
+        const vId = villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const slug = partner.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+        if (!slug) return err('partner must contain at least one letter or number')
+        const checkinToken = `gvr-${slug}`
+        const existing = await DB.prepare(`SELECT token FROM stayvibe_checkin_links WHERE token = ?`).bind(checkinToken).first()
+        if (existing) return err(`A check-in link for "${partner.trim()}" already exists`)
+        const linkLabel = label?.trim() || partner.trim()
+        await DB.prepare(
+          `INSERT INTO stayvibe_checkin_links (token, villa_id, partner, label, created_by) VALUES (?, ?, ?, ?, ?)`
+        ).bind(checkinToken, vId, partner.trim().toLowerCase(), linkLabel, actor).run()
+        return json({ success: true, data: { token: checkinToken, partner: partner.trim(), label: linkLabel } })
+      }
+
+      if (action === 'toggleCheckinLink') {
+        const { token: checkinToken } = body
+        if (!checkinToken) return err('token required')
+        const link = await DB.prepare(`SELECT villa_id FROM stayvibe_checkin_links WHERE token = ?`).bind(checkinToken).first()
+        if (!link) return err('Link not found', 404)
+        assertPropertyAccess(payload, link.villa_id)
+        await DB.prepare(`UPDATE stayvibe_checkin_links SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_at = ? WHERE token = ?`).bind(now(), checkinToken).run()
+        return json({ success: true })
+      }
+
       // ── AGENT QUOTE LINKS (stayvibe only) ─────────────────────────────
       // Each approved travel agent / sales partner gets their own token —
       // same shape as the guest check-in links above — that opens a

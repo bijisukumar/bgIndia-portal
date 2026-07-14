@@ -3475,6 +3475,58 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, linked: true } })
       }
 
+      // A confirmed booking can still fall through afterward (host couldn't
+      // accommodate, guest cancelled, refunded, etc.) — EnquiryDetail hides
+      // all other status actions once an enquiry is confirmed, so this is
+      // the only way back out of "Confirmed" short of editing the DB by
+      // hand. Also cancels the linked stay (if still active) so the two
+      // don't drift — same commission-safe cancel as resolveStay. The link
+      // isn't always in stayvibe_bookings (linkEnquiryToExistingStay never
+      // writes one), so fall back to an exact villa+dates match.
+      if (action === 'cancelConfirmedEnquiry') {
+        const enquiryId = body.enquiryId
+        if (!enquiryId) return err('enquiryId required')
+        const reason = (body.reason || '').trim() || 'booking cancelled'
+        const enquiry = await DB.prepare(`SELECT * FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        if (!enquiry) return err('Enquiry not found', 404)
+        const villaId = enquiry.villa_id || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        if (enquiry.status !== 'confirmed') return err('Only a confirmed enquiry can be cancelled this way')
+
+        let stayId = null
+        const booking = await DB.prepare(`SELECT stay_id FROM stayvibe_bookings WHERE enquiry_id = ? ORDER BY created_at DESC LIMIT 1`).bind(enquiryId).first()
+        if (booking?.stay_id) {
+          stayId = booking.stay_id
+        } else {
+          const matched = await DB.prepare(
+            `SELECT stay_id FROM stayvibe_stays WHERE villa_id = ? AND checkin_date = ? AND checkout_date = ? LIMIT 1`
+          ).bind(villaId, enquiry.checkin_date, enquiry.checkout_date).first()
+          if (matched) stayId = matched.stay_id
+        }
+
+        const stmts = [
+          DB.prepare(`UPDATE stayvibe_enquiries SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE enquiry_id = ?`)
+            .bind(actor, now(), enquiryId),
+          DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by) VALUES (?, ?, 'status_change', ?, ?)`)
+            .bind(genId('COMM'), enquiryId, `Booking cancelled: ${reason}`, actor),
+        ]
+
+        let stayAlsoCancelled = false
+        if (stayId) {
+          const stay = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+          if (stay && !['cancelled', 'void'].includes(stay.status)) {
+            const paidComm = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
+            stmts.push(DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', notes = TRIM(COALESCE(notes,'') || ' | cancelled: ' || ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`)
+              .bind(reason, actor, stayId))
+            if (!paidComm) stmts.push(DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId))
+            stayAlsoCancelled = true
+          }
+        }
+
+        await DB.batch(stmts)
+        return json({ success: true, data: { enquiryId, stayId, stayAlsoCancelled } })
+      }
+
       // Surfaces open enquiries that likely already turned into a real stay
       // without ever going through this enquiry's own "Confirm" flow — e.g.
       // guest gave just a first name at enquiry time ("Karthikeyan") then a

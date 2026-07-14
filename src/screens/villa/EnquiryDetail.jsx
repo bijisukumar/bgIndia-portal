@@ -410,6 +410,22 @@ export default function EnquiryDetail() {
     finally { setBusy(false) }
   }
 
+  // A confirmed booking can still fall through afterward (couldn't
+  // accommodate, guest cancelled, refunded, etc.) — there's otherwise no
+  // way back out of "Confirmed" from this screen. Also cancels the linked
+  // stay if it's still active, so the two don't drift out of sync.
+  const handleCancelBooking = async () => {
+    const reason = window.prompt(`Cancel ${e?.guest_name || 'this'}'s confirmed booking? The enquiry (and its linked stay, if still active) will be marked cancelled. Reason:`, 'refunded / could not accommodate')
+    if (reason === null) return
+    setBusy(true)
+    try {
+      const result = await api.cancelConfirmedEnquiry({ enquiryId, reason: reason || 'booking cancelled' })
+      showToast(result?.stayAlsoCancelled ? `Cancelled — stay ${result.stayId} also cancelled ✓` : 'Booking cancelled ✓')
+      load()
+    } catch (err) { showToast(err.message || 'Failed to cancel', 'error') }
+    finally { setBusy(false) }
+  }
+
   const handleDiscountCategoryChange = (categoryId) => {
     setDiscountParams({
       discountCategory: categoryId,
@@ -815,6 +831,21 @@ export default function EnquiryDetail() {
             </div>
           )}
         </div>
+
+        {e.status === 'confirmed' && (
+          <>
+            <div className="card-section-label" style={{ marginTop: '14px' }}>ACTIONS</div>
+            <div className="card">
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '10px' }}>
+                Booking fell through after confirming — couldn't accommodate, guest cancelled, refunded, etc.
+              </div>
+              <button onClick={handleCancelBooking} disabled={busy} className="btn"
+                style={{ background: 'rgba(239,68,68,0.1)', color: '#EF4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+                {busy ? 'Cancelling...' : '🚫 Cancel booking'}
+              </button>
+            </div>
+          </>
+        )}
 
         {!isFinal && (
           <>

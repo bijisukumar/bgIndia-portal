@@ -289,6 +289,7 @@ export const api = {
   markEnquiryLost:      (data)        => post('markEnquiryLost', data),
   confirmEnquiry:       (data)        => post('confirmEnquiry', data),
   linkEnquiryToExistingStay: (data)   => post('linkEnquiryToExistingStay', data),
+  cancelConfirmedEnquiry:    (data)   => post('cancelConfirmedEnquiry', data),
   getEnquiryMatchCandidates: (vId)    => get('getEnquiryMatchCandidates', { villaId: vId }),
   getEnquiryDashboard:  (vId, year)   => get('getEnquiryDashboard', year ? { villaId: vId, year } : { villaId: vId }),
   getEnquiryFollowUps:  (vId)         => get('getEnquiryFollowUps', { villaId: vId }),

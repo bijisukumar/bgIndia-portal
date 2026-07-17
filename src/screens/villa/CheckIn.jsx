@@ -557,6 +557,17 @@ export default function CheckIn() {
                             {formatDate(stay.checkin_date)}
                             {d !== null && d > 0 && <span> · in {d} day{d!==1?'s':''}</span>}
                           </div>
+                          {/* Early check-in / late check-out flagged here too,
+                              not just once the guest is Ready for Check-in —
+                              so Raman can plan ahead of time, not find out the
+                              same day. */}
+                          {(!!stay.request_early_checkin || !!stay.request_late_checkout) && (
+                            <div style={{fontSize:'0.7rem',color:'var(--gold)',marginTop:'2px',fontWeight:'600'}}>
+                              {!!stay.request_early_checkin && `⏰ Early check-in — Noon${stay.eta ? ` (asked for ${stay.eta})` : ''}`}
+                              {!!stay.request_early_checkin && !!stay.request_late_checkout && ' · '}
+                              {!!stay.request_late_checkout && '🌙 Late check-out'}
+                            </div>
+                          )}
                         </div>
                         <span style={{fontSize:'0.66rem',fontWeight:'700',padding:'2px 8px',
                           borderRadius:'10px',background:m.color+'22',color:m.color,whiteSpace:'nowrap'}}>

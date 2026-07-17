@@ -65,6 +65,19 @@ function daysFromNow(d) {
   return Math.round((parsed - todayLocal) / (1000*60*60*24))
 }
 
+// One-line summary of requested services, shown under each guest in the
+// select list so the owner can spot who needs what without opening every
+// guest individually — same underlying flags as the detail view's pills.
+function requestSummary(stay) {
+  const parts = []
+  if (stay.request_early_checkin) parts.push('⏰ Early check-in')
+  if (stay.request_late_checkout) parts.push('🌙 Late check-out')
+  if (stay.request_breakfast) parts.push('🍳 Breakfast' + (stay.breakfast_choice ? ` — ${stay.breakfast_choice}` : ''))
+  if (stay.request_cab) parts.push('🚗 Cab')
+  if (stay.request_extra_beds) parts.push('🛏 Extra beds' + (stay.extra_beds_count > 0 ? ` × ${stay.extra_beds_count}` : ''))
+  return parts.join(' · ')
+}
+
 const EMPTY_FORM = { channel:'Direct', tariffPerNight:'', extraCharges:'0', notes:'' }
 
 export default function CompleteBooking() {
@@ -523,6 +536,12 @@ export default function CompleteBooking() {
                             </span>
                           )}
                         </div>
+                        {requestSummary(stay) && (
+                          <div style={{fontSize:'0.68rem',color:'#C8903A',marginTop:'2px',
+                            overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            {requestSummary(stay)}
+                          </div>
+                        )}
                       </div>
                       <span style={{
                         fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',

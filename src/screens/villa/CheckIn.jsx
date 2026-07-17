@@ -349,6 +349,35 @@ export default function CheckIn() {
 
                 {selected && (
                   <>
+                    {/* Early check-in / late check-out — called out ABOVE the
+                        booking summary, first thing Raman sees, since these
+                        change what time he should actually expect the guest
+                        (and the guest's own typed ETA sometimes undercuts the
+                        approved early-check-in time — e.g. approved Noon, but
+                        guest says 11am — so both are shown for him to judge). */}
+                    {(!!selected.request_early_checkin || !!selected.request_late_checkout) && (
+                      <div style={{
+                        marginBottom:'12px', padding:'10px 14px', borderRadius:'10px',
+                        background:'rgba(200,144,58,0.1)', border:'1px solid rgba(200,144,58,0.35)',
+                      }}>
+                        {!!selected.request_early_checkin && (
+                          <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem'}}>
+                            ⏰ Early check-in approved — Noon
+                          </div>
+                        )}
+                        {!!selected.request_late_checkout && (
+                          <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem', marginTop: selected.request_early_checkin ? '4px' : 0}}>
+                            🌙 Late check-out approved
+                          </div>
+                        )}
+                        {selected.eta && (
+                          <div style={{color:'var(--text-dim)', fontSize:'0.78rem', marginTop:'4px'}}>
+                            Guest's requested ETA: <strong style={{color:'var(--text)'}}>{selected.eta}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Booking summary */}
                     <div className="card-section-label">BOOKING SUMMARY</div>
                     <div className="card">
@@ -383,6 +412,12 @@ export default function CheckIn() {
                         <div className="field" style={{marginBottom:0,marginTop:'4px'}}>
                           <div className="field-label">WhatsApp</div>
                           <div className="field-input auto-filled">{selected.guest_phone}</div>
+                        </div>
+                      )}
+                      {!selected.request_early_checkin && !selected.request_late_checkout && selected.eta && (
+                        <div className="field" style={{marginBottom:0,marginTop:'4px'}}>
+                          <div className="field-label">Requested ETA</div>
+                          <div className="field-input auto-filled">{selected.eta}</div>
                         </div>
                       )}
                     </div>

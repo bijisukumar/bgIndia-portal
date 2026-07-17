@@ -852,13 +852,24 @@ export default function CompleteBooking() {
                           <div style={infoLabel}>Nights</div>
                           <div style={infoVal}>{nights} night{nights!==1?'s':''}</div>
                         </div>
+                        {s.eta && (
+                          <div>
+                            <div style={infoLabel}>Requested ETA</div>
+                            <div style={infoVal}>{s.eta}</div>
+                          </div>
+                        )}
                       </div>
                     )
                   })()}
-                  {/* Guest requests */}
+                  {/* Guest requests — early check-in's approved time is called
+                      out here since the guest's own typed ETA above sometimes
+                      undercuts it (e.g. paid for/approved Noon, but types 11am
+                      as their ETA) — showing both side by side is what actually
+                      surfaces the mismatch, since ETA is free text Raman/the
+                      owner has to eyeball rather than something auto-checked. */}
                   {(!!s.request_early_checkin || !!s.request_late_checkout || !!s.request_breakfast || !!s.request_cab || !!s.request_extra_beds) && (
                     <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid var(--border-dim)',display:'flex',flexWrap:'wrap',gap:'6px'}}>
-                      {!!s.request_early_checkin && <span style={reqPill}>⏰ Early check-in</span>}
+                      {!!s.request_early_checkin && <span style={reqPill}>⏰ Early check-in (approved: Noon)</span>}
                       {!!s.request_late_checkout && <span style={reqPill}>🌙 Late check-out</span>}
                       {!!s.request_breakfast     && <span style={reqPill}>{'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}</span>}
                       {!!s.request_cab           && <span style={reqPill}>🚗 Cab</span>}

@@ -122,24 +122,31 @@ export default function RubberDashboard() {
 
       <div className="screen-body">
 
-        {/* THIS MONTH — owner only, always visible */}
+        {/* LAST 3 MONTHS — owner only, always visible */}
         {isOwner && dash && (() => {
           const nowYm = localTodayStr().slice(0, 7)
-          const thisMonth = (dash.monthly || []).find(m => m.ym === nowYm)
-            || { income: 0, expense: 0, net: 0 }
-          const monthLabel = parseLocalDate(nowYm + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
           const fmtShort = (v) => `₹${Math.abs(v) >= 100000 ? (Math.abs(v)/100000).toFixed(1)+'L' : Math.abs(v) >= 1000 ? (Math.abs(v)/1000).toFixed(1)+'K' : Math.abs(v).toLocaleString('en-IN')}`
-          const isLoss = thisMonth.net < 0
+          const months = [0, 1, 2].map(i => {
+            const dt = parseLocalDate(nowYm + '-01'); dt.setMonth(dt.getMonth() - i)
+            const ym = dt.toISOString().slice(0, 7)
+            const m = (dash.monthly || []).find(x => x.ym === ym) || { income: 0, expense: 0, net: 0 }
+            return { ym, label: dt.toLocaleDateString('en-IN', { month: 'short' }), current: i === 0, ...m }
+          })
           return (
-            <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'12px', padding:'12px 14px', marginBottom:'14px' }}>
-              <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1.5px', marginBottom:'8px' }}>{monthLabel.toUpperCase()}</div>
-              <div style={{ display:'flex', gap:'10px', marginBottom:'4px' }}>
-                <span style={{ fontSize:'0.78rem', color:'#34A853' }}>+{fmtShort(thisMonth.income)}</span>
-                <span style={{ fontSize:'0.78rem', color:'#F59E0B' }}>-{fmtShort(thisMonth.expense)}</span>
-              </div>
-              <div className={isLoss ? 'loss-gleam' : ''} style={{ fontSize:'1rem', fontWeight:'700', color: isLoss ? '#EF4444' : '#C8903A' }}>
-                {thisMonth.net >= 0 ? '+' : '-'}{fmtShort(thisMonth.net)}{isLoss && ' (loss)'}
-              </div>
+            <div style={{ display:'flex', gap:'8px', marginBottom:'14px' }}>
+              {months.map(m => {
+                const isLoss = m.net < 0
+                return (
+                  <div key={m.ym} style={{ flex:1, background: m.current ? 'rgba(200,144,58,0.06)' : 'rgba(255,255,255,0.02)', border: `1px solid ${m.current ? 'rgba(200,144,58,0.25)' : 'rgba(255,255,255,0.06)'}`, borderRadius:'12px', padding:'10px 8px', textAlign:'center' }}>
+                    <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'6px' }}>{m.label.toUpperCase()}</div>
+                    <div className={isLoss ? 'loss-gleam' : ''} style={{ fontSize:'0.92rem', fontWeight:'700', color: isLoss ? '#EF4444' : '#C8903A', marginBottom:'4px' }}>
+                      {m.net >= 0 ? '+' : '-'}{fmtShort(m.net)}
+                    </div>
+                    <div style={{ fontSize:'0.62rem', color:'#34A853' }}>+{fmtShort(m.income)}</div>
+                    <div style={{ fontSize:'0.62rem', color:'#F59E0B' }}>-{fmtShort(m.expense)}</div>
+                  </div>
+                )
+              })}
             </div>
           )
         })()}

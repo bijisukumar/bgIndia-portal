@@ -448,6 +448,11 @@ function MonthlyRegister() {
       <div style={{ fontSize: '0.58rem', color: '#5C7080', letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</div>
     </div>
   )
+  // 0.5 kg per sheet — display weight, switching to tonnes above 1000 kg
+  const sheetWeightLabel = (sheets) => {
+    const kg = Math.round((sheets || 0) * 0.5 * 100) / 100
+    return kg >= 1000 ? `${(kg / 1000).toLocaleString('en-IN', { maximumFractionDigits: 2 })} t` : `${kg.toLocaleString('en-IN')} kg`
+  }
   const d = data
   return (
     <>
@@ -456,10 +461,13 @@ function MonthlyRegister() {
         <input className="field-input gold" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ marginBottom: 12 }} />
         {!d ? <div style={{ color: '#5C7080', fontSize: '0.8rem', textAlign: 'center', padding: 12 }}>Loading…</div> : (
           <>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               {dayPill('Tapping days', d.days.tapping, '#5FD0AE')}
               {dayPill('Maintenance', d.days.maintenance, '#C8903A')}
               {dayPill('Rain — no tap', d.days.rain, '#5B8DBE')}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {dayPill(sheetWeightLabel(d.production.sheets), d.production.sheets, '#34A853')}
             </div>
             <div style={{ fontSize: '0.75rem', color: '#9AA5B4', marginBottom: 12 }}>
               {d.production.trees.toLocaleString('en-IN')} trees · {d.production.sheets.toLocaleString('en-IN')} sheets · {d.production.ottupal.toLocaleString('en-IN')} ottupal · tapper wages ₹{d.production.wages.toLocaleString('en-IN')}

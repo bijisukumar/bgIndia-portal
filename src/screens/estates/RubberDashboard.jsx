@@ -308,17 +308,23 @@ export default function RubberDashboard() {
                     })}
                   </div>
                 )}
-                <div style={{ marginTop:'14px', paddingTop:'12px', borderTop:'1px solid rgba(200,144,58,0.15)' }}>
-                  <button onClick={runWagesBackfill} disabled={bfBusy} style={{ background:'transparent', border:'1px solid rgba(95,208,174,0.35)', color:'#5FD0AE', borderRadius:'8px', padding:'8px 12px', fontSize:'0.68rem', cursor:'pointer' }}>
-                    {bfBusy ? 'Filing past wages…' : '⚙ Backfill past wages into P&L'}
-                  </button>
-                  {bfMsg && <div style={{ fontSize:'0.68rem', color:'#9AA5B4', marginTop:'6px' }}>{bfMsg}</div>}
-                </div>
               </div>
             )}
           </div>
           )
         })()}
+
+        {/* Wages backfill — always visible for owners, not tucked behind the
+            collapsed YTD panel (files missing "Rubber Labour" expenses for
+            every past week in one click, idempotent) */}
+        {isOwner && dash && (
+          <div style={{ marginBottom:'14px', padding:'10px 14px', borderRadius:'10px', background:'rgba(95,208,174,0.05)', border:'1px solid rgba(95,208,174,0.2)' }}>
+            <button onClick={runWagesBackfill} disabled={bfBusy} style={{ background:'transparent', border:'1px solid rgba(95,208,174,0.4)', color:'#5FD0AE', borderRadius:'8px', padding:'8px 12px', fontSize:'0.72rem', fontWeight:600, cursor:'pointer', width:'100%' }}>
+              {bfBusy ? 'Filing past wages…' : '⚙ Backfill past wages into P&L'}
+            </button>
+            {bfMsg && <div style={{ fontSize:'0.7rem', color:'#9AA5B4', marginTop:'8px', textAlign:'center' }}>{bfMsg}</div>}
+          </div>
+        )}
 
         {/* HARVEST LOG — collapsible, year filter pills inside */}
         <div style={{ background:'rgba(15,110,86,0.05)', border:'1px solid rgba(15,110,86,0.18)', borderRadius:'14px', marginBottom:'14px', overflow:'hidden' }}>

@@ -442,10 +442,12 @@ function MonthlyRegister() {
   }
 
   const inp = { width: '100%', padding: '9px 6px', textAlign: 'center', borderRadius: 8, border: '1px solid var(--border-dim)', background: 'var(--dark-input)', color: '#EDF2F7', fontSize: '0.85rem' }
-  const dayPill = (label, n, color) => (
+  const dayPill = (label, n, color, labelBright) => (
     <div style={{ flex: 1, textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${color}33` }}>
       <div style={{ fontSize: '1.3rem', fontWeight: 700, color }}>{n}</div>
-      <div style={{ fontSize: '0.58rem', color: '#5C7080', letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</div>
+      <div style={labelBright
+        ? { fontSize: '0.78rem', fontWeight: 700, color, letterSpacing: '0.3px', marginTop: '2px' }
+        : { fontSize: '0.58rem', color: '#5C7080', letterSpacing: '0.6px', textTransform: 'uppercase' }}>{label}</div>
     </div>
   )
   // 0.5 kg per sheet — display weight, switching to tonnes above 1000 kg
@@ -467,7 +469,7 @@ function MonthlyRegister() {
               {dayPill('Rain — no tap', d.days.rain, '#5B8DBE')}
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              {dayPill(sheetWeightLabel(d.production.sheets), d.production.sheets, '#34A853')}
+              {dayPill(sheetWeightLabel(d.production.sheets), d.production.sheets, '#34A853', true)}
             </div>
             <div style={{ fontSize: '0.75rem', color: '#9AA5B4', marginBottom: 12 }}>
               {d.production.trees.toLocaleString('en-IN')} trees · {d.production.sheets.toLocaleString('en-IN')} sheets · {d.production.ottupal.toLocaleString('en-IN')} ottupal · tapper wages ₹{d.production.wages.toLocaleString('en-IN')}

@@ -523,7 +523,7 @@ export async function onRequest(ctx) {
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest',
     'getRubberHarvests',  'saveRubberHarvest',
-    'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction', 'getRubberMonthly',
+    'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction', 'getRubberMonthly', 'backfillRubberWages',
     'getManagerSettlements', 'saveManagerSettlement', 'deleteManagerSettlement',
     'getEstateTransactions', 'saveEstateTransaction', 'deleteEstateTransaction',
     'getEstateDashboard',
@@ -1078,6 +1078,31 @@ export async function onRequest(ctx) {
   const ActiveDB = ESTATE_ACTIONS.has(action) ? DB_ESTATES : DB
   if (ESTATE_ACTIONS.has(action) && !DB_ESTATES) {
     return err('Estates DB not configured', 503)
+  }
+
+  // Shared by saveRubberProduction (single week, on every save) and
+  // backfillRubberWages (all historical weeks, one-time) — replaces the
+  // auto-generated wages expense for a given estate+week. Matched via the
+  // description tag (not just category+date) so a manually entered
+  // "Rubber Labour" line that happens to land on the same date is never
+  // touched.
+  async function upsertWeeklyWages(estateId, weekStartDate, sumWages, sumTree, workerNames) {
+    if (!weekStartDate) return
+    const WAGES_CATEGORY = 'Rubber Labour'
+    const wagesTag = `Tapper wages — week of ${weekStartDate}`
+    await ActiveDB.prepare(
+      `DELETE FROM estate360_estate_transactions WHERE estate = ? AND category = ? AND date = ? AND description LIKE ?`
+    ).bind(estateId, WAGES_CATEGORY, weekStartDate, `${wagesTag}%`).run()
+    const amt = Math.round((sumWages || 0) * 100) / 100
+    if (amt > 0) {
+      const wagesTxnId = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+      await ActiveDB.prepare(
+        `INSERT INTO estate360_estate_transactions (txn_id, estate, type, date, category, amount, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+      ).bind(wagesTxnId, estateId, 'expense', weekStartDate, WAGES_CATEGORY, amt,
+        `${wagesTag} · ${sumTree} trees (${(workerNames || []).join(', ') || '—'})`,
+        actor, actor, now(), now()).run()
+    }
+    return amt
   }
 
   try {
@@ -4637,32 +4662,8 @@ export async function onRequest(ctx) {
           sumWages += e.treeCount * e.tappingRate
           workerSet.add(e.workerName)
         }
-        sumWages = Math.round(sumWages * 100) / 100
-
-        // Record tapper wages as an expense under the estate's existing
-        // "Rubber Labour" category (same one used by the manual Estate
-        // Ledger) so it rolls up into the standard Labour vs. Plantation
-        // vs. other-cost breakdown instead of a one-off category.
-        // Re-saving the same week (edits) replaces the prior auto-generated
-        // wages line rather than piling up duplicates — matched on the
-        // "Tapper wages — week of …" description tag so a manually-entered
-        // Rubber Labour expense on the same date is never touched.
         const weekStartDate = body.weekStart || entries[0]?.date
-        const WAGES_CATEGORY = 'Rubber Labour'
-        const wagesTag = `Tapper wages — week of ${weekStartDate}`
-        if (weekStartDate) {
-          await ActiveDB.prepare(
-            `DELETE FROM estate360_estate_transactions WHERE estate = ? AND category = ? AND date = ? AND description LIKE ?`
-          ).bind(estateId, WAGES_CATEGORY, weekStartDate, `${wagesTag}%`).run()
-          if (sumWages > 0) {
-            const wagesTxnId = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-            await ActiveDB.prepare(
-              `INSERT INTO estate360_estate_transactions (txn_id, estate, type, date, category, amount, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-            ).bind(wagesTxnId, estateId, 'expense', weekStartDate, WAGES_CATEGORY, sumWages,
-              `${wagesTag} · ${sumTree} trees (${[...workerSet].join(', ') || '—'})`,
-              actor, actor, now(), now()).run()
-          }
-        }
+        await upsertWeeklyWages(estateId, weekStartDate, sumWages, sumTree, [...workerSet])
 
         const prodEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
         ctx.waitUntil(sendAlert(env, `🌳 Estate360 — Rubber production: ${sumSheet} sheets, ${sumTree} trees (${prodEstateLabel})`, [
@@ -4689,6 +4690,41 @@ export async function onRequest(ctx) {
         if (!prodId) return err('prodId required', 400)
         await ActiveDB.prepare(`DELETE FROM estate360_rubber_production WHERE prod_id = ?`).bind(prodId).run()
         return json({ success: true })
+      }
+
+      // One-time (re-runnable, idempotent) sweep: files a "Rubber Labour"
+      // wages expense for every past week in estate360_rubber_production
+      // that doesn't already have one — covers weeks saved before wages
+      // started auto-recording on save.
+      if (action === 'backfillRubberWages') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const estateId = body.estate || 'pavutumuri'
+        assertEstateAccess(payload, estateId)
+        const { results: rows } = await ActiveDB.prepare(
+          `SELECT prod_date, worker_name, tree_count, tapping_rate FROM estate360_rubber_production WHERE estate_id = ?`
+        ).bind(estateId).all()
+        const mondayOfDate = (dateStr) => {
+          const d = new Date(dateStr + 'T00:00:00Z')
+          const day = (d.getUTCDay() + 6) % 7
+          d.setUTCDate(d.getUTCDate() - day)
+          return d.toISOString().slice(0, 10)
+        }
+        const weeks = {}
+        for (const r of (rows || [])) {
+          if (!r.prod_date) continue
+          const wk = mondayOfDate(r.prod_date)
+          if (!weeks[wk]) weeks[wk] = { sumWages: 0, sumTree: 0, workers: new Set() }
+          weeks[wk].sumWages += (r.tree_count || 0) * (r.tapping_rate || 0)
+          weeks[wk].sumTree  += r.tree_count || 0
+          if (r.worker_name) weeks[wk].workers.add(r.worker_name)
+        }
+        let weeksProcessed = 0, totalWages = 0
+        for (const [wk, v] of Object.entries(weeks)) {
+          if (v.sumWages <= 0) continue
+          const amt = await upsertWeeklyWages(estateId, wk, v.sumWages, v.sumTree, [...v.workers])
+          weeksProcessed++; totalWages += amt || 0
+        }
+        return json({ success: true, data: { weeksProcessed, totalWages: Math.round(totalWages * 100) / 100 } })
       }
 
       // ── MANAGER SETTLEMENTS — Raman → Madhavan payments ──

@@ -79,6 +79,18 @@ export default function RubberDashboard() {
   const [drillMonth, setDrillMonth]     = useState(null)
   const [drillCategory, setDrillCategory] = useState(null)   // 'YYYY-MM::Category' currently expanded to line items
   const [harvestLogOpen, setHarvestLogOpen] = useState(false)
+  const [bfBusy, setBfBusy] = useState(false)
+  const [bfMsg, setBfMsg]   = useState('')
+
+  async function runWagesBackfill() {
+    setBfBusy(true); setBfMsg('')
+    try {
+      const r = await api.backfillRubberWages('pavutumuri')
+      setBfMsg(`Filed ${r.weeksProcessed} week(s) · ₹${(r.totalWages || 0).toLocaleString('en-IN')} total ✓`)
+      api.getEstateDashboard('pavutumuri').then(setDash).catch(() => {})
+    } catch (e) { setBfMsg('Failed: ' + (e?.message || 'error')) }
+    finally { setBfBusy(false) }
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -296,6 +308,12 @@ export default function RubberDashboard() {
                     })}
                   </div>
                 )}
+                <div style={{ marginTop:'14px', paddingTop:'12px', borderTop:'1px solid rgba(200,144,58,0.15)' }}>
+                  <button onClick={runWagesBackfill} disabled={bfBusy} style={{ background:'transparent', border:'1px solid rgba(95,208,174,0.35)', color:'#5FD0AE', borderRadius:'8px', padding:'8px 12px', fontSize:'0.68rem', cursor:'pointer' }}>
+                    {bfBusy ? 'Filing past wages…' : '⚙ Backfill past wages into P&L'}
+                  </button>
+                  {bfMsg && <div style={{ fontSize:'0.68rem', color:'#9AA5B4', marginTop:'6px' }}>{bfMsg}</div>}
+                </div>
               </div>
             )}
           </div>

@@ -218,6 +218,7 @@ export const api = {
   saveRubberProduction: (data)        => post('saveRubberProduction', data),
   getRubberProduction:  (params)      => get('getRubberProduction', { estate: 'pavutumuri', ...(params||{}) }),
   deleteRubberProduction:(data)       => post('deleteRubberProduction', data),
+  backfillRubberWages:  (estate)      => post('backfillRubberWages', { estate: estate || 'pavutumuri' }),
   saveManagerSettlement:(data)        => post('saveManagerSettlement', data),
   getManagerSettlements:(estate)      => get('getManagerSettlements', { estate: estate || 'pavutumuri' }),
   deleteManagerSettlement:(data)      => post('deleteManagerSettlement', data),

@@ -4639,21 +4639,27 @@ export async function onRequest(ctx) {
         }
         sumWages = Math.round(sumWages * 100) / 100
 
-        // Record tapper wages as an expense so the P&L reflects what's saved
-        // here. Keyed on (estate, category, date=weekStart) — re-saving the
-        // same week (edits) replaces the prior wages line instead of piling
-        // up duplicates.
+        // Record tapper wages as an expense under the estate's existing
+        // "Rubber Labour" category (same one used by the manual Estate
+        // Ledger) so it rolls up into the standard Labour vs. Plantation
+        // vs. other-cost breakdown instead of a one-off category.
+        // Re-saving the same week (edits) replaces the prior auto-generated
+        // wages line rather than piling up duplicates — matched on the
+        // "Tapper wages — week of …" description tag so a manually-entered
+        // Rubber Labour expense on the same date is never touched.
         const weekStartDate = body.weekStart || entries[0]?.date
+        const WAGES_CATEGORY = 'Rubber Labour'
+        const wagesTag = `Tapper wages — week of ${weekStartDate}`
         if (weekStartDate) {
           await ActiveDB.prepare(
-            `DELETE FROM estate360_estate_transactions WHERE estate = ? AND category = ? AND date = ?`
-          ).bind(estateId, 'Rubber tapping wages', weekStartDate).run()
+            `DELETE FROM estate360_estate_transactions WHERE estate = ? AND category = ? AND date = ? AND description LIKE ?`
+          ).bind(estateId, WAGES_CATEGORY, weekStartDate, `${wagesTag}%`).run()
           if (sumWages > 0) {
             const wagesTxnId = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
             await ActiveDB.prepare(
               `INSERT INTO estate360_estate_transactions (txn_id, estate, type, date, category, amount, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-            ).bind(wagesTxnId, estateId, 'expense', weekStartDate, 'Rubber tapping wages', sumWages,
-              `Tapper wages — week of ${weekStartDate} · ${sumTree} trees (${[...workerSet].join(', ') || '—'})`,
+            ).bind(wagesTxnId, estateId, 'expense', weekStartDate, WAGES_CATEGORY, sumWages,
+              `${wagesTag} · ${sumTree} trees (${[...workerSet].join(', ') || '—'})`,
               actor, actor, now(), now()).run()
           }
         }

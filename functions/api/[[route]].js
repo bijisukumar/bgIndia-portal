@@ -2569,6 +2569,14 @@ export async function onRequest(ctx) {
           rubberHarvests = rh
         } catch(e) {}
 
+        let rubberProd = []
+        try {
+          const { results: rp } = await ActiveDB.prepare(
+            `SELECT prod_date, tree_count, sheet_count, ottupal_count FROM estate360_rubber_production WHERE estate_id = ? AND prod_date >= ?`
+          ).bind(estateId, cutoffStr).all()
+          rubberProd = rp
+        } catch(e) {}
+
         const harvestIncome  = harvests.reduce((s, r) => s + (r.total_earnings || 0), 0)
         const harvestExpense = harvests.reduce((s, r) => s + (r.total_expense  || 0), 0)
 
@@ -2598,7 +2606,13 @@ export async function onRequest(ctx) {
         // [{date, amount, paidTo, description}]) so the UI can drill a clicked
         // category open into its individual dated entries.
         const monthly = {}
-        const ensureMonth = (ym) => { if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0, expBreakdown:{}, expLines:{} } }
+        const ensureMonth = (ym) => { if (!monthly[ym]) monthly[ym] = { income:0, expense:0, net:0, harvests:0, trees:0, sheets:0, ottupal:0, weeks:{}, expBreakdown:{}, expLines:{} } }
+        const mondayOfDate = (dateStr) => {
+          const d = new Date(dateStr + 'T00:00:00Z')
+          const day = (d.getUTCDay() + 6) % 7
+          d.setUTCDate(d.getUTCDate() - day)
+          return d.toISOString().slice(0, 10)
+        }
         const addExpLine = (bucket, k, v, extra) => {
           if (!v) return
           if (!bucket[k]) bucket[k] = []
@@ -2639,6 +2653,20 @@ export async function onRequest(ctx) {
             addExpLine(monthly[ym].expLines, t.category, t.amount, { date: t.date, paidTo: t.paid_to || null, description: t.description || null })
           }
         })
+        rubberProd.forEach(r => {
+          if (!r.prod_date) return
+          const ym = r.prod_date.slice(0, 7)
+          ensureMonth(ym)
+          monthly[ym].trees   += r.tree_count    || 0
+          monthly[ym].sheets  += r.sheet_count   || 0
+          monthly[ym].ottupal += r.ottupal_count || 0
+          const wk = mondayOfDate(r.prod_date)
+          if (!monthly[ym].weeks[wk]) monthly[ym].weeks[wk] = { weekStart: wk, trees: 0, sheets: 0, ottupal: 0 }
+          monthly[ym].weeks[wk].trees   += r.tree_count    || 0
+          monthly[ym].weeks[wk].sheets  += r.sheet_count   || 0
+          monthly[ym].weeks[wk].ottupal += r.ottupal_count || 0
+        })
+
         // Sort each category's line items newest-first, for a sensible default order
         Object.values(monthly).forEach(m => {
           Object.values(m.expLines).forEach(lines => lines.sort((a, b) => (b.date || '').localeCompare(a.date || '')))
@@ -2646,7 +2674,10 @@ export async function onRequest(ctx) {
 
         const monthlyArr = Object.entries(monthly)
           .sort((a,b) => b[0].localeCompare(a[0]))
-          .map(([ym, v]) => ({ ym, ...v, net: v.income - v.expense }))
+          .map(([ym, v]) => ({
+            ym, ...v, net: v.income - v.expense,
+            weeks: Object.values(v.weeks).sort((a, b) => b.weekStart.localeCompare(a.weekStart)),
+          }))
 
         return json({ success: true, data: {
           rangeFrom: cutoffStr, rangeTo: todayStr,
@@ -4580,7 +4611,7 @@ export async function onRequest(ctx) {
         }
         if (!entries.length) return err('no rows provided', 400)
 
-        let saved = 0, sumTree = 0, sumSheet = 0, sumOttupal = 0
+        let saved = 0, sumTree = 0, sumSheet = 0, sumOttupal = 0, sumWages = 0
         const workerSet = new Set()
         for (const e of entries) {
           if (!e.workerName || !e.date) continue
@@ -4603,7 +4634,28 @@ export async function onRequest(ctx) {
               updated_at    = excluded.updated_at
           `).bind(id, estateId, e.workerName, e.date, e.treeCount, e.sheetCount, e.ottupalCount, e.block, e.rain, e.tappingRate, e.notes, actor, now(), actor, now()).run()
           saved++; sumTree += e.treeCount; sumSheet += e.sheetCount; sumOttupal += e.ottupalCount
+          sumWages += e.treeCount * e.tappingRate
           workerSet.add(e.workerName)
+        }
+        sumWages = Math.round(sumWages * 100) / 100
+
+        // Record tapper wages as an expense so the P&L reflects what's saved
+        // here. Keyed on (estate, category, date=weekStart) — re-saving the
+        // same week (edits) replaces the prior wages line instead of piling
+        // up duplicates.
+        const weekStartDate = body.weekStart || entries[0]?.date
+        if (weekStartDate) {
+          await ActiveDB.prepare(
+            `DELETE FROM estate360_estate_transactions WHERE estate = ? AND category = ? AND date = ?`
+          ).bind(estateId, 'Rubber tapping wages', weekStartDate).run()
+          if (sumWages > 0) {
+            const wagesTxnId = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+            await ActiveDB.prepare(
+              `INSERT INTO estate360_estate_transactions (txn_id, estate, type, date, category, amount, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+            ).bind(wagesTxnId, estateId, 'expense', weekStartDate, 'Rubber tapping wages', sumWages,
+              `Tapper wages — week of ${weekStartDate} · ${sumTree} trees (${[...workerSet].join(', ') || '—'})`,
+              actor, actor, now(), now()).run()
+          }
         }
 
         const prodEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId

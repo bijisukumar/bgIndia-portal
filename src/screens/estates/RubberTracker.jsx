@@ -76,7 +76,7 @@ export default function RubberTracker() {
     setLoading(true)
     return api.getRubberProduction({ weekStart: ws })
       .then(d => { setWorkers(buildWorkers(ws, d?.rows || [])); setActive(0) })
-      .catch(() => setWorkers(buildWorkers(ws, [])))
+      .catch(e => { showToast(e?.message || 'Failed to load saved data — showing blank week', 'error'); setWorkers(buildWorkers(ws, [])) })
       .finally(() => setLoading(false))
   }
 
@@ -208,7 +208,7 @@ export default function RubberTracker() {
         </div>
 
         <button className="btn btn-teal" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save week (all tappers) →'}</button>
-        <p className="btn-email-note">📧 Sales &amp; wages are recorded under Income / Expense · owner emailed on save</p>
+        <p className="btn-email-note">📧 Wages recorded as an expense · owner emailed on save · record sheet/ottupal sales separately on the P&amp;L dashboard</p>
       </div>
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>

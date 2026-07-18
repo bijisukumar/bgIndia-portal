@@ -19,6 +19,12 @@ function fmtDate(d) {
   if (!parsed) return '—'
   return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
+function addDaysStr(dateStr, n) {
+  const d = parseLocalDate(dateStr)
+  if (!d) return dateStr
+  d.setDate(d.getDate() + n)
+  return d.toISOString().slice(0, 10)
+}
 
 // ── Weight / revenue trend chart ──────────────────────────────
 function WeightTrendChart({ harvests }) {
@@ -195,7 +201,12 @@ export default function RubberDashboard() {
                         <div key={m.ym} style={{ marginBottom:'6px', background:'rgba(255,255,255,0.02)', borderRadius:'8px', overflow:'hidden', border:'1px solid rgba(255,255,255,0.05)' }}>
                           <div onClick={()=>setDrillMonth(isOpen ? null : m.ym)}
                             style={{ display:'flex', alignItems:'center', padding:'8px 10px', cursor:'pointer', gap:'10px' }}>
-                            <div style={{ fontSize:'0.78rem', color:'#EDF2F7', fontWeight:'600', width:'70px' }}>{monthLabel}</div>
+                            <div style={{ width:'70px' }}>
+                              <div style={{ fontSize:'0.78rem', color:'#EDF2F7', fontWeight:'600' }}>{monthLabel}</div>
+                              {(m.trees > 0 || m.sheets > 0) && (
+                                <div style={{ fontSize:'0.6rem', color:'#5C7080', marginTop:'1px' }}>{m.sheets.toLocaleString('en-IN')}s / {m.trees.toLocaleString('en-IN')}t</div>
+                              )}
+                            </div>
                             <div style={{ flex:1, display:'flex', gap:'12px' }}>
                               <span style={{ fontSize:'0.72rem', color:'#34A853' }}>+₹{m.income >= 1000 ? (m.income/1000).toFixed(1)+'K' : m.income}</span>
                               <span style={{ fontSize:'0.72rem', color:'#F59E0B' }}>-₹{m.expense >= 1000 ? (m.expense/1000).toFixed(1)+'K' : m.expense}</span>
@@ -212,6 +223,24 @@ export default function RubberDashboard() {
                                 <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>EXPENSE</div><div style={{ color:'#F59E0B', fontWeight:'600', fontSize:'0.82rem' }}>₹{m.expense.toLocaleString('en-IN')}</div></div>
                                 <div><div style={{ fontSize:'0.6rem', color:'#5C7080' }}>NET</div><div style={{ color: monthIsLoss?'#EF4444':'#C8903A', fontWeight:'700', fontSize:'0.82rem' }}>₹{m.net.toLocaleString('en-IN')}</div></div>
                               </div>
+                              {(m.weeks || []).length > 0 && (
+                                <div style={{ marginBottom:'10px' }}>
+                                  <div style={{ fontSize:'0.58rem', color:'#5FD0AE', letterSpacing:'1px', marginBottom:'6px' }}>WEEKLY PRODUCTION</div>
+                                  {m.weeks.map(w => {
+                                    const wEnd = addDaysStr(w.weekStart, 6)
+                                    const shortFmt = (d) => { const p = parseLocalDate(d); return p ? p.toLocaleDateString('en-IN', { day:'2-digit', month:'short' }) : d }
+                                    return (
+                                      <div key={w.weekStart} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'4px 0', fontSize:'0.7rem' }}>
+                                        <span style={{ color:'#9AA5B4', width:'92px', flexShrink:0 }}>{shortFmt(w.weekStart)}–{shortFmt(wEnd)}</span>
+                                        <span style={{ color:'#EDF2F7' }}>{w.sheets.toLocaleString('en-IN')} sheets</span>
+                                        <span style={{ color:'#5C7080' }}>·</span>
+                                        <span style={{ color:'#EDF2F7' }}>{w.trees.toLocaleString('en-IN')} trees</span>
+                                        {w.ottupal > 0 && <><span style={{ color:'#5C7080' }}>·</span><span style={{ color:'#EDF2F7' }}>{w.ottupal.toLocaleString('en-IN')} ottupal</span></>}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
                               {monthExpEntries.length > 0 && (
                                 <div>
                                   <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'1px', marginBottom:'6px' }}>EXPENSE COMPONENTS</div>

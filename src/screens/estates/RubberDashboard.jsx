@@ -417,6 +417,7 @@ function MonthlyRegister() {
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
   const [saleOpen, setSaleOpen] = useState(false)
+  const [expOpen, setExpOpen] = useState(false)
   const [sale, setSale] = useState({ sheets: '', weightKg: '', ratePerKg: DEFAULT_SHEET_RATE, ottupalKg: '', ottupalRate: DEFAULT_OTTUPAL_RATE })
   const [toast, setToast] = useState(null)
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
@@ -499,8 +500,11 @@ function MonthlyRegister() {
                 <span className="net-val" style={{ fontSize: '0.78rem' }}>₹{t.total.toLocaleString('en-IN')}</span>
               </div>
             ))}
-            <div className="net-row"><span className="net-label">Expenses</span><span className="net-val" style={{ color: '#E06C5A' }}>−₹{d.pnl.totalExpense.toLocaleString('en-IN')}</span></div>
-            {d.pnl.expense.map(t => (
+            <div className="net-row" onClick={() => d.pnl.expense.length > 0 && setExpOpen(o => !o)} style={{ cursor: d.pnl.expense.length > 0 ? 'pointer' : 'default' }}>
+              <span className="net-label">Expenses {d.pnl.expense.length > 0 && <span style={{ fontSize: '0.65rem', color: '#5C7080' }}>{expOpen ? '∧' : '›'}</span>}</span>
+              <span className="net-val" style={{ color: '#E06C5A' }}>−₹{d.pnl.totalExpense.toLocaleString('en-IN')}</span>
+            </div>
+            {expOpen && d.pnl.expense.map(t => (
               <div key={'e' + t.category} className="net-row" style={{ paddingLeft: 14 }}>
                 <span className="net-label" style={{ fontSize: '0.72rem' }}>{t.category}</span>
                 <span className="net-val" style={{ fontSize: '0.78rem', color: '#E06C5A' }}>−₹{t.total.toLocaleString('en-IN')}</span>

@@ -4509,6 +4509,19 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId } })
       }
 
+      // Manual phone entry for a stay — e.g. an Airbnb confirmation email
+      // that never included one, and the owner learned it some other way
+      // (WhatsApp, a call). Nothing in Complete Booking's normal save flow
+      // touches guest_phone, so there was no way to add it there at all.
+      if (action === 'updateStayGuestPhone') {
+        const { stayId, phone } = body
+        if (!stayId) return err('stayId required')
+        if (!phone || !phone.trim()) return err('phone required')
+        await DB.prepare(`UPDATE stayvibe_stays SET guest_phone = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
+          .bind(phone.trim(), actor, now(), stayId).run()
+        return json({ success: true, data: { stayId, phone: phone.trim() } })
+      }
+
       if (action === 'saveRentalIncome') {
         const { year, monthFrom, monthTo, properties } = body
         const from = parseInt(monthFrom ?? body.month ?? 0); const to = parseInt(monthTo ?? body.month ?? from)

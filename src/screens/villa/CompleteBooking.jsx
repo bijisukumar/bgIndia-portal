@@ -98,6 +98,14 @@ export default function CompleteBooking() {
   const [bookedByOpen,    setBookedByOpen]    = useState(false)
   const [bookedByQuery,   setBookedByQuery]   = useState('')
   const [bookedByResults, setBookedByResults] = useState([])
+
+  // ── Manual phone entry — e.g. an Airbnb confirmation email that never
+  // included one, learned some other way (WhatsApp, a call). Unlocks the
+  // WhatsApp intro / directions sections below, which already gate on
+  // guest_phone being present. ──
+  const [addingPhone, setAddingPhone] = useState(false)
+  const [phoneDraft,  setPhoneDraft]  = useState('')
+  const [phoneBusy,   setPhoneBusy]   = useState(false)
   const [bookedBySearching, setBookedBySearching] = useState(false)
 
   // ── Merge/Link mode: tick 2+ guests in the list, then link them in one
@@ -140,6 +148,7 @@ export default function CompleteBooking() {
   function selectStay(stay) {
     setSelected(stay)
     setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
+    setAddingPhone(false); setPhoneDraft('')
     const ch = stay.source
       ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
       : 'Direct'
@@ -321,6 +330,20 @@ export default function CompleteBooking() {
       setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
+  }
+
+  async function handleSavePhone() {
+    if (!selected) return
+    const digits = String(phoneDraft).replace(/\D/g, '')
+    if (digits.length < 10) { showToast('Enter a valid phone number (10+ digits)', 'error'); return }
+    setPhoneBusy(true)
+    try {
+      await api.updateStayGuestPhone({ stayId: selected.stay_id, phone: phoneDraft.trim() })
+      showToast('Phone added ✓')
+      setAddingPhone(false); setPhoneDraft('')
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setPhoneBusy(false) }
   }
 
   function toggleMergeCheck(stayId) {
@@ -766,11 +789,36 @@ export default function CompleteBooking() {
                         </div>
                         <div>
                           <div style={infoLabel}>Phone</div>
-                          <div style={infoVal}>
-                            {s.guest_phone
-                              ? <a href={`tel:${s.guest_phone}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_phone}</a>
-                              : <span style={{color:'var(--text-dim)'}}>—</span>}
-                          </div>
+                          {s.guest_phone ? (
+                            <div style={infoVal}>
+                              <a href={`tel:${s.guest_phone}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_phone}</a>
+                            </div>
+                          ) : !addingPhone ? (
+                            <button onClick={()=>{setAddingPhone(true);setPhoneDraft('+91')}}
+                              style={{fontSize:'0.78rem',color:'#85B7EB',background:'none',border:'none',
+                                cursor:'pointer',padding:0,textDecoration:'underline'}}>
+                              + Add phone number
+                            </button>
+                          ) : (
+                            <div style={{display:'flex',gap:'6px',alignItems:'center'}}>
+                              <input type="tel" autoFocus value={phoneDraft}
+                                onChange={e=>setPhoneDraft(e.target.value)}
+                                onKeyDown={e=>{ if (e.key==='Enter') handleSavePhone() }}
+                                placeholder="+91 98765 43210"
+                                style={{flex:'1 1 auto',minWidth:0,padding:'6px 8px',background:'var(--dark-bg)',
+                                  border:'1px solid var(--border-dim)',borderRadius:'6px',color:'var(--text)',fontSize:'0.82rem'}}/>
+                              <button onClick={handleSavePhone} disabled={phoneBusy}
+                                style={{flexShrink:0,padding:'6px 10px',borderRadius:'6px',border:'none',
+                                  background:'var(--gold)',color:'#1A202C',fontWeight:'700',fontSize:'0.75rem',cursor:'pointer'}}>
+                                {phoneBusy?'…':'Save'}
+                              </button>
+                              <button onClick={()=>{setAddingPhone(false);setPhoneDraft('')}}
+                                style={{flexShrink:0,padding:'6px 8px',borderRadius:'6px',border:'1px solid var(--border-dim)',
+                                  background:'transparent',color:'var(--text-dim)',fontSize:'0.75rem',cursor:'pointer'}}>
+                                ✕
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <div style={infoLabel}>Email</div>

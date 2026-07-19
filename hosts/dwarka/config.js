@@ -48,7 +48,7 @@ export const CONFIG = {
       mapsLink: 'https://maps.app.goo.gl/fjfe4eS4BJmaHh62A',
       bedrooms: 4,
       active:   true,
-      logoUrl:  null,   // set to '/icons/dwarka-logo.png' or CDN URL to brand this villa
+      logoUrl:  '/icons/DwarkaLVGLogo.png',
     }
   ],
 

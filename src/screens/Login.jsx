@@ -42,7 +42,7 @@ export default function Login() {
         {/* Logo */}
         <div style={styles.logoWrap}>
           <img
-            src="/icons/logo-emblem.png?v=5"
+            src="/icons/StayVibe360Logo.png"
             alt={CONFIG.brandName}
             style={styles.logo}
             onError={e => console.error("Logo failed to load at path:", e.target.src)}

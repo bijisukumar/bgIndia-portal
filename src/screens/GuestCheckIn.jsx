@@ -12,16 +12,17 @@ import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
 const VILLA_NAMES = Object.fromEntries(CONFIG.villas.map(v => [v.id, v.full || v.name]))
 
-function LogoImg() {
+function LogoImg({ villaId }) {
   const [failed, setFailed] = useState(false)
   if (failed) return (
     <div style={{ width:'56px', height:'56px', borderRadius:'12px', fontSize:'1.8rem',
       background:'rgba(200,144,58,0.15)', border:'1px solid rgba(200,144,58,0.3)',
       display:'flex', alignItems:'center', justifyContent:'center' }}>🏡</div>
   )
+  const whiteLabelLogo = CONFIG.villas.find(v => v.id === villaId)?.logoUrl
   return (
     <img
-      src="/icons/logo-emblem.png"
+      src={whiteLabelLogo || '/icons/StayVibe360Logo.png'}
       alt={CONFIG.brandName}
       onError={() => setFailed(true)}
       style={{ width:'56px', height:'56px', borderRadius:'12px', objectFit:'cover',
@@ -400,7 +401,7 @@ export default function GuestCheckIn() {
       {/* ── HEADER ── */}
       <div style={s.header}>
         <div style={s.brandRow}>
-          <LogoImg />
+          <LogoImg villaId={villaId} />
           <div>
             <div style={s.brandName}>{villaName}</div>
             <div style={s.brandSub}>GURUVAYUR · KERALA</div>

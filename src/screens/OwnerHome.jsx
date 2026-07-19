@@ -1141,15 +1141,18 @@ export default function OwnerHome({ sections }) {
   // saw these unconditionally since only the menu tiles below were ever
   // scoped by `sections`.
   const showVillaBlocks = !sections || sections.includes('villa')
+  const activeVilla = CONFIG.villas.find(v => v.id === DEFAULT_VILLA_ID)
+  const whiteLabelLogo = activeVilla?.logoUrl || null
 
   return (
     <div className="screen">
       <div style={styles.header}>
-        <img src="/icons/logo-emblem.png" alt="GE" style={styles.logo}
+        <img src={whiteLabelLogo || '/icons/StayVibe360Logo.png'} alt={CONFIG.brandName} style={styles.logo}
           onError={e => e.target.style.display = 'none'} />
         <div style={styles.headerText}>
           <div style={styles.brandName}>{CONFIG.brandName}</div>
           <div style={styles.tagline}>{CONFIG.tagline.toUpperCase()}</div>
+          {whiteLabelLogo && <div style={styles.poweredBy}>Powered by StayVibe360</div>}
         </div>
         <div style={styles.welcomeBadge}>
           <span style={styles.welcomeLabel}>OWNER</span>
@@ -1217,6 +1220,7 @@ const styles = {
   headerText: { flex: 1 },
   brandName:  { fontFamily: "\'Cormorant Garamond\', serif", fontSize: '1.15rem', fontWeight: '600', color: '#E8B86D', letterSpacing: '0.5px' },
   tagline:    { fontSize: '0.6rem', color: '#5C7080', letterSpacing: '2px', marginTop: '2px' },
+  poweredBy:  { fontSize: '0.55rem', color: '#3D4A5C', letterSpacing: '1px', marginTop: '3px' },
   welcomeBadge: { background: 'rgba(200,144,58,0.12)', border: '1px solid rgba(200,144,58,0.2)', borderRadius: '20px', padding: '4px 12px' },
   welcomeLabel: { color: '#C8903A', fontSize: '0.65rem', fontWeight: '700', letterSpacing: '2px' },
 }

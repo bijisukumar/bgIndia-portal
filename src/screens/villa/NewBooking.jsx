@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { CONFIG } from '../../config'
 
+const MANAGER_NAME = CONFIG.villas.find(v => v.active)?.managerName || CONFIG.villas[0]?.managerName || 'Manager'
 const TODAY    = localTodayStr()
 const CHANNELS = ['Direct', 'Airbnb', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Expedia', 'VRBO', 'Other']
 // HOST fee only (what OTA deducts from your payout — NOT the guest service fee)
@@ -181,7 +183,7 @@ export default function NewBooking() {
               {[
                 { icon: '📋', text: 'Share guest registration form link with booker', done: false },
                 { icon: '✅', text: 'Guest fills online registration (Aadhaar, names, dates)', done: false },
-                { icon: '🚗', text: 'RamananKutty does check-in on portal', done: false },
+                { icon: '🚗', text: `${MANAGER_NAME} does check-in on portal`, done: false },
                 { icon: '🏠', text: 'Record villa rental income for this stay', done: false },
               ].map((step, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

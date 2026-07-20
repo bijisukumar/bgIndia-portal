@@ -2,6 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { parseLocalDate } from '../utils/dates'
+import { CONFIG } from '../config'
+
+const ACTIVE_VILLA = CONFIG.villas.find(v => v.active) || CONFIG.villas[0] || {}
+const MANAGER_NAME = ACTIVE_VILLA.managerName || 'Manager'
+const MANAGER_UPI = ACTIVE_VILLA.managerUpi || ''
 
 // ── COMMISSION LOGIC ──────────────────────────────────────────────────────────
 // To change Raman's commission rates, edit ONLY this function.
@@ -176,8 +181,7 @@ export default function RDashboard() {
   }
 
   const gpayLink = (amount) => {
-    const upi = '85471419raman@okicici'
-    return `upi://pay?pa=${upi}&pn=RamananKutty&am=${amount}&cu=INR&tn=Villa+Commission`
+    return `upi://pay?pa=${MANAGER_UPI}&pn=${encodeURIComponent(MANAGER_NAME)}&am=${amount}&cu=INR&tn=Villa+Commission`
   }
 
   const allStays = getAllStays()
@@ -200,8 +204,8 @@ export default function RDashboard() {
       <div className="topbar">
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
         <div>
-          <div className="topbar-title">R-Dashboard</div>
-          <div className="topbar-sub">RAMANKUTTY · COMMISSION TRACKER</div>
+          <div className="topbar-title">Staff Perks</div>
+          <div className="topbar-sub">{MANAGER_NAME.toUpperCase()} · COMMISSION TRACKER</div>
         </div>
         <div style={{ width: 34 }} />
       </div>

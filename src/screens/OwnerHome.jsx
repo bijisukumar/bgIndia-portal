@@ -7,6 +7,11 @@ import { parseLocalDate, fmtDate } from '../utils/dates'
 import { channelLabel, channelPillStyle } from '../utils/channel'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
+// Manager name shown on the "Staff Perks" tile and elsewhere — configurable
+// per host so a white-label tenant sees their own on-site manager's name
+// instead of a hardcoded one.
+const MANAGER_NAME = CONFIG.villas.find(v => v.active)?.managerName || CONFIG.villas[0]?.managerName || 'Manager'
+
 // Two top-level sections: Hospitality (Villa + Rental) and Estates
 const HOSPITALITY = {
   label: 'SERVICED VILLAS & PASSIVE RENTAL',
@@ -56,8 +61,8 @@ const PEOPLE = {
     },
     {
       id: 'rdashboard', icon: '📊', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
-      title: 'R-Dashboard',
-      sub: 'RamananKutty commission · Unpaid · History',
+      title: 'Staff Perks',
+      sub: `${MANAGER_NAME} commission · Unpaid · History`,
       path: '/owner/r-dashboard',
     },
   ],

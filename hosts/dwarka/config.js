@@ -49,6 +49,14 @@ export const CONFIG = {
       bedrooms: 4,
       active:   true,
       logoUrl:  '/icons/DwarkaLVGLogo.png',
+      // On-site manager whose name shows on the owner's "Staff Perks"
+      // commission tile and the New Booking checklist — configurable per
+      // host so a white-label tenant sees their own manager's name.
+      managerName: 'RamananKutty',
+      // Commission payout UPI id — genuinely host-specific, not cosmetic:
+      // a new host's "Pay now" button must never default to someone
+      // else's bank account.
+      managerUpi: '85471419raman@okicici',
     }
   ],
 

@@ -36,6 +36,8 @@ export const CONFIG = {
       logoUrl:  null,   // no distinct white-label logo for the demo tenant — showing the
                         // redundant "Powered by StayVibe360" line under the StayVibe360
                         // logo itself would look like a bug, not a feature
+      managerName: 'Demo Manager',
+      managerUpi: 'demo-manager@upi',
     }
   ],
 

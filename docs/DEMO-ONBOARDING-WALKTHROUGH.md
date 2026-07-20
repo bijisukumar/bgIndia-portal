@@ -118,9 +118,22 @@ Should return `{"success":true,"token":"..."}`.
 
 ## 6. Custom domain (manual — dashboard only)
 No `wrangler pages domain` command exists (checked `wrangler pages --help`
-— not in the command tree). Add via Cloudflare dashboard: Pages →
-`demovilla-portal` → Custom domains → add `demo.stayvibe360.com`. SSL
-provisions automatically.
+— not in the command tree). Two separate steps, both dashboard-only:
+1. DNS tab (zone `stayvibe360.com`) → add a CNAME record: name `demo`,
+   content `demovilla-portal.pages.dev`, Proxied.
+2. Pages → `demovilla-portal` project → **Custom domains** tab → Set up a
+   custom domain → enter `demo.stayvibe360.com`.
+
+The DNS record alone isn't enough — until step 2 claims the hostname for
+the project, Cloudflare has no origin to route it to and returns a 522.
+Once both are done the domain shows **Active** with SSL enabled, usually
+within a minute or two.
+
+Confirmed live: `demo.stayvibe360.com` (demovilla-portal) and
+`manage.stayvibe360.com` (bgindia-portal, added as a second custom domain
+alongside the original `manage.luxuryvillasofguruvayur.com` — a Pages
+project can serve multiple custom domains at once, no code or DNS change
+needed on the app side).
 
 ## 7. Acceptance
 Run `/infra` TestRunner (full pass) against the deployed demo before

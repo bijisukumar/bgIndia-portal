@@ -22,6 +22,17 @@ class ErrorBoundary extends Component {
   }
 }
 
+// Horizontal-only strips (month pills) don't respond to a plain mouse
+// wheel on desktop — only touchpad/touch swipe naturally scrolls them —
+// so a vertical wheel motion over the strip is redirected sideways instead
+// of doing nothing (which reads as "December is missing").
+function scrollStripOnWheel(e) {
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    e.currentTarget.scrollLeft += e.deltaY
+    e.preventDefault()
+  }
+}
+
 const MONTHS     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const MONTHS_FULL= ['January','February','March','April','May','June','July','August','September','October','November','December']
 const CUR_MONTH  = new Date().getMonth()
@@ -243,7 +254,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
 
       {/* By month */}
       <div className="card-section-label">📋 BOOKINGS BY MONTH</div>
-      <div className="month-strip" style={{ marginBottom:'12px', overflowX:'auto', flexWrap:'nowrap', WebkitOverflowScrolling:'touch' }}>
+      <div className="month-strip" style={{ marginBottom:'12px', overflowX:'auto', flexWrap:'nowrap', WebkitOverflowScrolling:'touch' }} onWheel={scrollStripOnWheel}>
           <button className={`month-pill${selMonth==='all'?' active':''}`} onClick={() => setSelMonth('all')}>All</button>
           {MONTHS.map((m, i) => (
             <button key={m} className={`month-pill${selMonth===i?' active':''}`} onClick={() => setSelMonth(i)}>{m}</button>
@@ -822,7 +833,7 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
         ))}
       </div>
 
-      <div className="month-strip" style={{ overflowX:'auto', flexWrap:'nowrap', WebkitOverflowScrolling:'touch' }}>
+      <div className="month-strip" style={{ overflowX:'auto', flexWrap:'nowrap', WebkitOverflowScrolling:'touch' }} onWheel={scrollStripOnWheel}>
         <button className={`month-pill${month==='fy'?' active':''}`} onClick={() => onMonthChange('fy')}>All</button>
         {MONTHS.map((m, i) => (
           <button key={m} className={`month-pill${month===i?' active':''}`} onClick={() => onMonthChange(i)}>{m}</button>
@@ -1140,7 +1151,7 @@ function VillaDashboardInner() {
       <div className="topbar">
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
         <div>
-          <div className="topbar-title">Villa dashboard</div>
+          <div className="topbar-title">Dashboard</div>
           <div className="topbar-sub">DWARKA · GVR · {year}</div>
         </div>
         <button className="back-btn" onClick={() => navigate('/')} title="Home">🏠</button>

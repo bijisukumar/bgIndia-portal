@@ -227,7 +227,7 @@ export default function RamanHome() {
     },
     {
       icon: '🧾', bg: 'rgba(239,68,68,0.08)', arrow: '#EF4444',
-      title: 'Villa expenses',
+      title: 'Expenses',
       sub: 'Log electricity, maintenance, repairs & recurring costs',
       path: '/raman/expenses',
       disabled: false,

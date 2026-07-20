@@ -88,15 +88,15 @@ export default function VillaHub() {
                 { icon: '📋', bg: 'rgba(52,168,83,0.08)',    arrow: '#34A853', title: 'New booking',       sub: 'Record booking · assign Stay ID · create Drive folder', path: `/owner/villa/booking` },
                 { icon: '📨', bg: 'rgba(139,92,246,0.08)',   arrow: '#8B5CF6', title: 'Guest enquiries',   sub: 'Track leads · conversion · repeat guests',              path: `/owner/villa/enquiries` },
                 { icon: '🏨', bg: 'rgba(200,144,58,0.08)',   arrow: '#C8903A', title: 'Complete booking', sub: 'Financials · docs · ready for check-in',              path: `/owner/villa/income` },
-                { icon: '📊', bg: 'rgba(24,95,165,0.08)',    arrow: '#185FA5', title: 'Villa dashboard',    sub: 'Revenue · profit · breakdown',                          path: `/owner/villa/dashboard` },
+                { icon: '📊', bg: 'rgba(24,95,165,0.08)',    arrow: '#185FA5', title: 'Dashboard',    sub: 'Revenue · profit · breakdown',                          path: `/owner/villa/dashboard` },
             { icon: '📦', bg: 'rgba(15,110,86,0.08)',    arrow: '#0F6E56', title: 'Inventory',          sub: 'Stock levels · sell prices · restock log',               path: `/owner/villa/inventory` },
-                { icon: '🧾', bg: 'rgba(239,68,68,0.08)',    arrow: '#EF4444', title: 'Villa expenses',      sub: 'Electricity · maintenance · repairs · recurring costs', path: `/owner/villa/expenses` },
+                { icon: '🧾', bg: 'rgba(239,68,68,0.08)',    arrow: '#EF4444', title: 'Expenses',      sub: 'Electricity · maintenance · repairs · recurring costs', path: `/owner/villa/expenses` },
                 { icon: '🔔', bg: 'rgba(139,92,246,0.08)',   arrow: '#8B5CF6', title: 'Notification settings', sub: 'Owner alert email · per-villa config',                path: `/owner/villa/notifications` },
                 { icon: '🔧', bg: 'rgba(92,112,128,0.08)', arrow: '#5C7080', title: 'Maintenance',         sub: 'Schema validation · alert settings · system health',       path: `/owner/maintenance` },
               ].map((row, i, arr) => (
                 <div key={row.title}
                   className="menu-row"
-                  style={{ padding: '14px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--border-dim)' : 'none' }}
+                  style={{ padding: '14px 16px', borderBottom: i < arr.length - 1 ? '1px solid var(--border-dim)' : 'none' }}
                   onClick={() => navigate(row.path)}
                 >
                   <div className="menu-icon" style={{ background: row.bg }}>{row.icon}</div>

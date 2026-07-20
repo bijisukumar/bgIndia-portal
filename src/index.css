@@ -328,6 +328,7 @@ textarea.field-input { resize: vertical; min-height: 80px; }
   flex-wrap: nowrap;
   gap: 5px;
   overflow-x: auto;
+  scroll-behavior: smooth;
   padding: 0 0 6px 0;
   margin: 0 -16px 14px;   /* bleed to screen edges */
   padding-left: 16px;

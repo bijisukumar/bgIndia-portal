@@ -167,7 +167,7 @@ export default function VillaExpenses() {
     <div className="screen">
       <div className="topbar">
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
-        <div><div className="topbar-title">Villa Expenses</div><div className="topbar-sub">DWARKA · RECURRING COSTS</div></div>
+        <div><div className="topbar-title">Expenses</div><div className="topbar-sub">DWARKA · RECURRING COSTS</div></div>
       </div>
 
       <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', background: '#111' }}>

@@ -18,5 +18,6 @@ dist/
 "scripts/backfill-v3-2026-05-18.sql" 
 "scripts/export-coconut.sql" 
 "scripts/export-estate-txn.sql" 
-"scripts/export-irrigation.sql" 
-"scripts/export-rubber.sql" 
+"scripts/export-irrigation.sql"
+"scripts/export-rubber.sql"
+scripts/demo-data/generated-demo-stays.sql

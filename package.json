@@ -9,8 +9,9 @@
     "build:stayvibe": "vite build --config vite.stayvibe.config.js",
     "build:rev360": "vite build --config vite.rev360.config.js",
     "build:estate360": "vite build --config vite.estate360.config.js",
+    "build:demovilla": "vite build --config vite.demovilla.config.js",
     "build:manage": "vite build",
-    "build:all": "npm run build:stayvibe && npm run build:rev360 && npm run build:estate360 && npm run build:manage"
+    "build:all": "npm run build:stayvibe && npm run build:rev360 && npm run build:estate360 && npm run build:demovilla && npm run build:manage"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

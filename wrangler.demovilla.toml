@@ -1,0 +1,14 @@
+name = "demovilla-portal"
+compatibility_date = "2024-01-01"
+pages_build_output_dir = "dist/demovilla"
+
+[vars]
+DEFAULT_VILLA_ID = "demovilla"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "demovilla-db"
+database_id = "228e2cfc-36c1-4030-afab-8f178d539832"
+
+[ai]
+binding = "AI"

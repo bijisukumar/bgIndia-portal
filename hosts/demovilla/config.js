@@ -33,7 +33,9 @@ export const CONFIG = {
       mapsLink: 'https://maps.app.goo.gl/demo-placeholder',
       bedrooms: 3,
       active:   true,
-      logoUrl:  null,
+      logoUrl:  null,   // no distinct white-label logo for the demo tenant — showing the
+                        // redundant "Powered by StayVibe360" line under the StayVibe360
+                        // logo itself would look like a bug, not a feature
     }
   ],
 

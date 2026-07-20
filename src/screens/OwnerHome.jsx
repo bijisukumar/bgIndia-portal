@@ -1138,6 +1138,17 @@ export default function OwnerHome({ sections }) {
   const people       = filterSection(PEOPLE, sections)
   const estates      = filterSection(ESTATES, sections)
 
+  // DB Admin's full SQL/schema editor is master-owner only — everyone else
+  // gets a leaner "Quick Reports" surface (canned reports, no raw SQL),
+  // so the tile itself needs to say so rather than promise editor access
+  // it won't grant.
+  const isMaster = user?.role === 'master_owner'
+  const peopleRows = people.rows.map(row => row.id !== 'dbadmin' ? row : {
+    ...row,
+    title: isMaster ? 'DB Admin' : 'Quick Reports',
+    sub: isMaster ? 'Saved queries · SQL editor · Live D1' : 'Canned reports · read-only',
+  })
+
   // The alert blocks below (duplicate bookings, review chase, check-in
   // links, channel mix, occupancy gaps, etc.) are all villa-guest-booking
   // concepts — they only make sense for apps that actually have the
@@ -1203,7 +1214,7 @@ export default function OwnerHome({ sections }) {
         </>}
 
         {hospitality.rows.length > 0 && <MenuSection section={hospitality} />}
-        {people.rows.length > 0 && <MenuSection section={people} />}
+        {peopleRows.length > 0 && <MenuSection section={{ ...people, rows: peopleRows }} />}
         {estates.rows.length > 0 && <MenuSection section={estates} />}
 
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>

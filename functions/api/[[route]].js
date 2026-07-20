@@ -1885,6 +1885,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'runSQL') {
+        if (payload.role !== 'master_owner') return err('Master owner access only', 403)
         const sql = url.searchParams.get('sql') || ''
         if (!sql.trim().toUpperCase().startsWith('SELECT') && !sql.trim().toUpperCase().startsWith('PRAGMA')) {
           return err('Only SELECT and PRAGMA queries allowed')
@@ -1898,6 +1899,7 @@ export async function onRequest(ctx) {
       // SCHEMA SNAPSHOT — returns all tables + columns from live DB
       // Used by Maintenance > Schema Validation screen
       if (action === 'getSchemaSnapshot') {
+        if (payload.role !== 'master_owner') return err('Master owner access only', 403)
         try {
           const { results: tables } = await DB.prepare(
             `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_cf_%' ORDER BY name`
@@ -3779,10 +3781,15 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'runSQLWrite') {
+        if (payload.role !== 'master_owner') return err('Master owner access only', 403)
         const sql = body?.sql ? body.sql.trim() : ''
         if (!sql) return err('sql required')
-        if (['DROP TABLE','TRUNCATE','DROP DATABASE','ATTACH','DETACH'].some(b => sql.toUpperCase().includes(b))) {
-          return err('Operation not permitted — DROP TABLE and TRUNCATE are blocked')
+        // DELETE/TRUNCATE/DROP are blocked unconditionally, even for the master
+        // owner — this quick-query tool is for reads and light fixes, not
+        // destructive ops. Real deletes go through a deliberate migration
+        // script (wrangler d1 execute), not this in-app convenience editor.
+        if (['DELETE','DROP TABLE','TRUNCATE','DROP DATABASE','ATTACH','DETACH'].some(b => sql.toUpperCase().includes(b))) {
+          return err('Operation not permitted — DELETE, DROP TABLE, and TRUNCATE are blocked in this editor')
         }
         try {
           // SQL-aware split — correctly handles semicolons inside string

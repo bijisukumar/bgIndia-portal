@@ -98,16 +98,25 @@ npx wrangler pages deploy dist/demovilla --project-name=demovilla-portal --commi
 cp wrangler.toml.manage-bak wrangler.toml
 rm wrangler.toml.manage-bak
 ```
-Once a Pages project has bindings applied this way, every *later* deploy
-of that project (even without `--config`, e.g. after seeding new demo
-data or a worker code change) keeps using them — this dance is only
-needed the first time a given Pages project is created. Ordinary
-"rebuild after touching the shared worker" deploys for demovilla-portal
-just need:
+**Update, after seeing it twice**: this is *not* reliably one-time. A later
+plain `wrangler pages deploy` (no `--config` swap) has silently dropped the
+DB binding again on this project — same symptom both times: login starts
+returning "Invalid PIN" even though the row and hash in D1 are provably
+correct, and it doesn't resolve with waiting (ruled out propagation delay
+by testing the exact deployment URL directly, 20+ seconds, multiple
+retries). The fix is the same swap-and-restore dance above, re-run. Given
+the intermittency, treat this as **the standard deploy procedure for
+demovilla-portal every time**, not a one-time setup step:
 ```
 npm run build:demovilla
+cp wrangler.toml wrangler.toml.manage-bak
+cp wrangler.demovilla.toml wrangler.toml
 npx wrangler pages deploy dist/demovilla --project-name=demovilla-portal --commit-dirty=true
+cp wrangler.toml.manage-bak wrangler.toml
+rm wrangler.toml.manage-bak
 ```
+Then always confirm with a login curl before trusting the deploy — silent
+and fast to check, versus discovering it mid-demo.
 
 Verify auth is wired end to end:
 ```

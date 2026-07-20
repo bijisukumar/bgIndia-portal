@@ -2,6 +2,16 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { CONFIG } from '../../config'
+import { useAuth } from '../../hooks/useAuth'
+
+// Manager name/estates/rental presence differ per host — a villa/Airbnb-only
+// host with no estates or passive rental business shouldn't see those report
+// categories at all, and the staff category should show their own manager's
+// name instead of a hardcoded one (matches the OwnerHome "Staff Perks" tile).
+const MANAGER_NAME = CONFIG.villas.find(v => v.active)?.managerName || CONFIG.villas[0]?.managerName || 'Staff'
+const HAS_ESTATES = (CONFIG.estates || []).length > 0
+const HAS_RENTAL  = (CONFIG.rentalProperties || []).length > 0
 
 // ── PRESET QUERIES ────────────────────────────────────────
 const PRESET_QUERIES = [
@@ -12,13 +22,17 @@ const PRESET_QUERIES = [
   { key: 'top_guests',        label: 'Repeat guests (2+ stays)',    cat: 'Villa' },
   { key: 'avg_tariff_year',   label: 'Avg tariff & nights by year', cat: 'Villa' },
   { key: 'direct_conversion', label: 'Direct vs OTA split',         cat: 'Villa' },
-  { key: 'raman_unpaid',      label: 'Raman — unpaid commissions',  cat: 'Raman' },
-  { key: 'raman_summary',     label: 'Raman — paid vs unpaid',      cat: 'Raman' },
+  { key: 'raman_unpaid',      label: `${MANAGER_NAME} — unpaid commissions`, cat: MANAGER_NAME },
+  { key: 'raman_summary',     label: `${MANAGER_NAME} — paid vs unpaid`,     cat: MANAGER_NAME },
   { key: 'inventory_stock',   label: 'Full inventory stock',        cat: 'Inventory' },
   { key: 'low_stock',         label: 'Low stock items (≤3)',         cat: 'Inventory' },
-  { key: 'coconut_by_year',   label: 'Coconut harvests by year',    cat: 'Estates' },
-  { key: 'rental_ytd',        label: 'Rental income YTD',           cat: 'Rental' },
+  ...(HAS_RENTAL ? [{ key: 'rental_ytd', label: 'Rental income YTD', cat: 'Rental' }] : []),
+  // 'coconut_by_year' removed — there was never a matching server-side
+  // preset (the estates table it targeted moved to a separate D1 binding
+  // this screen doesn't query), so it always errored with "Unknown query key".
 ]
+
+const CATS = ['All', 'Villa', MANAGER_NAME, 'Inventory', ...(HAS_ESTATES ? ['Estates'] : []), ...(HAS_RENTAL ? ['Rental'] : [])]
 
 const QUICK_SQL = [
   { label: 'All tables',         sql: `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name` },
@@ -35,8 +49,6 @@ const QUICK_SQL = [
   // doesn't query. See scripts/migrate-v2.1-drop-stale-estate-tables.sql.
   { label: 'rental income',      sql: `SELECT * FROM rev360_rental_income ORDER BY year DESC, month DESC LIMIT 30` },
 ]
-
-const CATS = ['All', 'Villa', 'Raman', 'Inventory', 'Estates', 'Rental']
 
 const SAVED_KEY = 'bgindia_saved_queries'
 
@@ -201,7 +213,9 @@ function SavedQueryModal({ initial, onSave, onCancel }) {
 // ── MAIN COMPONENT ────────────────────────────────────────
 export default function D1Explorer() {
   const navigate = useNavigate()
-  const [tab, setTab]               = useState('saved')
+  const { user } = useAuth()
+  const isMaster = user?.role === 'master_owner'
+  const [tab, setTab]               = useState(isMaster ? 'saved' : 'presets')
   const [catFilter, setCatFilter]   = useState('All')
   const [results, setResults]       = useState(null)
   const [running, setRunning]       = useState(false)
@@ -353,26 +367,30 @@ export default function D1Explorer() {
       <div className="topbar">
         <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
         <div>
-          <div className="topbar-title">DB Admin</div>
-          <div className="topbar-sub">bgindia-db · LIVE</div>
+          <div className="topbar-title">{isMaster ? 'DB Admin' : 'Quick Reports'}</div>
+          {/* Database name is an internal detail — never surfaced to non-master hosts */}
+          <div className="topbar-sub">{isMaster ? 'bgindia-db · LIVE' : 'LIVE'}</div>
         </div>
         <div style={{ background: 'rgba(52,168,83,0.15)', border: '1px solid rgba(52,168,83,0.3)', borderRadius: '16px', padding: '3px 10px' }}>
           <span style={{ color: '#34A853', fontSize: '0.65rem', fontWeight: '700' }}>● LIVE</span>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', background: '#111' }}>
-        <button style={tabStyle('saved')}   onClick={() => setTab('saved')}>💾 Saved</button>
-        <button style={tabStyle('sql')}     onClick={() => setTab('sql')}>✍️ SQL</button>
-        <button style={tabStyle('presets')} onClick={() => setTab('presets')}>📊 Presets</button>
-        <button style={tabStyle('schema')}  onClick={() => setTab('schema')}>🏗 Schema</button>
-      </div>
+      {/* Tabs — Saved/SQL/Schema (raw SQL access) are master-owner only;
+          everyone else only ever sees the canned Presets ("Quick Reports") */}
+      {isMaster && (
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)', background: '#111' }}>
+          <button style={tabStyle('saved')}   onClick={() => setTab('saved')}>💾 Saved</button>
+          <button style={tabStyle('sql')}     onClick={() => setTab('sql')}>✍️ SQL</button>
+          <button style={tabStyle('presets')} onClick={() => setTab('presets')}>📊 Presets</button>
+          <button style={tabStyle('schema')}  onClick={() => setTab('schema')}>🏗 Schema</button>
+        </div>
+      )}
 
       <div className="screen-body">
 
         {/* ── SAVED QUERIES TAB ──────────────────────── */}
-        {tab === 'saved' && (
+        {isMaster && tab === 'saved' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <div className="card-section-label" style={{ marginBottom: 0 }}>YOUR SAVED QUERIES</div>
@@ -482,7 +500,7 @@ export default function D1Explorer() {
         )}
 
         {/* ── SQL EDITOR TAB ────────────────────────── */}
-        {tab === 'sql' && (
+        {isMaster && tab === 'sql' && (
           <>
             <div className="card-section-label">QUICK LOAD</div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -572,7 +590,7 @@ export default function D1Explorer() {
         )}
 
         {/* ── SCHEMA TAB ──────────────────────────────── */}
-        {tab === 'schema' && (
+        {isMaster && tab === 'schema' && (
           <>
             <div className="card-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>TABLES — tap to browse{schemaGeneratedAt && !schemaLoading && (

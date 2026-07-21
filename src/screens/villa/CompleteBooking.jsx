@@ -16,7 +16,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 
@@ -70,8 +70,8 @@ function daysFromNow(d) {
 // guest individually — same underlying flags as the detail view's pills.
 function requestSummary(stay) {
   const parts = []
-  if (stay.request_early_checkin) parts.push('⏰ Early check-in')
-  if (stay.request_late_checkout) parts.push('🌙 Late check-out')
+  if (stay.request_early_checkin) parts.push('⏰ Early check-in' + (stay.early_checkin_time ? ` — ${formatTime12h(stay.early_checkin_time)}` : ''))
+  if (stay.request_late_checkout) parts.push('🌙 Late check-out' + (stay.late_checkout_time ? ` — ${formatTime12h(stay.late_checkout_time)}` : ''))
   if (stay.request_breakfast) parts.push('🍳 Breakfast' + (stay.breakfast_choice ? ` — ${stay.breakfast_choice}` : ''))
   if (stay.request_cab) parts.push('🚗 Cab')
   if (stay.request_extra_beds) parts.push('🛏 Extra beds' + (stay.extra_beds_count > 0 ? ` × ${stay.extra_beds_count}` : ''))
@@ -107,6 +107,15 @@ export default function CompleteBooking() {
   const [phoneDraft,  setPhoneDraft]  = useState('')
   const [phoneBusy,   setPhoneBusy]   = useState(false)
   const phoneFieldRef = useRef(null)
+
+  // ── Early check-in / late check-out actual approved time — the boolean
+  // request flags only say the guest asked, not what time was agreed. Both
+  // are captured here (independently editable) since a stay can have both. ──
+  const [editingEarlyTime, setEditingEarlyTime] = useState(false)
+  const [editingLateTime,  setEditingLateTime]  = useState(false)
+  const [earlyTimeDraft,   setEarlyTimeDraft]   = useState('')
+  const [lateTimeDraft,    setLateTimeDraft]    = useState('')
+  const [timeBusy,         setTimeBusy]         = useState(false)
   const [bookedBySearching, setBookedBySearching] = useState(false)
 
   // ── Merge/Link mode: tick 2+ guests in the list, then link them in one
@@ -150,6 +159,7 @@ export default function CompleteBooking() {
     setSelected(stay)
     setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
     setAddingPhone(false); setPhoneDraft('')
+    setEditingEarlyTime(false); setEditingLateTime(false); setEarlyTimeDraft(''); setLateTimeDraft('')
     const ch = stay.source
       ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
       : 'Direct'
@@ -346,6 +356,24 @@ export default function CompleteBooking() {
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
     finally { setPhoneBusy(false) }
+  }
+
+  // Always sends both times — whichever field isn't being edited right now
+  // is passed through unchanged from the stay's current saved value, so
+  // saving one never clobbers the other.
+  async function handleSaveCheckinTimes(which) {
+    if (!selected) return
+    setTimeBusy(true)
+    try {
+      const earlyCheckinTime = which === 'early' ? earlyTimeDraft : (selected.early_checkin_time || null)
+      const lateCheckoutTime = which === 'late'  ? lateTimeDraft  : (selected.late_checkout_time || null)
+      await api.updateStayCheckinTimes({ stayId: selected.stay_id, earlyCheckinTime, lateCheckoutTime })
+      showToast('Time saved ✓')
+      if (which === 'early') setEditingEarlyTime(false)
+      if (which === 'late')  setEditingLateTime(false)
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setTimeBusy(false) }
   }
 
   function toggleMergeCheck(stayId) {
@@ -930,19 +958,65 @@ export default function CompleteBooking() {
                       </div>
                     )
                   })()}
-                  {/* Guest requests — early check-in's approved time is called
-                      out here since the guest's own typed ETA above sometimes
-                      undercuts it (e.g. paid for/approved Noon, but types 11am
-                      as their ETA) — showing both side by side is what actually
-                      surfaces the mismatch, since ETA is free text Raman/the
-                      owner has to eyeball rather than something auto-checked. */}
+                  {/* Guest requests — early check-in/late check-out get the
+                      actual agreed TIME captured here (not just a yes/no),
+                      since that's what Raman needs to plan around, and the
+                      guest's own typed ETA above sometimes undercuts it (e.g.
+                      approved 2pm, but guest types 11am as their ETA) —
+                      showing both side by side is what surfaces the mismatch. */}
                   {(!!s.request_early_checkin || !!s.request_late_checkout || !!s.request_breakfast || !!s.request_cab || !!s.request_extra_beds) && (
-                    <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid var(--border-dim)',display:'flex',flexWrap:'wrap',gap:'6px'}}>
-                      {!!s.request_early_checkin && <span style={reqPill}>⏰ Early check-in (approved: Noon)</span>}
-                      {!!s.request_late_checkout && <span style={reqPill}>🌙 Late check-out</span>}
-                      {!!s.request_breakfast     && <span style={reqPill}>{'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}</span>}
-                      {!!s.request_cab           && <span style={reqPill}>🚗 Cab</span>}
-                      {!!s.request_extra_beds    && <span style={reqPill}>{'🛏 Extra beds' + (s.extra_beds_count > 0 ? ` × ${s.extra_beds_count}` : '')}</span>}
+                    <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid var(--border-dim)'}}>
+                      {!!s.request_early_checkin && (
+                        <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap',marginBottom:'6px'}}>
+                          <span style={reqPill}>{'⏰ Early check-in' + (s.early_checkin_time ? ` — ${formatTime12h(s.early_checkin_time)}` : '')}</span>
+                          {editingEarlyTime ? (
+                            <>
+                              <input type="time" value={earlyTimeDraft} onChange={e=>setEarlyTimeDraft(e.target.value)}
+                                style={{padding:'4px 6px',borderRadius:'6px',background:'var(--dark-bg)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.78rem'}} />
+                              <button onClick={()=>handleSaveCheckinTimes('early')} disabled={timeBusy}
+                                style={{padding:'4px 10px',borderRadius:'6px',border:'none',background:'var(--gold)',color:'#1A202C',fontWeight:'700',fontSize:'0.72rem',cursor:'pointer'}}>
+                                {timeBusy?'…':'Save'}
+                              </button>
+                              <button onClick={()=>setEditingEarlyTime(false)}
+                                style={{padding:'4px 8px',borderRadius:'6px',border:'1px solid var(--border-dim)',background:'transparent',color:'var(--text-dim)',fontSize:'0.72rem',cursor:'pointer'}}>✕</button>
+                            </>
+                          ) : (
+                            <button onClick={()=>{setEditingEarlyTime(true); setEarlyTimeDraft(s.early_checkin_time||'')}}
+                              style={{fontSize:'0.7rem',color:'#85B7EB',background:'none',border:'none',cursor:'pointer',padding:0,textDecoration:'underline'}}>
+                              {s.early_checkin_time ? 'change time' : '+ set time'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {!!s.request_late_checkout && (
+                        <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap',marginBottom:'6px'}}>
+                          <span style={reqPill}>{'🌙 Late check-out' + (s.late_checkout_time ? ` — ${formatTime12h(s.late_checkout_time)}` : '')}</span>
+                          {editingLateTime ? (
+                            <>
+                              <input type="time" value={lateTimeDraft} onChange={e=>setLateTimeDraft(e.target.value)}
+                                style={{padding:'4px 6px',borderRadius:'6px',background:'var(--dark-bg)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.78rem'}} />
+                              <button onClick={()=>handleSaveCheckinTimes('late')} disabled={timeBusy}
+                                style={{padding:'4px 10px',borderRadius:'6px',border:'none',background:'var(--gold)',color:'#1A202C',fontWeight:'700',fontSize:'0.72rem',cursor:'pointer'}}>
+                                {timeBusy?'…':'Save'}
+                              </button>
+                              <button onClick={()=>setEditingLateTime(false)}
+                                style={{padding:'4px 8px',borderRadius:'6px',border:'1px solid var(--border-dim)',background:'transparent',color:'var(--text-dim)',fontSize:'0.72rem',cursor:'pointer'}}>✕</button>
+                            </>
+                          ) : (
+                            <button onClick={()=>{setEditingLateTime(true); setLateTimeDraft(s.late_checkout_time||'')}}
+                              style={{fontSize:'0.7rem',color:'#85B7EB',background:'none',border:'none',cursor:'pointer',padding:0,textDecoration:'underline'}}>
+                              {s.late_checkout_time ? 'change time' : '+ set time'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {(!!s.request_breakfast || !!s.request_cab || !!s.request_extra_beds) && (
+                        <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
+                          {!!s.request_breakfast     && <span style={reqPill}>{'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}</span>}
+                          {!!s.request_cab           && <span style={reqPill}>🚗 Cab</span>}
+                          {!!s.request_extra_beds    && <span style={reqPill}>{'🛏 Extra beds' + (s.extra_beds_count > 0 ? ` × ${s.extra_beds_count}` : '')}</span>}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

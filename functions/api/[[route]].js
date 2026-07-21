@@ -4538,6 +4538,19 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, phone: cleanPhone } })
       }
 
+      // Actual approved times for early check-in / late check-out — the boolean
+      // request_early_checkin/request_late_checkout flags only say a request
+      // exists, not what time was actually agreed. Both fields are sent every
+      // call (nullable) so either one can be updated without disturbing the
+      // other's already-saved value.
+      if (action === 'updateStayCheckinTimes') {
+        const { stayId, earlyCheckinTime, lateCheckoutTime } = body
+        if (!stayId) return err('stayId required')
+        await DB.prepare(`UPDATE stayvibe_stays SET early_checkin_time = ?, late_checkout_time = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
+          .bind(earlyCheckinTime || null, lateCheckoutTime || null, actor, now(), stayId).run()
+        return json({ success: true, data: { stayId, earlyCheckinTime: earlyCheckinTime || null, lateCheckoutTime: lateCheckoutTime || null } })
+      }
+
       if (action === 'saveRentalIncome') {
         const { year, monthFrom, monthTo, properties } = body
         const from = parseInt(monthFrom ?? body.month ?? 0); const to = parseInt(monthTo ?? body.month ?? from)

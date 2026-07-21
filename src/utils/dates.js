@@ -53,3 +53,19 @@ export function localTodayStr() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
+
+// Formats a 24h "HH:MM" time value (as produced by <input type="time">) into
+// a friendly 12h display string, e.g. "14:00" -> "2:00 PM". Returns '' for
+// anything that isn't a clean HH:MM string rather than throwing, since this
+// is always used directly against a possibly-unset DB field.
+export function formatTime12h(t) {
+  if (!t) return ''
+  const m = String(t).match(/^(\d{1,2}):(\d{2})/)
+  if (!m) return ''
+  let h = parseInt(m[1], 10)
+  const min = m[2]
+  const suffix = h >= 12 ? 'PM' : 'AM'
+  h = h % 12
+  if (h === 0) h = 12
+  return `${h}:${min} ${suffix}`
+}

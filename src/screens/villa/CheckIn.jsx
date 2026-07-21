@@ -16,7 +16,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -362,12 +362,12 @@ export default function CheckIn() {
                       }}>
                         {!!selected.request_early_checkin && (
                           <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem'}}>
-                            ⏰ Early check-in approved — Noon
+                            {'⏰ Early check-in approved' + (selected.early_checkin_time ? ` — ${formatTime12h(selected.early_checkin_time)}` : ' — time not set yet')}
                           </div>
                         )}
                         {!!selected.request_late_checkout && (
                           <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem', marginTop: selected.request_early_checkin ? '4px' : 0}}>
-                            🌙 Late check-out approved
+                            {'🌙 Late check-out approved' + (selected.late_checkout_time ? ` — ${formatTime12h(selected.late_checkout_time)}` : ' — time not set yet')}
                           </div>
                         )}
                         {selected.eta && (
@@ -563,9 +563,9 @@ export default function CheckIn() {
                               same day. */}
                           {(!!stay.request_early_checkin || !!stay.request_late_checkout) && (
                             <div style={{fontSize:'0.7rem',color:'var(--gold)',marginTop:'2px',fontWeight:'600'}}>
-                              {!!stay.request_early_checkin && `⏰ Early check-in — Noon${stay.eta ? ` (asked for ${stay.eta})` : ''}`}
+                              {!!stay.request_early_checkin && `⏰ Early check-in${stay.early_checkin_time ? ` — ${formatTime12h(stay.early_checkin_time)}` : ''}${stay.eta ? ` (asked for ${stay.eta})` : ''}`}
                               {!!stay.request_early_checkin && !!stay.request_late_checkout && ' · '}
-                              {!!stay.request_late_checkout && '🌙 Late check-out'}
+                              {!!stay.request_late_checkout && `🌙 Late check-out${stay.late_checkout_time ? ` — ${formatTime12h(stay.late_checkout_time)}` : ''}`}
                             </div>
                           )}
                         </div>

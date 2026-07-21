@@ -13,7 +13,7 @@
  * Route: /owner/villa/income  (kept same route so no App.jsx change needed)
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
@@ -106,6 +106,7 @@ export default function CompleteBooking() {
   const [addingPhone, setAddingPhone] = useState(false)
   const [phoneDraft,  setPhoneDraft]  = useState('')
   const [phoneBusy,   setPhoneBusy]   = useState(false)
+  const phoneFieldRef = useRef(null)
   const [bookedBySearching, setBookedBySearching] = useState(false)
 
   // ── Merge/Link mode: tick 2+ guests in the list, then link them in one
@@ -787,7 +788,7 @@ export default function CompleteBooking() {
                               : <span style={{color:'var(--text-dim)'}}>TBD</span>}
                           </div>
                         </div>
-                        <div>
+                        <div ref={phoneFieldRef}>
                           <div style={infoLabel}>Phone</div>
                           {s.guest_phone ? (
                             <div style={infoVal}>
@@ -1177,13 +1178,19 @@ export default function CompleteBooking() {
                   const name  = (selected?.guest_name || '').split(' ')[0]
                   const ci    = selected?.checkin_date || ''
                   if (!phone) return (
-                    <div style={{
-                      padding:'10px 14px', borderRadius:'10px', marginBottom:'14px',
-                      background:'rgba(37,211,102,0.05)', border:'1px dashed rgba(37,211,102,0.2)',
-                      color:'rgba(37,211,102,0.45)', fontSize:'0.78rem', textAlign:'center',
-                    }}>
-                      💬 WhatsApp intro available once guest phone is captured
-                    </div>
+                    <button
+                      onClick={() => {
+                        setAddingPhone(true)
+                        phoneFieldRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                      }}
+                      style={{
+                        width: '100%', padding:'10px 14px', borderRadius:'10px', marginBottom:'14px',
+                        background:'rgba(37,211,102,0.05)', border:'1px dashed rgba(37,211,102,0.3)',
+                        color:'rgba(37,211,102,0.7)', fontSize:'0.78rem', textAlign:'center',
+                        cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted',
+                      }}>
+                      💬 WhatsApp intro available once guest phone is captured — tap to add it
+                    </button>
                   )
                   const raw = String(phone).replace(/\D/g,'')
                   const num = raw.startsWith('91') ? raw : `91${raw}`

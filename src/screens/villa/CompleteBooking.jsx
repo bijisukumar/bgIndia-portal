@@ -339,7 +339,8 @@ export default function CompleteBooking() {
     if (digits.length < 10) { showToast('Enter a valid phone number (10+ digits)', 'error'); return }
     setPhoneBusy(true)
     try {
-      await api.updateStayGuestPhone({ stayId: selected.stay_id, phone: phoneDraft.trim() })
+      const cleanedPhone = phoneDraft.trim().replace(new RegExp('[\u200B-\u200F\u202A-\u202E\u2066-\u2069]', 'g'), '')
+      await api.updateStayGuestPhone({ stayId: selected.stay_id, phone: cleanedPhone })
       showToast('Phone added ✓')
       setAddingPhone(false); setPhoneDraft('')
       await loadStays()

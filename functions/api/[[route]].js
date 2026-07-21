@@ -4524,9 +4524,14 @@ export async function onRequest(ctx) {
         const { stayId, phone } = body
         if (!stayId) return err('stayId required')
         if (!phone || !phone.trim()) return err('phone required')
+        // Strip invisible bidi/zero-width formatting characters that come
+        // along when a number is copy-pasted from WhatsApp/Contacts — they
+        // don't show up visually but break tel: links and any later
+        // exact-match phone comparison (duplicate-guest detection etc).
+        const cleanPhone = phone.trim().replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '')
         await DB.prepare(`UPDATE stayvibe_stays SET guest_phone = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
-          .bind(phone.trim(), actor, now(), stayId).run()
-        return json({ success: true, data: { stayId, phone: phone.trim() } })
+          .bind(cleanPhone, actor, now(), stayId).run()
+        return json({ success: true, data: { stayId, phone: cleanPhone } })
       }
 
       if (action === 'saveRentalIncome') {

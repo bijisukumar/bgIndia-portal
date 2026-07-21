@@ -32,6 +32,7 @@ import EnquiryConversionDashboard from '../../screens/villa/EnquiryConversionDas
 import MarketingCampaigns from '../../screens/villa/MarketingCampaigns'
 import AgentLinks     from '../../screens/villa/AgentLinks'
 import AgentQuote     from '../../screens/villa/AgentQuote'
+import GuestCheckIn   from '../../screens/GuestCheckIn'
 import RDashboard     from '../../screens/RDashboard'
 import D1Explorer     from '../../screens/infra/D1Explorer'
 
@@ -103,6 +104,7 @@ export default function App() {
         <Routes>
           <Route path="/login"        element={<LoginGate />} />
           <Route path="/quote/:token" element={<AgentQuote />} />
+          <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
           <Route path="/*"            element={<ProtectedRoutes />} />
         </Routes>
       </BrowserRouter>

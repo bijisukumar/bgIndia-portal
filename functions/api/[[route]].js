@@ -2061,6 +2061,7 @@ export async function onRequest(ctx) {
                   guest_service_fee, guest_paid_total,
                   airbnb_conf, folder_created,
                   request_early_checkin, request_late_checkout,
+                  early_checkin_time, late_checkout_time,
                   request_breakfast, breakfast_choice, request_cab,
                   request_extra_beds, extra_beds_count,
                   nationality, purpose_of_visit, mode_of_transport, eta,

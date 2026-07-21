@@ -1193,8 +1193,14 @@ export default function CompleteBooking() {
                       💬 WhatsApp intro available once guest phone is captured — tap to add it
                     </button>
                   )
-                  const raw = String(phone).replace(/\D/g,'')
-                  const num = raw.startsWith('91') ? raw : `91${raw}`
+                  const phoneStr = String(phone)
+                  const raw = phoneStr.replace(/\D/g,'')
+                  // Only assume India's country code for a bare 10-digit number
+                  // with no '+' in the original string — blindly prepending '91'
+                  // would corrupt a real international number (e.g. a US guest's
+                  // +1... becoming 911...).
+                  const looksInternational = phoneStr.includes('+') || raw.length > 10
+                  const num = looksInternational ? raw : `91${raw}`
                   const msg = encodeURIComponent(
                     `Namaskaram ${name}! 🙏\n\n` +
                     `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${parseLocalDate(ci)?.toLocaleDateString('en-IN',{month:'long',day:'numeric'}) || ci}.\n\n` +

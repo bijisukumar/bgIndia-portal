@@ -701,8 +701,13 @@ function ReviewChaseBlock() {
   }
 
   function waLink(phone, guestName) {
-    const clean = (phone || '').replace(/\D/g, '')
-    const num   = clean.startsWith('91') ? clean : `91${clean}`
+    const raw = phone || ''
+    const clean = raw.replace(/\D/g, '')
+    // Only assume India's country code for a bare 10-digit number with no
+    // '+' in the original string — blindly prepending '91' would corrupt
+    // a real international number (e.g. a US guest's +1... becoming 911...).
+    const looksInternational = raw.includes('+') || clean.length > 10
+    const num = looksInternational ? clean : `91${clean}`
     const msg   = encodeURIComponent(
       `Hi ${(guestName || '').split(' ')[0]}, thank you for staying with us at Luxury Villas of Guruvayur! 🙏 We hope you had a wonderful experience. If you have a moment, we'd really appreciate a review on Airbnb — it means a lot to us and helps future guests. Thank you!`
     )

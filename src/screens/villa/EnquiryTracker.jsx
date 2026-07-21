@@ -13,7 +13,7 @@ export const SOURCES = [
   { id: 'referral',     label: 'Referral' },
 ]
 
-export const PURPOSES = ['Vacation', 'Wedding', 'Temple Visit', 'Family Function', 'Other']
+export const PURPOSES = ['Vacation', 'Wedding', 'Temple Visit', 'Family Function', 'Dance', 'Other']
 
 export const LOST_REASONS = [
   { id: 'price',             label: 'Price' },

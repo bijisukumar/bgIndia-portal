@@ -3277,6 +3277,10 @@ export async function onRequest(ctx) {
         const extraCharges = parseFloat(body.extraCharges) || 0
         const extraLines = body.extraLines != null ? String(body.extraLines) : null
         const finalOffer = quoteAmount - discountAmount + extraCharges
+        // Only meaningful (and only stored) when purpose is actually 'Other' —
+        // clears itself automatically if the guest's purpose changes away from
+        // 'Other' on an edit, so a stale note never lingers under a different purpose.
+        const purposeOther = body.purpose === 'Other' ? (body.purposeOther || null) : null
 
         if (body.enquiryId) {
           // Update existing
@@ -3284,7 +3288,7 @@ export async function onRequest(ctx) {
             UPDATE stayvibe_enquiries SET
               guest_name = ?, phone = ?, email = ?, source = ?,
               checkin_date = ?, checkout_date = ?, nights = ?, guests_count = ?,
-              adults = ?, children = ?, infants = ?, purpose = ?,
+              adults = ?, children = ?, infants = ?, purpose = ?, purpose_other = ?,
               quote_amount = ?, repeat_discount_pct = ?, discount_category = ?, discount_pct = ?,
               discount_amount = ?, extra_charges = ?, extra_lines = ?, final_offer_amount = ?,
               status = ?, last_contact_date = ?, follow_up_due = ?,
@@ -3294,7 +3298,7 @@ export async function onRequest(ctx) {
           `).bind(
             body.guestName, normPhone, normEmail, body.source || 'website',
             body.checkInDate || null, body.checkOutDate || null, nights, guestsCount,
-            adults, children, infants, body.purpose || null,
+            adults, children, infants, body.purpose || null, purposeOther,
             quoteAmount, discountPct, discountCategory, categoryDiscountPct,
             discountAmount, extraCharges, extraLines, finalOffer,
             body.status || 'new', body.lastContactDate || null, body.followUpDue || null,
@@ -3307,14 +3311,14 @@ export async function onRequest(ctx) {
         await DB.prepare(`
           INSERT INTO stayvibe_enquiries (
             enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
-            checkin_date, checkout_date, nights, guests_count, adults, children, infants, purpose,
+            checkin_date, checkout_date, nights, guests_count, adults, children, infants, purpose, purpose_other,
             quote_amount, is_repeat_guest, previous_stays, repeat_discount_pct,
             discount_category, discount_pct, discount_amount, extra_charges, extra_lines, final_offer_amount,
             status, assigned_to, notes, created_by, updated_by
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `).bind(
           enquiryId, villaId, guestId, body.guestName || 'Unknown', normPhone, normEmail, body.source || 'website',
-          body.checkInDate || null, body.checkOutDate || null, nights, guestsCount, adults, children, infants, body.purpose || null,
+          body.checkInDate || null, body.checkOutDate || null, nights, guestsCount, adults, children, infants, body.purpose || null, purposeOther,
           quoteAmount, isRepeat ? 1 : 0, previousStays, discountPct,
           discountCategory, categoryDiscountPct, discountAmount, extraCharges, extraLines, finalOffer,
           body.status || 'new', body.assignedTo || 'owner', body.notes || null, actor, actor

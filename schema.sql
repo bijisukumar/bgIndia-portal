@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS stayvibe_enquiries (
   created_at  TEXT DEFAULT (datetime('now')),
   updated_by  TEXT DEFAULT 'owner',
   updated_at  TEXT DEFAULT (datetime('now'))
-, reminder_2day_sent_at TEXT, reminder_5day_sent_at TEXT, adults            INTEGER DEFAULT 0, children          INTEGER DEFAULT 0, infants           INTEGER DEFAULT 0, discount_category TEXT, discount_pct      REAL DEFAULT 0, extra_charges REAL DEFAULT 0, extra_lines   TEXT DEFAULT NULL);
+, reminder_2day_sent_at TEXT, reminder_5day_sent_at TEXT, adults            INTEGER DEFAULT 0, children          INTEGER DEFAULT 0, infants           INTEGER DEFAULT 0, discount_category TEXT, discount_pct      REAL DEFAULT 0, extra_charges REAL DEFAULT 0, extra_lines   TEXT DEFAULT NULL, purpose_other TEXT DEFAULT NULL);
 
 CREATE TABLE IF NOT EXISTS stayvibe_bookings (
   booking_id   TEXT PRIMARY KEY,

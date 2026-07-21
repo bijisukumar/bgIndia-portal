@@ -621,7 +621,7 @@ export default function EnquiryDetail() {
             📞 {e.phone || '—'} {e.email && <>· ✉️ {e.email}</>}<br />
             📅 {e.checkin_date || '—'} → {e.checkout_date || '—'} ({e.nights || 0}n) · 👥 {e.guests_count || 1} guests
             {(e.adults || e.children || e.infants) ? <> ({e.adults || 0}A{e.children ? ` + ${e.children}C` : ''}{e.infants ? ` + ${e.infants}I` : ''})</> : null}<br />
-            🎯 {e.purpose || '—'} · via {SOURCES.find(s => s.id === e.source)?.label || e.source}
+            🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {SOURCES.find(s => s.id === e.source)?.label || e.source}
           </div>
         </div>
 

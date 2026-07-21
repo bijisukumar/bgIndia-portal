@@ -18,7 +18,7 @@ export default function NewEnquiry() {
 
   const [form, setForm] = useState({
     guestName: '', phone: '', email: '', source: 'website',
-    checkInDate: '', checkOutDate: '', adults: 2, children: 0, infants: 0, purpose: 'Vacation',
+    checkInDate: '', checkOutDate: '', adults: 2, children: 0, infants: 0, purpose: 'Vacation', purposeOther: '',
     quoteAmount: '', repeatDiscountPct: 0,
     discountCategory: '', discountPct: 0,
     status: 'new', notes: '',
@@ -51,7 +51,7 @@ export default function NewEnquiry() {
         guestName: e.guest_name || '', phone: e.phone || '', email: e.email || '',
         source: e.source || 'website', checkInDate: e.checkin_date || '', checkOutDate: e.checkout_date || '',
         adults: e.adults || e.guests_count || 1, children: e.children || 0, infants: e.infants || 0,
-        purpose: e.purpose || 'Vacation',
+        purpose: e.purpose || 'Vacation', purposeOther: e.purpose_other || '',
         quoteAmount: e.quote_amount || '', repeatDiscountPct: e.repeat_discount_pct || 0,
         discountCategory: e.discount_category || '', discountPct: e.discount_pct || 0,
         status: e.status || 'new', notes: e.notes || '',
@@ -152,7 +152,7 @@ export default function NewEnquiry() {
         guestName: form.guestName, phone: form.phone, email: form.email,
         source: form.source, checkInDate: form.checkInDate, checkOutDate: form.checkOutDate,
         adults: adultsNum, children: childrenNum, infants: infantsNum, guestsCount: totalGuests,
-        purpose: form.purpose,
+        purpose: form.purpose, purposeOther: form.purpose === 'Other' ? form.purposeOther.trim() : null,
         quoteAmount: quote, repeatDiscountPct: form.discountCategory ? 0 : discountPct,
         discountCategory: form.discountCategory || null, discountPct: form.discountCategory ? discountPct : 0,
         status: form.status, notes: form.notes,
@@ -266,6 +266,14 @@ export default function NewEnquiry() {
                 {PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+            {form.purpose === 'Other' && (
+              <div className="field" style={{ marginBottom: 0, marginTop: '10px' }}>
+                <div className="field-label">Please specify</div>
+                <input className="field-input" value={form.purposeOther}
+                  onChange={e => set('purposeOther', e.target.value)}
+                  placeholder="e.g. Photoshoot, Corporate offsite…" />
+              </div>
+            )}
           </div>
           <div className="field" style={{ marginTop: '10px', marginBottom: 0 }}>
             <div className="field-label">Source</div>

@@ -20,7 +20,7 @@ export default function NewEnquiry() {
     guestName: '', phone: '', email: '', source: 'website',
     checkInDate: '', checkOutDate: '', adults: 2, children: 0, infants: 0, purpose: 'Vacation', purposeOther: '',
     quoteAmount: '', repeatDiscountPct: 0,
-    discountCategory: '', discountPct: 0,
+    discountCategory: '', discountPct: 0, discountAmountInput: '',
     status: 'new', notes: '',
   })
   const [rateCard, setRateCard] = useState(FALLBACK_RATE_CARDS.dwarka)
@@ -54,6 +54,7 @@ export default function NewEnquiry() {
         purpose: e.purpose || 'Vacation', purposeOther: e.purpose_other || '',
         quoteAmount: e.quote_amount || '', repeatDiscountPct: e.repeat_discount_pct || 0,
         discountCategory: e.discount_category || '', discountPct: e.discount_pct || 0,
+        discountAmountInput: e.discount_category === 'custom_amount' ? (e.discount_amount || '') : '',
         status: e.status || 'new', notes: e.notes || '',
       })
     }).catch(() => {})
@@ -107,10 +108,20 @@ export default function NewEnquiry() {
   const quote = parseFloat(form.quoteAmount) || 0
   // Discount category (new system) and legacy repeat-guest % are mutually exclusive —
   // whichever the owner has set on this enquiry is what's applied to the quote.
-  const discountPct = form.discountCategory
-    ? (parseFloat(form.discountPct) || 0)
-    : (parseFloat(form.repeatDiscountPct) || 0)
-  const discountAmount = Math.round(quote * discountPct) / 100
+  // "Custom Amount" is a third mode: the owner enters a rupee amount directly and we
+  // back-compute the equivalent % (rounded to 2dp for storage) so it flows through the
+  // same discountPct/discountCategory fields every other category already uses.
+  const isCustomDiscount = form.discountCategory === 'custom_amount'
+  const customAmount = parseFloat(form.discountAmountInput) || 0
+  const discountPctRaw = isCustomDiscount
+    ? (quote > 0 ? (customAmount / quote) * 100 : 0)
+    : form.discountCategory
+      ? (parseFloat(form.discountPct) || 0)
+      : (parseFloat(form.repeatDiscountPct) || 0)
+  const discountPct = isCustomDiscount ? Math.round(discountPctRaw * 100) / 100 : discountPctRaw
+  // Use the exact typed amount for the live preview (not the rounded-%-back-to-amount
+  // round trip) so what the owner sees while composing matches what they typed.
+  const discountAmount = isCustomDiscount ? customAmount : Math.round(quote * discountPct) / 100
   const finalOffer = quote - discountAmount
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -138,6 +149,7 @@ export default function NewEnquiry() {
       // Pre-fill the default % for the chosen category, but only if the field
       // is still at 0 / hasn't been hand-edited yet for this category.
       discountPct: categoryId ? getDefaultDiscountPct(categoryId) : 0,
+      discountAmountInput: '',
     }))
   }
 
@@ -317,7 +329,18 @@ export default function NewEnquiry() {
             </select>
           </div>
 
-          {form.discountCategory ? (
+          {isCustomDiscount ? (
+            <div className="field" style={{ marginBottom: 0 }}>
+              <div className="field-label">Discount amount (₹)</div>
+              <input type="number" min="0" className="field-input" value={form.discountAmountInput}
+                onChange={e => set('discountAmountInput', e.target.value)} placeholder="0" />
+              {quote > 0 && customAmount > 0 && (
+                <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '4px' }}>
+                  = {discountPct.toFixed(1)}% discount
+                </div>
+              )}
+            </div>
+          ) : form.discountCategory ? (
             <div className="field" style={{ marginBottom: 0 }}>
               <div className="field-label">Discount %</div>
               <input type="number" min="0" max="100" className="field-input" value={form.discountPct} onChange={e => set('discountPct', e.target.value)} />
@@ -332,7 +355,7 @@ export default function NewEnquiry() {
           {quote > 0 && (
             <div className="net-box" style={{ marginTop: '10px' }}>
               <div className="net-row"><span className="net-label">Quote</span><span className="net-val">{fmt(quote)}</span></div>
-              {discountAmount > 0 && <div className="net-row"><span className="net-label">Discount{form.discountCategory ? ` (${DISCOUNT_CATEGORIES.find(c => c.id === form.discountCategory)?.label})` : ''}</span><span className="net-val">−{fmt(discountAmount)}</span></div>}
+              {discountAmount > 0 && <div className="net-row"><span className="net-label">Discount{form.discountCategory ? ` (${DISCOUNT_CATEGORIES.find(c => c.id === form.discountCategory)?.label}${isCustomDiscount ? ` · ${discountPct.toFixed(1)}%` : ''})` : ''}</span><span className="net-val">−{fmt(discountAmount)}</span></div>}
               <div className="net-divider" />
               <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(finalOffer)}</span></div>
             </div>

@@ -97,6 +97,7 @@ export const CONFIG = {
     discountCategories: [
       { id: 'loyal_patron', label: 'Loyal Patron', defaultPct: 10 },
       { id: 'b2b_india', label: 'B2B – India', defaultPct: 10 },
+      { id: 'custom_amount', label: 'Custom Amount', defaultPct: 0 },
     ],
 
     extraItems: [

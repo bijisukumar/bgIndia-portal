@@ -174,6 +174,7 @@ export const CONFIG = {
       { id: 'platinum_guest', label: 'Platinum Guest', defaultPct: 20 },
       { id: 'b2b_india', label: 'B2B – India', defaultPct: 10 },
       { id: 'b2b_intl', label: 'B2B – International', defaultPct: 20 },
+      { id: 'custom_amount', label: 'Custom Amount', defaultPct: 0 },
     ],
 
     // Shared preset list for ad-hoc priced line items (e.g. "Additional Guest"),

@@ -31,6 +31,14 @@ export default function NewEnquiry() {
   const [toast, setToast] = useState(null)
   const debounceRef = useRef(null)
 
+  // Name-based guest search (type-ahead), so an existing guest can be picked
+  // instead of retyping phone/email by hand
+  const [nameResults, setNameResults] = useState([])
+  const [nameSearching, setNameSearching] = useState(false)
+  const [nameDropdownOpen, setNameDropdownOpen] = useState(false)
+  const nameDebounceRef = useRef(null)
+  const selectedNameRef = useRef('')   // last name picked from the dropdown, to avoid re-searching it
+
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
   // Load the villa's rate card once on mount (falls back to the hardcoded
@@ -80,6 +88,31 @@ export default function NewEnquiry() {
     }, 500)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [form.phone, form.email, isEdit])
+
+  // Live guest-name search, debounced — lets the owner pick an existing guest
+  // instead of typing phone/email by hand
+  useEffect(() => {
+    if (isEdit) return
+    const q = form.guestName.trim()
+    if (q.length < 2 || q === selectedNameRef.current) { setNameResults([]); setNameDropdownOpen(false); return }
+
+    if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current)
+    setNameSearching(true)
+    nameDebounceRef.current = setTimeout(() => {
+      api.searchGuestsByName(q).then(results => {
+        setNameResults(results || [])
+        setNameDropdownOpen(true)
+      }).catch(() => {}).finally(() => setNameSearching(false))
+    }, 300)
+    return () => { if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current) }
+  }, [form.guestName, isEdit])
+
+  const handleSelectGuest = (g) => {
+    selectedNameRef.current = g.name
+    setForm(f => ({ ...f, guestName: g.name, phone: g.phone || f.phone, email: g.email || f.email }))
+    setNameDropdownOpen(false)
+    setNameResults([])
+  }
 
   const nights = form.checkInDate && form.checkOutDate
     ? Math.max(0, Math.round((parseLocalDate(form.checkOutDate) - parseLocalDate(form.checkInDate)) / 86400000))
@@ -188,9 +221,43 @@ export default function NewEnquiry() {
       <div className="screen-body">
         <div className="card-section-label">GUEST INFORMATION</div>
         <div className="card">
-          <div className="field">
+          <div className="field" style={{ position: 'relative' }}>
             <div className="field-label">Full name</div>
-            <input className="field-input" value={form.guestName} onChange={e => set('guestName', e.target.value)} placeholder="Guest name" />
+            <input
+              className="field-input" value={form.guestName}
+              onChange={e => set('guestName', e.target.value)}
+              onFocus={() => { if (nameResults.length) setNameDropdownOpen(true) }}
+              onBlur={() => setTimeout(() => setNameDropdownOpen(false), 150)}
+              placeholder="Type a name to search existing guests…" autoComplete="off"
+            />
+            {nameDropdownOpen && (
+              <div style={{
+                position: 'absolute', left: 0, right: 0, top: '100%', zIndex: 20, marginTop: '4px',
+                background: 'var(--dark-card)', border: '1px solid var(--border-dim)', borderRadius: '8px',
+                overflow: 'hidden', maxHeight: '220px', overflowY: 'auto',
+              }}>
+                {nameSearching && (
+                  <div style={{ padding: '8px 10px', fontSize: '0.72rem', color: 'var(--text-dim)' }}>Searching…</div>
+                )}
+                {!nameSearching && nameResults.map(g => (
+                  <div
+                    key={g.guest_id}
+                    onMouseDown={() => handleSelectGuest(g)}
+                    style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--border-dim)', fontSize: '0.82rem' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(200,144,58,0.08)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ fontWeight: 600 }}>{g.name}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
+                      {g.phone || g.email || '—'} · {g.total_stays || 0} past stay{g.total_stays !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                ))}
+                {!nameSearching && nameResults.length === 0 && (
+                  <div style={{ padding: '8px 10px', fontSize: '0.72rem', color: 'var(--text-dim)' }}>No matching guests found</div>
+                )}
+              </div>
+            )}
           </div>
           <div className="field">
             <div className="field-label">Mobile / WhatsApp</div>

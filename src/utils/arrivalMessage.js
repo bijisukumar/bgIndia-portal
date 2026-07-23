@@ -79,25 +79,21 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
     ? `Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`
     : `This is Raman, your host coordinator. Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`
 
-  const arrivalSteps = senderRole === 'owner'
-    ? [
-        `A couple of things so we're ready and waiting for you at the gate:`,
-        `1\uFE0F\u20E3 ${MANAGER_NAME}, our villa manager, will be on the ground to receive you \u2014 please message him directly on ${MANAGER_PHONE} about 1 hour before you reach Guruvayur.`,
-        `2\uFE0F\u20E3 He'll be at the villa to welcome you and help with check-in \u2014 same at check-out, just give him a heads-up on your departure time.`,
-      ]
-    : [
-        `A couple of things so I'm ready and waiting for you at the gate:`,
-        `1\uFE0F\u20E3 Please message me on this number about 1 hour before you reach Guruvayur.`,
-        `2\uFE0F\u20E3 I'll be at the villa to welcome you and help with check-in \u2014 same at check-out, just give me a heads-up on your departure time.`,
-      ]
+  // The "call ahead" instruction is the one thing that actually prevents a bad
+  // arrival: it stops the guest waiting at a locked gate AND stops staff
+  // waiting around all day for an unknown arrival time. Worded from whoever
+  // is actually sending it \u2014 Raman speaking for himself, or the owner
+  // pointing the guest to Raman by name.
+  const callAhead = senderRole === 'owner'
+    ? `\u2705 Please call or WhatsApp ${MANAGER_NAME} about 1 hour before you reach Guruvayur \u2014 that way he's already waiting at the gate when you arrive, instead of either of you waiting on the other.`
+    : `\u2705 Please call or WhatsApp me about 1 hour before you reach Guruvayur \u2014 that way I'm already waiting at the gate when you arrive, instead of either of us waiting on the other.`
 
   const lines = [
     `Namaskaram ${name}! \uD83D\uDE4F`,
     ``,
     intro,
     ``,
-    `Please review your booking info:`,
-    ``,
+    `*BOOKING INFO*`,
     `\u2022 Max guest count: ${totalGuests} guest${totalGuests !== 1 ? 's' : ''}${breakdown} \u2014 count validated at check-in`,
     `\u2022 Bedrooms: ${VILLA_BEDROOMS} bedrooms [Standard Indian Queen size beds]`,
     `\u2022 Nights of stay: ${nights || '\u2014'}`,
@@ -106,10 +102,14 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
     ``,
     `\u23F0 IMPORTANT: please keep a close watch on the check-in and check-out times above. Unless a different time has been agreed with us in advance, these timings are critical \u2014 the next guest's arrival and the villa's preparation are planned around them.`,
     ``,
-    `\uD83D\uDCCD Location: ${VILLA_MAPS_LINK}`,
+    `*DRIVING DIRECTIONS*`,
+    `\uD83D\uDCCD ${VILLA_MAPS_LINK}`,
     VILLA_ADDRESS,
     ``,
-    ...arrivalSteps,
+    `*STAFF ON SITE*`,
+    `\uD83D\uDC64 ${MANAGER_NAME} \u2014 ${MANAGER_PHONE}`,
+    ``,
+    callAhead,
     ``,
     // When Biji himself sends this, the "reach out to our host" line would be
     // telling the guest to contact the person they're already messaging \u2014

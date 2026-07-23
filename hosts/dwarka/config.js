@@ -57,6 +57,10 @@ export const CONFIG = {
       // a new host's "Pay now" button must never default to someone
       // else's bank account.
       managerUpi: '85471419raman@okicici',
+      // Manager's own WhatsApp — shared with guests only when the OWNER sends
+      // the arrival message (so the guest has a direct line to the person
+      // actually on-site, instead of "Raman" appearing to have texted them).
+      managerPhone: '+91 85471 41401',
     }
   ],
 

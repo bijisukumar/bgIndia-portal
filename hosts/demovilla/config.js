@@ -38,6 +38,7 @@ export const CONFIG = {
                         // logo itself would look like a bug, not a feature
       managerName: 'Demo Manager',
       managerUpi: 'demo-manager@upi',
+      managerPhone: '+1 900 000 0002',
     }
   ],
 

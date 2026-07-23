@@ -760,7 +760,10 @@ export default function CompleteBooking() {
                   </div>
                 )}
 
-                {/* Directions & arrival steps — WhatsApp, framed as from Raman */}
+                {/* Directions & arrival steps — WhatsApp, sent by the owner in
+                    their own voice, introducing Raman and his direct number
+                    (buildArrivalWaLink's default/no-opts call in CheckIn.jsx
+                    is the one that's actually framed as Raman speaking). */}
                 {s.status === 'ready_for_checkin' && (() => {
                   const phone = selected?.guest_phone || selected?.phone
                   if (!phone) return (
@@ -772,7 +775,7 @@ export default function CompleteBooking() {
                       📍 Directions & arrival steps available once guest phone is captured
                     </div>
                   )
-                  const link = buildArrivalWaLink(selected)
+                  const link = buildArrivalWaLink(selected, { senderRole: 'owner' })
                   return (
                     <a href={link} target="_blank" rel="noreferrer"
                       style={{
@@ -781,7 +784,7 @@ export default function CompleteBooking() {
                         color:'#25D366', fontWeight:'700', fontSize:'0.85rem',
                         textDecoration:'none', marginBottom:'14px',
                       }}>
-                      📍 Send directions & arrival steps (from Raman)
+                      📍 Send directions & arrival steps
                     </a>
                   )
                 })()}

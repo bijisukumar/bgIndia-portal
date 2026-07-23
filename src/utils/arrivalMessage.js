@@ -25,6 +25,8 @@ const VILLA_ADDRESS   = villa.address
 // Raman for date/guest-count/request changes, only Biji can approve those.
 const HOST_WA_NUMBER  = CONFIG.ownerWhatsApp
 const VILLA_BEDROOMS  = villa.bedrooms
+const MANAGER_NAME    = villa.managerName
+const MANAGER_PHONE   = villa.managerPhone
 
 // NOT sourced from CONFIG: these already duplicate tenants.checkin_time /
 // checkout_time (D1, served via the getTenantConfig worker action) used by
@@ -43,8 +45,14 @@ function fmtLong(d) {
  * Builds the message text (plain, unencoded — for previewing or wa.me encoding).
  * @param {object} stay - a stay/booking record with guest_name, checkin_date,
  *   checkout_date, adults, children, request_early_checkin, request_late_checkout
+ * @param {object} opts - { senderRole: 'raman' | 'owner' }. 'raman' (default)
+ *   keeps the message written in Raman's own voice, for when he sends it
+ *   himself from his own WhatsApp. 'owner' is for when Biji sends it instead —
+ *   the message can't pretend to be Raman texting, so it introduces him and
+ *   gives the guest his direct number instead of a bare "message me."
  */
-export function buildArrivalMessage(stay = {}) {
+export function buildArrivalMessage(stay = {}, opts = {}) {
+  const senderRole = opts.senderRole === 'owner' ? 'owner' : 'raman'
   // Full name in the greeting (matches the owner's established format and
   // avoids 'Namaskaram J!' for initials-style names like 'J S Jagadish Babu')
   const name = (stay.guest_name || '').trim() || 'there'
@@ -67,10 +75,26 @@ export function buildArrivalMessage(stay = {}) {
   const ciTime = stay.request_early_checkin ? 'early check-in as agreed \u23F0' : CHECKIN_TIME
   const coTime = stay.request_late_checkout ? 'late check-out as agreed \uD83C\uDF19' : CHECKOUT_TIME
 
+  const intro = senderRole === 'owner'
+    ? `Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`
+    : `This is Raman, your host coordinator. Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`
+
+  const arrivalSteps = senderRole === 'owner'
+    ? [
+        `A couple of things so we're ready and waiting for you at the gate:`,
+        `1\uFE0F\u20E3 ${MANAGER_NAME}, our villa manager, will be on the ground to receive you \u2014 please message him directly on ${MANAGER_PHONE} about 1 hour before you reach Guruvayur.`,
+        `2\uFE0F\u20E3 He'll be at the villa to welcome you and help with check-in \u2014 same at check-out, just give him a heads-up on your departure time.`,
+      ]
+    : [
+        `A couple of things so I'm ready and waiting for you at the gate:`,
+        `1\uFE0F\u20E3 Please message me on this number about 1 hour before you reach Guruvayur.`,
+        `2\uFE0F\u20E3 I'll be at the villa to welcome you and help with check-in \u2014 same at check-out, just give me a heads-up on your departure time.`,
+      ]
+
   const lines = [
     `Namaskaram ${name}! \uD83D\uDE4F`,
     ``,
-    `This is Raman, your host coordinator. Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`,
+    intro,
     ``,
     `Please review your booking info:`,
     ``,
@@ -85,12 +109,15 @@ export function buildArrivalMessage(stay = {}) {
     `\uD83D\uDCCD Location: ${VILLA_MAPS_LINK}`,
     VILLA_ADDRESS,
     ``,
-    `A couple of things so I'm ready and waiting for you at the gate:`,
-    `1\uFE0F\u20E3 Please message me on this number about 1 hour before you reach Guruvayur.`,
-    `2\uFE0F\u20E3 I'll be at the villa to welcome you and help with check-in \u2014 same at check-out, just give me a heads-up on your departure time.`,
+    ...arrivalSteps,
     ``,
-    `Note: any changes to your booking (dates, guest count, or requests) need to be approved directly by our host Biji \u2014 please reach out on WhatsApp at ${HOST_WA_NUMBER}.`,
-    ``,
+    // When Biji himself sends this, the "reach out to our host" line would be
+    // telling the guest to contact the person they're already messaging \u2014
+    // only included in Raman's version, where it genuinely routes elsewhere.
+    ...(senderRole === 'owner' ? [] : [
+      `Note: any changes to your booking (dates, guest count, or requests) need to be approved directly by our host Biji \u2014 please reach out on WhatsApp at ${HOST_WA_NUMBER}.`,
+      ``,
+    ]),
     `Looking forward to hosting you! \uD83C\uDFE1`,
   ]
 
@@ -100,12 +127,13 @@ export function buildArrivalMessage(stay = {}) {
 /**
  * Builds a wa.me deep-link (pre-filled, not auto-sent) that opens the guest's
  * chat with the message ready to send. Returns null if no phone is on file.
+ * @param {object} opts - forwarded to buildArrivalMessage, see there.
  */
-export function buildArrivalWaLink(stay = {}) {
+export function buildArrivalWaLink(stay = {}, opts = {}) {
   const phone = stay.guest_phone || stay.phone
   if (!phone) return null
   const raw = String(phone).replace(/\D/g, '')
   const num = raw.startsWith('91') ? raw : (raw.length === 10 ? `91${raw}` : raw)
-  const msg = encodeURIComponent(buildArrivalMessage(stay))
+  const msg = encodeURIComponent(buildArrivalMessage(stay, opts))
   return `https://wa.me/${num}?text=${msg}`
 }

@@ -115,6 +115,29 @@ function SectionLabel({ children, color='#C8903A', icon }) {
   )
 }
 
+function ServiceToggle({ label, priceNote, hint, checked, onClick, color='#8B5CF6' }) {
+  return (
+    <div onClick={onClick} style={{ display:'flex', alignItems:'flex-start', gap:'10px', marginBottom:'10px',
+      padding:'12px 14px', borderRadius:'10px', cursor:'pointer',
+      border: checked ? `1px solid ${color}66` : '1px solid rgba(255,255,255,0.08)',
+      background: checked ? `${color}14` : 'rgba(255,255,255,0.02)' }}>
+      <div style={{ width:'20px', height:'20px', borderRadius:'6px', flexShrink:0, marginTop:'1px',
+        border: checked ? `1px solid ${color}` : '1px solid rgba(255,255,255,0.2)',
+        background: checked ? color : 'transparent',
+        display:'flex', alignItems:'center', justifyContent:'center',
+        fontSize:'0.75rem', color:'#fff' }}>
+        {checked ? '✓' : ''}
+      </div>
+      <div>
+        <div style={{ fontSize:'0.85rem', color: checked ? '#F0F0F0' : '#D0D0D0', fontWeight:'600' }}>
+          {label}{priceNote && <span style={{ color:'#C8903A', fontWeight:'600', fontSize:'0.78rem' }}> {priceNote}</span>}
+        </div>
+        {hint && <div style={{ fontSize:'0.7rem', color:'#6B7280', marginTop:'2px' }}>{hint}</div>}
+      </div>
+    </div>
+  )
+}
+
 function UploadBox({ label, preview, onClick, color='#C8903A', icon='📷', hint }) {
   return (
     <div onClick={onClick} style={{ padding:'16px', borderRadius:'10px',
@@ -172,6 +195,9 @@ export default function GuestCheckIn() {
   // Nationality
   const [nationality, setNationality] = useState('Indian')
   const isForeign = nationality === 'Foreign'
+  // "Enhance Your Stay" comes after section 4 (Indian ID) or section 6
+  // (Foreign Form C's arrival section), so its own number shifts accordingly.
+  const enhanceSectionNum = isForeign ? 7 : 5
 
   // Submission state
   const [submitting, setSubmitting] = useState(false)
@@ -230,6 +256,15 @@ export default function GuestCheckIn() {
   const [passportOcrBusy, setPassportOcrBusy] = useState(false)  // reading MRZ
   const [passportOcrHint, setPassportOcrHint] = useState('')     // status under the upload
   const visaRef     = useRef()
+
+  // ── Enhance your stay (optional add-on requests) ───────────
+  const [reqEarly,        setReqEarly]        = useState(false)
+  const [reqLate,         setReqLate]         = useState(false)
+  const [reqBreakfast,    setReqBreakfast]    = useState(false)
+  const [breakfastChoice, setBreakfastChoice] = useState('')
+  const [reqExtraBeds,    setReqExtraBeds]    = useState(false)
+  const [extraBedsCount,  setExtraBedsCount]  = useState(1)
+  const [reqCab,          setReqCab]          = useState(false)
 
   function handleFileUpload(e, setPreview, setFile) {
     const file = e.target.files?.[0]
@@ -357,6 +392,13 @@ export default function GuestCheckIn() {
         idFileB64, idFileName: idFile?.name||null,
         passportFileB64: passportB64,
         visaFileB64: visaB64,
+        requestEarlyCheckIn: reqEarly,
+        requestLateCheckOut: reqLate,
+        requestBreakfast: reqBreakfast,
+        breakfastChoice: reqBreakfast ? breakfastChoice : null,
+        requestCab: reqCab,
+        requestExtraBeds: reqExtraBeds,
+        extraBedsCount: reqExtraBeds ? (parseInt(extraBedsCount) || 1) : 0,
       }
 
       const res  = await fetch('/api/submitGuestCheckIn', {
@@ -735,6 +777,89 @@ export default function GuestCheckIn() {
             <Input value={nextDest} onChange={setNextDest} placeholder="Kovalam / Mumbai / Home country" />
           </Field>
         </>)}
+
+        {/* ── ENHANCE YOUR STAY (optional add-ons) ── */}
+        <SectionLabel icon="✨" color="#8B5CF6">{enhanceSectionNum} · ENHANCE YOUR STAY</SectionLabel>
+
+        <div style={{ marginBottom:'14px', padding:'12px 14px', background:'rgba(139,92,246,0.06)',
+          border:'1px solid rgba(139,92,246,0.2)', borderRadius:'10px', fontSize:'0.82rem',
+          color:'#9AA5B4', lineHeight:'1.6' }}>
+          💡 Curious how early check-in, late check-out, or our other services actually work? Take a quick look at our{' '}
+          <a href="https://luxuryvillasofguruvayur.com/faq.html" target="_blank" rel="noreferrer"
+            style={{ color:'#A78BFA', fontWeight:'600' }}>Stay FAQ</a>{' '}
+          before choosing below — it only takes a minute, and helps you pick exactly what's right for your stay.
+        </div>
+
+        <div style={{ fontSize:'0.78rem', color:'#9AA5B4', marginBottom:'10px' }}>
+          Select any services you would like us to arrange:
+        </div>
+
+        <ServiceToggle label="Request early check-in" hint="Subject to availability · Additional charges apply"
+          checked={reqEarly} onClick={() => setReqEarly(!reqEarly)} />
+        <ServiceToggle label="Request late check-out" hint="Subject to availability · No last-minute extensions"
+          checked={reqLate} onClick={() => setReqLate(!reqLate)} />
+        <ServiceToggle label="Breakfast" priceNote="(₹275 per person)"
+          hint="Fresh traditional Kerala breakfast prepared and served at the villa."
+          checked={reqBreakfast}
+          onClick={() => { const next = !reqBreakfast; setReqBreakfast(next); if (!next) setBreakfastChoice('') }} />
+
+        {reqBreakfast && (
+          <div style={{ marginLeft:'30px', marginBottom:'10px' }}>
+            <div style={{ fontSize:'0.72rem', color:'#9AA5B4', marginBottom:'6px' }}>Select breakfast type:</div>
+            {[
+              'Idli, Vada, Chutney, Coffee/Tea & Water',
+              'Puttu, Kadala, Kerala Banana, Coffee/Tea & Water',
+              'Appam, Curry, Coffee/Tea & Water',
+            ].map(opt => {
+              const key = opt.split(',')[0]
+              const active = breakfastChoice === key
+              return (
+                <div key={key} onClick={() => setBreakfastChoice(active ? '' : key)}
+                  style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px', cursor:'pointer' }}>
+                  <div style={{ width:'16px', height:'16px', borderRadius:'4px', flexShrink:0,
+                    border: active ? '1px solid #8B5CF6' : '1px solid rgba(255,255,255,0.2)',
+                    background: active ? '#8B5CF6' : 'transparent',
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.65rem', color:'#fff' }}>
+                    {active ? '✓' : ''}
+                  </div>
+                  <div style={{ fontSize:'0.78rem', color:'#D0D0D0' }}>{opt}</div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <ServiceToggle label="Extra floor beds" priceNote="₹750 per night (₹1,000 at the villa)"
+          hint="Additional sleeping arrangements · Please specify count below"
+          checked={reqExtraBeds} onClick={() => setReqExtraBeds(!reqExtraBeds)} />
+
+        {reqExtraBeds && (
+          <div style={{ marginLeft:'30px', marginBottom:'10px', display:'flex', alignItems:'center', gap:'8px' }}>
+            <span style={{ fontSize:'0.78rem', color:'#9AA5B4' }}>Number of extra beds needed</span>
+            <input type="number" min="1" max="10" value={extraBedsCount}
+              onChange={e => setExtraBedsCount(e.target.value)}
+              style={{ width:'60px', padding:'6px 8px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.15)',
+                background:'#1E2530', color:'#F0F0F0', fontSize:'0.8rem' }} />
+          </div>
+        )}
+
+        <ServiceToggle label="Cab service"
+          hint="Airport and railway station pickup/drop arrangements coordinated by our team."
+          checked={reqCab} onClick={() => setReqCab(!reqCab)} />
+
+        {/* ── WHAT HAPPENS NEXT ── */}
+        <div style={{ margin:'24px 0 4px', padding:'16px', background:'rgba(200,144,58,0.06)',
+          border:'1px solid rgba(200,144,58,0.2)', borderRadius:'10px' }}>
+          <div style={{ fontSize:'0.68rem', fontWeight:'700', letterSpacing:'1px', color:'#C8903A', marginBottom:'10px' }}>
+            ONCE SUBMITTED
+          </div>
+          <div style={{ fontSize:'0.78rem', color:'#9AA5B4', lineHeight:'1.7' }}>
+            <div style={{ marginBottom:'6px' }}>✅ Thank you for completing your registration. Our host team will review your details and contact you shortly.</div>
+            <div style={{ marginBottom:'6px' }}>📞 We will reach out to assist with your arrival and check-in arrangements.</div>
+            <div style={{ marginBottom:'6px' }}>🛏️ Extra floor beds pre-booked here: <strong style={{ color:'#C8903A' }}>₹750 / bed / night.</strong></div>
+            <div>🛏️ Extra floor beds requested at villa: <strong style={{ color:'#9AA5B4' }}>₹1,000 / bed / night.</strong></div>
+          </div>
+        </div>
 
         </> /* end !linkLoading && !linkError */
         )}

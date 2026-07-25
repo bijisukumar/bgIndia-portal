@@ -1,0 +1,26 @@
+name: Checkout-day email autosend
+
+# Fires the "you're checking out today" guest email once a day. Cloudflare
+# Pages Functions (the file-based functions/api/[[route]].js routing this
+# project uses, not a single _worker.js) don't expose a native `scheduled`
+# handler, so the daily trigger lives here instead and just calls the
+# endpoint over HTTP. The endpoint itself (runCheckoutEmailAutosend) is
+# guarded by CRON_SECRET and is safe to re-run — it only emails stays
+# where checkout_email_sent_at is still NULL.
+on:
+  schedule:
+    # 00:30 UTC = 6:00 AM IST
+    - cron: '30 0 * * *'
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call runCheckoutEmailAutosend
+        run: |
+          curl -sS -X POST "https://manage.luxuryvillasofguruvayur.com/api/runCheckoutEmailAutosend" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            -d '{}' \
+            --fail-with-body

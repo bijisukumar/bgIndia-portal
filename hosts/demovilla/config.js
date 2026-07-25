@@ -39,8 +39,36 @@ export const CONFIG = {
       managerName: 'Demo Manager',
       managerUpi: 'demo-manager@upi',
       managerPhone: '+1 900 000 0002',
+      checkoutTime: '11:00 AM',
     }
   ],
+
+  guestMessages: {
+    comfortCheck: {
+      template:
+`Namaskaram {guestName}! 🙏
+
+We hope your travel was comfortable, and that check-in went smoothly with our staff able to assist you well.
+
+Wishing you a wonderful stay at {villaName}! If you need anything at all during your time here, {managerName} is just a phone call away — {managerPhone}.
+
+Enjoy your stay! 🏡`,
+    },
+    checkoutDay: {
+      subject: 'Checkout day today — {villaName}',
+      template:
+`Namaskaram {guestName},
+
+Today is your check-out day at {villaName}. Standard check-out time is {checkoutTime} — please let {managerName} know if you need any assistance before you leave ({managerPhone}).
+
+You'll find all your check-out details in the folder left at the villa — please do review it at your convenience.
+
+We hope you had a truly beautiful and enjoyable stay, with wonderful family moments at {villaName}. Safe travels, and we do hope to welcome you back again soon!
+
+Warm regards,
+{brandName}`,
+    },
+  },
 
   rentalProperties: [],
 

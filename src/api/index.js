@@ -132,6 +132,7 @@ export const api = {
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),
   updateStayGuestPhone: (data)   => post('updateStayGuestPhone', data),
   updateStayCheckinTimes: (data) => post('updateStayCheckinTimes', data),
+  sendCheckoutEmailNow: (data) => post('sendCheckoutEmailNow', data),
   saveKitchenEntry:     (data)   => post('saveKitchenEntry', data),
   getRecentCheckouts:   (villaId) => get('getRecentCheckouts', { villaId }),
   saveBreakfastEntry:   (data)   => post('saveBreakfastEntry', data),

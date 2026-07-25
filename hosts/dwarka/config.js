@@ -61,8 +61,47 @@ export const CONFIG = {
       // the arrival message (so the guest has a direct line to the person
       // actually on-site, instead of "Raman" appearing to have texted them).
       managerPhone: '+91 85471 41401',
+      // Duplicates the arrival message's hardcoded checkout time on purpose —
+      // see that file's own note on why this isn't wired to the dynamic
+      // tenant config yet (would require an async rewrite).
+      checkoutTime: '11:00 AM',
     }
   ],
+
+  // Guest-facing message templates for the Complete Booking screen's
+  // Checked-In Guests block. {placeholders} are substituted per-stay —
+  // guestName, villaName, managerName, managerPhone, checkoutTime, brandName.
+  // Content lives here (not hardcoded) so wording can change without
+  // touching the sending logic, and so a white-label host can use its own
+  // voice. Read server-side too (functions/api/[[route]].js imports this
+  // file directly for the automated checkout-day send — see HOST_CONFIGS
+  // there), so keep this object plain data, no functions/JSX.
+  guestMessages: {
+    comfortCheck: {
+      template:
+`Namaskaram {guestName}! 🙏
+
+We hope your travel to Guruvayur was comfortable, and that check-in went smoothly with our staff able to assist you well.
+
+Wishing you a wonderful stay at {villaName}! If you need anything at all during your time here, {managerName} is just a phone call away — {managerPhone}.
+
+Enjoy your stay! 🏡`,
+    },
+    checkoutDay: {
+      subject: 'Checkout day today — {villaName}',
+      template:
+`Namaskaram {guestName},
+
+Today is your check-out day at {villaName}. Standard check-out time is {checkoutTime} — please let {managerName} know if you need any assistance before you leave ({managerPhone}).
+
+You'll find all your check-out details in the folder left at the villa — please do review it at your convenience.
+
+We hope you had a truly beautiful and enjoyable time in Guruvayur, with wonderful family moments at {villaName}. Safe travels, and we do hope to welcome you back again soon!
+
+Warm regards,
+{brandName}`,
+    },
+  },
 
   // Rental properties — monthly income tracker
   // tenantName and leaseEnd are now managed via the Tenant Agreements screen (/owner/rental/agreement)

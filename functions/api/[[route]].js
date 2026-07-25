@@ -3,6 +3,19 @@
 //   v2.0 — JWT authentication (PINs server-side only)
 // ============================================================
 
+// This worker is one shared deployment across every tenant (unlike the
+// frontend, which is built once per host via the @host-config vite alias
+// and only ever needs its own host's CONFIG). Server-triggered sends —
+// the checkout-day autosend job has no browser/request to read a
+// per-host CONFIG from — need to look a tenant's config up by villa_id
+// at runtime instead, hence importing every host directly here.
+import { CONFIG as DWARKA_CONFIG } from '../../hosts/dwarka/config.js'
+import { CONFIG as DEMOVILLA_CONFIG } from '../../hosts/demovilla/config.js'
+const HOST_CONFIGS = { dwarka: DWARKA_CONFIG, demovilla: DEMOVILLA_CONFIG }
+function getHostConfig(villaId) {
+  return HOST_CONFIGS[villaId] || HOST_CONFIGS.dwarka
+}
+
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -212,6 +225,44 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category) {
         .run()
     } catch (e) { console.error('alert_log insert failed:', e?.message || e) }
   }
+}
+
+// ── {placeholder} substitution for config-driven guest message templates ──
+function renderTemplate(template, vars) {
+  return String(template).replace(/\{(\w+)\}/g, (m, key) => (vars[key] != null ? vars[key] : m))
+}
+
+// ── GUEST-FACING EMAIL via Resend ────────────────────────────
+// Separate from sendAlert (which is always host-Biji-facing, from a
+// "Security" sender) — this sends TO a guest, so it needs its own
+// guest-appropriate from-address. Shares the same Resend key/logging.
+async function sendGuestEmail(env, DB, { to, subject, text, villaId, category }) {
+  let ok = false, statusCode = null, detail = ''
+  try {
+    const apiKey = await getResendApiKey(DB, env)
+    if (!apiKey) throw new Error('RESEND_API_KEY not configured')
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        from: 'Guruvayur Estates <stay@luxuryvillasofguruvayur.com>',
+        to: [to], subject, text,
+      }),
+    })
+    ok = res.ok
+    statusCode = res.status
+    if (!res.ok) detail = await res.text().catch(() => '')
+  } catch (e) {
+    detail = e?.message || String(e)
+  }
+  if (DB) {
+    try {
+      await DB.prepare(`INSERT INTO infra_alert_log (log_id, villa_id, subject, to_email, success, status_code, error_detail, category, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+        .bind(genId('AL'), villaId || null, subject, to, ok ? 1 : 0, statusCode, detail ? detail.slice(0, 500) : null, category || 'guest_email', new Date().toISOString().slice(0, 19).replace('T', ' '))
+        .run()
+    } catch (e) { console.error('alert_log insert failed:', e?.message || e) }
+  }
+  return { ok, statusCode, detail }
 }
 
 // ── PER-VILLA OWNER ALERT EMAIL ─────────────────────────────
@@ -554,9 +605,18 @@ export async function onRequest(ctx) {
     const country   = request.headers.get('CF-IPCountry')     || 'unknown'
     const city      = request.cf?.city                         || 'unknown'
     const region    = request.cf?.region                       || ''
+    const postal    = request.cf?.postalCode                   || ''
+    const lat       = request.cf?.latitude                     || ''
+    const lon       = request.cf?.longitude                    || ''
+    // Cloudflare already resolves the connecting network's owner (mobile
+    // carrier or ISP) from the IP — free, no external lookup needed.
+    const isp       = request.cf?.asOrganization                || 'unknown'
     const userAgent = request.headers.get('User-Agent')        || 'unknown'
     const referer   = request.headers.get('Referer')           || ''
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+    const locationLine = `Location:   ${city}${region ? ', ' + region : ''}, ${country}` +
+      (postal ? ` ${postal}` : '') + (lat && lon ? ` (${lat}, ${lon})` : '')
+    const ispLine = `ISP:        ${isp}`
 
     const rl = checkRateLimit(ip)
     if (rl.limited) {
@@ -566,7 +626,8 @@ export async function onRequest(ctx) {
         '',
         `Time:       ${timestamp}`,
         `IP Address: ${ip}`,
-        `Location:   ${city}${region ? ', ' + region : ''}, ${country}`,
+        locationLine,
+        ispLine,
         `User Agent: ${userAgent}`,
         `Referer:    ${referer || 'direct'}`,
         '',
@@ -638,7 +699,8 @@ export async function onRequest(ctx) {
         '',
         `Time:       ${timestamp}`,
         `IP Address: ${ip}`,
-        `Location:   ${city}${region ? ', ' + region : ''}, ${country}`,
+        locationLine,
+        ispLine,
         `User Agent: ${userAgent}`,
         `Referer:    ${referer || 'direct'}`,
         `PIN tried:  ${String(pin).length} digits (not shown for security)`,
@@ -1031,6 +1093,52 @@ export async function onRequest(ctx) {
       tariffPerNight, subtotal, discountPct, total,
       overflowGuests, withinRecommended,
     } })
+  }
+
+  // ── CHECKOUT-DAY EMAIL AUTOSEND (external cron, not a logged-in user) ──
+  // Called once daily (6am IST) by a scheduled GitHub Actions workflow —
+  // Cloudflare Pages Functions (this file-based routing style, not a single
+  // _worker.js) don't expose a native `scheduled` handler, so the trigger
+  // lives outside Cloudflare and just hits this endpoint. Guarded by a
+  // shared secret instead of a user JWT since there's no logged-in session
+  // to check. checkout_email_sent_at is the de-dupe guard — safe to re-run.
+  if (action === 'runCheckoutEmailAutosend' && method === 'POST') {
+    const secret = request.headers.get('X-Cron-Secret') || ''
+    if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
+
+    const today = new Date().toISOString().slice(0, 10)
+    const { results: due } = await DB.prepare(`
+      SELECT * FROM stayvibe_stays
+      WHERE checkout_date = ?
+        AND status IN ('checked_in', 'ready_for_checkout')
+        AND guest_email IS NOT NULL AND guest_email != ''
+        AND checkout_email_sent_at IS NULL
+    `).bind(today).all()
+
+    let sent = 0, failed = 0
+    for (const stay of (due || [])) {
+      const host = getHostConfig(stay.villa_id)
+      const villa = host.villas[0]
+      const msg = host.guestMessages.checkoutDay
+      const vars = {
+        guestName: stay.guest_name, villaName: villa.full,
+        managerName: villa.managerName, managerPhone: villa.managerPhone,
+        checkoutTime: villa.checkoutTime, brandName: host.brandName,
+      }
+      const result = await sendGuestEmail(env, DB, {
+        to: stay.guest_email, subject: renderTemplate(msg.subject, vars),
+        text: renderTemplate(msg.template, vars), villaId: stay.villa_id,
+        category: 'checkout_day_email',
+      })
+      if (result.ok) {
+        sent++
+        await DB.prepare(`UPDATE stayvibe_stays SET checkout_email_sent_at = ? WHERE stay_id = ?`)
+          .bind(new Date().toISOString().slice(0, 19).replace('T', ' '), stay.stay_id).run()
+      } else {
+        failed++
+      }
+    }
+    return json({ success: true, data: { date: today, checked: (due || []).length, sent, failed } })
   }
 
   // ── AUTH GUARD — verify JWT on every other request ─────
@@ -2065,7 +2173,7 @@ export async function onRequest(ctx) {
                   request_breakfast, breakfast_choice, request_cab,
                   request_extra_beds, extra_beds_count,
                   nationality, purpose_of_visit, mode_of_transport, eta,
-                  booked_by_guest_id, booked_by_name
+                  booked_by_guest_id, booked_by_name, checkout_email_sent_at
            FROM stayvibe_stays
            WHERE villa_id = ?
              AND status NOT IN ('closed','cancelled','void')
@@ -4550,6 +4658,35 @@ export async function onRequest(ctx) {
         await DB.prepare(`UPDATE stayvibe_stays SET early_checkin_time = ?, late_checkout_time = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
           .bind(earlyCheckinTime || null, lateCheckoutTime || null, actor, now(), stayId).run()
         return json({ success: true, data: { stayId, earlyCheckinTime: earlyCheckinTime || null, lateCheckoutTime: lateCheckoutTime || null } })
+      }
+
+      // Manual backup for the checkout-day email — the automated 6am send
+      // (runCheckoutEmailAutosend, outside the auth gate below) is the
+      // primary path; this lets the owner fire it early, resend it, or
+      // cover a guest who checked out unexpectedly before the autosend ran.
+      if (action === 'sendCheckoutEmailNow') {
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        if (!stay.guest_email) return err('No email on file for this guest')
+        const host = getHostConfig(stay.villa_id)
+        const villa = host.villas[0]
+        const msg = host.guestMessages.checkoutDay
+        const vars = {
+          guestName: stay.guest_name, villaName: villa.full,
+          managerName: villa.managerName, managerPhone: villa.managerPhone,
+          checkoutTime: villa.checkoutTime, brandName: host.brandName,
+        }
+        const result = await sendGuestEmail(env, DB, {
+          to: stay.guest_email, subject: renderTemplate(msg.subject, vars),
+          text: renderTemplate(msg.template, vars), villaId: stay.villa_id,
+          category: 'checkout_day_email',
+        })
+        if (!result.ok) return err('Email send failed: ' + (result.detail || 'unknown error'))
+        await DB.prepare(`UPDATE stayvibe_stays SET checkout_email_sent_at = ? WHERE stay_id = ?`).bind(now(), stayId).run()
+        return json({ success: true, data: { stayId, sentAt: now() } })
       }
 
       if (action === 'saveRentalIncome') {

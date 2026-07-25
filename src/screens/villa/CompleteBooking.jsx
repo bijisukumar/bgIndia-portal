@@ -19,6 +19,7 @@ import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
+import { buildComfortCheckWaLink } from '../../utils/guestMessages'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
 
@@ -129,6 +130,7 @@ export default function CompleteBooking() {
   const [mergeGuestMatches, setMergeGuestMatches] = useState({}) // stay_id -> {guest_id, name} | null (not found) | undefined (loading)
   const [absorbPrompt, setAbsorbPrompt] = useState(null) // { source, target } — offer to move financials off the duplicate
   const [absorbBusy, setAbsorbBusy] = useState(false)
+  const [checkoutEmailBusy, setCheckoutEmailBusy] = useState(null) // stay_id currently sending, or null
 
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),3500)
@@ -376,6 +378,19 @@ export default function CompleteBooking() {
     finally { setTimeBusy(false) }
   }
 
+  // Manual backup for the checkout-day email — the 6am autosend is the
+  // primary path (see runCheckoutEmailAutosend in the worker); this covers
+  // sending early, resending, or a guest who leaves before the autosend runs.
+  async function handleSendCheckoutEmailNow(stayId) {
+    setCheckoutEmailBusy(stayId)
+    try {
+      await api.sendCheckoutEmailNow({ stayId })
+      showToast('Checkout email sent ✓')
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setCheckoutEmailBusy(null) }
+  }
+
   function toggleMergeCheck(stayId) {
     setMergeChecked(prev =>
       prev.includes(stayId) ? prev.filter(id => id !== stayId)
@@ -523,6 +538,63 @@ export default function CompleteBooking() {
 
         {!loading && stays.length > 0 && (
           <>
+            {/* Checked-in guests — comfort-check message any time during the
+                stay, plus a manual backup for the checkout-day email (the
+                6am autosend is the primary path — see runCheckoutEmailAutosend
+                in the worker). */}
+            {(() => {
+              const checkedIn = stays.filter(s => s.status === 'checked_in')
+              if (checkedIn.length === 0) return null
+              return (
+                <>
+                  <div className="card-section-label">CHECKED-IN GUESTS</div>
+                  <div style={{background:'var(--dark-card)',borderRadius:'12px',border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'20px'}}>
+                    {checkedIn.map((stay, i) => {
+                      const waLink = buildComfortCheckWaLink(stay)
+                      const emailSending = checkoutEmailBusy === stay.stay_id
+                      const emailSent = !!stay.checkout_email_sent_at
+                      return (
+                        <div key={stay.stay_id} style={{padding:'14px 16px',
+                          borderBottom: i < checkedIn.length-1 ? '1px solid var(--border-dim)' : 'none'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'10px'}}>
+                            <div style={{fontWeight:'600',fontSize:'0.9rem'}}>{stay.guest_name}</div>
+                            <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>
+                              Checkout {fmtDate(stay.checkout_date)}
+                            </div>
+                          </div>
+                          <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                            {waLink ? (
+                              <a href={waLink} target="_blank" rel="noreferrer"
+                                style={{fontSize:'0.76rem',fontWeight:'700',padding:'8px 12px',borderRadius:'8px',
+                                  background:'rgba(37,211,102,0.1)',border:'1px solid rgba(37,211,102,0.3)',
+                                  color:'#25D366',textDecoration:'none'}}>
+                                💬 Send comfort check
+                              </a>
+                            ) : (
+                              <span style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>No phone on file for comfort check</span>
+                            )}
+                            {stay.guest_email ? (
+                              <button onClick={() => handleSendCheckoutEmailNow(stay.stay_id)}
+                                disabled={emailSending}
+                                style={{fontSize:'0.76rem',fontWeight:'700',padding:'8px 12px',borderRadius:'8px',
+                                  background: emailSent ? 'rgba(52,168,83,0.1)' : 'rgba(133,183,235,0.1)',
+                                  border: emailSent ? '1px solid rgba(52,168,83,0.3)' : '1px solid rgba(133,183,235,0.3)',
+                                  color: emailSent ? '#34A853' : '#85B7EB',
+                                  cursor: emailSending ? 'not-allowed' : 'pointer'}}>
+                                {emailSending ? 'Sending…' : emailSent ? '✅ Checkout email sent' : '📧 Send checkout email now'}
+                              </button>
+                            ) : (
+                              <span style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>No email on file — checkout email can't be sent</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )
+            })()}
+
             {/* Guest selector */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <div className="card-section-label">SELECT GUEST</div>

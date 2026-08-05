@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Call runCheckoutEmailAutosend
         run: |
-          curl -sS -X POST "https://manage.luxuryvillasofguruvayur.com/api/runCheckoutEmailAutosend" \
+          curl -sS -X POST "https://manage.stayvibe360.com/api/runCheckoutEmailAutosend" \
             -H "Content-Type: application/json" \
             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
             -d '{}' \

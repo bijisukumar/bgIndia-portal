@@ -21,7 +21,7 @@ import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { buildComfortCheckWaLink, buildHostIntroWaLink } from '../../utils/guestMessages'
 
-const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
+const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Other']
 
 // Extra charge line items — single source of truth in utils/villaPricing
 // (shared with EnquiryDetail quotes) so the two dropdowns can never drift.

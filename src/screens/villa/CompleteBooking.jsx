@@ -832,6 +832,25 @@ export default function CompleteBooking() {
                   </div>
                 )}
 
+                {/* Linked booking's own Drive folder — merging via "🔗 Merge
+                    bookings" only records booked_by_guest_id/booked_by_name,
+                    it never reconciles drive_folder_id/govt_id fields between
+                    the two stays. So when the check-in form created a separate
+                    duplicate stay (name mismatch with the real booking), the
+                    guest's actual uploaded ID lives in THAT stay's folder, not
+                    this one — surface it here so it's never a dead end. */}
+                {(linkedByParent[s.stay_id] || [])
+                  .filter(child => child.drive_folder_id && child.drive_folder_id !== s.drive_folder_id)
+                  .map(child => (
+                    <a key={child.stay_id} href={`https://drive.google.com/drive/folders/${child.drive_folder_id}`}
+                      target="_blank" rel="noreferrer"
+                      style={{display:'block',padding:'10px 14px',background:'var(--dark-card)',
+                        border:'1px solid rgba(139,92,246,0.35)',borderRadius:'10px',marginBottom:'14px',
+                        color:'#8B5CF6',fontSize:'0.82rem',textDecoration:'none'}}>
+                      📁 {child.guest_name}'s check-in documents (linked booking) → their ID upload landed here
+                    </a>
+                  ))}
+
                 {/* Directions & arrival steps — WhatsApp, sent by the owner in
                     their own voice, introducing Raman and his direct number
                     (buildArrivalWaLink's default/no-opts call in CheckIn.jsx

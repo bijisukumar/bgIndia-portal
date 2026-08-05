@@ -1095,6 +1095,50 @@ export async function onRequest(ctx) {
     } })
   }
 
+  // ── FLEXIBILITY REQUEST (public — same no-auth trust model as the
+  // guest check-in form). Writes a request for the owner to price and
+  // confirm; never quotes or promises anything back to the guest. ──
+  if (action === 'submitFlexRequest' && method === 'POST') {
+    const fBody = await request.json().catch(() => ({}))
+    const {
+      villaId = DEFAULT_VILLA_ID, guestName, contact, bookingChannel,
+      checkInDate, checkOutDate, needType, details,
+    } = fBody
+    if (!guestName || !String(guestName).trim()) return err('guestName required')
+    const reqId = genId('FLEX')
+    await DB.prepare(`
+      INSERT INTO stayvibe_flex_requests
+        (request_id, villa_id, guest_name, contact, booking_channel,
+         checkin_date, checkout_date, need_type, details, status)
+      VALUES (?,?,?,?,?,?,?,?,?,'new')
+    `).bind(
+      reqId, villaId, String(guestName).trim(), contact || null,
+      bookingChannel || null, checkInDate || null, checkOutDate || null,
+      needType || null, details || null
+    ).run()
+
+    // Tell the owner straight away — these are time-sensitive (the guest is
+    // asking about dates they're about to travel on) and there's no other
+    // trigger that would surface a new row.
+    try {
+      const to = await getOwnerAlertEmail(DB, env, villaId)
+      await sendAlert(env, '🕐 Flexibility request — ' + String(guestName).trim(), [
+        'A guest asked about early check-in / late check-out.',
+        '',
+        `Guest:    ${String(guestName).trim()}`,
+        `Contact:  ${contact || '—'}`,
+        `Booked:   ${bookingChannel || '—'}`,
+        `Dates:    ${checkInDate || '—'} → ${checkOutDate || '—'}`,
+        `Needs:    ${needType || '—'}`,
+        `Details:  ${details || '—'}`,
+        '',
+        'Check the adjoining night, then quote 25% or 50% and confirm with the guest.',
+      ], to, DB, villaId, 'flex_request')
+    } catch (e) { console.error('flex request alert failed:', e?.message || e) }
+
+    return json({ success: true, data: { requestId: reqId } })
+  }
+
   // ── CHECKOUT-DAY EMAIL AUTOSEND (external cron, not a logged-in user) ──
   // Called once daily (6am IST) by a scheduled GitHub Actions workflow —
   // Cloudflare Pages Functions (this file-based routing style, not a single
@@ -2824,6 +2868,39 @@ export async function onRequest(ctx) {
       }
 
 
+
+      // Owner-side list for the flexibility requests the public page writes.
+      if (action === 'getFlexRequests') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results } = await DB.prepare(
+          `SELECT request_id, guest_name, contact, booking_channel, checkin_date,
+                  checkout_date, need_type, details, status, quoted_pct,
+                  owner_note, created_at
+             FROM stayvibe_flex_requests
+            WHERE villa_id = ?
+            ORDER BY CASE WHEN status = 'new' THEN 0 ELSE 1 END, created_at DESC
+            LIMIT 100`
+        ).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
+      if (action === 'updateFlexRequest') {
+        const { requestId, status, quotedPct, ownerNote } = body
+        if (!requestId) return err('requestId required')
+        const row = await DB.prepare(`SELECT villa_id FROM stayvibe_flex_requests WHERE request_id = ?`).bind(requestId).first()
+        if (!row) return err('Request not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        await DB.prepare(
+          `UPDATE stayvibe_flex_requests
+              SET status = COALESCE(?, status),
+                  quoted_pct = COALESCE(?, quoted_pct),
+                  owner_note = COALESCE(?, owner_note),
+                  updated_at = ?
+            WHERE request_id = ?`
+        ).bind(status || null, quotedPct ?? null, ownerNote || null, now(), requestId).run()
+        return json({ success: true, data: { requestId } })
+      }
 
       if (action === 'getCheckinLinks') {
         const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM stayvibe_checkin_links ORDER BY villa_id, partner`).all()

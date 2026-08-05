@@ -102,6 +102,66 @@ export const CONFIG = {
   // voice. Read server-side too (functions/api/[[route]].js imports this
   // file directly for the automated checkout-day send — see HOST_CONFIGS
   // there), so keep this object plain data, no functions/JSX.
+  // Public "need flexibility" page (/flexibility). Every word a guest reads
+  // lives here so wording can change without touching the component.
+  // Deliberately carries NO rupee figures: the owner quotes 25% or 50% of a
+  // night per request after checking the dates, so nobody turns up having
+  // decided the rate for themselves.
+  flexibility: {
+    hero: {
+      eyebrow: 'DIRECT GUESTS · DWARKA VILLA',
+      title: "Travelling with family? We'll make the timings work.",
+      intro: 'Check-in is after 4:00 PM and check-out by 11:00 AM. Here is what happens in the five hours between — and what we can do when those hours do not suit your family.',
+    },
+    why: {
+      heading: 'Why our timings are what they are',
+      body: [
+        'Check-out is by 11:00 AM. Check-in is after 4:00 PM. That gap is five hours, and it is fully used.',
+        'Dwarka is a 3,000 sq ft home with four bedrooms and four and a half bathrooms. Between one family leaving and the next arriving, our team works through all of it.',
+      ],
+      checklist: [
+        'Every bed stripped and remade with fresh linen — nothing is reused between families, ever',
+        'Every bathroom deep-cleaned and sanitised',
+        'The kitchen cleaned down and restocked, ready for your family to cook in from the moment you arrive',
+        'Every bedroom, the living areas, the dining hall and the grounds gone over',
+      ],
+      closing: [
+        "We don't cut corners to turn the house around faster. A home this size simply takes that long to bring back to the standard you would expect when your family walks in.",
+        "So when we hold to those hours, it isn't policy for the sake of policy — it's the reason the house feels the way it does when you arrive. Your family's gathering here should be memorable, and this is a large part of how we make sure it is.",
+      ],
+    },
+    options: {
+      heading: "Need to arrive earlier, or leave later? Just ask.",
+      body: [
+        'We know family travel rarely fits neatly into a 4:00 PM arrival — a long drive, small children, elderly parents, a wedding to be at. So rather than turn the request down, we hold the adjoining night for you.',
+        "Once we do that, the night can't be offered to anyone else. Even so, we don't charge for a full extra night — we ask for a fraction of it, typically 25% or 50%, depending on how much extra time you need. We'll confirm the exact amount once we've looked at your dates.",
+      ],
+      directNote: "This is something we're able to offer only to guests who book with us directly. Booking direct means the calendar is ours to hold, so we can set a night aside for your family and price it as a courtesy rather than a full night's stay. It's one of the ways we try to keep your costs down.",
+      advanceNote: 'Please ask ahead of time. Timing changes need to be agreed and settled before you arrive so we can plan the turnaround around your family — our on-site team is not able to approve changes on the day.',
+    },
+    ota: {
+      heading: 'Booked through Airbnb, Booking.com or another platform?',
+      body: [
+        "Extra nights for your current stay need to be arranged through them — those dates live in their system, and they'll charge the full nightly rate.",
+        "Worth knowing for next time: guests who book with us directly get flexibility on arrival and departure timings, held as a courtesy at a fraction of a night rather than the full rate. No platform fees either — you're dealing with the family who owns the home.",
+      ],
+      ctaLabel: "Send me your direct rates for next time",
+      thanks: "Thank you — we'll be in touch with our direct rates. We'd love to host your family again.",
+    },
+    form: {
+      heading: 'Tell us what you need',
+      needTypes: [
+        'Earlier check-in on arrival day',
+        'Later check-out on departure day',
+        'Both',
+      ],
+      submitLabel: 'Send request',
+      thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do and the exact amount, before you travel.",
+    },
+    channels: ['Direct with the villa', 'Airbnb', 'Booking.com', 'MakeMyTrip', 'Goibibo', 'Agoda', 'Expedia', 'VRBO', 'Other platform'],
+    directChannel: 'Direct with the villa',
+  },
+
   guestMessages: {
     // Owner's personal welcome, sent any time before check-in. Villa/owner
     // names are literal here (not placeholders) since this whole object is

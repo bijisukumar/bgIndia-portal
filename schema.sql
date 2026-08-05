@@ -727,3 +727,27 @@ CREATE TABLE IF NOT EXISTS platform_auth_tokens (
   active      INTEGER DEFAULT 1,
   created_at  TEXT
 );
+
+-- Guest-facing "need flexibility" requests (early check-in / late check-out).
+-- Public page writes here with no auth (same trust model as the check-in
+-- form); the owner reviews, quotes a % of the nightly rate and confirms.
+-- booking_channel is self-declared by the guest and decides which branch of
+-- the page they see — direct guests get the request form, OTA guests get the
+-- book-direct-next-time capture instead.
+CREATE TABLE IF NOT EXISTS stayvibe_flex_requests (
+  request_id TEXT PRIMARY KEY,
+  villa_id TEXT NOT NULL DEFAULT 'dwarka',
+  guest_name TEXT NOT NULL,
+  contact TEXT,
+  booking_channel TEXT,
+  checkin_date TEXT,
+  checkout_date TEXT,
+  need_type TEXT,
+  details TEXT,
+  status TEXT DEFAULT 'new',
+  quoted_pct INTEGER,
+  owner_note TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_flex_requests ON stayvibe_flex_requests(villa_id, status, created_at);

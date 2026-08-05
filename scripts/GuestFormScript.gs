@@ -341,7 +341,10 @@ function processPendingCheckInForms() {
   if (!resp || !resp.success || !resp.data) {
     Logger.log('No pending review stays or error: ' + JSON.stringify(resp));
     try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ processPendingCheckInForms — worker call failed',
-      'getPendingReviewStays returned: ' + JSON.stringify(resp)); } catch(e) {}
+      'getPendingReviewStays returned: ' + JSON.stringify(resp) +
+      (LAST_WORKER_ERROR ? '\n\nCause: ' + LAST_WORKER_ERROR : '') +
+      '\n\nWorker URL: ' + WORKER_URL +
+      '\nTime: ' + new Date().toISOString()); } catch(e) {}
     return;
   }
 
@@ -767,9 +770,16 @@ function getSystemToken() {
   try { return PropertiesService.getScriptProperties().getProperty('SYSTEM_TOKEN') || ''; }
   catch(e) { return ''; }
 }
+// Set by callWorker whenever it returns null, so an alert can report WHY.
+// Previously the real cause (DNS failure, an HTML error page, a bad SSL
+// handshake) was swallowed into Logger where nobody saw it, and the owner
+// just got "returned: null" with nothing to act on.
+var LAST_WORKER_ERROR = '';
+
 function callWorker(method, action, payload) {
+  LAST_WORKER_ERROR = '';
+  var url = WORKER_URL + '/' + action;
   try {
-    var url  = WORKER_URL + '/' + action;
     var opts = {
       method: method.toLowerCase(),
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getSystemToken() },
@@ -781,8 +791,26 @@ function callWorker(method, action, payload) {
       }).join('&');
     }
     if (method === 'POST') opts.payload = JSON.stringify(payload || {});
-    return JSON.parse(UrlFetchApp.fetch(url, opts).getContentText());
-  } catch(e) { Logger.log('callWorker (' + action + '): ' + e.message); return null; }
+
+    var res  = UrlFetchApp.fetch(url, opts);
+    var code = res.getResponseCode();
+    var body = res.getContentText();
+    try {
+      return JSON.parse(body);
+    } catch (parseErr) {
+      // Reaching here means we got a response but it wasn't JSON — almost
+      // always an HTML error/parking page, i.e. the hostname is resolving
+      // somewhere other than the worker.
+      LAST_WORKER_ERROR = 'HTTP ' + code + ' from ' + url +
+        ' — response was not JSON: ' + String(body).substring(0, 300);
+      Logger.log('callWorker (' + action + '): ' + LAST_WORKER_ERROR);
+      return null;
+    }
+  } catch(e) {
+    LAST_WORKER_ERROR = 'fetch threw for ' + url + ': ' + e.message;
+    Logger.log('callWorker (' + action + '): ' + LAST_WORKER_ERROR);
+    return null;
+  }
 }
 function sendAlert(subject, body) {
   try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ' + subject, body); }

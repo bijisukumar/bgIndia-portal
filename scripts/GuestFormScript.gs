@@ -61,7 +61,7 @@
 // ============================================================
 
 // ── ONLY THESE TWO VALUES CHANGE PER CLIENT ───────────────
-var WORKER_URL = 'https://manage.luxuryvillasofguruvayur.com/api';
+var WORKER_URL = 'https://manage.stayvibe360.com/api';
 var TENANT_ID  = 'dwarka';  // matches tenants.tenant_id in D1
 // ─────────────────────────────────────────────────────────
 

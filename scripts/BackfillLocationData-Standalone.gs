@@ -16,7 +16,7 @@ var DRIVE_ROOT_ID = '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva';
 var MAIN_SHEET_ID = '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ';
 var STAYS_SHEET   = 'Stays';
 var FORM_SHEET_ID = '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0';
-var WORKER_URL    = 'https://manage.luxuryvillasofguruvayur.com/api';
+var WORKER_URL    = 'https://manage.stayvibe360.com/api';
 
 var FOLDER_2026 = '1IOisLwV7QxihMSRvlalolq1sMtW51QFt';
 var FOLDER_2025 = '15fXmazoHTIeUf6Jq9bsaZHzZghzLBcaU';

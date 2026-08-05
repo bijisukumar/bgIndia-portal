@@ -4,7 +4,7 @@
  * Tracks campaign clicks and inquiry form conversions
  */
 (function () {
-  const API = 'https://manage.luxuryvillasofguruvayur.com/api';
+  const API = 'https://manage.stayvibe360.com/api';
   const SESSION_KEY = 'lvg_ref';
 
   // 1. Extract ?ref= token from URL

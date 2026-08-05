@@ -8,7 +8,7 @@
 //   2. Redeploy: Deployments → Manage → New version → Deploy
 // ============================================================
 
-var WORKER_URL = 'https://manage.luxuryvillasofguruvayur.com/api';
+var WORKER_URL = 'https://manage.stayvibe360.com/api';
 
 // ============================================================
 // PART 1: UPDATED DRIVE FOLDER STRUCTURE

@@ -5125,15 +5125,26 @@ export async function onRequest(ctx) {
       if (action === 'linkBookedBy') {
         const { stayId, guestId } = body
         if (!stayId) return err('stayId required')
-        let guestName = null
+        let guestName = null, guestPhone = null, guestEmail = null
         if (guestId) {
-          const guest = await DB.prepare(`SELECT name FROM stayvibe_guests WHERE guest_id = ?`).bind(guestId).first()
+          const guest = await DB.prepare(`SELECT name, phone, email FROM stayvibe_guests WHERE guest_id = ?`).bind(guestId).first()
           if (!guest) return err('Guest not found', 404)
-          guestName = guest.name
+          guestName  = guest.name
+          guestPhone = guest.phone || null
+          guestEmail = guest.email || null
         }
+        // Carry the linked contact's phone/email onto the stay when the stay
+        // has none of its own. COALESCE(NULLIF(...)) is preserve-if-set, so an
+        // already-captured value is never overwritten (and unlinking, where
+        // these bind as NULL, is a no-op). Without this, merging a check-in
+        // form duplicate into its channel booking left the surviving stay with
+        // no way to contact the guest even though the form had captured it.
         await DB.prepare(
-          `UPDATE stayvibe_stays SET booked_by_guest_id = ?, booked_by_name = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`
-        ).bind(guestId || null, guestName, actor, now(), stayId).run()
+          `UPDATE stayvibe_stays SET booked_by_guest_id = ?, booked_by_name = ?,
+             guest_phone = COALESCE(NULLIF(guest_phone,''), ?),
+             guest_email = COALESCE(NULLIF(guest_email,''), ?),
+             updated_by = ?, updated_at = ? WHERE stay_id = ?`
+        ).bind(guestId || null, guestName, guestPhone, guestEmail, actor, now(), stayId).run()
 
         // Linking "who's paying" (e.g. a B2B agency like Detrip) is
         // separate from tracking the person who actually stayed (e.g.

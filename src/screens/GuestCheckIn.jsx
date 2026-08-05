@@ -662,7 +662,7 @@ export default function GuestCheckIn() {
             <UploadBox label="Tap to upload ID" preview={idPreview}
               onClick={() => idRef.current?.click()}
               hint="Aadhaar / PAN / Licence — photo or PDF" />
-            <input ref={idRef} type="file" accept="image/*,application/pdf" capture="environment"
+            <input ref={idRef} type="file" accept="image/*,application/pdf"
               onChange={e => handleFileUpload(e, setIdPreview, setIdFile)}
               style={{ display:'none' }} />
             {idPreview && (
@@ -696,7 +696,7 @@ export default function GuestCheckIn() {
               onClick={() => passportRef.current?.click()}
               color="#85B7EB" icon="🛂"
               hint="Clear photo of the biographical data page" />
-            <input ref={passportRef} type="file" accept="image/*,application/pdf" capture="environment"
+            <input ref={passportRef} type="file" accept="image/*,application/pdf"
               onChange={handlePassportUpload}
               style={{ display:'none' }} />
             {passportPreview && (
@@ -755,7 +755,7 @@ export default function GuestCheckIn() {
                 onClick={() => visaRef.current?.click()}
                 color="#85B7EB" icon="📋"
                 hint="Visa stamp, sticker, or e-Visa printout" />
-              <input ref={visaRef} type="file" accept="image/*,application/pdf" capture="environment"
+              <input ref={visaRef} type="file" accept="image/*,application/pdf"
                 onChange={e => handleFileUpload(e, setVisaPreview, null)}
                 style={{ display:'none' }} />
               {visaPreview && (

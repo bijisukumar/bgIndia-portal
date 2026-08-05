@@ -19,7 +19,7 @@ import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
-import { buildComfortCheckWaLink } from '../../utils/guestMessages'
+import { buildComfortCheckWaLink, buildHostIntroWaLink } from '../../utils/guestMessages'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Expedia','VRBO','Other']
 
@@ -1345,7 +1345,6 @@ export default function CompleteBooking() {
                 {s && !['checked_in','checked_out','closed','cancelled'].includes(s.status) && (() => {
                   const phone = selected?.guest_phone || selected?.phone
                   const name  = (selected?.guest_name || '').split(' ')[0]
-                  const ci    = selected?.checkin_date || ''
                   if (!phone) return (
                     <button
                       onClick={() => {
@@ -1361,23 +1360,14 @@ export default function CompleteBooking() {
                       💬 WhatsApp intro available once guest phone is captured — tap to add it
                     </button>
                   )
-                  const phoneStr = String(phone)
-                  const raw = phoneStr.replace(/\D/g,'')
-                  // Only assume India's country code for a bare 10-digit number
-                  // with no '+' in the original string — blindly prepending '91'
-                  // would corrupt a real international number (e.g. a US guest's
-                  // +1... becoming 911...).
-                  const looksInternational = phoneStr.includes('+') || raw.length > 10
-                  const num = looksInternational ? raw : `91${raw}`
-                  const msg = encodeURIComponent(
-                    `Namaskaram ${name}! 🙏\n\n` +
-                    `This is Biji from ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}. I wanted to personally welcome you ahead of your stay on ${parseLocalDate(ci)?.toLocaleDateString('en-IN',{month:'long',day:'numeric'}) || ci}.\n\n` +
-                    `At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.\n\n` +
-                    `Please let me know a convenient time to connect. We're looking forward to hosting you and your family.\n\n` +
-                    `Snehapoorvam (സ്നേഹപൂർവ്വം),\nBiji | ${selected.villa_name || 'Guruvayur Villa (Dwarka)'}`
-                  )
+                  // Message text + wa.me link both come from
+                  // CONFIG.guestMessages.hostIntro via buildHostIntroWaLink —
+                  // booking details and the check-in-form nudge (auto-omitted
+                  // once the guest has registered) are assembled there.
+                  const introLink = buildHostIntroWaLink(selected)
+                  if (!introLink) return null
                   return (
-                    <a href={`https://wa.me/${num}?text=${msg}`} target="_blank" rel="noreferrer"
+                    <a href={introLink} target="_blank" rel="noreferrer"
                       style={{
                         display:'block', padding:'12px', borderRadius:'10px', textAlign:'center',
                         background:'rgba(37,211,102,0.1)', border:'1px solid rgba(37,211,102,0.3)',

@@ -39,11 +39,40 @@ export const CONFIG = {
       managerName: 'Demo Manager',
       managerUpi: 'demo-manager@upi',
       managerPhone: '+1 900 000 0002',
+      checkinTime:  '4:00 PM',
       checkoutTime: '11:00 AM',
     }
   ],
 
+  checkinBaseUrl: 'https://demo.stayvibe360.com',
+  checkinLinkTokens: { direct: 'demo-direct' },
+  checkinLinkDefaultToken: 'demo-direct',
+
   guestMessages: {
+    hostIntro: {
+      template:
+`Namaskaram {firstName}! 🙏
+
+This is your host from Demo Villa. I wanted to personally welcome you ahead of your stay on {checkinDateShort}.
+
+We open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.
+
+*YOUR BOOKING*
+• Check-in: {checkinDateFull} — after {checkinTime}
+• Check-out: {checkoutDateFull} — by {checkoutTime}
+• Guests: {guestCount}
+• Nights: {nights}
+{checkinPrompt}
+Please let me know a convenient time to connect. We're looking forward to hosting you and your family.
+
+Warm regards,
+Demo Villa`,
+      checkinPrompt:
+`
+📝 If you haven't completed your online check-in registration yet, please do so at your earliest convenience — it's a mandatory registration requirement, and it helps us have everything ready before you arrive:
+{checkinUrl}
+`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

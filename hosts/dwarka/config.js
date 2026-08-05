@@ -64,9 +64,32 @@ export const CONFIG = {
       // Duplicates the arrival message's hardcoded checkout time on purpose —
       // see that file's own note on why this isn't wired to the dynamic
       // tenant config yet (would require an async rewrite).
+      checkinTime:  '4:00 PM',
       checkoutTime: '11:00 AM',
     }
   ],
+
+  // Public check-in form. Token-based route on the React app
+  // (src/screens/GuestCheckIn.jsx via /checkin/:linkToken) — chosen over the
+  // luxuryvillasofguruvayur.com forms because stayvibe360.com is the
+  // canonical domain and stayed up through the 2026-08-05 nameserver
+  // incident that took the other one offline.
+  checkinBaseUrl: 'https://dwarka.stayvibe360.com',
+  // stays.source → stayvibe_checkin_links.token. Not a mechanical
+  // 'gvr-' + source: makemytrip's token is gvr-mmt, booking_com's is
+  // gvr-booking, and website/whatsapp/agoda have no token of their own so
+  // they fall through to the default. Keys are matched lowercased.
+  checkinLinkTokens: {
+    airbnb:      'gvr-airbnb',
+    booking_com: 'gvr-booking',
+    booking:     'gvr-booking',
+    makemytrip:  'gvr-mmt',
+    goibibo:     'gvr-goibibo',
+    direct:      'gvr-direct',
+    website:     'gvr-direct',
+    whatsapp:    'gvr-direct',
+  },
+  checkinLinkDefaultToken: 'gvr-direct',
 
   // Guest-facing message templates for the Complete Booking screen's
   // Checked-In Guests block. {placeholders} are substituted per-stay —
@@ -77,6 +100,38 @@ export const CONFIG = {
   // file directly for the automated checkout-day send — see HOST_CONFIGS
   // there), so keep this object plain data, no functions/JSX.
   guestMessages: {
+    // Owner's personal welcome, sent any time before check-in. Villa/owner
+    // names are literal here (not placeholders) since this whole object is
+    // already per-host — only per-stay values are substituted.
+    hostIntro: {
+      template:
+`Namaskaram {firstName}! 🙏
+
+This is Biji from Guruvayur Villa (Dwarka). I wanted to personally welcome you ahead of your stay on {checkinDateShort}.
+
+At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.
+
+*YOUR BOOKING*
+• Check-in: {checkinDateFull} — after {checkinTime}
+• Check-out: {checkoutDateFull} — by {checkoutTime}
+• Guests: {guestCount}
+• Nights: {nights}
+{checkinPrompt}
+Please let me know a convenient time to connect. We're looking forward to hosting you and your family.
+
+Snehapoorvam (സ്നേഹപൂർവ്വം),
+Biji | Guruvayur Villa (Dwarka)`,
+      // Spliced into {checkinPrompt} above ONLY when the stay has no
+      // check-in form on record — a guest who has already registered
+      // should never be asked again. Leading/trailing blank lines are
+      // deliberate: they keep the paragraph spacing right when present,
+      // and collapse cleanly to nothing when omitted.
+      checkinPrompt:
+`
+📝 If you haven't completed your online check-in registration yet, please do so at your earliest convenience — it's a mandatory government requirement, and it helps us have everything ready before you arrive:
+{checkinUrl}
+`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

@@ -69,6 +69,19 @@ export const CONFIG = {
     }
   ],
 
+  // Turnaround policy. Applied as the DEFAULT for every booking unless that
+  // stay says otherwise (expected_arrival_at / expected_departure_at, or an
+  // agreed early_checkin_time / late_checkout_time). turnaroundHours is what
+  // the villa genuinely needs between one family leaving and the next
+  // arriving — the flexibility screen uses it to work out the earliest
+  // arrival / latest departure it can actually offer, instead of just
+  // calling a back-to-back day "blocked".
+  turnaround: {
+    defaultCheckinTime:  '16:00',
+    defaultCheckoutTime: '11:00',
+    turnaroundHours: 4,
+  },
+
   // Public check-in form. Token-based route on the React app
   // (src/screens/GuestCheckIn.jsx via /checkin/:linkToken) — chosen over the
   // luxuryvillasofguruvayur.com forms because stayvibe360.com is the

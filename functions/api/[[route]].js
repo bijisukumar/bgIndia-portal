@@ -2894,12 +2894,41 @@ export async function onRequest(ctx) {
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   gross, net, tariff_per_night, status,
                   early_checkin_time, late_checkout_time, eta,
+                  expected_arrival_at, expected_departure_at,
                   actual_checkin_at, actual_checkout_at
              FROM stayvibe_stays
             WHERE villa_id = ? AND status NOT IN ('cancelled','void')
             ORDER BY checkin_date`
         ).bind(villaId).all()
-        const live = (stays || []).filter(s => s.status !== 'closed' || true)
+        const live = stays || []
+
+        // When is the villa REALLY free? A booking's calendar dates aren't
+        // the same as when the family physically comes and goes — someone can
+        // hold a night purely to allow an early arrival the following morning
+        // (which is exactly why a back-to-back day isn't automatically a no).
+        // Precedence, most trusted first: what actually happened → what we
+        // recorded as expected → the time we agreed → the house default.
+        const cfg = getHostConfig(villaId).turnaround || {}
+        const DEF_IN  = cfg.defaultCheckinTime  || '16:00'
+        const DEF_OUT = cfg.defaultCheckoutTime || '11:00'
+        const TURN_MS = (cfg.turnaroundHours != null ? cfg.turnaroundHours : 4) * 3600000
+        // Every stored time is naive villa wall-clock ("2026-08-08 11:00").
+        // Anchored to UTC on the way in and read back with UTC getters, so
+        // the arithmetic is identical wherever this runs. Mixing local
+        // getters with toISOString() would silently shift everything by the
+        // runtime's offset — fine on Cloudflare (UTC), wrong anywhere else.
+        const at = (dateStr, timeStr) => (dateStr ? new Date(`${dateStr}T${(timeStr || '00:00').slice(0, 5)}:00Z`) : null)
+        const parseDt = v => {
+          if (!v) return null
+          const s = String(v).trim().replace(' ', 'T')
+          const d = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z')
+          return isNaN(d) ? null : d
+        }
+        const arrivalOf = s => parseDt(s.actual_checkin_at) || parseDt(s.expected_arrival_at)
+          || at(s.checkin_date, s.early_checkin_time || DEF_IN)
+        const departureOf = s => parseDt(s.actual_checkout_at) || parseDt(s.expected_departure_at)
+          || at(s.checkout_date, s.late_checkout_time || DEF_OUT)
+        const dayTime = d => d ? d.toISOString().slice(0, 16).replace('T', ' ') : null
 
         const nightlyOf = (s) => {
           if (!s) return 0
@@ -2934,7 +2963,32 @@ export async function onRequest(ctx) {
             checkIn: s.checkin_date, checkOut: s.checkout_date,
             lateCheckoutTime: s.late_checkout_time, earlyCheckinTime: s.early_checkin_time,
             eta: s.eta, status: s.status,
+            leavesAt:  dayTime(departureOf(s)),
+            arrivesAt: dayTime(arrivalOf(s)),
+            // true when the family isn't physically there on the day they
+            // hand the villa over — e.g. holding a night to arrive next
+            // morning. This is what makes a "booked" day still workable.
+            arrivesLaterThanCheckin: (() => {
+              const a = arrivalOf(s)
+              return !!(a && s.checkin_date && a.toISOString().slice(0,10) > s.checkin_date)
+            })(),
           })
+
+          // The real question isn't "is the adjoining day booked" but
+          // "when is the villa free, allowing for cleaning". Earliest we
+          // could hand over = the previous family's departure + turnaround.
+          // Latest this guest could leave = the next family's arrival − it.
+          const earliestArrival = blockingBefore
+            ? new Date(departureOf(blockingBefore).getTime() + TURN_MS) : null
+          const latestDeparture = blockingAfter
+            ? new Date(arrivalOf(blockingAfter).getTime() - TURN_MS) : null
+
+          // Would the ask actually fit? Compared against the standard times,
+          // since that's what the guest is trying to improve on.
+          const stdArrival = at(ci, DEF_IN)
+          const stdDepart  = at(co, DEF_OUT)
+          const earlyPossible = earliestArrival && stdArrival ? earliestArrival < stdArrival : null
+          const latePossible  = latestDeparture && stdDepart  ? latestDeparture  > stdDepart  : null
 
           const nightly = nightlyOf(own)
           return {
@@ -2942,9 +2996,17 @@ export async function onRequest(ctx) {
             ownStay: slim(own),
             blockingBefore: slim(blockingBefore),
             blockingAfter: slim(blockingAfter),
-            // free  = adjoining day is empty, nothing to buy
-            // blocked = someone else is there; the night would have to be held
-            verdict: (blockingBefore || blockingAfter) ? 'blocked' : (ci || co) ? 'free' : 'unknown',
+            // free    = nothing either side, nothing to buy
+            // possible = adjoining day is held, but the turnaround still fits
+            // blocked  = held, and there isn't room to clean in between
+            verdict: (!blockingBefore && !blockingAfter)
+              ? ((ci || co) ? 'free' : 'unknown')
+              : ((earlyPossible || latePossible) ? 'possible' : 'blocked'),
+            earliestArrival: dayTime(earliestArrival),
+            latestDeparture: dayTime(latestDeparture),
+            standardArrival: dayTime(stdArrival),
+            standardDeparture: dayTime(stdDepart),
+            turnaroundHours: TURN_MS / 3600000,
             nightlyRate: nightly,
             quote25: nightly ? Math.round(nightly * 0.25) : 0,
             quote50: nightly ? Math.round(nightly * 0.50) : 0,

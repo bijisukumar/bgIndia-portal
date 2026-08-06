@@ -29,6 +29,30 @@ const STATUS = {
   lead:     { label: 'OTA lead',  color: '#85B7EB', bg: 'rgba(133,183,235,0.12)'},
 }
 
+// 'possible' is the one that earns its keep: the adjoining day IS sold, but
+// once you allow for when that family actually comes and goes, the turnaround
+// still fits — so it's a yes the calendar alone would have called a no.
+const VERDICT = {
+  free:     { label: 'Adjoining day is free',        color: '#34A853', bg: 'rgba(52,168,83,0.07)',  line: 'rgba(52,168,83,0.28)' },
+  possible: { label: 'Booked either side — but this still fits', color: '#F59E0B', bg: 'rgba(245,158,11,0.07)', line: 'rgba(245,158,11,0.30)' },
+  blocked:  { label: 'No room to turn the villa around', color: '#EF4444', bg: 'rgba(239,68,68,0.07)', line: 'rgba(239,68,68,0.28)' },
+  unknown:  { label: 'No dates given',                color: '#9AA5B4', bg: 'rgba(154,165,180,0.07)', line: 'var(--border-dim)' },
+}
+
+// "2026-08-10 08:00" → "10 Aug, 8:00 AM". Kept as a plain string parse so a
+// naive villa-local timestamp is never re-interpreted in the browser's zone.
+function when(s) {
+  if (!s) return '—'
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
+  if (!m) return s
+  const [, y, mo, dd, hh, mi] = m
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  let h = parseInt(hh, 10)
+  const ap = h >= 12 ? 'PM' : 'AM'
+  h = h % 12 || 12
+  return `${parseInt(dd, 10)} ${MON[parseInt(mo, 10) - 1]}, ${h}:${mi} ${ap}`
+}
+
 export default function FlexRequests() {
   const navigate = useNavigate()
   const [rows, setRows]       = useState([])
@@ -98,7 +122,7 @@ export default function FlexRequests() {
         {!loading && rows.map(r => {
           const meta = isLead(r) ? STATUS.lead : (STATUS[r.status] || STATUS.new)
           const d = draft[r.request_id] || {}
-          const blocked = r.verdict === 'blocked'
+          const V = VERDICT[r.verdict] || VERDICT.unknown
           const blocker = r.blockingBefore || r.blockingAfter
           return (
             <div key={r.request_id} className="card" style={{ marginBottom: 14 }}>
@@ -143,31 +167,64 @@ export default function FlexRequests() {
                 </div>
               ) : (
                 <>
-                  {/* Can we? */}
+                  {/* Can we? Not just "is it booked" — when is the villa
+                      genuinely free, allowing for cleaning. */}
                   <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8,
-                    background: blocked ? 'rgba(239,68,68,0.07)' : 'rgba(52,168,83,0.07)',
-                    border: `1px solid ${blocked ? 'rgba(239,68,68,0.28)' : 'rgba(52,168,83,0.28)'}`,
-                    fontSize: '0.78rem', lineHeight: 1.6 }}>
-                    {blocked ? (
-                      <>
-                        <span style={{ color: '#EF4444', fontWeight: 700 }}>Adjoining night is booked</span>
-                        <div style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-                          {blocker.guestName} · {fmtDate(blocker.checkIn)} → {fmtDate(blocker.checkOut)}
-                          {blocker.lateCheckoutTime && ` · late check-out ${blocker.lateCheckoutTime}`}
-                          {blocker.earlyCheckinTime && ` · early check-in ${blocker.earlyCheckinTime}`}
-                          {blocker.eta && ` · ETA ${blocker.eta}`}
+                    background: V.bg, border: `1px solid ${V.line}`, fontSize: '0.78rem', lineHeight: 1.6 }}>
+                    <span style={{ color: V.color, fontWeight: 700 }}>{V.label}</span>
+
+                    {r.verdict === 'free' && (
+                      <div style={{ color: 'var(--text-dim)', marginTop: 4 }}>
+                        Nobody booked either side — you can accommodate without holding a night.
+                      </div>
+                    )}
+
+                    {blocker && (
+                      <div style={{ color: 'var(--text-dim)', marginTop: 6 }}>
+                        <div>
+                          <strong style={{ color: 'var(--text)' }}>{blocker.guestName}</strong>
+                          {' · '}{fmtDate(blocker.checkIn)} → {fmtDate(blocker.checkOut)}
                         </div>
-                        <div style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-                          To say yes you'd hold that night — quote 25% or 50% below.
+                        {r.blockingBefore && (
+                          <div>leaves {when(r.blockingBefore.leavesAt)}</div>
+                        )}
+                        {r.blockingAfter && (
+                          <div>
+                            arrives {when(r.blockingAfter.arrivesAt)}
+                            {r.blockingAfter.arrivesLaterThanCheckin && (
+                              <span style={{ color: '#F59E0B' }}> — holds the night but arrives next day</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {(r.earliestArrival || r.latestDeparture) && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-dim)' }}>
+                        {r.earliestArrival && (
+                          <div style={{ color: 'var(--text-dim)' }}>
+                            Earliest you can hand over:{' '}
+                            <strong style={{ color: V.color }}>{when(r.earliestArrival)}</strong>
+                            <span style={{ opacity: 0.7 }}> (standard {when(r.standardArrival)})</span>
+                          </div>
+                        )}
+                        {r.latestDeparture && (
+                          <div style={{ color: 'var(--text-dim)' }}>
+                            Latest they can stay:{' '}
+                            <strong style={{ color: V.color }}>{when(r.latestDeparture)}</strong>
+                            <span style={{ opacity: 0.7 }}> (standard {when(r.standardDeparture)})</span>
+                          </div>
+                        )}
+                        <div style={{ color: 'var(--text-dim)', opacity: 0.75, marginTop: 3, fontSize: '0.72rem' }}>
+                          Allows {r.turnaroundHours}h to turn the villa around.
                         </div>
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ color: '#34A853', fontWeight: 700 }}>Adjoining day looks free</span>
-                        <div style={{ color: 'var(--text-dim)', marginTop: 4 }}>
-                          Nobody else is booked either side — you can accommodate without holding a night.
-                        </div>
-                      </>
+                      </div>
+                    )}
+
+                    {r.verdict === 'blocked' && (
+                      <div style={{ color: 'var(--text-dim)', marginTop: 6 }}>
+                        No room to clean in between — to say yes you'd hold the night. Quote below.
+                      </div>
                     )}
                   </div>
 

@@ -44,6 +44,12 @@ export const CONFIG = {
     }
   ],
 
+  turnaround: {
+    defaultCheckinTime:  '16:00',
+    defaultCheckoutTime: '11:00',
+    turnaroundHours: 4,
+  },
+
   checkinBaseUrl: 'https://demo.stayvibe360.com',
   checkinLinkTokens: { direct: 'demo-direct' },
   checkinLinkDefaultToken: 'demo-direct',

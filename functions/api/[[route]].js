@@ -2870,10 +2870,15 @@ export async function onRequest(ctx) {
 
 
       // Owner-side list for the flexibility requests the public page writes.
+      // Each request is returned WITH the turnaround picture the owner needs
+      // to answer it: who else is in the villa on the adjoining day, what the
+      // guest's own booking looks like, and the per-night rate the 25%/50%
+      // quote comes off. Done here in one pass rather than letting the screen
+      // fire a query per request.
       if (action === 'getFlexRequests') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const { results } = await DB.prepare(
+        const { results: reqs } = await DB.prepare(
           `SELECT request_id, guest_name, contact, booking_channel, checkin_date,
                   checkout_date, need_type, details, status, quoted_pct,
                   owner_note, created_at
@@ -2881,6 +2886,86 @@ export async function onRequest(ctx) {
             WHERE villa_id = ?
             ORDER BY CASE WHEN status = 'new' THEN 0 ELSE 1 END, created_at DESC
             LIMIT 100`
+        ).bind(villaId).all()
+
+        // One fetch of every live stay in the window the requests touch,
+        // then matched in memory — avoids a per-request round trip.
+        const { results: stays } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
+                  gross, net, tariff_per_night, status,
+                  early_checkin_time, late_checkout_time, eta,
+                  actual_checkin_at, actual_checkout_at
+             FROM stayvibe_stays
+            WHERE villa_id = ? AND status NOT IN ('cancelled','void')
+            ORDER BY checkin_date`
+        ).bind(villaId).all()
+        const live = (stays || []).filter(s => s.status !== 'closed' || true)
+
+        const nightlyOf = (s) => {
+          if (!s) return 0
+          const n = parseInt(s.nights, 10) || 1
+          const perNight = parseFloat(s.tariff_per_night) || 0
+          if (perNight > 0) return Math.round(perNight)
+          const total = parseFloat(s.net) || parseFloat(s.gross) || 0
+          return n > 0 ? Math.round(total / n) : 0
+        }
+
+        const data = (reqs || []).map(r => {
+          // The guest's own booking: same name, overlapping the dates they gave.
+          const own = live.find(s =>
+            (s.guest_name || '').trim().toLowerCase() === (r.guest_name || '').trim().toLowerCase() &&
+            (!r.checkin_date || !s.checkout_date || s.checkout_date >= r.checkin_date)
+          ) || null
+
+          // Who's in the villa on the adjoining day. For an early check-in
+          // that's whoever checks out the morning the guest wants to arrive;
+          // for a late check-out it's whoever arrives that afternoon.
+          const wantsEarly = /earl/i.test(r.need_type || '') || /both/i.test(r.need_type || '')
+          const wantsLate  = /late/i.test(r.need_type || '') || /both/i.test(r.need_type || '')
+          const ci = r.checkin_date, co = r.checkout_date
+
+          const blockingBefore = (wantsEarly && ci)
+            ? live.find(s => s.checkout_date === ci && s.stay_id !== (own && own.stay_id)) || null : null
+          const blockingAfter = (wantsLate && co)
+            ? live.find(s => s.checkin_date === co && s.stay_id !== (own && own.stay_id)) || null : null
+
+          const slim = s => s && ({
+            stayId: s.stay_id, guestName: s.guest_name,
+            checkIn: s.checkin_date, checkOut: s.checkout_date,
+            lateCheckoutTime: s.late_checkout_time, earlyCheckinTime: s.early_checkin_time,
+            eta: s.eta, status: s.status,
+          })
+
+          const nightly = nightlyOf(own)
+          return {
+            ...r,
+            ownStay: slim(own),
+            blockingBefore: slim(blockingBefore),
+            blockingAfter: slim(blockingAfter),
+            // free  = adjoining day is empty, nothing to buy
+            // blocked = someone else is there; the night would have to be held
+            verdict: (blockingBefore || blockingAfter) ? 'blocked' : (ci || co) ? 'free' : 'unknown',
+            nightlyRate: nightly,
+            quote25: nightly ? Math.round(nightly * 0.25) : 0,
+            quote50: nightly ? Math.round(nightly * 0.50) : 0,
+          }
+        })
+        return json({ success: true, data })
+      }
+
+      // Turnaround history — how long the villa ACTUALLY had between a guest
+      // leaving and the next arriving, from the timestamps staff stamp on
+      // check-in/check-out. Feeds the "do we really need 5 hours?" question
+      // with evidence instead of a guess.
+      if (action === 'getTurnaroundHistory') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date,
+                  actual_checkin_at, actual_checkout_at
+             FROM stayvibe_stays
+            WHERE villa_id = ? AND (actual_checkin_at IS NOT NULL OR actual_checkout_at IS NOT NULL)
+            ORDER BY checkin_date DESC LIMIT 60`
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }
@@ -5100,6 +5185,20 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         if (!['booked','confirmed','docs_uploaded','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed','cancelled'].includes(status)) return err(`Invalid status: ${status}`)
         await DB.prepare(`UPDATE stayvibe_stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
+
+        // Stamp when the guest ACTUALLY arrived/left, off the status change
+        // staff already make — no extra tap for Raman. Distinct from
+        // early_checkin_time/late_checkout_time (what was AGREED) and from
+        // eta (what the guest GUESSED). Only these three together let us
+        // work out the real turnaround the villa needs. COALESCE keeps the
+        // first stamp if a status is ever re-applied.
+        if (status === 'checked_in') {
+          await DB.prepare(`UPDATE stayvibe_stays SET actual_checkin_at = COALESCE(actual_checkin_at, ?) WHERE stay_id = ?`).bind(now(), stayId).run()
+        }
+        if (status === 'checked_out') {
+          await DB.prepare(`UPDATE stayvibe_stays SET actual_checkout_at = COALESCE(actual_checkout_at, ?) WHERE stay_id = ?`).bind(now(), stayId).run()
+        }
+
         if (status === 'cancelled') await syncEnquiryOnStayCancel(DB, stayId, actor, 'cancelled from Complete Booking')
         if (status === 'checked_out') {
           const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()

@@ -36,6 +36,12 @@ const HOSPITALITY = {
       path: '/owner/villa/agent-links',
     },
     {
+      id: 'flexibility', icon: '🕐', bg: 'rgba(139,92,246,0.08)', arrow: '#8B5CF6',
+      title: 'Flexibility requests',
+      sub: 'Early check-in / late check-out · availability · 25–50% quote',
+      path: '/owner/villa/flexibility',
+    },
+    {
       id: 'rental', icon: '🏢', bg: 'rgba(24,95,165,0.08)', arrow: '#185FA5',
       title: 'Passive rental income',
       sub: 'Monthly tracker · Dashboard · Renewal alerts',

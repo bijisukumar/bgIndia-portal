@@ -135,6 +135,7 @@ export const api = {
   sendCheckoutEmailNow: (data) => post('sendCheckoutEmailNow', data),
   getFlexRequests:   (villaId) => get('getFlexRequests', { villaId }),
   updateFlexRequest: (data)    => post('updateFlexRequest', data),
+  getTurnaroundHistory: (villaId) => get('getTurnaroundHistory', { villaId }),
   saveKitchenEntry:     (data)   => post('saveKitchenEntry', data),
   getRecentCheckouts:   (villaId) => get('getRecentCheckouts', { villaId }),
   saveBreakfastEntry:   (data)   => post('saveBreakfastEntry', data),

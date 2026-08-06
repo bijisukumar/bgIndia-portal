@@ -751,3 +751,11 @@ CREATE TABLE IF NOT EXISTS stayvibe_flex_requests (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS stayvibe_idx_flex_requests ON stayvibe_flex_requests(villa_id, status, created_at);
+
+-- Actual arrival/departure timestamps, stamped automatically off the status
+-- change staff already make (checked_in / checked_out) — no extra tap.
+-- Distinct from early_checkin_time/late_checkout_time (what was AGREED) and
+-- eta (what the guest GUESSED); only all three together reveal the real
+-- turnaround the villa needs, which is what the 5-hour window rests on.
+-- ALTER TABLE stayvibe_stays ADD COLUMN actual_checkin_at TEXT DEFAULT NULL;
+-- ALTER TABLE stayvibe_stays ADD COLUMN actual_checkout_at TEXT DEFAULT NULL;

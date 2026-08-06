@@ -31,6 +31,7 @@ import EnquiryDetail  from '../../screens/villa/EnquiryDetail'
 import EnquiryConversionDashboard from '../../screens/villa/EnquiryConversionDashboard'
 import MarketingCampaigns from '../../screens/villa/MarketingCampaigns'
 import AgentLinks     from '../../screens/villa/AgentLinks'
+import FlexRequests   from '../../screens/villa/FlexRequests'
 import AgentQuote     from '../../screens/villa/AgentQuote'
 import GuestCheckIn   from '../../screens/GuestCheckIn'
 import Flexibility    from '../../screens/Flexibility'
@@ -60,10 +61,11 @@ function ProtectedRoutes() {
     <Routes>
       {/* ── OWNER ── */}
       {(role === 'owner' || role === 'master_owner') && <>
-        <Route path="/"                       element={<OwnerHome sections={['villa', 'marketing', 'guests', 'dbadmin', 'rdashboard', 'agentlinks']} />} />
+        <Route path="/"                       element={<OwnerHome sections={['villa', 'marketing', 'guests', 'dbadmin', 'rdashboard', 'agentlinks', 'flexibility']} />} />
         <Route path="/owner/villa"            element={<VillaHub />} />
         <Route path="/owner/marketing"        element={<MarketingCampaigns />} />
         <Route path="/owner/villa/agent-links" element={<AgentLinks />} />
+        <Route path="/owner/villa/flexibility" element={<FlexRequests />} />
         <Route path="/owner/villa/booking"    element={<NewBooking />} />
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />

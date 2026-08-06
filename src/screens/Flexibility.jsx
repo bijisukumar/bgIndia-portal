@@ -143,6 +143,12 @@ export default function Flexibility() {
           {F.options.body.map((p, i) => (
             <p key={i} style={{ color: c.dim, fontSize: '0.92rem', lineHeight: 1.7, margin: '0 0 12px' }}>{p}</p>
           ))}
+          {F.options.availabilityNote && (
+            <p style={{ color: c.dim, fontSize: '0.9rem', lineHeight: 1.7, margin: '0 0 12px',
+              paddingLeft: 12, borderLeft: `2px solid ${c.goldLine}` }}>
+              {F.options.availabilityNote}
+            </p>
+          )}
           <div style={{ borderTop: `1px solid ${c.goldLine}`, marginTop: 16, paddingTop: 14 }}>
             <p style={{ color: c.text, fontSize: '0.9rem', lineHeight: 1.7, margin: 0, fontWeight: 500 }}>
               {F.options.directNote}

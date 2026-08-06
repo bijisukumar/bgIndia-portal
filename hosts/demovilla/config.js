@@ -48,6 +48,61 @@ export const CONFIG = {
   checkinLinkTokens: { direct: 'demo-direct' },
   checkinLinkDefaultToken: 'demo-direct',
 
+  // Demo equivalent of dwarka's flexibility page. Required, not optional:
+  // demovilla builds from the same stayvibe app entry, so /flexibility is
+  // routed here too and the component reads these keys directly — without
+  // this block that route would throw on render.
+  flexibility: {
+    hero: {
+      eyebrow: 'DIRECT GUESTS · DEMO VILLA',
+      title: "Travelling with family? We'll make the timings work.",
+      intro: 'Check-in is after 4:00 PM and check-out by 11:00 AM. Here is what happens in the five hours between — and what we can do when those hours do not suit your family.',
+    },
+    why: {
+      heading: 'Why our timings are what they are',
+      body: [
+        'Check-out is by 11:00 AM. Check-in is after 4:00 PM. That gap is five hours, and it is fully used.',
+        'Between one family leaving and the next arriving, our team resets the whole house.',
+      ],
+      checklist: [
+        'Every bed stripped and remade with fresh linen',
+        'Every bathroom deep-cleaned and sanitised',
+        'The kitchen cleaned down and restocked',
+        'Every bedroom, the living areas and the grounds gone over',
+      ],
+      closing: [
+        "We don't cut corners to turn the house around faster — a home this size simply takes that long to bring back to standard.",
+      ],
+    },
+    options: {
+      heading: 'Need to arrive earlier, or leave later? Just ask.',
+      body: [
+        'Rather than turn the request down, we hold the adjoining night for you.',
+        "Once we do, that night can't be offered to anyone else. Even so, we don't charge for a full extra night — we ask for a fraction of it, typically 25% or 50%, depending on how much extra time you need.",
+      ],
+      availabilityNote: "One honest note: when the villa is booked back-to-back, there may simply be no gap to give — and we won't always be able to say yes. If that happens we'll tell you early, and we'll look at every option we have before we do.",
+      directNote: "This is something we're able to offer only to guests who book with us directly.",
+      advanceNote: 'Please ask ahead of time — timing changes need to be agreed before you arrive.',
+    },
+    ota: {
+      heading: 'Booked through a platform?',
+      body: [
+        'Extra nights for your current stay need to be arranged through them — those dates live in their system.',
+        'Worth knowing for next time: guests who book with us directly get flexibility on arrival and departure timings at a fraction of a night rather than the full rate.',
+      ],
+      ctaLabel: 'Send me your direct rates for next time',
+      thanks: "Thank you — we'll be in touch with our direct rates.",
+    },
+    form: {
+      heading: 'Tell us what you need',
+      needTypes: ['Earlier check-in on arrival day', 'Later check-out on departure day', 'Both'],
+      submitLabel: 'Send request',
+      thanks: "Thank you — we've got your request and will come back to you before you travel.",
+    },
+    channels: ['Direct with the villa', 'Airbnb', 'Booking.com', 'Other platform'],
+    directChannel: 'Direct with the villa',
+  },
+
   guestMessages: {
     hostIntro: {
       template:

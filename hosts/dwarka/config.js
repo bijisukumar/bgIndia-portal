@@ -136,6 +136,7 @@ export const CONFIG = {
         'We know family travel rarely fits neatly into a 4:00 PM arrival — a long drive, small children, elderly parents, a wedding to be at. So rather than turn the request down, we hold the adjoining night for you.',
         "Once we do that, the night can't be offered to anyone else. Even so, we don't charge for a full extra night — we ask for a fraction of it, typically 25% or 50%, depending on how much extra time you need. We'll confirm the exact amount once we've looked at your dates.",
       ],
+      availabilityNote: "One honest note: when the villa is booked back-to-back, there may simply be no gap to give — and we won't always be able to say yes. If that happens we'll tell you early rather than leave you hoping, and we'll look at every option we have to rearrange things around your family before we do.",
       directNote: "This is something we're able to offer only to guests who book with us directly. Booking direct means the calendar is ours to hold, so we can set a night aside for your family and price it as a courtesy rather than a full night's stay. It's one of the ways we try to keep your costs down.",
       advanceNote: 'Please ask ahead of time. Timing changes need to be agreed and settled before you arrive so we can plan the turnaround around your family — our on-site team is not able to approve changes on the day.',
     },

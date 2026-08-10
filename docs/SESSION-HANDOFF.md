@@ -23,6 +23,31 @@ Update this file at every release milestone — never re-tell the story in chat.
   "manager" for SaaS). Estates managers: Pradosh (Pollachi/coconut),
   RamananKutty (Pavutumuri/rubber).
 
+## Deploy commands — the directory is NOT interchangeable
+Each Vite config writes to its own `dist/<app>` subfolder; only `build:manage`
+writes to `dist` itself. `wrangler pages deploy dist` therefore uploads the
+**manage** build, and pointing that at any other project silently replaces
+that site with the owner portal — the app still loads, the API still answers,
+only the wrong frontend is served. Deploy the app's own subfolder:
+
+```
+npm run build:stayvibe  && npx wrangler pages deploy dist/stayvibe   --project-name=stayvibe          --branch=main --commit-dirty=true
+npm run build:rev360    && npx wrangler pages deploy dist/rev360     --project-name=rev360-gvr        --branch=main --commit-dirty=true
+npm run build:estate360 && npx wrangler pages deploy dist/estate360  --project-name=estate360         --branch=main --commit-dirty=true
+npm run build:demovilla && npx wrangler pages deploy dist/demovilla  --project-name=demovilla-portal  --branch=main --commit-dirty=true   # + wrangler.toml swap
+npm run build:manage    && npx wrangler pages deploy dist            --project-name=bgindia-portal    --branch=main --commit-dirty=true
+```
+
+Verify after deploying — the title is the cheapest tell that the right build
+landed (`StayVibe — Villa Management` vs `Guruvayur Estates Portal`):
+
+```
+curl -s https://dwarka.stayvibe360.com/ | grep -o "<title>[^<]*</title>"
+```
+
+`build:manage` empties `dist` including the sibling subfolders, so build each
+app immediately before its own deploy rather than batching all builds first.
+
 ## Workflow (established)
 - Edit → check (`node --check` worker; `npx esbuild <file> --loader:.jsx=jsx
   --jsx=automatic` for screens) → commit `fix()/feat()/data()/docs()` with

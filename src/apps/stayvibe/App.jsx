@@ -8,6 +8,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
 import AccessDenied from '../../components/AccessDenied'
+import InstallAppBanner from '../../components/InstallAppBanner'
 import '../../index.css'
 
 // Auth
@@ -58,6 +59,7 @@ function ProtectedRoutes() {
   }
 
   return (
+    <>
     <Routes>
       {/* ── OWNER ── */}
       {(role === 'owner' || role === 'master_owner') && <>
@@ -97,6 +99,9 @@ function ProtectedRoutes() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    {/* Staff-only: never shown on the public guest routes above */}
+    <InstallAppBanner />
+    </>
   )
 }
 

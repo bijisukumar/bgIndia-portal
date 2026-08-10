@@ -241,12 +241,18 @@ async function sendGuestEmail(env, DB, { to, subject, text, villaId, category })
   try {
     const apiKey = await getResendApiKey(DB, env)
     if (!apiKey) throw new Error('RESEND_API_KEY not configured')
+    // Per-host silent copy to the villa's own inbox, so staff hold the exact
+    // message the guest got rather than reconstructing it from the log.
+    // BCC not CC: the guest must never see an internal address on a mail
+    // addressed to them. Omitted entirely when the host sets no address.
+    const bcc = getHostConfig(villaId)?.guestEmailBcc
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
         from: 'Guruvayur Estates <stay@luxuryvillasofguruvayur.com>',
         to: [to], subject, text,
+        ...(bcc ? { bcc: [bcc] } : {}),
       }),
     })
     ok = res.ok

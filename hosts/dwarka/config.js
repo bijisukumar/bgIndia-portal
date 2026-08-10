@@ -27,6 +27,10 @@ export const CONFIG = {
   // Owner WhatsApp — for guest change requests only (arrival message routes
   // any date/guest-count/request changes here, not to the on-site manager).
   ownerWhatsApp: '+1 972.876.5101',
+  // Silent copy of every guest-facing email, so the villa inbox holds the
+  // same record the guest received. BCC, never CC — the guest must not see
+  // an internal address on a message addressed to them.
+  guestEmailBcc: 'kerala.luxuryvillas@gmail.com',
   spreadsheetId:    '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ',  // add this
   guestFormSheetId: '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
 

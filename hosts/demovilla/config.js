@@ -19,6 +19,8 @@ export const CONFIG = {
   driveRootId:   'demo-drive-root-id',
   ownerEmail:    'demo-owner@example.test',
   ownerWhatsApp: '+1 900 000 0000',
+  // Deliberately null: the demo tenant must never BCC a real inbox.
+  guestEmailBcc: null,
   spreadsheetId:    'demo-spreadsheet-id',
   guestFormSheetId: 'demo-guest-form-sheet-id',
 

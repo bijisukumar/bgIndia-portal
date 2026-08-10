@@ -185,7 +185,10 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category) {
       throw new Error(`RESEND_API_KEY not configured (checked env and DB fallback). Run: wrangler pages secret put RESEND_API_KEY, or save it to villa_settings key '_resend_api_key'.`)
     }
     const body = {
-      from: 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
+      // Per-host sender: a second tenant's owner must not receive security
+      // alerts from this villa's brand. Falls back to the original address
+      // when a host config predates the email block.
+      from: getHostConfig(villaId)?.email?.alertFrom || 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
       to: [recipient],
       subject,
       text: lines.join('\n'),
@@ -241,16 +244,18 @@ async function sendGuestEmail(env, DB, { to, subject, text, villaId, category })
   try {
     const apiKey = await getResendApiKey(DB, env)
     if (!apiKey) throw new Error('RESEND_API_KEY not configured')
-    // Per-host silent copy to the villa's own inbox, so staff hold the exact
-    // message the guest got rather than reconstructing it from the log.
-    // BCC not CC: the guest must never see an internal address on a mail
-    // addressed to them. Omitted entirely when the host sets no address.
-    const bcc = getHostConfig(villaId)?.guestEmailBcc
+    // Per-host sender and silent copy. The guest must see the brand they
+    // actually booked with, and the villa's own inbox holds the exact
+    // message rather than a reconstruction from the log. BCC not CC: the
+    // guest must never see an internal address on a mail addressed to them,
+    // and the copy is omitted entirely when a host sets no address.
+    const hostEmail = getHostConfig(villaId)?.email || {}
+    const bcc = hostEmail.guestBcc
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
-        from: 'Guruvayur Estates <stay@luxuryvillasofguruvayur.com>',
+        from: hostEmail.guestFrom || 'Guruvayur Estates <stay@luxuryvillasofguruvayur.com>',
         to: [to], subject, text,
         ...(bcc ? { bcc: [bcc] } : {}),
       }),

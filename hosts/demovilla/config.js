@@ -19,8 +19,15 @@ export const CONFIG = {
   driveRootId:   'demo-drive-root-id',
   ownerEmail:    'demo-owner@example.test',
   ownerWhatsApp: '+1 900 000 0000',
-  // Deliberately null: the demo tenant must never BCC a real inbox.
-  guestEmailBcc: null,
+  // Demo tenant has no verified sending domain of its own, so it borrows the
+  // one verified domain with a display name that is unmistakably not a real
+  // customer. guestBcc stays null — the demo must never copy a real inbox
+  // while a prospect is clicking around in it.
+  email: {
+    guestFrom: 'Demo Test Villas <stay@luxuryvillasofguruvayur.com>',
+    alertFrom: 'Demo Test Villas (alerts) <alerts@luxuryvillasofguruvayur.com>',
+    guestBcc:  null,
+  },
   spreadsheetId:    'demo-spreadsheet-id',
   guestFormSheetId: 'demo-guest-form-sheet-id',
 

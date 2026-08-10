@@ -529,6 +529,55 @@ async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, e
 // Booking, but the enquiry never found out). Mirrors
 // cancelConfirmedEnquiry's own enquiry→stay direction, just reversed.
 // Best-effort: never let a sync failure block the actual stay-status change.
+
+// ── LIFECYCLE STAGE ORDER ────────────────────────────────────────────────
+// The linear part of the stay lifecycle. cancelled/void deliberately sit
+// outside it — they're exits, not stages, so a stay leaving via one of them
+// keeps whatever stamps it had.
+const STAY_STAGES = ['booked','confirmed','docs_uploaded','pending_review','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed']
+
+// Keep actual_checkin_at / actual_checkout_at honest with the stay's stage,
+// and unwind check-out's side effects when a stay is walked BACKWARD.
+//
+// Two things go wrong without this. Forward: Raman's real buttons are
+// confirmCheckIn and checkOut, not updateStayStatus, so the actual times
+// were never being stamped on the path staff actually use — the turnaround
+// history would have stayed empty. Backward: an owner correcting a mistaken
+// check-out would leave behind a departure timestamp for a guest who never
+// left (which getFlexRequests then reads as a real turnaround) plus a
+// commission the manager isn't owed.
+//
+// A commission that's already been PAID is a real payment record — it is
+// never deleted here; the caller is told so it can say as much.
+async function reconcileStayStamps(DB, stayId, status) {
+  const idx = STAY_STAGES.indexOf(status)
+  if (idx < 0) return { commissionRemoved: 0, paidCommissionKept: false }
+
+  // Stamp ONLY on the transition itself, never on any later stage. Marking a
+  // months-old stay "closed" today must not record today as the moment the
+  // guest left — that would feed a fictional turnaround into the history.
+  // Stages after the transition leave the existing stamp untouched.
+  if (idx < STAY_STAGES.indexOf('checked_in')) {
+    await DB.prepare(`UPDATE stayvibe_stays SET actual_checkin_at = NULL WHERE stay_id = ?`).bind(stayId).run()
+  } else if (status === 'checked_in') {
+    await DB.prepare(`UPDATE stayvibe_stays SET actual_checkin_at = COALESCE(actual_checkin_at, ?) WHERE stay_id = ?`).bind(now(), stayId).run()
+  }
+
+  if (idx >= STAY_STAGES.indexOf('checked_out')) {
+    if (status === 'checked_out') {
+      await DB.prepare(`UPDATE stayvibe_stays SET actual_checkout_at = COALESCE(actual_checkout_at, ?) WHERE stay_id = ?`).bind(now(), stayId).run()
+    }
+    return { commissionRemoved: 0, paidCommissionKept: false }
+  }
+
+  await DB.prepare(`UPDATE stayvibe_stays SET actual_checkout_at = NULL WHERE stay_id = ?`).bind(stayId).run()
+
+  const paid = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 1`).bind(stayId).first()
+  if (paid) return { commissionRemoved: 0, paidCommissionKept: true }
+  const res = await DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND created_by = 'system'`).bind(stayId).run()
+  return { commissionRemoved: res?.meta?.changes || 0, paidCommissionKept: false }
+}
+
 async function syncEnquiryOnStayCancel(DB, stayId, actor, reason) {
   try {
     const booking = await DB.prepare(`SELECT enquiry_id FROM stayvibe_bookings WHERE stay_id = ? ORDER BY created_at DESC LIMIT 1`).bind(stayId).first()
@@ -4460,6 +4509,9 @@ export async function onRequest(ctx) {
         } else {
           await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
         }
+        // Same reason as checkOut: this is Raman's real check-in button, so
+        // the arrival time must be stamped here or it never gets captured.
+        await reconcileStayStamps(DB, stayId, 'checked_in')
 
         // Car / number-plate photos Raman took at check-in — same pipeline as
         // guest ID docs: land in D1 as base64, the Apps Script
@@ -4516,6 +4568,9 @@ export async function onRequest(ctx) {
       if (action === 'checkOut') {
         const { stayId } = body
         await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+        // This, not updateStayStatus, is the button Raman actually presses —
+        // so this is where the real departure time has to be captured.
+        await reconcileStayStamps(DB, stayId, 'checked_out')
         const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights, villa_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         const coVillaId = stay?.villa_id || DEFAULT_VILLA_ID
         if (stay) {
@@ -5252,14 +5307,10 @@ export async function onRequest(ctx) {
         // staff already make — no extra tap for Raman. Distinct from
         // early_checkin_time/late_checkout_time (what was AGREED) and from
         // eta (what the guest GUESSED). Only these three together let us
-        // work out the real turnaround the villa needs. COALESCE keeps the
-        // first stamp if a status is ever re-applied.
-        if (status === 'checked_in') {
-          await DB.prepare(`UPDATE stayvibe_stays SET actual_checkin_at = COALESCE(actual_checkin_at, ?) WHERE stay_id = ?`).bind(now(), stayId).run()
-        }
-        if (status === 'checked_out') {
-          await DB.prepare(`UPDATE stayvibe_stays SET actual_checkout_at = COALESCE(actual_checkout_at, ?) WHERE stay_id = ?`).bind(now(), stayId).run()
-        }
+        // work out the real turnaround the villa needs. Also unwinds those
+        // stamps, and check-out's commission, when the owner walks a stay
+        // backward to correct a staff mistake.
+        const stamps = await reconcileStayStamps(DB, stayId, status)
 
         if (status === 'cancelled') await syncEnquiryOnStayCancel(DB, stayId, actor, 'cancelled from Complete Booking')
         if (status === 'checked_out') {
@@ -5272,7 +5323,7 @@ export async function onRequest(ctx) {
             }
           }
         }
-        return json({ success: true, data: { stayId, status } })
+        return json({ success: true, data: { stayId, status, ...stamps } })
       }
 
       if (action === 'markReviewChased') {

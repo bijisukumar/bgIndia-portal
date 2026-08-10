@@ -286,6 +286,29 @@ export default function CompleteBooking() {
     finally { setTransitioning(false) }
   }
 
+  // Walk a stay BACKWARD to undo a staff mistake. The backend clears the
+  // actual check-in/check-out stamps the stay no longer qualifies for and
+  // removes the auto-created staff commission — but only while it's unpaid,
+  // so a commission already settled is never silently erased.
+  async function handleRevert(newStatus, label) {
+    if (!selected) return
+    if (!window.confirm(
+      `Move ${selected.guest_name} back to "${label}"?\n\n` +
+      `Use this only to correct a mistake. The recorded actual check-in / check-out times are cleared, and the staff commission created by the check-out is removed if it hasn't been paid yet.`
+    )) return
+    setTransitioning(true)
+    try {
+      const res = await api.updateStayStatus({ stayId: selected.stay_id, status: newStatus })
+      showToast(
+        res?.paidCommissionKept ? `Back to ${label} — paid commission kept ✓`
+        : res?.commissionRemoved ? `Back to ${label} — commission removed ✓`
+        : `Back to ${label} ✓`
+      )
+      await loadStays()
+    } catch(e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setTransitioning(false) }
+  }
+
   // Void (soft) — keeps the row on record, hides it from active lists, logs a
   // tombstone, reverses an unpaid commission. Works on ANY stay regardless of
   // status (unlike the pending-review-only buttons).
@@ -506,6 +529,13 @@ export default function CompleteBooking() {
   const canMarkDocsUploaded   = s && ['booked','confirmed'].includes(s.status)
   const canMarkReadyForCheckin = s && ['booked','confirmed','docs_uploaded','pending_review'].includes(s.status)
   const canCancel             = s && !['closed','cancelled','checked_out'].includes(s.status)
+
+  // Owner override — walk a stay BACK a stage when staff moved it forward by
+  // mistake. Anitha was checked out the day before she was even due to
+  // arrive, and there was no way to undo it. This screen is owner-only, so
+  // the guard is the route itself.
+  const canUndoCheckout = s && s.status === 'checked_out'
+  const canUndoCheckin  = s && ['checked_in','ready_for_checkout'].includes(s.status)
 
   return (
     <div className="screen">
@@ -1420,6 +1450,39 @@ export default function CompleteBooking() {
                     </button>
                   )}
                 </div>
+
+                {/* Owner override — the only way back up the lifecycle */}
+                {(canUndoCheckout || canUndoCheckin) && (
+                  <>
+                    <div className="card-section-label">CORRECT A MISTAKE</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'6px'}}>
+                      {canUndoCheckout && (
+                        <button onClick={()=>handleRevert('ready_for_checkin','Ready for check-in')}
+                          disabled={transitioning}
+                          style={actionBtn('#38BDF8')}>
+                          {transitioning?'…':'↩️ Undo check-out → Ready for check-in (guest never arrived)'}
+                        </button>
+                      )}
+                      {canUndoCheckout && (
+                        <button onClick={()=>handleRevert('checked_in','Checked in')}
+                          disabled={transitioning}
+                          style={actionBtn('#38BDF8')}>
+                          {transitioning?'…':'↩️ Undo check-out → Checked in (guest is still here)'}
+                        </button>
+                      )}
+                      {canUndoCheckin && (
+                        <button onClick={()=>handleRevert('ready_for_checkin','Ready for check-in')}
+                          disabled={transitioning}
+                          style={actionBtn('#38BDF8')}>
+                          {transitioning?'…':'↩️ Undo check-in → Ready for check-in'}
+                        </button>
+                      )}
+                    </div>
+                    <p style={{color:'var(--text-dim)',fontSize:'0.72rem',lineHeight:'1.6',marginBottom:'14px'}}>
+                      Clears the recorded actual times and removes the staff commission if it hasn't been paid.
+                    </p>
+                  </>
+                )}
 
                 {/* Lifecycle guide */}
                 <div className="card" style={{fontSize:'0.75rem',color:'var(--text-dim)',lineHeight:'1.8'}}>

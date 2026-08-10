@@ -108,6 +108,10 @@ export default function CheckIn() {
   const [ocrHint,   setOcrHint]   = useState('')      // status line under the field
   const [ocrSuggestion, setOcrSuggestion] = useState('') // read value when field already has manual text
   const [saving,  setSaving]    = useState(false)
+  // Check-out is the one irreversible-feeling action on this screen, and it
+  // has been pressed against the wrong guest. An inline panel rather than
+  // window.confirm so the guest's name can actually be shown in bold.
+  const [confirmingCheckout, setConfirmingCheckout] = useState(false)
   const [loading, setLoading]   = useState(true)
   const [toast,   setToast]     = useState(null)
   const carRef   = useRef()
@@ -118,6 +122,9 @@ export default function CheckIn() {
   }
 
   useEffect(() => { loadStays() }, [])
+
+  // Never carry an open check-out confirmation across to a different guest
+  useEffect(() => { setConfirmingCheckout(false) }, [selected?.stay_id])
 
   async function loadStays() {
     setLoading(true)
@@ -263,6 +270,7 @@ export default function CheckIn() {
     try {
       await api.checkOut({ stayId: selected.stay_id })
       showToast('✅ Check-out complete! Raman commission recorded.')
+      setConfirmingCheckout(false)
       setSelected(null)
       await loadStays()
     } catch(e) { showToast('Failed: '+e.message,'error') }
@@ -664,14 +672,49 @@ export default function CheckIn() {
                           {saving?'…':'🧳 Guest is ready to check out'}
                         </button>
                       )}
-                      {selected.status === 'ready_for_checkout' && (
-                        <button onClick={handleCompleteCheckout} disabled={saving}
+                      {selected.status === 'ready_for_checkout' && !confirmingCheckout && (
+                        <button onClick={()=>setConfirmingCheckout(true)} disabled={saving}
                           style={{width:'100%',padding:'12px',borderRadius:'10px',
                             border:'1px solid rgba(52,168,83,0.4)',
                             background:'rgba(52,168,83,0.12)',color:'#34A853',
                             fontWeight:'700',fontSize:'0.88rem',cursor:'pointer',textAlign:'left'}}>
                           {saving?'…':'✅ Complete check-out — guest has left'}
                         </button>
+                      )}
+
+                      {selected.status === 'ready_for_checkout' && confirmingCheckout && (
+                        <div style={{padding:'14px',borderRadius:'10px',
+                          border:'1px solid rgba(245,158,11,0.5)',
+                          background:'rgba(245,158,11,0.10)'}}>
+                          <div style={{color:'var(--text)',fontSize:'0.95rem',
+                            lineHeight:'1.55',marginBottom:'12px'}}>
+                            Do you want to check out{' '}
+                            <strong style={{color:'#F59E0B',fontWeight:'800',
+                              textTransform:'uppercase',letterSpacing:'0.02em'}}>
+                              {selected.guest_name}
+                            </strong>?
+                          </div>
+                          <div style={{color:'var(--text-dim)',fontSize:'0.74rem',
+                            lineHeight:'1.55',marginBottom:'12px'}}>
+                            This records the departure time and creates the commission. Only do it once the guest has actually left.
+                          </div>
+                          <div style={{display:'flex',gap:'8px'}}>
+                            <button onClick={handleCompleteCheckout} disabled={saving}
+                              style={{flex:1,padding:'12px',borderRadius:'10px',
+                                border:'1px solid rgba(52,168,83,0.4)',
+                                background:'rgba(52,168,83,0.16)',color:'#34A853',
+                                fontWeight:'700',fontSize:'0.88rem',cursor:'pointer'}}>
+                              {saving?'…':'Yes, check out'}
+                            </button>
+                            <button onClick={()=>setConfirmingCheckout(false)} disabled={saving}
+                              style={{flex:1,padding:'12px',borderRadius:'10px',
+                                border:'1px solid rgba(255,255,255,0.18)',
+                                background:'transparent',color:'var(--text-muted)',
+                                fontWeight:'700',fontSize:'0.88rem',cursor:'pointer'}}>
+                              No, go back
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                     <p style={{color:'var(--text-dim)',fontSize:'0.75rem',textAlign:'center',marginTop:'4px'}}>

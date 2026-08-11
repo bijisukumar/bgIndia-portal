@@ -156,13 +156,30 @@ function pollAirbnbCancellations() {
   });
 }
 
+// Dedupe label for the review poller. Read state is NOT a safe marker —
+// the owner reads this mailbox in Outlook and on a phone, so a review mail
+// is routinely opened by a human within the 5-minute poll window. Once read,
+// an is:unread search skips it forever and the review is silently lost.
+// That is why only 3 reviews ever landed automatically. A label we own is
+// unaffected by anyone reading the mail.
+var REVIEW_DONE_LABEL = 'portal-review-done';
+
+function getReviewDoneLabel() {
+  return GmailApp.getUserLabelByName(REVIEW_DONE_LABEL)
+      || GmailApp.createLabel(REVIEW_DONE_LABEL);
+}
+
 // ── AIRBNB REVIEW POLLER ──────────────────────────────────────────────────
 function pollAirbnbReviews() {
+  var doneLabel = getReviewDoneLabel();
+  // 30-day window rather than "unread": anything missed while this was
+  // read-gated gets picked up on the next run instead of staying lost.
   var threads = GmailApp.search(
-    'from:automated@airbnb.com subject:"left a" subject:"review" is:unread',
+    'from:automated@airbnb.com subject:"left a" subject:"review" ' +
+    'newer_than:30d -label:' + REVIEW_DONE_LABEL,
     0, 20
   );
-  Logger.log('Unread Airbnb review threads: ' + threads.length);
+  Logger.log('Unprocessed Airbnb review threads: ' + threads.length);
   if (threads.length === 0) return;
 
   threads.forEach(function(thread) {
@@ -225,13 +242,14 @@ function pollAirbnbReviews() {
 
       if (!guestName) {
         Logger.log('Could not parse guest name from: ' + subject);
-        msg.markRead();
+        thread.addLabel(doneLabel);
         return;
       }
 
       // Find matching stay in D1 by guest name
       var currentYear = new Date().getFullYear();
       var matchedStay = null;
+      var ambiguous   = null;
 
       for (var y = 0; y <= 1; y++) {
         var resp = callWorker('GET', 'getStays', { villaId: 'dwarka', year: String(currentYear - y) });
@@ -240,17 +258,66 @@ function pollAirbnbReviews() {
           var firstName = guestName.split(' ')[0].toLowerCase();
           var candidates = resp.data.filter(function(s) {
             return (s.guest_name || '').toLowerCase().startsWith(firstName) &&
-                   !['cancelled'].includes(s.status);
+                   ['cancelled', 'void'].indexOf(s.status) === -1;
           });
-          // Pick most recent if multiple
-          if (candidates.length > 0) {
+
+          // A first-name prefix is a weak signal, so narrow before choosing.
+          // An Airbnb review belongs on the Airbnb booking — the row holding
+          // the confirmation code and the money — not on a duplicate check-in
+          // row that happens to share the guest's name. Suni's review landed
+          // on exactly such a duplicate: both rows were named Suni, both
+          // checked out the same day, so the old date sort tied and picked
+          // whichever came back first.
+          if (candidates.length > 1) {
+            var real = candidates.filter(function(s) {
+              return (s.airbnb_conf && String(s.airbnb_conf).trim()) || Number(s.gross) > 0;
+            });
+            if (real.length > 0) candidates = real;
+          }
+
+          if (candidates.length > 1) {
             candidates.sort(function(a, b) {
               return new Date(b.checkout_date||b.checkin_date) - new Date(a.checkout_date||a.checkin_date);
             });
+            // Still more than one after narrowing, and no date separates them:
+            // that is a guess, not a match. Guessing is what put the review on
+            // the wrong stay. Surface it and let a human choose.
+            var topDate = candidates[0].checkout_date || candidates[0].checkin_date;
+            var tied = candidates.filter(function(s) {
+              return (s.checkout_date || s.checkin_date) === topDate;
+            });
+            if (tied.length > 1) {
+              ambiguous = tied;
+              break;
+            }
+          }
+
+          if (candidates.length > 0) {
             matchedStay = candidates[0];
             break;
           }
         }
+      }
+
+      if (ambiguous) {
+        Logger.log('Ambiguous review match for ' + guestName + ' — ' + ambiguous.length + ' candidates');
+        sendAlert('⭐ Review received — which stay? ' + guestName,
+          'Airbnb shows only a first name, and more than one stay matches with' +
+          '\nnothing to separate them. Not guessing — please set it by hand.\n' +
+          '\nGuest:  ' + guestName +
+          '\nRating: ' + rating + '★' +
+          '\nDate:   ' + reviewDate +
+          (reviewText ? '\n\nReview:\n' + reviewText : '') +
+          (specialThanks.length ? '\n\nHighlights: ' + specialThanks.join(', ') : '') +
+          '\n\nCandidates:\n' + ambiguous.map(function(s) {
+            return '  ' + s.stay_id + '  ' + s.guest_name +
+                   '  ' + (s.checkin_date || '?') + '→' + (s.checkout_date || '?') +
+                   '  ' + s.status +
+                   '  gross ' + (s.gross || 0) +
+                   (s.airbnb_conf ? '  conf ' + s.airbnb_conf : '');
+          }).join('\n'));
+        thread.addLabel(doneLabel);
+        return;
       }
 
       if (!matchedStay) {
@@ -259,7 +326,7 @@ function pollAirbnbReviews() {
           'Guest: ' + guestName + '\nRating: ' + rating + '★\nDate: ' + reviewDate +
           '\nReview: ' + reviewText +
           '\n\nPlease manually update the stay rating in the portal.');
-        msg.markRead();
+        thread.addLabel(doneLabel);
         return;
       }
 
@@ -298,13 +365,17 @@ function pollAirbnbReviews() {
           (specialThanks.length ? '\n\nHighlights: ' + specialThanks.join(', ')      : '') +
           '\n\n' + (matchedStay.status === 'closed' ? 'Stay was already closed.' : 'Stay closed automatically.')
         );
+        // Label only once the review is actually stored. A failed save stays
+        // unlabelled so the next run retries it — the old code marked the
+        // mail read regardless, so a transient worker error lost the review
+        // permanently with nothing but a log line to show for it.
+        thread.addLabel(doneLabel);
       } else {
-        Logger.log('saveReview failed: ' + JSON.stringify(saveResp));
+        Logger.log('saveReview failed (will retry next run): ' + JSON.stringify(saveResp));
       }
 
-      msg.markRead();
-
     } catch(e) {
+      // Deliberately not labelled — an exception should retry, not vanish.
       Logger.log('Error processing review "' + subject + '": ' + e.message);
     }
   });

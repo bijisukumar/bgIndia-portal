@@ -2224,11 +2224,31 @@ export async function onRequest(ctx) {
       if (action === 'getRamanTodo') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stayvibe_stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
-        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review') AND checkin_date >= date('now') AND checkin_date <= date('now', '+7 days') ORDER BY checkin_date ASC`).bind(villaId).all()
+        // daysUntil/daysOver are computed in SQL with julianday, not in JS.
+        // The old version subtracted `new Date()` (local, with a time of day)
+        // from `new Date('2026-08-13')` (UTC midnight) and added 1 to
+        // compensate — which drifts with the time of day and the server's
+        // zone. Pure date arithmetic can't drift: today is 0, tomorrow is 1.
+        const DAYS_UNTIL = `CAST(julianday(checkin_date) - julianday(date('now')) AS INTEGER)`
+        const DAYS_OVER  = `CAST(julianday(date('now')) - julianday(checkout_date) AS INTEGER)`
+        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, ${DAYS_OVER} AS days_over FROM stayvibe_stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
+        // Next N arrivals rather than a 7-day window: on a quiet week Raman
+        // saw an empty card and had no idea who was coming next.
+        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= date('now') ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
+        const mapRow = r => ({
+          stayId: r.stay_id, guestName: r.guest_name,
+          checkInDate: r.checkin_date, checkOutDate: r.checkout_date,
+          nights: r.nights, adults: r.adults, source: r.source, status: r.status,
+          earlyCheckinTime: r.early_checkin_time || null,
+          lateCheckoutTime: r.late_checkout_time || null,
+          requestEarlyCheckin: !!r.request_early_checkin,
+          requestLateCheckout: !!r.request_late_checkout,
+          eta: r.eta || null,
+          expectedArrivalAt: r.expected_arrival_at || null,
+        })
         return json({ success: true, data: {
-          overdue: overdueRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkInDate: r.checkin_date, checkOutDate: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, status: r.status, daysOver: Math.floor((new Date() - new Date(r.checkout_date)) / 86400000) })),
-          upcoming: upcomingRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkInDate: r.checkin_date, checkOutDate: r.checkout_date, nights: r.nights, adults: r.adults, source: r.source, status: r.status, daysUntil: Math.floor((new Date(r.checkin_date) - new Date()) / 86400000) + 1 }))
+          overdue:  overdueRows.map(r => ({ ...mapRow(r), daysOver: r.days_over })),
+          upcoming: upcomingRows.map(r => ({ ...mapRow(r), daysUntil: r.days_until })),
         }})
       }
 

@@ -13,6 +13,39 @@ function fmtDate(d) {
   catch { return String(d) }
 }
 
+// Villa's standard times, used whenever no early/late time was agreed for
+// the individual stay. Raman needs a time on every row, not just the
+// exceptional ones — "when am I opening the gate" is the whole question.
+const VILLA_DEFAULTS = (CONFIG.villas || []).find(v => v.id === DEFAULT_VILLA_ID)
+                    || (CONFIG.villas || [])[0] || {}
+
+// '15:00' -> '3:00 PM'. Stored times are 24h; staff read 12h.
+function fmtTime(t) {
+  if (!t) return null
+  const m = String(t).trim().match(/^(\d{1,2}):(\d{2})/)
+  if (!m) return String(t)
+  let h = parseInt(m[1], 10)
+  const suffix = h >= 12 ? 'PM' : 'AM'
+  h = h % 12 || 12
+  return `${h}:${m[2]} ${suffix}`
+}
+
+// When the guest is due in and out, and whether either was negotiated.
+function stayTimes(s) {
+  const inTime  = fmtTime(s.earlyCheckinTime) || VILLA_DEFAULTS.checkinTime  || '4:00 PM'
+  const outTime = fmtTime(s.lateCheckoutTime) || VILLA_DEFAULTS.checkoutTime || '11:00 AM'
+  return {
+    inTime, outTime,
+    inEarly:  !!s.earlyCheckinTime,
+    outLate:  !!s.lateCheckoutTime,
+    // A request with no agreed time still matters — it means a conversation
+    // is open, and Raman should not be surprised at the door.
+    inPending:  !s.earlyCheckinTime && !!s.requestEarlyCheckin,
+    outPending: !s.lateCheckoutTime && !!s.requestLateCheckout,
+    eta: fmtTime(s.eta),
+  }
+}
+
 function sourceIcon(source) {
   if (!source) return '🏠'
   const s = source.toLowerCase()
@@ -85,8 +118,13 @@ function UpcomingBlock({ upcoming }) {
   const navigate = useNavigate()
   if (!upcoming || upcoming.length === 0) return null
 
-  const today = upcoming.filter(s => s.daysUntil <= 1)
-  const soon  = upcoming.filter(s => s.daysUntil > 1)
+  // TODAY means today. The old filter was daysUntil <= 1, which labelled
+  // tomorrow's arrival TODAY — Prashansa showed as arriving today when she
+  // was due the next day.
+  const whenLabel = d =>
+    d === 0 ? 'TODAY' : d === 1 ? 'TOMORROW' : `in ${d} days`
+  const whenColour = d =>
+    d === 0 ? '#34A853' : d === 1 ? '#F59E0B' : '#9AA5B4'
 
   return (
     <div style={{ marginBottom: '14px', background: 'rgba(52,168,83,0.05)',
@@ -97,7 +135,7 @@ function UpcomingBlock({ upcoming }) {
         display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span>📋</span>
         <span style={{ fontSize: '0.68rem', fontWeight: '700', color: '#34A853', letterSpacing: '1.5px' }}>
-          UPCOMING CHECK-INS · NEXT 7 DAYS
+          NEXT {upcoming.length} CHECK-IN{upcoming.length > 1 ? 'S' : ''}
         </span>
         <span style={{ marginLeft: 'auto', background: 'rgba(52,168,83,0.15)', color: '#34A853',
           fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
@@ -105,51 +143,55 @@ function UpcomingBlock({ upcoming }) {
         </span>
       </div>
 
-      {/* Today / tomorrow first */}
-      {today.map((s, i) => (
-        <div key={s.stayId || i}
-          onClick={() => navigate('/raman/checkin')}
-          style={{ padding: '11px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px',
-            background: 'rgba(52,168,83,0.07)',
-            borderBottom: '1px solid rgba(52,168,83,0.1)' }}>
-          <span style={{ fontSize: '1.1rem' }}>{sourceIcon(s.source)}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {s.guestName}
-            </div>
-            <div style={{ fontSize: '0.72rem', color: '#34A853', marginTop: '2px', fontWeight: '700' }}>
-              TODAY · {s.adults} guest{s.adults > 1 ? 's' : ''} · {s.nights} night{s.nights > 1 ? 's' : ''}
-            </div>
-          </div>
-          <span style={{ fontSize: '0.65rem', fontWeight: '700', color: '#34A853',
-            background: 'rgba(52,168,83,0.2)', padding: '3px 8px', borderRadius: '8px' }}>
-            TODAY
-          </span>
-        </div>
-      ))}
+      {upcoming.map((s, i) => {
+        const t = stayTimes(s)
+        const imminent = s.daysUntil <= 1
+        return (
+          <div key={s.stayId || i}
+            onClick={() => navigate('/raman/checkin')}
+            style={{ padding: '11px 14px', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: '10px',
+              background: s.daysUntil === 0 ? 'rgba(52,168,83,0.07)' : 'transparent',
+              borderBottom: i < upcoming.length - 1 ? '1px solid rgba(52,168,83,0.1)' : 'none' }}>
+            <span style={{ fontSize: '1.1rem', lineHeight: '1.3' }}>{sourceIcon(s.source)}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {s.guestName}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: imminent ? whenColour(s.daysUntil) : '#9AA5B4',
+                marginTop: '2px', fontWeight: imminent ? '700' : '400' }}>
+                {fmtDate(s.checkInDate)} · {s.adults} guest{s.adults > 1 ? 's' : ''} · {s.nights} night{s.nights > 1 ? 's' : ''}
+              </div>
 
-      {/* Rest of upcoming */}
-      {soon.map((s, i) => (
-        <div key={s.stayId || i}
-          onClick={() => navigate('/raman/checkin')}
-          style={{ padding: '11px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px',
-            borderBottom: i < soon.length - 1 ? '1px solid rgba(52,168,83,0.08)' : 'none' }}>
-          <span style={{ fontSize: '1.1rem' }}>{sourceIcon(s.source)}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {s.guestName}
+              {/* When to open the gate, and when they're due out */}
+              <div style={{ fontSize: '0.7rem', marginTop: '4px', display: 'flex',
+                flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center' }}>
+                <span style={{ color: t.inEarly ? '#F59E0B' : '#9AA5B4' }}>
+                  🔑 In {t.inTime}{t.inEarly ? ' (early)' : ''}
+                </span>
+                <span style={{ color: t.outLate ? '#F59E0B' : '#9AA5B4' }}>
+                  🧳 Out {t.outTime}{t.outLate ? ' (late)' : ''}
+                </span>
+                {t.eta && (
+                  <span style={{ color: '#85B7EB' }}>🚗 ETA {t.eta}</span>
+                )}
+              </div>
+
+              {(t.inPending || t.outPending) && (
+                <div style={{ fontSize: '0.68rem', color: '#F59E0B', marginTop: '3px' }}>
+                  ⏳ {t.inPending ? 'Early check-in' : 'Late check-out'} requested — time not agreed yet
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: '0.72rem', color: '#9AA5B4', marginTop: '2px' }}>
-              {fmtDate(s.checkInDate)} · {s.adults} guest{s.adults > 1 ? 's' : ''} · {s.nights} night{s.nights > 1 ? 's' : ''}
-            </div>
+            <span style={{ fontSize: '0.65rem', fontWeight: '700', flexShrink: 0,
+              color: whenColour(s.daysUntil),
+              background: imminent ? 'rgba(52,168,83,0.2)' : 'transparent',
+              padding: imminent ? '3px 8px' : '3px 0', borderRadius: '8px' }}>
+              {whenLabel(s.daysUntil)}
+            </span>
           </div>
-          <span style={{ fontSize: '0.72rem', color: '#9AA5B4', flexShrink: 0 }}>
-            in {s.daysUntil} days
-          </span>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

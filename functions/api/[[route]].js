@@ -2246,9 +2246,39 @@ export async function onRequest(ctx) {
           eta: r.eta || null,
           expectedArrivalAt: r.expected_arrival_at || null,
         })
+        // Same-day turnaround: someone checks out on the very day the next
+        // guest arrives, so the villa has to be reset inside a few hours
+        // rather than overnight. Raman could only see this by cross-checking
+        // two screens, which is exactly when it gets missed.
+        const arrivalDates = [...new Set((upcomingRows || []).map(r => r.checkin_date).filter(Boolean))]
+        const departuresByDate = {}
+        if (arrivalDates.length) {
+          const placeholders = arrivalDates.map(() => '?').join(',')
+          const { results: deps } = await DB.prepare(
+            `SELECT stay_id, guest_name, checkout_date, late_checkout_time
+               FROM stayvibe_stays
+              WHERE villa_id = ? AND status NOT IN ('cancelled','void')
+                AND checkout_date IN (${placeholders})`
+          ).bind(villaId, ...arrivalDates).all()
+          for (const d of (deps || [])) {
+            if (!departuresByDate[d.checkout_date]) departuresByDate[d.checkout_date] = []
+            departuresByDate[d.checkout_date].push(d)
+          }
+        }
+
         return json({ success: true, data: {
           overdue:  overdueRows.map(r => ({ ...mapRow(r), daysOver: r.days_over })),
-          upcoming: upcomingRows.map(r => ({ ...mapRow(r), daysUntil: r.days_until })),
+          upcoming: upcomingRows.map(r => {
+            const sameDay = (departuresByDate[r.checkin_date] || []).filter(d => d.stay_id !== r.stay_id)
+            return {
+              ...mapRow(r),
+              daysUntil: r.days_until,
+              sameDayDeparture: sameDay.length ? {
+                guestName: sameDay[0].guest_name,
+                lateCheckoutTime: sameDay[0].late_checkout_time || null,
+              } : null,
+            }
+          }),
         }})
       }
 

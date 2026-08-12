@@ -46,6 +46,28 @@ function stayTimes(s) {
   }
 }
 
+// Parses both stored 24h times ('23:00') and the config's 12h strings
+// ('4:00 PM') into minutes past midnight, so the turnaround window can be
+// measured whichever form each side happens to be in.
+function toMinutes(v) {
+  if (!v) return null
+  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+  if (!m) return null
+  let h = parseInt(m[1], 10)
+  const suffix = (m[3] || '').toUpperCase()
+  if (suffix === 'PM' && h !== 12) h += 12
+  if (suffix === 'AM' && h === 12) h = 0
+  return h * 60 + parseInt(m[2], 10)
+}
+
+function fmtGap(mins) {
+  if (mins == null) return null
+  const sign = mins < 0 ? '-' : ''
+  const a = Math.abs(mins)
+  const h = Math.floor(a / 60), m = a % 60
+  return m === 0 ? `${sign}${h} hrs` : `${sign}${h}h ${m}m`
+}
+
 function sourceIcon(source) {
   if (!source) return '🏠'
   const s = source.toLowerCase()
@@ -182,6 +204,28 @@ function UpcomingBlock({ upcoming }) {
                   ⏳ {t.inPending ? 'Early check-in' : 'Late check-out'} requested — time not agreed yet
                 </div>
               )}
+
+              {/* Same-day turnaround — the villa has hours, not overnight */}
+              {s.sameDayDeparture && (() => {
+                const outT  = fmtTime(s.sameDayDeparture.lateCheckoutTime)
+                            || VILLA_DEFAULTS.checkoutTime || '11:00 AM'
+                const gap   = toMinutes(t.inTime) != null && toMinutes(outT) != null
+                            ? toMinutes(t.inTime) - toMinutes(outT) : null
+                const tight = gap != null && gap < 240   // under the 4 hrs a full reset needs
+                return (
+                  <div style={{ marginTop: '6px', padding: '7px 9px', borderRadius: '8px',
+                    background: tight ? 'rgba(229,57,53,0.16)' : 'rgba(245,158,11,0.14)',
+                    border: `1px solid ${tight ? 'rgba(229,57,53,0.55)' : 'rgba(245,158,11,0.45)'}` }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: '800',
+                      color: tight ? '#FF6B66' : '#F59E0B', letterSpacing: '0.5px' }}>
+                      ⚠️ SAME-DAY TURNAROUND{gap != null ? ` · ${fmtGap(gap)} TO CLEAN` : ''}
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: '#E8EDF3', marginTop: '2px', lineHeight: '1.45' }}>
+                      {s.sameDayDeparture.guestName} leaves {outT}, {s.guestName.split(' ')[0]} arrives {t.inTime}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
             <span style={{ fontSize: '0.65rem', fontWeight: '700', flexShrink: 0,
               color: whenColour(s.daysUntil),

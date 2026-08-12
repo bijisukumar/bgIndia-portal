@@ -162,11 +162,36 @@ function pollAirbnbCancellations() {
 // an is:unread search skips it forever and the review is silently lost.
 // That is why only 3 reviews ever landed automatically. A label we own is
 // unaffected by anyone reading the mail.
-var REVIEW_DONE_LABEL = 'portal-review-done';
+// No hyphens in this name, deliberately. Gmail parses a hyphen inside a
+// search value as a negation operator, so '-label:portal-review-done'
+// degraded into "exclude anything containing review / done" and matched
+// nothing at all — the first run reported 0 threads with reviews clearly
+// sitting in the mailbox. Quoted below as well, belt and braces.
+var REVIEW_DONE_LABEL = 'PortalReviewDone';
 
 function getReviewDoneLabel() {
   return GmailApp.getUserLabelByName(REVIEW_DONE_LABEL)
       || GmailApp.createLabel(REVIEW_DONE_LABEL);
+}
+
+// Run this by hand when the poller reports 0 threads and you can see review
+// mail in the mailbox. It walks the query outwards one clause at a time, so
+// the clause that kills the match is obvious instead of guessed at.
+function debugReviewSearch() {
+  var base = 'from:automated@airbnb.com subject:"left a" subject:"review"';
+  var queries = [
+    ['from only',            'from:automated@airbnb.com'],
+    ['base',                 base],
+    ['base + 30d',           base + ' newer_than:30d'],
+    ['base + 30d + label',   base + ' newer_than:30d -label:"' + REVIEW_DONE_LABEL + '"'],
+  ];
+  queries.forEach(function(q) {
+    var n = GmailApp.search(q[1], 0, 20);
+    Logger.log(q[0] + ' → ' + n.length + '   [' + q[1] + ']');
+    n.slice(0, 5).forEach(function(t) {
+      Logger.log('      ' + t.getMessages()[0].getSubject());
+    });
+  });
 }
 
 // ── AIRBNB REVIEW POLLER ──────────────────────────────────────────────────
@@ -176,7 +201,7 @@ function pollAirbnbReviews() {
   // read-gated gets picked up on the next run instead of staying lost.
   var threads = GmailApp.search(
     'from:automated@airbnb.com subject:"left a" subject:"review" ' +
-    'newer_than:30d -label:' + REVIEW_DONE_LABEL,
+    'newer_than:30d -label:"' + REVIEW_DONE_LABEL + '"',
     0, 20
   );
   Logger.log('Unprocessed Airbnb review threads: ' + threads.length);

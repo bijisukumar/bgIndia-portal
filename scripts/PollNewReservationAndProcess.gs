@@ -162,12 +162,12 @@ function pollAirbnbCancellations() {
 // an is:unread search skips it forever and the review is silently lost.
 // That is why only 3 reviews ever landed automatically. A label we own is
 // unaffected by anyone reading the mail.
-// No hyphens in this name, deliberately. Gmail parses a hyphen inside a
-// search value as a negation operator, so '-label:portal-review-done'
-// degraded into "exclude anything containing review / done" and matched
-// nothing at all — the first run reported 0 threads with reviews clearly
-// sitting in the mailbox. Quoted below as well, belt and braces.
-var REVIEW_DONE_LABEL = 'PortalReviewDone';
+// Do not rename this without relabelling the existing threads in Gmail.
+// The label IS the dedupe record — threads already handled carry it, and a
+// new name matches none of them, so every past review would be reprocessed
+// and re-alerted. Quoted in the query below so a hyphen in the name stays
+// safe from Gmail's operator parsing.
+var REVIEW_DONE_LABEL = 'portal-review-done';
 
 function getReviewDoneLabel() {
   return GmailApp.getUserLabelByName(REVIEW_DONE_LABEL)

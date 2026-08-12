@@ -43,9 +43,17 @@ export default defineConfig({
         orientation: 'portrait',
         scope: '/',
         start_url: '/',
+        // Two purposes, not one combined 'any maskable'. Android crops a
+        // maskable icon to a circle, so declaring the full logo maskable
+        // would have sliced the StayVibe360 wordmark off. 'any' is the
+        // login-screen logo verbatim, so staff recognise the installed app
+        // instantly; 'maskable' is the roundel alone, inside the safe zone,
+        // for launchers that mask.
         icons: [
-          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/icons/sv-icon-192.png',     sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/sv-icon-512.png',     sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/icons/sv-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: '/icons/sv-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ]
       },
       workbox: {

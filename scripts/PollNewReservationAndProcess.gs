@@ -281,8 +281,16 @@ function pollAirbnbReviews() {
         if (resp && resp.success && Array.isArray(resp.data)) {
           // Match by first name (Airbnb only shows first name in review emails)
           var firstName = guestName.split(' ')[0].toLowerCase();
+          // Match booked_by_name as well as guest_name. An Airbnb review is
+          // written by the account holder — the person who BOOKED — who is
+          // often not the person whose name ends up on the stay. Abhishek's
+          // review found nothing because his booking sits under the guest
+          // who checked in, with "Abhishek M Shet" recorded only in
+          // booked_by_name.
           var candidates = resp.data.filter(function(s) {
-            return (s.guest_name || '').toLowerCase().startsWith(firstName) &&
+            var byGuest  = (s.guest_name || '').toLowerCase().indexOf(firstName) === 0;
+            var byBooker = (s.booked_by_name || '').toLowerCase().indexOf(firstName) === 0;
+            return (byGuest || byBooker) &&
                    ['cancelled', 'void'].indexOf(s.status) === -1;
           });
 

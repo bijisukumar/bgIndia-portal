@@ -589,6 +589,39 @@ async function reconcileStayStamps(DB, stayId, status) {
   return { commissionRemoved: res?.meta?.changes || 0, paidCommissionKept: false }
 }
 
+// ── MANAGER COMMISSION ───────────────────────────────────────────────────
+// Raman is paid per stay serviced, not per night blocked on the calendar:
+// 1,000 for a single night, 2,000 beyond that.
+//
+// An approved late check-out blocks the adjoining night so nobody else can
+// book it, which pushes `nights` up — but it is not another night of work.
+// The villa is still opened once and reset once. Left alone, a one-night
+// stay with a late check-out would quietly pay 2,000 instead of 1,000.
+//
+// The held night is identifiable without a new column (stayvibe_stays is at
+// D1's 100-column ceiling for ALTER TABLE): the guest is recorded as
+// departing before the booked checkout date, on a stay flagged as an
+// approved late check-out. Both conditions are required — a guest simply
+// leaving early is not an extension and must not reduce Raman's pay.
+const COMMISSION_SINGLE_NIGHT = 1000
+const COMMISSION_MULTI_NIGHT  = 2000
+
+function managerCommissionFor(stay) {
+  const nights = parseInt(stay && stay.nights) || 1
+  let billable = nights
+  if (stay && stay.request_late_checkout && stay.expected_departure_at && stay.checkout_date) {
+    const leaves = String(stay.expected_departure_at).slice(0, 10)
+    if (leaves < stay.checkout_date) {
+      const held = Math.round(
+        (new Date(`${stay.checkout_date}T00:00:00Z`) - new Date(`${leaves}T00:00:00Z`)) / 86400000
+      )
+      if (held > 0) billable = nights - held
+    }
+  }
+  billable = Math.max(1, billable)
+  return billable > 1 ? COMMISSION_MULTI_NIGHT : COMMISSION_SINGLE_NIGHT
+}
+
 async function syncEnquiryOnStayCancel(DB, stayId, actor, reason) {
   try {
     const booking = await DB.prepare(`SELECT enquiry_id FROM stayvibe_bookings WHERE stay_id = ? ORDER BY created_at DESC LIMIT 1`).bind(stayId).first()
@@ -2293,7 +2326,7 @@ export async function onRequest(ctx) {
         const checkOut = url.searchParams.get('checkOut')
         if (!checkIn || !checkOut || checkOut <= checkIn) return err('checkIn and checkOut (after checkIn) required')
         const { results } = await DB.prepare(`
-          SELECT stay_id, guest_name, checkin_date, checkout_date, source, status
+          SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, late_checkout_time
           FROM stayvibe_stays
           WHERE villa_id = ?
             AND status NOT IN ('cancelled','void')
@@ -2301,10 +2334,40 @@ export async function onRequest(ctx) {
             AND checkin_date  < date(?, '+3 day')
             AND checkout_date > date(?, '-3 day')
           ORDER BY checkin_date`).bind(villaId, checkOut, checkIn).all()
+
+        // Same-day turnover is normally fine — one guest out in the morning,
+        // the next in that afternoon. It stops being fine when the departing
+        // guest has an approved late check-out: the villa is still occupied
+        // into the afternoon or night, and the hours needed to reset it no
+        // longer exist. Dates alone can't see that, so a booking that should
+        // have been refused looked available.
+        const turnCfg  = getHostConfig(villaId).turnaround || {}
+        const TURN_MIN = (turnCfg.turnaroundHours != null ? turnCfg.turnaroundHours : 4) * 60
+        const mins = v => {
+          if (!v) return null
+          const m = String(v).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+          if (!m) return null
+          let h = parseInt(m[1], 10)
+          const ap = (m[3] || '').toUpperCase()
+          if (ap === 'PM' && h !== 12) h += 12
+          if (ap === 'AM' && h === 12) h = 0
+          return h * 60 + parseInt(m[2], 10)
+        }
+        const ARRIVE_MIN = mins(turnCfg.defaultCheckinTime || '16:00')
+
         const conflicts = [], nearby = []
         for (const r of (results || [])) {
-          if (r.checkin_date < checkOut && r.checkout_date > checkIn) conflicts.push(r)
-          else nearby.push(r)
+          if (r.checkin_date < checkOut && r.checkout_date > checkIn) { conflicts.push(r); continue }
+          if (r.checkout_date === checkIn && r.late_checkout_time) {
+            const leaveMin = mins(r.late_checkout_time)
+            const gap = leaveMin == null || ARRIVE_MIN == null ? null : ARRIVE_MIN - leaveMin
+            if (gap != null && gap < TURN_MIN) {
+              conflicts.push({ ...r, reason: 'late_checkout_turnaround',
+                note: `Departing guest has an approved late check-out at ${r.late_checkout_time} — only ${Math.max(0, Math.round(gap))} min before a ${turnCfg.defaultCheckinTime || '16:00'} arrival, and the villa needs ${TURN_MIN} min to reset.` })
+              continue
+            }
+          }
+          nearby.push(r)
         }
         return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby } })
       }
@@ -4632,12 +4695,12 @@ export async function onRequest(ctx) {
         // This, not updateStayStatus, is the button Raman actually presses —
         // so this is where the real departure time has to be captured.
         await reconcileStayStamps(DB, stayId, 'checked_out')
-        const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights, villa_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const stay = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, nights, villa_id, request_late_checkout, expected_departure_at FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         const coVillaId = stay?.villa_id || DEFAULT_VILLA_ID
         if (stay) {
           const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
-            const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
+            const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay)
             await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
 
             ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
@@ -5375,11 +5438,11 @@ export async function onRequest(ctx) {
 
         if (status === 'cancelled') await syncEnquiryOnStayCancel(DB, stayId, actor, 'cancelled from Complete Booking')
         if (status === 'checked_out') {
-          const stay = await DB.prepare(`SELECT guest_name, checkin_date, nights FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+          const stay = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, nights, request_late_checkout, expected_departure_at FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
           if (stay) {
             const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
             if (!existing) {
-              const nights = parseInt(stay.nights) || 1; const ramanComm = nights > 1 ? 2000 : 1000
+              const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay)
               await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
             }
           }

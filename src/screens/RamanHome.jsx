@@ -341,20 +341,18 @@ export default function RamanHome() {
       <div className="screen-body">
 
         {/* ── TO-DO BLOCKS ── */}
-        {loadingStay ? (
+        {loadingStay && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px',
             padding: '12px 0', marginBottom: '8px' }}>
             <div className="spinner"/>
             <span style={{ color: '#5C7080', fontSize: '0.85rem' }}>Loading…</span>
           </div>
-        ) : (
-          <>
-            <OverdueBlock  overdue={todo.overdue} />
-            <UpcomingBlock upcoming={todo.upcoming} />
-          </>
         )}
 
-        {/* ── ACTIVE STAY BANNER ── */}
+        {/* ── WHO IS IN THE HOUSE RIGHT NOW ──
+             Sits above the arrivals list deliberately. Raman's first question
+             on opening the app is who he is looking after today, not who is
+             due next — the upcoming list is planning, this is the job. */}
         {!loadingStay && (
           activeStay ? (
             <div className="active-stay-banner" onClick={() => navigate('/raman/checkin')}>
@@ -395,6 +393,14 @@ export default function RamanHome() {
               </div>
             </div>
           ) : null
+        )}
+
+        {/* Who is coming next — planning, below today's job */}
+        {!loadingStay && (
+          <>
+            <OverdueBlock  overdue={todo.overdue} />
+            <UpcomingBlock upcoming={todo.upcoming} />
+          </>
         )}
 
         {/* ── MENU ── */}

@@ -203,7 +203,7 @@ export const CONFIG = {
       thanks: "Thank you — we'll come straight back to you with our direct rates.",
     },
     form: {
-      heading: 'Tell us what you need',
+      heading: 'Tell us what you need (for an existing booking)',
       needTypes: [
         'Earlier check-in on arrival day',
         'Later check-out on departure day',
@@ -224,7 +224,7 @@ export const CONFIG = {
         { id: 'must_have',        label: 'Must have — I want it secured, and will pay for it' },
         { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no additional payment needed" },
       ],
-      submitLabel: 'Send request',
+      submitLabel: "Send request — we'll follow up to confirm",
       thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do, before you travel.",
     },
     // Three, not nine. The guest doesn't need to name their platform for us

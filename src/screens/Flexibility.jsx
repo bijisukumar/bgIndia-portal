@@ -154,30 +154,86 @@ export default function Flexibility() {
     )
   }
 
-  // Prefilled WhatsApp to the owner. Same facts as the saved record, laid
-  // out so it can be read on a phone without opening the portal.
+  // Which price tier a requested time falls into. For an early arrival an
+  // EARLIER time needs the bigger tier; for a late departure a LATER one
+  // does. Past the last tier we say so rather than quote a number nobody
+  // has agreed to.
+  function tierFor(rows, requested, dir) {
+    if (!rows || !rows.length || !requested) return null
+    const ordered = [...rows].sort((a, b) => a.hours - b.hours)
+    const hit = ordered.find(r => (dir < 0 ? requested >= r.time : requested <= r.time))
+    return hit || { beyond: true, hours: ordered[ordered.length - 1].hours }
+  }
+
+  const rupees = n => '\u20B9' + Number(n || 0).toLocaleString('en-IN')
+
+  // Prefilled WhatsApp to the owner. Carries everything the saved record
+  // does — including the stay id and the tier their requested time lands
+  // in — so the whole request can be judged on a phone without opening
+  // the portal. Amounts are labelled approx: the page never quotes a
+  // confirmed price and neither should this.
   function buildWaLink(kind) {
     const digits = String(CONFIG.ownerWhatsApp || '').replace(/\D/g, '')
     if (!digits) return ''
+    const found = lookup && lookup.found
     const L = []
-    L.push(`*Flexibility request — ${villa.name}*`)
+    L.push('*Flexibility request \u2014 ' + villa.name + '*')
     L.push('')
-    L.push(`Name: ${name.trim()}`)
-    L.push(`Contact: ${contact.trim()}`)
-    L.push(`Current booking: ${channel}`)
-    if (checkIn || checkOut) L.push(`Dates: ${checkIn || '?'} to ${checkOut || '?'}`)
-    if (kind === 'direct') {
-      L.push(`Need: ${needType}`)
-      if (wantsEarlyIn && inTime)  L.push(`Wants to arrive: ${inTime}`)
-      if (wantsLateOut && outTime) L.push(`Wants to leave: ${outTime}`)
-      const p = (F.form.priorities || []).find(x => x.id === priority)
-      if (p) L.push(`Type: ${p.label}`)
+    L.push('*Guest*')
+    L.push('Name: ' + name.trim())
+    L.push('Contact: ' + contact.trim())
+    L.push('Booked via: ' + (channel || 'not given'))
+    if (found) L.push('Stay ID: ' + lookup.stayId)
+    L.push('')
+    L.push('*Booking*')
+    if (found) {
+      L.push('Dates: ' + lookup.checkinDate + ' to ' + lookup.checkoutDate +
+             ' (' + lookup.nights + ' night' + (lookup.nights > 1 ? 's' : '') + ')')
+      L.push('Nightly rate: ' + rupees(lookup.nightlyRate))
+      L.push('Standard: in ' + lookup.standardCheckin + ', out ' + lookup.standardCheckout)
     } else {
-      L.push('Asking about direct rates for a future stay')
+      L.push('Dates: ' + (checkIn || '?') + ' to ' + (checkOut || '?'))
+      L.push('(not matched to a booking \u2014 needs looking up)')
     }
-    if (wantsDirect) L.push('Open to booking direct')
-    if (details.trim()) L.push(`Notes: ${details.trim()}`)
-    return `https://wa.me/${digits}?text=${encodeURIComponent(L.join('\n'))}`
+
+    if (kind === 'direct') {
+      L.push('')
+      L.push('*Request*')
+      L.push('Wants: ' + (needType || '\u2014'))
+      if (wantsEarlyIn && inTime) {
+        const t = found ? tierFor(lookup.earlyCheckin, inTime, -1) : null
+        L.push('Arrive at: ' + inTime +
+          (t ? (t.beyond ? '  (earlier than ' + t.hours + " hrs \u2014 needs your price)"
+                         : '  (' + t.hours + ' hrs early \u2014 ' + t.pct + '%, approx ' + rupees(t.amount) + ')')
+              : ''))
+      }
+      if (wantsLateOut && outTime) {
+        const t = found ? tierFor(lookup.lateCheckout, outTime, +1) : null
+        L.push('Leave at: ' + outTime +
+          (t ? (t.beyond ? '  (later than ' + t.hours + " hrs \u2014 needs your price)"
+                         : '  (' + t.hours + ' hrs late \u2014 ' + t.pct + '%, approx ' + rupees(t.amount) + ')')
+              : ''))
+      }
+      const pr = (F.form.priorities || []).find(x => x.id === priority)
+      if (pr) L.push('Priority: ' + pr.label)
+    } else {
+      L.push('')
+      L.push('*Request*')
+      L.push('Asking for direct rates')
+    }
+
+    if (wantsDirect) {
+      L.push('')
+      L.push('\u2192 Open to booking DIRECT with us')
+    }
+    if (details.trim()) {
+      L.push('')
+      L.push('*Notes*')
+      L.push(details.trim())
+    }
+    L.push('')
+    L.push('_Amounts are approximate and subject to your approval._')
+    return 'https://wa.me/' + digits + '?text=' + encodeURIComponent(L.join('\n'))
   }
 
   async function submit(kind) {

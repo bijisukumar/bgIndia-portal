@@ -122,7 +122,7 @@ export const CONFIG = {
       thanks: "Thank you — we'll be in touch with our direct rates.",
     },
     form: {
-      heading: 'Tell us what you need',
+      heading: 'Tell us what you need (for an existing booking)',
       needTypes: ['Earlier check-in on arrival day', 'Later check-out on departure day', 'Both'],
       checkinTimeLabel:  'What time do you need to arrive?',
       checkoutTimeLabel: 'What time do you need to leave?',
@@ -135,7 +135,7 @@ export const CONFIG = {
         { id: 'must_have',        label: 'Must have — I want it secured, and will pay for it' },
         { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no additional payment needed" },
       ],
-      submitLabel: 'Send request',
+      submitLabel: "Send request — we'll follow up to confirm",
       thanks: "Thank you — we've got your request and will come back to you before you travel.",
     },
     tiers: [ { hours: 4, pct: 25 }, { hours: 8, pct: 50 } ],

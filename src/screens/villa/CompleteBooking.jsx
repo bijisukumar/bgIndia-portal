@@ -236,6 +236,16 @@ export default function CompleteBooking() {
   const cleanFeeAmt   = parseFloat(airbnb.cleaningFee) || 0
   const hostSvcAmt    = parseFloat(airbnb.hostServiceFee) || 0
   const youEarnAmt    = parseFloat(airbnb.youEarn) || tariff
+  // Airbnb began collecting occupancy tax and there is no column left to store
+  // it (D1 caps ALTER TABLE at 100 columns and stayvibe_stays is at the cap).
+  // It does not need one — the guest's total minus the parts we already hold
+  // IS the tax, and it reconciles to the confirmation email exactly.
+  const guestPaidAmt  = parseFloat(airbnb.guestPaid) || 0
+  const guestSvcAmt   = parseFloat(airbnb.guestServiceFee) || 0
+  const occupancyTax  = (guestPaidAmt > 0 && nightFeeAmt > 0)
+    ? Math.max(0, Math.round((guestPaidAmt - (nightFeeAmt * nights) - cleanFeeAmt - guestSvcAmt) * 100) / 100)
+    : 0
+
   const gross      = isAirbnb
     ? (nightFeeAmt * nights) + cleanFeeAmt + extraTotal
     : (tariff * nights) + extraTotal
@@ -1408,6 +1418,16 @@ export default function CompleteBooking() {
                         <span className="net-label">Host service fee (3%)</span>
                         <span className="net-val neg">−{fmt(hostSvcAmt)}</span>
                       </div>}
+                      {/* Collected by Airbnb from the guest and remitted on —
+                          never ours, so it does not touch "You earn". Shown so
+                          the row reconciles against the confirmation email,
+                          which is the only place this number appears. */}
+                      {occupancyTax > 0 && <div className="net-row">
+                        <span className="net-label" style={{color:'var(--text-dim)'}}>
+                          Occupancy tax (Airbnb collects)
+                        </span>
+                        <span className="net-val" style={{color:'var(--text-dim)'}}>{fmt(occupancyTax)}</span>
+                      </div>}
                       {extraLines.map((line,i) => (
                         <div key={i} className="net-row">
                           <span className="net-label">{line.label}</span>
@@ -1454,24 +1474,32 @@ export default function CompleteBooking() {
                     us. Falls back to the night fee on older rows where the
                     guest-paid total was never captured. */}
                 {(() => {
-                  const guestPaidTotal = parseFloat(airbnb.guestPaid) || 0
-                  const airbnbBase = guestPaidTotal > 0 ? guestPaidTotal : (nightFeeAmt * (nights || 1))
-                  const base = isAirbnb ? (airbnbBase / (nights || 1)) : tariff
+                  // What the guest paid for the STAY, per night, on both
+                  // channels. Occupancy tax is excluded on purpose: it is
+                  // government money, not the value of the room, so charging
+                  // a share of it is neither explicable nor ours to keep.
+                  // Direct guests pay us gross, so gross IS their total.
+                  const paidForStay = guestPaidAmt > 0
+                    ? (guestPaidAmt - occupancyTax)
+                    : (nightFeeAmt * (nights || 1)) + cleanFeeAmt
+                  const base = isAirbnb
+                    ? paidForStay / (nights || 1)
+                    : (gross > 0 ? gross / (nights || 1) : tariff)
                   if (base <= 0) return null
                   return (
                     <div className="card" style={{marginBottom:'8px'}}>
                       <div className="card-section-label" style={{marginBottom:'10px'}}>EXTENDED STAY REFERENCE</div>
                       <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'10px'}}>
-                        Based on {isAirbnb ? 'what the guest paid, per night' : 'nightly rate'} of {fmt(base)}
+                        Based on what the guest paid per night ({fmt(base)}){isAirbnb && occupancyTax > 0 ? ' — occupancy tax excluded' : ''}
                       </div>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
                         <div style={extBox}>
-                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of {isAirbnb ? 'guest-paid' : 'nightly'} rate</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of guest-paid rate</div>
                           <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.25))}</div>
                           <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Early check-in / late check-out ref</div>
                         </div>
                         <div style={extBox}>
-                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of {isAirbnb ? 'guest-paid' : 'nightly'} rate</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of guest-paid rate</div>
                           <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.5))}</div>
                           <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Half-day / extra night ref</div>
                         </div>

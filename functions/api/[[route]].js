@@ -417,10 +417,41 @@ function genId(prefix) {
 // FROM the ledger, enforcing net = gross − commission by construction.
 // NON-BLOCKING by design: any failure here logs and returns — the booking
 // write that already succeeded is never affected.
+// Occupancy tax is a recent addition to Airbnb's breakdown and there is no
+// column left on stayvibe_stays to hold it (D1 caps ALTER TABLE at 100 and we
+// are at the cap). It does not need one: the guest's total minus the three
+// components we already store IS the tax, exactly. Verified against a real
+// confirmation email — 16,845.01 - 11,750 - 1,000 - 1,800.01 = 2,295.00.
+//
+// Returns 0 rather than a guess when the inputs are incomplete, so an older
+// row missing a component reports no tax instead of inventing one.
+function derivedOccupancyTax(r) {
+  const paid  = Number(r && r.guest_paid_total)  || 0
+  const night = Number(r && r.night_fee)         || 0
+  const clean = Number(r && r.cleaning_fee)      || 0
+  const gsf   = Number(r && r.guest_service_fee) || 0
+  if (paid <= 0 || night <= 0) return 0
+  const tax = Math.round((paid - night - clean - gsf) * 100) / 100
+  return tax > 0 ? tax : 0
+}
+
+// What the guest paid for the STAY, per night — the basis for extended-stay
+// quotes. Occupancy tax is excluded deliberately: it is government money, not
+// the value of the room, and charging a share of it would be neither
+// explicable to the guest nor ours to keep.
+function guestPaidPerNight(r) {
+  const nights = Math.max(1, parseInt(r && r.nights) || 1)
+  const paid   = Number(r && r.guest_paid_total) || 0
+  if (paid > 0) return Math.round((paid - derivedOccupancyTax(r)) / nights)
+  const tariff = Number(r && r.tariff_per_night) || 0
+  if (tariff > 0) return Math.round(tariff)
+  return Math.round((Number(r && r.gross) || 0) / nights)
+}
+
 async function syncStayLedger(DB, stayId) {
   try {
     if (!stayId) return
-    const s = await DB.prepare(`SELECT stay_id, villa_id, gross, commission_amt, net, extra_charges, cleaning_fee, night_fee, guest_service_fee FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+    const s = await DB.prepare(`SELECT stay_id, villa_id, gross, commission_amt, net, extra_charges, cleaning_fee, night_fee, guest_service_fee, guest_paid_total, nights FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
     if (!s) return
     const r2 = x => Math.round((Number(x) || 0) * 100) / 100
     const cleaning = r2(s.cleaning_fee)
@@ -440,6 +471,11 @@ async function syncStayLedger(DB, stayId) {
     if (extras < 0)     add('discount', 'outflow', Math.abs(extras), 'adapter: reclassified from negative extra_charges')
     if (comm > 0)       add('channel_commission', 'outflow', comm, 'adapter')
     if (gsf > 0)        add('guest_service_fee', 'passthrough', gsf, 'adapter')  // excluded from P&L
+    // Same treatment as the guest service fee: collected from the guest and
+    // remitted onward, never ours, so it sits outside the P&L but must appear
+    // for the row to reconcile against Airbnb's own total.
+    const occTax = derivedOccupancyTax(s)
+    if (occTax > 0)     add('occupancy_tax', 'passthrough', occTax, 'adapter: derived from guest total')
 
     const stmts = [DB.prepare(`DELETE FROM stayvibe_booking_line_items WHERE stay_id = ?`).bind(stayId)]
     for (const l of lines) {
@@ -1230,7 +1266,9 @@ export async function onRequest(ctx) {
     const digits = ct.replace(/\D/g, '')
     const { results: hits } = await DB.prepare(`
       SELECT stay_id, guest_name, booked_by_name, checkin_date, checkout_date, nights,
-             tariff_per_night, gross, guest_paid_total, guest_email, guest_phone, source
+             tariff_per_night, gross, guest_paid_total,
+             night_fee, cleaning_fee, guest_service_fee,
+             guest_email, guest_phone, source
         FROM stayvibe_stays
        WHERE villa_id = ?
          AND checkin_date = ? AND checkout_date = ?
@@ -1260,11 +1298,7 @@ export async function onRequest(ctx) {
     // guest_paid_total is the guest's side of an Airbnb row; fall back to
     // tariff, then gross, for direct bookings and older rows that never
     // captured it.
-    const guestPaid = Number(match.guest_paid_total) || 0
-    const nightly = Math.round(
-      guestPaid > 0 ? guestPaid / nights
-      : Number(match.tariff_per_night) > 0 ? Number(match.tariff_per_night)
-      : (Number(match.gross) || 0) / nights)
+    const nightly = guestPaidPerNight(match)
 
     const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null }
     const fmt   = mins => {

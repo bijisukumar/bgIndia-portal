@@ -186,10 +186,19 @@ export const CONFIG = {
     ota: {
       heading: 'Booked through a partner?',
       body: [
-        "Any extra night for your current stay has to be booked through whoever you booked with — those dates live in their system, and they'll charge the full nightly rate for it.",
-        "Booking with us directly is what makes the flexible timings possible: the calendar is ours to hold, so we can set a night aside for your family at a fraction of a night instead of the full rate. No platform fees either — you're dealing with the family who owns the home.",
+        "Any extra night for your current stay has to go through whoever you booked with — those dates sit in their system, and they'll charge you a full night for it.",
+        "But you don't have to book that way with us again. When you come to us directly, the calendar is ours to hold — and that changes what we can do for your family:",
       ],
-      directOptInLabel: "I'm open to booking directly next time, to save on cost",
+      // The conversion pitch. Concrete benefits, in the guest's terms — a
+      // vague "book direct next time" asks them to do us a favour; this
+      // tells them what they get for it.
+      directPitch: [
+        'No platform commission on the booking — that saving stays with you',
+        'Flexible arrival and departure at a fraction of a night, never the full rate',
+        'Talk straight to the family who owns the home — no call centre, no ticket number',
+        'Tell us what your family needs and get an answer from someone who can actually say yes',
+      ],
+      directOptInLabel: "Yes — send me your direct rates. I'd like to book with you directly.",
       ctaLabel: "Send me your direct rates for next time",
       thanks: "Thank you — we'll be in touch with our direct rates. We'd love to host your family again.",
     },

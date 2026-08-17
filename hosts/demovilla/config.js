@@ -112,7 +112,12 @@ export const CONFIG = {
         'Extra nights for your current stay need to be arranged through them — those dates live in their system.',
         'Worth knowing for next time: guests who book with us directly get flexibility on arrival and departure timings at a fraction of a night rather than the full rate.',
       ],
-      directOptInLabel: "I'm open to booking directly next time, to save on cost",
+      directPitch: [
+        'No platform commission — that saving stays with you',
+        'Flexible arrival and departure at a fraction of a night',
+        'Talk straight to the family who owns the home',
+      ],
+      directOptInLabel: "Yes — send me your direct rates. I'd like to book with you directly.",
       ctaLabel: 'Send me your direct rates for next time',
       thanks: "Thank you — we'll be in touch with our direct rates.",
     },

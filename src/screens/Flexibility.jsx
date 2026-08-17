@@ -29,10 +29,15 @@ const c = {
   card: '#1B2130', line: 'rgba(255,255,255,0.08)', green: '#34A853',
 }
 
+// Sized for a thumb, not a mouse — this page is read on phones.
+// fontSize is 16px on purpose: iOS Safari zooms the whole page when a field
+// smaller than that takes focus, which throws the guest out of the layout
+// mid-form. 13px padding takes the fields to ~45px, over the 44px minimum
+// touch target; at 11px they measured 39px.
 const input = {
-  width: '100%', padding: '11px 14px', borderRadius: '10px',
+  width: '100%', padding: '13px 14px', borderRadius: '10px',
   border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)',
-  color: c.text, fontSize: '0.9rem', outline: 'none', boxSizing: 'border-box',
+  color: c.text, fontSize: '16px', outline: 'none', boxSizing: 'border-box',
 }
 
 function Field({ label, required, children, hint }) {
@@ -102,7 +107,7 @@ export default function Flexibility() {
     L.push('')
     L.push(`Name: ${name.trim()}`)
     L.push(`Contact: ${contact.trim()}`)
-    L.push(`Booked via: ${channel}`)
+    L.push(`Current booking: ${channel}`)
     if (checkIn || checkOut) L.push(`Dates: ${checkIn || '?'} to ${checkOut || '?'}`)
     if (kind === 'direct') {
       L.push(`Need: ${needType}`)
@@ -111,7 +116,7 @@ export default function Flexibility() {
       const p = (F.form.priorities || []).find(x => x.id === priority)
       if (p) L.push(`Type: ${p.label}`)
     } else {
-      L.push('Booked through a partner — asking about direct rates')
+      L.push('Asking about direct rates for a future stay')
     }
     if (wantsDirect) L.push('Open to booking direct')
     if (details.trim()) L.push(`Notes: ${details.trim()}`)
@@ -256,8 +261,22 @@ export default function Flexibility() {
                     <p key={i} style={{ color: c.dim, fontSize: '0.88rem', lineHeight: 1.7, margin: '0 0 12px' }}>{p}</p>
                   ))}
 
+                  {(F.ota.directPitch || []).length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 9,
+                      margin: '0 0 16px', padding: '14px 15px', borderRadius: 11,
+                      background: c.goldSoft, border: `1px solid ${c.goldLine}` }}>
+                      {F.ota.directPitch.map((line, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+                          <span style={{ color: c.gold, flexShrink: 0, fontWeight: 700 }}>✓</span>
+                          <span style={{ color: c.text, fontSize: '0.87rem', lineHeight: 1.55 }}>{line}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* The conversion ask, before the inputs — they've just read
-                      why direct is cheaper, so this is the moment it lands. */}
+                      what direct actually gets them, so this is the moment it
+                      lands. */}
                   <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
                     padding: '12px 13px', borderRadius: 10, cursor: 'pointer', margin: '4px 0 16px',
                     background: wantsDirect ? 'rgba(200,144,58,0.12)' : 'rgba(255,255,255,0.03)',
@@ -315,7 +334,7 @@ export default function Flexibility() {
                       date, to say yes or no. */}
                   {(wantsEarlyIn || wantsLateOut) && (
                     <div style={{ display: 'grid',
-                      gridTemplateColumns: wantsEarlyIn && wantsLateOut ? '1fr 1fr' : '1fr', gap: 10 }}>
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
                       {wantsEarlyIn && (
                         <Field label={F.form.checkinTimeLabel || 'What time do you need to arrive?'}>
                           <input style={input} type="time" value={inTime}

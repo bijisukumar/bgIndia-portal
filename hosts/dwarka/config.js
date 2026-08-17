@@ -138,8 +138,8 @@ export const CONFIG = {
   flexibility: {
     hero: {
       eyebrow: 'DIRECT GUESTS · DWARKA VILLA',
-      title: "Travelling with family? We'll make the timings work.",
-      intro: 'Check-in is after 4:00 PM and check-out by 11:00 AM. Here is what happens in the five hours between — and what we can do when those hours do not suit your family.',
+      title: 'We go further for families than the clock allows.',
+      intro: "Check-in after 4:00 PM and check-out by 11:00 AM is the standard, here and everywhere. But a family travelling together rarely fits a booking window — so where we can, we stretch it. Here is what those hours are actually for, and how far we are able to go for yours.",
     },
     why: {
       heading: 'Why our timings are what they are',
@@ -187,10 +187,10 @@ export const CONFIG = {
       heading: 'Booked through a partner?',
       body: [
         "Any extra night for your current stay has to go through whoever you booked with — those dates sit in their system, and they'll charge you a full night for it.",
-        "But you don't have to book that way with us again. When you come to us directly, the calendar is ours to hold — and that changes what we can do for your family:",
+        "You can still deal with us directly from here. When the booking is ours to hold, so is the calendar — and that changes what we are able to do for your family:",
       ],
       // The conversion pitch. Concrete benefits, in the guest's terms — a
-      // vague "book direct next time" asks them to do us a favour; this
+      // a vague "book direct" ask reads as us wanting a favour; this
       // tells them what they get for it.
       directPitch: [
         'No platform commission on the booking — that saving stays with you',
@@ -198,9 +198,9 @@ export const CONFIG = {
         'Talk straight to the family who owns the home — no call centre, no ticket number',
         'Tell us what your family needs and get an answer from someone who can actually say yes',
       ],
-      directOptInLabel: "Yes — send me your direct rates. I'd like to book with you directly.",
-      ctaLabel: "Send me your direct rates for next time",
-      thanks: "Thank you — we'll be in touch with our direct rates. We'd love to host your family again.",
+      directOptInLabel: "I'd like to book with you directly.",
+      ctaLabel: 'Send me your direct rates',
+      thanks: "Thank you — we'll come straight back to you with our direct rates.",
     },
     form: {
       heading: 'Tell us what you need',
@@ -220,7 +220,6 @@ export const CONFIG = {
         { id: 'nice_to_have', label: 'Would like it if available — no charge, confirm on the day' },
         { id: 'must_have',    label: 'Must have — happy to pay to secure it' },
       ],
-      directInterestLabel: "I'd like to discuss booking directly with you",
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do, before you travel.",
     },

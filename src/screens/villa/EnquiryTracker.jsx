@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { daysFromToday } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { waNumber } from '../../utils/guestMessages'
 
 export const SOURCES = [
   { id: 'website',     label: 'Website' },
@@ -55,15 +56,10 @@ function isArchivable(enq) {
 function nudgeWaLink(enq) {
   const raw = (enq.phone || '').trim()
   if (!raw) return null
-  const digits = raw.replace(/\D/g, '')
-  if (!digits) return null
-  // Only assume India's country code for a bare 10-digit number with no
-  // '+' in the original string. Anything that already looks international
-  // (has a '+', or is already longer than 10 digits) is left as-is —
-  // blindly prepending '91' would corrupt a real international number
-  // (e.g. a Qatar guest's +974... becoming 91974...).
-  const looksInternational = raw.includes('+') || digits.length > 10
-  const num = looksInternational ? digits : `91${digits}`
+  // Shared normaliser — also strips the domestic trunk 0 that guests
+  // routinely type, which used to produce a dead wa.me link.
+  const num = waNumber(raw)
+  if (!num) return null
   const firstName = (enq.guest_name || '').split(' ')[0]
   const msg = encodeURIComponent(
     `Hi ${firstName}, just checking in — were you able to look over the details for your stay? Happy to answer any questions you have. And if you've decided to go a different way, no worries at all, just let us know so we can keep things updated on our end. Thank you! 🙏`

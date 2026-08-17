@@ -23,10 +23,27 @@ function renderTemplate(template, vars) {
 // in the original string. Blindly prepending '91' corrupts a real
 // international number (a US +1 214… becoming 91 1 214…) — a bug this
 // codebase has now hit more than once, so every wa.me link goes through here.
-function waNumber(phone) {
+//
+// Trunk prefixes are stripped FIRST, because they inflate the digit count
+// and make a domestic number look international. "08197785354" is a normal
+// Indian mobile with the domestic trunk 0 in front: 11 digits, no '+', so
+// the length test alone called it international and produced a dead
+// wa.me/08197785354. Guests type that 0 constantly.
+export function waNumber(phone) {
   const phoneStr = String(phone || '')
-  const digits = phoneStr.replace(/\D/g, '')
+  let digits = phoneStr.replace(/\D/g, '')
   if (!digits) return null
+
+  if (digits.startsWith('00')) {
+    // '00' is the international access code — what follows already carries
+    // its own country code, so never prepend one.
+    digits = digits.slice(2)
+    return digits || null
+  }
+  // A single leading 0 before a 10-digit number is the domestic trunk
+  // prefix, not part of the number.
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1)
+
   const looksInternational = phoneStr.includes('+') || digits.length > 10
   return looksInternational ? digits : `91${digits}`
 }

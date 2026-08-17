@@ -209,6 +209,9 @@ export default function GuestCheckIn() {
   const [dob,      setDob]      = useState('')
   const [gender,   setGender]   = useState('')
   const [phone,    setPhone]    = useState('')
+  // Indian by default: nearly every guest is, and the +91 prefix is what
+  // stops the trunk 0 getting typed in the first place.
+  const [intlPhone, setIntlPhone] = useState(false)
   const [email,    setEmail]    = useState('')
 
   // ── Address ───────────────────────────────────────────────
@@ -358,7 +361,7 @@ export default function GuestCheckIn() {
       const payload = {
         villaId, partner, stayId: stayId||null,
         guestName: fullName.trim(), dob, gender, nationality,
-        phone, email,
+        phone: intlPhone ? phone : (phone ? `+91${phone}` : ''), email,
         // For foreign guests, home_address/city/state/pincode/country stay as the
         // VILLA'S India address — that's what Form C requires (current address in
         // India during the stay). The guest's actual home country is a separate
@@ -534,8 +537,33 @@ export default function GuestCheckIn() {
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-          <Field label="Phone number" required>
-            <Input type="tel" value={phone} onChange={setPhone} placeholder="9880335522" />
+          {/* +91 is fixed alongside the field rather than pre-filled into it,
+              so a guest cannot delete it or type a domestic trunk 0 in front.
+              That leading 0 is the single most common way a number reaches us
+              unusable — wa.me rejects it, so the guest can't be messaged at
+              all. Non-Indian guests use the toggle. */}
+          <Field label="Phone number" required
+            hint={intlPhone ? 'Include your country code' : 'Indian mobile — 10 digits, no leading 0'}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+              {!intlPhone && (
+                <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px',
+                  borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.06)', color: '#EDF2F7',
+                  fontSize: '16px', fontWeight: 600, flexShrink: 0 }}>
+                  +91
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Input type="tel" value={phone}
+                  onChange={v => setPhone(intlPhone ? v : String(v).replace(/\D/g, '').replace(/^0+/, '').slice(0, 10))}
+                  placeholder={intlPhone ? '+971 50 123 4567' : '9880335522'} />
+              </div>
+            </div>
+            <button type="button" onClick={() => { setIntlPhone(!intlPhone); setPhone('') }}
+              style={{ marginTop: 6, background: 'none', border: 'none', padding: 0,
+                color: '#85B7EB', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline' }}>
+              {intlPhone ? 'Indian number instead' : 'Not an Indian number?'}
+            </button>
           </Field>
           <Field label="Email address">
             <Input type="email" value={email} onChange={setEmail} placeholder="you@example.com" />

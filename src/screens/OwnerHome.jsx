@@ -4,6 +4,7 @@ import { CONFIG } from '../config'
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { parseLocalDate, fmtDate } from '../utils/dates'
+import { waNumber } from '../utils/guestMessages'
 import { channelLabel, channelPillStyle } from '../utils/channel'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
@@ -707,13 +708,10 @@ function ReviewChaseBlock() {
   }
 
   function waLink(phone, guestName) {
-    const raw = phone || ''
-    const clean = raw.replace(/\D/g, '')
-    // Only assume India's country code for a bare 10-digit number with no
-    // '+' in the original string — blindly prepending '91' would corrupt
-    // a real international number (e.g. a US guest's +1... becoming 911...).
-    const looksInternational = raw.includes('+') || clean.length > 10
-    const num = looksInternational ? clean : `91${clean}`
+    // Shared normaliser — also strips the domestic trunk 0 that guests
+    // routinely type, which used to produce a dead wa.me link.
+    const num = waNumber(phone)
+    if (!num) return null
     const msg   = encodeURIComponent(
       `Hi ${(guestName || '').split(' ')[0]}, thank you for staying with us at Luxury Villas of Guruvayur! 🙏 We hope you had a wonderful experience. If you have a moment, we'd really appreciate a review on Airbnb — it means a lot to us and helps future guests. Thank you!`
     )

@@ -275,6 +275,44 @@ export default function CompleteBooking() {
   }
 
   // Transition status
+  // Whole-card edit for Guest Info. Everything here arrives from a channel
+  // or a guest-typed form, so it is all wrong sooner or later — dates get
+  // amended over WhatsApp, phones arrive with a trunk 0, guest counts change.
+  const [editInfo,  setEditInfo]  = useState(false)
+  const [infoDraft, setInfoDraft] = useState({})
+  const [infoBusy,  setInfoBusy]  = useState(false)
+
+  function openInfoEdit() {
+    if (!selected) return
+    setInfoDraft({
+      guestName:    selected.guest_name    || '',
+      guestPhone:   selected.guest_phone   || '',
+      guestEmail:   selected.guest_email   || '',
+      checkinDate:  selected.checkin_date  || '',
+      checkoutDate: selected.checkout_date || '',
+      adults:       selected.adults   != null ? String(selected.adults)   : '',
+      children:     selected.children != null ? String(selected.children) : '',
+      eta:          selected.eta || '',
+    })
+    setEditInfo(true)
+  }
+
+  async function handleSaveInfo() {
+    if (!selected) return
+    const d = infoDraft
+    if (d.checkinDate && d.checkoutDate && d.checkoutDate <= d.checkinDate) {
+      showToast('Check-out must be after check-in', 'error'); return
+    }
+    setInfoBusy(true)
+    try {
+      await api.updateStayGuestInfo({ stayId: selected.stay_id, ...d })
+      showToast('Guest info updated ✓')
+      setEditInfo(false)
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setInfoBusy(false) }
+  }
+
   async function handleStatusChange(newStatus) {
     if (!selected) return
     setTransitioning(true)
@@ -911,7 +949,17 @@ export default function CompleteBooking() {
                 })()}
 
                 {/* Guest Info */}
-                <div className="card-section-label">GUEST INFO</div>
+                <div className="card-section-label"
+                  style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px'}}>
+                  <span>GUEST INFO</span>
+                  {!editInfo && (
+                    <button onClick={openInfoEdit}
+                      style={{fontSize:'0.7rem',color:'#85B7EB',background:'none',border:'none',
+                        cursor:'pointer',padding:0,textDecoration:'underline',letterSpacing:0}}>
+                      edit
+                    </button>
+                  )}
+                </div>
                 <div className="card" style={{marginBottom:'14px'}}>
                   {(() => {
                     // Derive checkout from checkin + nights if checkout_date is null
@@ -927,6 +975,76 @@ export default function CompleteBooking() {
                     const children = parseInt(s.children) || 0
                     const infants  = parseInt(s.infants)  || 0
                     const total    = adults + children + infants
+                    const dfield = { display:'block', width:'100%', padding:'9px 10px',
+                      background:'var(--dark-bg)', border:'1px solid var(--border-dim)',
+                      borderRadius:'7px', color:'var(--text)', fontSize:'16px',
+                      boxSizing:'border-box' }
+                    const setD = (k, v) => setInfoDraft(p => ({ ...p, [k]: v }))
+                    if (editInfo) return (
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 12px'}}>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Guest name</div>
+                          <input style={dfield} value={infoDraft.guestName}
+                            onChange={e=>setD('guestName', e.target.value)} />
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Check-in</div>
+                          <input type="date" style={dfield} value={infoDraft.checkinDate}
+                            onChange={e=>setD('checkinDate', e.target.value)} />
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Check-out</div>
+                          <input type="date" style={dfield} value={infoDraft.checkoutDate}
+                            onChange={e=>setD('checkoutDate', e.target.value)} />
+                        </div>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Phone</div>
+                          <input type="tel" style={dfield} value={infoDraft.guestPhone}
+                            onChange={e=>setD('guestPhone', e.target.value)}
+                            placeholder="+91 98765 43210" />
+                          <div style={{fontSize:'0.66rem',color:'var(--text-dim)',marginTop:'3px'}}>
+                            A leading 0 is removed and +91 added on save — WhatsApp rejects both otherwise.
+                          </div>
+                        </div>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Email</div>
+                          <input type="email" style={dfield} value={infoDraft.guestEmail}
+                            onChange={e=>setD('guestEmail', e.target.value)} />
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Adults</div>
+                          <input type="number" min="0" style={dfield} value={infoDraft.adults}
+                            onChange={e=>setD('adults', e.target.value)} />
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Children</div>
+                          <input type="number" min="0" style={dfield} value={infoDraft.children}
+                            onChange={e=>setD('children', e.target.value)} />
+                        </div>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Requested ETA</div>
+                          <input type="time" style={dfield} value={infoDraft.eta}
+                            onChange={e=>setD('eta', e.target.value)} />
+                        </div>
+                        <div style={{gridColumn:'1 / -1',display:'flex',gap:'8px',marginTop:'4px'}}>
+                          <button onClick={handleSaveInfo} disabled={infoBusy}
+                            style={{flex:1,padding:'11px',borderRadius:'9px',border:'none',
+                              background:'var(--gold)',color:'#1A202C',fontWeight:'800',
+                              fontSize:'0.85rem',cursor:infoBusy?'not-allowed':'pointer'}}>
+                            {infoBusy ? 'Saving…' : 'Save changes'}
+                          </button>
+                          <button onClick={()=>setEditInfo(false)} disabled={infoBusy}
+                            style={{flex:1,padding:'11px',borderRadius:'9px',
+                              border:'1px solid var(--border-dim)',background:'transparent',
+                              color:'var(--text-muted)',fontWeight:'700',fontSize:'0.85rem',cursor:'pointer'}}>
+                            Cancel
+                          </button>
+                        </div>
+                        <div style={{gridColumn:'1 / -1',fontSize:'0.68rem',color:'var(--text-dim)'}}>
+                          Changing the dates recalculates nights.
+                        </div>
+                      </div>
+                    )
                     return (
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 16px'}}>
                         <div>

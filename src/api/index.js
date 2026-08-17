@@ -131,6 +131,7 @@ export const api = {
   // ── VILLA INCOME ─────────────────────────────────────────
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),
   updateStayGuestPhone: (data)   => post('updateStayGuestPhone', data),
+  updateStayGuestInfo: (data)    => post('updateStayGuestInfo', data),
   updateStayCheckinTimes: (data) => post('updateStayCheckinTimes', data),
   sendCheckoutEmailNow: (data) => post('sendCheckoutEmailNow', data),
   getFlexRequests:   (villaId) => get('getFlexRequests', { villaId }),

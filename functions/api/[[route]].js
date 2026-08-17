@@ -589,6 +589,23 @@ async function reconcileStayStamps(DB, stayId, status) {
   return { commissionRemoved: res?.meta?.changes || 0, paidCommissionKept: false }
 }
 
+// Store phone numbers in a shape WhatsApp will actually accept. Guests type
+// the domestic trunk 0 constantly ("08197785354"); wa.me rejects it, so the
+// guest silently becomes unmessageable. Fixed at the point of storage as
+// well as at link time, so bad numbers stop entering the database at all.
+// A '+' or a country code already present is left alone — prepending 91 to
+// a real international number is a corruption this codebase has hit before.
+function normalizeStoredPhone(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return null
+  let digits = s.replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.startsWith('00')) return `+${digits.slice(2)}`
+  if (s.includes('+'))         return `+${digits}`
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1)
+  return digits.length === 10 ? `+91${digits}` : `+${digits}`
+}
+
 // ── MANAGER COMMISSION ───────────────────────────────────────────────────
 // Raman is paid per stay serviced, not per night blocked on the calendar:
 // 1,000 for a single night, 2,000 beyond that.
@@ -5125,6 +5142,49 @@ export async function onRequest(ctx) {
       // that never included one, and the owner learned it some other way
       // (WhatsApp, a call). Nothing in Complete Booking's normal save flow
       // touches guest_phone, so there was no way to add it there at all.
+      // ── EDIT GUEST INFO ──────────────────────────────────────────────
+      // One action for the whole Guest Info card. Every field is optional:
+      // only what's sent is written, so a partial edit can't blank the rest.
+      // Dates recompute `nights` — leaving a stale night count behind would
+      // quietly distort occupancy and the manager's commission band.
+      if (action === 'updateStayGuestInfo') {
+        const { stayId, guestName, guestPhone, guestEmail,
+                checkinDate, checkoutDate, adults, children, eta } = body
+        if (!stayId) return err('stayId required')
+        const cur = await DB.prepare(`SELECT checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!cur) return err('Stay not found', 404)
+
+        const sets = [], vals = []
+        const put = (col, v) => { sets.push(`${col} = ?`); vals.push(v) }
+        // Invisible bidi/zero-width characters ride along on numbers pasted
+        // from WhatsApp or Contacts. They don't render, but they break tel:
+        // links and every later exact-match comparison.
+        const scrub = v => String(v == null ? '' : v).trim().replace(/[​-‏‪-‮⁦-⁩]/g, '')
+
+        if (guestName  !== undefined) put('guest_name',  scrub(guestName))
+        if (guestPhone !== undefined) put('guest_phone', normalizeStoredPhone(scrub(guestPhone)))
+        if (guestEmail !== undefined) put('guest_email', scrub(guestEmail).toLowerCase() || null)
+        if (eta        !== undefined) put('eta',         scrub(eta) || null)
+        if (adults     !== undefined) put('adults',      parseInt(adults)   || 0)
+        if (children   !== undefined) put('children',    parseInt(children) || 0)
+
+        const ci = checkinDate  !== undefined ? (scrub(checkinDate)  || null) : cur.checkin_date
+        const co = checkoutDate !== undefined ? (scrub(checkoutDate) || null) : cur.checkout_date
+        if (checkinDate  !== undefined) put('checkin_date',  ci)
+        if (checkoutDate !== undefined) put('checkout_date', co)
+        if ((checkinDate !== undefined || checkoutDate !== undefined) && ci && co) {
+          if (co <= ci) return err('Check-out must be after check-in')
+          put('nights', Math.max(1, Math.round(
+            (new Date(`${co}T00:00:00Z`) - new Date(`${ci}T00:00:00Z`)) / 86400000)))
+        }
+        if (!sets.length) return err('nothing to update')
+
+        put('updated_by', actor); put('updated_at', now())
+        await DB.prepare(`UPDATE stayvibe_stays SET ${sets.join(', ')} WHERE stay_id = ?`).bind(...vals, stayId).run()
+        const row = await DB.prepare(`SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, eta FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        return json({ success: true, data: row })
+      }
+
       if (action === 'updateStayGuestPhone') {
         const { stayId, phone } = body
         if (!stayId) return err('stayId required')

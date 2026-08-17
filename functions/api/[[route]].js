@@ -1230,7 +1230,7 @@ export async function onRequest(ctx) {
     const digits = ct.replace(/\D/g, '')
     const { results: hits } = await DB.prepare(`
       SELECT stay_id, guest_name, booked_by_name, checkin_date, checkout_date, nights,
-             tariff_per_night, gross, guest_email, guest_phone, source
+             tariff_per_night, gross, guest_paid_total, guest_email, guest_phone, source
         FROM stayvibe_stays
        WHERE villa_id = ?
          AND checkin_date = ? AND checkout_date = ?
@@ -1253,10 +1253,17 @@ export async function onRequest(ctx) {
     const turn  = cfg.turnaround || {}
     const tiers = (cfg.flexibility && cfg.flexibility.tiers) || [{ hours: 4, pct: 25 }, { hours: 8, pct: 50 }]
     const nights = Math.max(1, parseInt(match.nights) || 1)
-    // tariff_per_night is authoritative where set; otherwise derive it, since
-    // an OTA row often carries only the total.
-    const nightly = Math.round(Number(match.tariff_per_night) > 0
-      ? Number(match.tariff_per_night)
+    // The quote is a share of what the GUEST PAID, per night — not of what we
+    // receive. On a channel booking those differ by the platform's service
+    // fee, and the guest is being asked for a fraction of their own booking:
+    // quoting off our net reads as arbitrary to them and undercharges us.
+    // guest_paid_total is the guest's side of an Airbnb row; fall back to
+    // tariff, then gross, for direct bookings and older rows that never
+    // captured it.
+    const guestPaid = Number(match.guest_paid_total) || 0
+    const nightly = Math.round(
+      guestPaid > 0 ? guestPaid / nights
+      : Number(match.tariff_per_night) > 0 ? Number(match.tariff_per_night)
       : (Number(match.gross) || 0) / nights)
 
     const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null }

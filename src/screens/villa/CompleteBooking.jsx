@@ -1444,28 +1444,34 @@ export default function CompleteBooking() {
                   </div>
                 </div>
 
-                {/* Extended check-in numbers — a nightly rate reference (not the
-                    multi-night total), same "per night" figure the enquiry's own
-                    pricing box already shows, so early check-in / half-day
-                    references stay correct regardless of how many nights the
-                    stay actually is. */}
+                {/* Extended check-in numbers — a per-night reference, not the
+                    multi-night total, so the figure stays correct regardless of
+                    how many nights the stay is.
+                    On Airbnb the base is what the GUEST PAID, not the night fee
+                    we receive. The guest is being asked for a share of their own
+                    booking, and their booking includes Airbnb's service fee — a
+                    quote off our net reads as arbitrary to them and undercharges
+                    us. Falls back to the night fee on older rows where the
+                    guest-paid total was never captured. */}
                 {(() => {
-                  const base = isAirbnb ? (nightFeeAmt / (nights || 1)) : tariff
+                  const guestPaidTotal = parseFloat(airbnb.guestPaid) || 0
+                  const airbnbBase = guestPaidTotal > 0 ? guestPaidTotal : (nightFeeAmt * (nights || 1))
+                  const base = isAirbnb ? (airbnbBase / (nights || 1)) : tariff
                   if (base <= 0) return null
                   return (
                     <div className="card" style={{marginBottom:'8px'}}>
                       <div className="card-section-label" style={{marginBottom:'10px'}}>EXTENDED STAY REFERENCE</div>
                       <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'10px'}}>
-                        Based on nightly rate of {fmt(base)}
+                        Based on {isAirbnb ? 'what the guest paid, per night' : 'nightly rate'} of {fmt(base)}
                       </div>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
                         <div style={extBox}>
-                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of nightly rate</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of {isAirbnb ? 'guest-paid' : 'nightly'} rate</div>
                           <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.25))}</div>
                           <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Early check-in / late check-out ref</div>
                         </div>
                         <div style={extBox}>
-                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of nightly rate</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of {isAirbnb ? 'guest-paid' : 'nightly'} rate</div>
                           <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.5))}</div>
                           <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Half-day / extra night ref</div>
                         </div>

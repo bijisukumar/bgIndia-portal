@@ -84,6 +84,9 @@ export default function Flexibility() {
   const [inTime,   setInTime]   = useState('')
   const [outTime,  setOutTime]  = useState('')
   const [waLink,   setWaLink]   = useState('')
+  const [lookup,  setLookup]   = useState(null)   // null | {found:false} | {found:true,...}
+  const [looking, setLooking]  = useState(false)
+  const [manual,  setManual]   = useState(false)  // fall back to the old free-form path
   const [details,  setDetails]  = useState('')
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
@@ -96,6 +99,51 @@ export default function Flexibility() {
 
   const isDirect = channel === F.directChannel
   const isOta    = !!channel && !isDirect
+
+  async function findMe() {
+    if (!name.trim())    { setError('Please tell us your name');  return }
+    if (!contact.trim()) { setError('Please give the email or phone on the booking'); return }
+    if (!checkIn || !checkOut) { setError('Please give both dates as they are on the booking'); return }
+    setError(''); setLooking(true); setLookup(null)
+    try {
+      const res = await fetch('/api/findMyBooking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ villaId: DEFAULT_VILLA_ID, guestName: name.trim(),
+          contact: contact.trim(), checkInDate: checkIn, checkOutDate: checkOut }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error || 'Could not look that up')
+      setLookup(data.data)
+      // Take the channel from the booking rather than asking — a guest who
+      // picks the wrong one from a dropdown would be quoted the wrong thing.
+      if (data.data.found) setChannel(data.data.isDirect ? F.directChannel : (F.channels[0] || 'OTA'))
+    } catch (e) { setError(e.message) }
+    finally { setLooking(false) }
+  }
+
+  // The quote, in the guest's own numbers. Only shown once we know which
+  // booking we're talking about — the public copy above still carries no
+  // figures, so nobody reverse-engineers a rate before we've seen the dates.
+  function QuoteBlock({ title, rows, note }) {
+    return (
+      <div style={{ background: c.card, border: `1px solid ${c.line}`, borderRadius: 12,
+        padding: '14px 15px', marginBottom: 12 }}>
+        <div style={{ color: c.gold, fontWeight: 700, fontSize: '0.9rem', marginBottom: 8 }}>{title}</div>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+            padding: '7px 0', borderTop: i ? `1px solid ${c.line}` : 'none' }}>
+            <span style={{ color: c.text, fontSize: '0.86rem' }}>
+              {r.hours} hrs — from {r.time}
+            </span>
+            <span style={{ color: c.dim, fontSize: '0.86rem', whiteSpace: 'nowrap' }}>
+              {r.pct}% · ₹{Number(r.amount).toLocaleString('en-IN')}
+            </span>
+          </div>
+        ))}
+        {note && <div style={{ color: c.faint, fontSize: '0.72rem', marginTop: 8, lineHeight: 1.5 }}>{note}</div>}
+      </div>
+    )
+  }
 
   // Prefilled WhatsApp to the owner. Same facts as the saved record, laid
   // out so it can be read on a phone without opening the portal.
@@ -182,16 +230,19 @@ export default function Flexibility() {
     </>
   )
 
+  const dateFields = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+      <Field label="Check-in date" required>
+        <input style={input} type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} />
+      </Field>
+      <Field label="Check-out date" required>
+        <input style={input} type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} />
+      </Field>
+    </div>
+  )
+
   const stayFields = (
     <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-        <Field label="Check-in date">
-          <input style={input} type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} />
-        </Field>
-        <Field label="Check-out date">
-          <input style={input} type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} />
-        </Field>
-      </div>
       <Field label="What do you need?" required>
         <select value={needType} onChange={e => setNeedType(e.target.value)}
           style={{ ...input, background: '#1A2332', color: needType ? c.text : c.faint }}>
@@ -318,78 +369,124 @@ export default function Flexibility() {
             <div style={{ background: c.card, border: `1px solid ${c.line}`, borderRadius: 14, padding: '24px 22px' }}>
               <h2 style={{ fontSize: '1.1rem', color: c.gold, margin: '0 0 16px' }}>{F.form.heading}</h2>
 
-              <Field label="How did you book?" required>
-                <select value={channel} onChange={e => { setChannel(e.target.value); setError('') }}
-                  style={{ ...input, background: '#1A2332', color: channel ? c.text : c.faint }}>
-                  <option value="">Select…</option>
-                  {F.channels.map(ch => <option key={ch} value={ch}>{ch}</option>)}
-                </select>
-              </Field>
+              {/* PHASE 1 - who they are and which dates. Nothing else is
+                  asked yet: we can answer far better once we know which
+                  booking this is, so find it first. */}
+              {!(lookup && lookup.found) && (
+                <>
+                  {contactFields}
+                  {dateFields}
+                  {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>{error}</div>}
+                  <button onClick={findMe} disabled={looking} style={{
+                    width: '100%', padding: 14, borderRadius: 11, border: 'none',
+                    background: looking ? 'rgba(200,144,58,0.4)' : c.gold, color: '#111',
+                    fontWeight: 800, fontSize: '0.92rem', cursor: looking ? 'not-allowed' : 'pointer' }}>
+                    {looking ? 'Looking...' : 'Find my booking'}
+                  </button>
 
-              {/* OTA guests can't be sold the adjoining night here — turn it
-                  into a direct booking instead. */}
-              {isOta && (
-                <div style={{ marginTop: 18, paddingTop: 18, borderTop: `1px solid ${c.line}` }}>
-                  <h3 style={{ fontSize: '0.95rem', color: c.text, margin: '0 0 10px' }}>{F.ota.heading}</h3>
-                  {F.ota.body.map((p, i) => (
-                    <p key={i} style={{ color: c.dim, fontSize: '0.88rem', lineHeight: 1.7, margin: '0 0 12px' }}>{p}</p>
-                  ))}
-
-                  {(F.ota.directPitch || []).length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 9,
-                      margin: '0 0 16px', padding: '14px 15px', borderRadius: 11,
-                      background: c.goldSoft, border: `1px solid ${c.goldLine}` }}>
-                      {F.ota.directPitch.map((line, i) => (
-                        <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
-                          <span style={{ color: c.gold, flexShrink: 0, fontWeight: 700 }}>✓</span>
-                          <span style={{ color: c.text, fontSize: '0.87rem', lineHeight: 1.55 }}>{line}</span>
-                        </div>
-                      ))}
+                  {lookup && !lookup.found && !manual && (
+                    <div style={{ marginTop: 14, padding: '14px 15px', borderRadius: 11,
+                      background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.4)' }}>
+                      <div style={{ color: '#F59E0B', fontWeight: 700, fontSize: '0.88rem', marginBottom: 6 }}>
+                        We could not match that to a booking
+                      </div>
+                      <div style={{ color: c.dim, fontSize: '0.84rem', lineHeight: 1.6 }}>
+                        The dates and the email or phone need to be exactly as they are on your
+                        reservation. Worth checking those - or send us the request anyway and
+                        we will find it at our end.
+                      </div>
+                      <button onClick={() => setManual(true)} style={{
+                        marginTop: 12, padding: '11px 16px', borderRadius: 10,
+                        border: '1px solid ' + c.goldLine, background: 'transparent',
+                        color: c.gold, fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer' }}>
+                        Send the request anyway
+                      </button>
                     </div>
                   )}
 
-                  {/* The conversion ask, before the inputs — they've just read
-                      what direct actually gets them, so this is the moment it
-                      lands. */}
-                  <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
-                    padding: '12px 13px', borderRadius: 10, cursor: 'pointer', margin: '4px 0 16px',
-                    background: wantsDirect ? 'rgba(200,144,58,0.12)' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${wantsDirect ? c.goldLine : c.line}` }}>
-                    <input type="checkbox" checked={wantsDirect}
-                      onChange={e => setWantsDirect(e.target.checked)}
-                      style={{ marginTop: 3, flexShrink: 0 }} />
-                    <span style={{ color: wantsDirect ? c.text : c.dim, fontSize: '0.88rem', lineHeight: 1.5 }}>
-                      {F.ota.directOptInLabel || "I'd like to book with you directly."}
-                    </span>
-                  </label>
-
-                  {contactFields}
-                  {/* Ticking the box means they want to deal with us directly,
-                      so ask for everything a direct request needs here and now
-                      rather than sending them round again. */}
-                  {wantsDirect && stayFields}
-                  {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>⚠️ {error}</div>}
-                  <button onClick={() => submit(wantsDirect ? 'direct' : 'ota')} disabled={busy} style={{
-                    width: '100%', padding: 14, borderRadius: 11, border: 'none',
-                    background: busy ? 'rgba(200,144,58,0.4)' : c.gold, color: '#111',
-                    fontWeight: 800, fontSize: '0.92rem', cursor: busy ? 'not-allowed' : 'pointer' }}>
-                    {busy ? 'Sending…' : (wantsDirect ? F.form.submitLabel : F.ota.ctaLabel)}
-                  </button>
-                </div>
+                  {manual && (
+                    <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid ' + c.line }}>
+                      <Field label="How did you book?" required>
+                        <select value={channel} onChange={e => { setChannel(e.target.value); setError('') }}
+                          style={{ ...input, background: '#1A2332', color: channel ? c.text : c.faint }}>
+                          <option value="">Select...</option>
+                          {F.channels.map(ch => <option key={ch} value={ch}>{ch}</option>)}
+                        </select>
+                      </Field>
+                      {stayFields}
+                      {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>{error}</div>}
+                      <button onClick={() => submit('direct')} disabled={busy} style={{
+                        width: '100%', padding: 14, borderRadius: 11, border: 'none',
+                        background: busy ? 'rgba(200,144,58,0.4)' : c.gold, color: '#111',
+                        fontWeight: 800, fontSize: '0.92rem', cursor: busy ? 'not-allowed' : 'pointer' }}>
+                        {busy ? 'Sending...' : F.form.submitLabel}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
 
-              {isDirect && (
-                <div style={{ marginTop: 18, paddingTop: 18, borderTop: `1px solid ${c.line}` }}>
-                  {contactFields}
+              {/* PHASE 2 - found. Now we can quote real numbers. */}
+              {lookup && lookup.found && (
+                <>
+                  <div style={{ padding: '13px 15px', borderRadius: 11, marginBottom: 16,
+                    background: 'rgba(52,168,83,0.08)', border: '1px solid rgba(52,168,83,0.35)' }}>
+                    <div style={{ color: c.green, fontWeight: 700, fontSize: '0.9rem' }}>
+                      Found it - welcome back, {lookup.firstName}
+                    </div>
+                    <div style={{ color: c.dim, fontSize: '0.82rem', marginTop: 3 }}>
+                      {lookup.checkinDate} to {lookup.checkoutDate} · {lookup.nights} night{lookup.nights > 1 ? 's' : ''}
+                      {' '}· check-in {lookup.standardCheckin}, check-out {lookup.standardCheckout}
+                    </div>
+                  </div>
+
+                  <QuoteBlock title="Arrive earlier" rows={lookup.earlyCheckin}
+                    note="Priced against your own nightly rate, not a full extra night." />
+                  <QuoteBlock title="Leave later" rows={lookup.lateCheckout}
+                    note="Whichever you choose, we hold the adjoining night so it is actually yours." />
+
+                  {!lookup.isDirect && (
+                    <div style={{ marginBottom: 14 }}>
+                      {(F.ota.directPitch || []).length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8,
+                          margin: '0 0 12px', padding: '13px 14px', borderRadius: 11,
+                          background: c.goldSoft, border: '1px solid ' + c.goldLine }}>
+                          {F.ota.directPitch.map((line, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+                              <span style={{ color: c.gold, flexShrink: 0, fontWeight: 700 }}>&#10003;</span>
+                              <span style={{ color: c.text, fontSize: '0.85rem', lineHeight: 1.5 }}>{line}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
+                        padding: '12px 13px', borderRadius: 10, cursor: 'pointer',
+                        background: wantsDirect ? 'rgba(200,144,58,0.12)' : c.card,
+                        border: '1px solid ' + (wantsDirect ? c.goldLine : c.line) }}>
+                        <input type="checkbox" checked={wantsDirect}
+                          onChange={e => setWantsDirect(e.target.checked)}
+                          style={{ marginTop: 3, flexShrink: 0 }} />
+                        <span style={{ color: wantsDirect ? c.text : c.dim, fontSize: '0.88rem', lineHeight: 1.5 }}>
+                          {F.ota.directOptInLabel}
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
                   {stayFields}
-                  {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>⚠️ {error}</div>}
+                  {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>{error}</div>}
                   <button onClick={() => submit('direct')} disabled={busy} style={{
                     width: '100%', padding: 14, borderRadius: 11, border: 'none',
                     background: busy ? 'rgba(200,144,58,0.4)' : c.gold, color: '#111',
                     fontWeight: 800, fontSize: '0.92rem', cursor: busy ? 'not-allowed' : 'pointer' }}>
-                    {busy ? 'Sending…' : F.form.submitLabel}
+                    {busy ? 'Sending...' : F.form.submitLabel}
                   </button>
-                </div>
+                  <button onClick={() => { setLookup(null); setError('') }} style={{
+                    width: '100%', marginTop: 8, padding: 10, borderRadius: 10, border: 'none',
+                    background: 'transparent', color: c.faint, fontSize: '0.8rem', cursor: 'pointer' }}>
+                    Not your booking? Search again
+                  </button>
+                </>
               )}
             </div>
           )}

@@ -134,6 +134,7 @@ export const CONFIG = {
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request and will come back to you before you travel.",
     },
+    tiers: [ { hours: 4, pct: 25 }, { hours: 8, pct: 50 } ],
     channels: ['OTA — online partner (Airbnb, Booking.com, MMT…)', 'Direct with us', 'Travel agent'],
     directChannel: 'Direct with us',
   },

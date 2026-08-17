@@ -226,6 +226,15 @@ export const CONFIG = {
     // Three, not nine. The guest doesn't need to name their platform for us
     // to answer them — only whether we hold their calendar. OTA and travel
     // agent behave identically here: we cannot sell them the adjoining night.
+    // What extra time costs, as a share of the guest's own nightly rate.
+    // Read server-side by findMyBooking to quote real figures once we know
+    // which booking we're talking to — the public copy above still carries
+    // no numbers, so nobody works backwards to a rate before we've checked
+    // the dates.
+    tiers: [
+      { hours: 4, pct: 25 },
+      { hours: 8, pct: 50 },
+    ],
     channels: ['OTA — online partner (Airbnb, Booking.com, MMT…)', 'Direct with us', 'Travel agent'],
     directChannel: 'Direct with us',
   },

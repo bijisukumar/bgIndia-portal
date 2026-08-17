@@ -1188,6 +1188,90 @@ export async function onRequest(ctx) {
     } })
   }
 
+  // ── FIND MY BOOKING (public) ──────────────────────────────────────────
+  // Lets a guest pull up their own stay so the page can quote real numbers
+  // instead of vague percentages. Public, so the matching is the security:
+  // BOTH dates must match exactly and the contact must match exactly —
+  // only the name is fuzzy, because guests type theirs inconsistently
+  // ("SUNI CHANDRAN" vs "Suni Chandran Balachandran").
+  //
+  // Exact dates + exact contact is the shared secret. Loosening either
+  // would turn this into a way to enumerate guests, so don't. The reply
+  // carries no phone, email, address or price paid — only what the guest
+  // already knows plus the nightly rate their own quote is derived from.
+  // A miss says "not found" and nothing more: never reveal which half
+  // matched, or the endpoint becomes an address checker.
+  if (action === 'findMyBooking' && method === 'POST') {
+    const lb = await request.json().catch(() => ({}))
+    const villaId  = lb.villaId || DEFAULT_VILLA_ID
+    const nm       = String(lb.guestName || '').trim()
+    const ct       = String(lb.contact   || '').trim()
+    const ci       = String(lb.checkInDate  || '').trim()
+    const co       = String(lb.checkOutDate || '').trim()
+    if (!nm || !ct || !ci || !co) return err('name, contact and both dates are required')
+
+    const digits = ct.replace(/\D/g, '')
+    const { results: hits } = await DB.prepare(`
+      SELECT stay_id, guest_name, booked_by_name, checkin_date, checkout_date, nights,
+             tariff_per_night, gross, guest_email, guest_phone, source
+        FROM stayvibe_stays
+       WHERE villa_id = ?
+         AND checkin_date = ? AND checkout_date = ?
+         AND status NOT IN ('cancelled','void')
+         AND (LOWER(guest_name) LIKE ? OR LOWER(COALESCE(booked_by_name,'')) LIKE ?)
+    `).bind(villaId, ci, co, `%${nm.toLowerCase()}%`, `%${nm.toLowerCase()}%`).all()
+
+    const match = (hits || []).find(r => {
+      const email = String(r.guest_email || '').trim().toLowerCase()
+      const phone = String(r.guest_phone || '').replace(/\D/g, '')
+      if (email && email === ct.toLowerCase()) return true
+      // Phone match on the last 10 digits — the same number is stored with
+      // and without a country code across channels.
+      if (phone && digits.length >= 10 && phone.slice(-10) === digits.slice(-10)) return true
+      return false
+    })
+    if (!match) return json({ success: true, data: { found: false } })
+
+    const cfg   = getHostConfig(villaId)
+    const turn  = cfg.turnaround || {}
+    const tiers = (cfg.flexibility && cfg.flexibility.tiers) || [{ hours: 4, pct: 25 }, { hours: 8, pct: 50 }]
+    const nights = Math.max(1, parseInt(match.nights) || 1)
+    // tariff_per_night is authoritative where set; otherwise derive it, since
+    // an OTA row often carries only the total.
+    const nightly = Math.round(Number(match.tariff_per_night) > 0
+      ? Number(match.tariff_per_night)
+      : (Number(match.gross) || 0) / nights)
+
+    const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null }
+    const fmt   = mins => {
+      const m = ((mins % 1440) + 1440) % 1440
+      return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+    }
+    const inMin  = toMin(turn.defaultCheckinTime  || '16:00')
+    const outMin = toMin(turn.defaultCheckoutTime || '11:00')
+    const build = (baseMin, dir) => tiers.map(t => ({
+      hours: t.hours, pct: t.pct,
+      amount: Math.round(nightly * t.pct / 100),
+      time: fmt(baseMin + dir * t.hours * 60),
+    }))
+
+    return json({ success: true, data: {
+      found: true,
+      stayId: match.stay_id,
+      firstName: String(match.guest_name || '').trim().split(/\s+/)[0] || 'there',
+      checkinDate: match.checkin_date, checkoutDate: match.checkout_date,
+      nights, nightlyRate: nightly,
+      // The channel comes from the booking, so the page never has to ask
+      // "how did you book?" — and can't be told the wrong answer.
+      source: match.source || null,
+      isDirect: ['direct','website','whatsapp'].includes(String(match.source || '').toLowerCase()),
+      standardCheckin:  turn.defaultCheckinTime  || '16:00',
+      standardCheckout: turn.defaultCheckoutTime || '11:00',
+      earlyCheckin: build(inMin,  -1),
+      lateCheckout: build(outMin, +1),
+    }})
+  }
+
   // ── FLEXIBILITY REQUEST (public — same no-auth trust model as the
   // guest check-in form). Writes a request for the owner to price and
   // confirm; never quotes or promises anything back to the guest. ──

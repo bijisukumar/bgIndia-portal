@@ -66,6 +66,8 @@ export default function Flexibility() {
   const [checkIn,  setCheckIn]  = useState('')
   const [checkOut, setCheckOut] = useState('')
   const [needType, setNeedType] = useState('')
+  const [priority, setPriority] = useState('')
+  const [wantsDirect, setWantsDirect] = useState(false)
   const [details,  setDetails]  = useState('')
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
@@ -78,6 +80,7 @@ export default function Flexibility() {
     if (!name.trim())    { setError('Please tell us your name');  return }
     if (!contact.trim()) { setError('Please leave a phone or email so we can reply'); return }
     if (kind === 'direct' && !needType) { setError('Please tell us what you need'); return }
+    if (kind === 'direct' && !priority) { setError('Please tell us whether this is a nice-to-have or a must-have'); return }
     setError(''); setBusy(true)
     try {
       const res = await fetch('/api/submitFlexRequest', {
@@ -91,6 +94,10 @@ export default function Flexibility() {
           // action for the current stay — recorded distinctly so the owner
           // isn't shown it as something to price.
           needType: kind === 'direct' ? needType : 'Direct rates for next time',
+          // An OTA lead is by definition someone we want on direct next time,
+          // so that path always carries the interest flag.
+          priority: kind === 'direct' ? priority : null,
+          wantsDirect: kind === 'direct' ? wantsDirect : true,
           details: details || null,
         }),
       })
@@ -142,6 +149,17 @@ export default function Flexibility() {
           <h2 style={{ fontSize: '1.1rem', color: c.gold, margin: '0 0 14px' }}>{F.options.heading}</h2>
           {F.options.body.map((p, i) => (
             <p key={i} style={{ color: c.dim, fontSize: '0.92rem', lineHeight: 1.7, margin: '0 0 12px' }}>{p}</p>
+          ))}
+
+          {/* The two asks, side by side — a guest who only "would like" the
+              extra time should not read a price and assume it applies. */}
+          {(F.options.tiers || []).map((t, i) => (
+            <div key={i} style={{ background: c.card, border: `1px solid ${c.line}`,
+              borderRadius: 12, padding: '16px 16px', margin: '0 0 12px' }}>
+              <div style={{ color: c.gold, fontWeight: 700, fontSize: '0.95rem' }}>{t.label}</div>
+              <div style={{ color: c.text, fontWeight: 600, fontSize: '0.88rem', margin: '4px 0 8px' }}>{t.lead}</div>
+              <div style={{ color: c.dim, fontSize: '0.9rem', lineHeight: 1.7 }}>{t.body}</div>
+            </div>
           ))}
           {F.options.availabilityNote && (
             <p style={{ color: c.dim, fontSize: '0.9rem', lineHeight: 1.7, margin: '0 0 12px',
@@ -222,12 +240,45 @@ export default function Flexibility() {
                       {F.form.needTypes.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </Field>
+                  {/* Which tier they're asking for. Radios, not a dropdown —
+                      the difference between the two is the whole point and
+                      shouldn't be hidden behind a tap. */}
+                  <Field label={F.form.priorityLabel || 'Type of request'} required>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {(F.form.priorities || []).map(p => (
+                        <label key={p.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
+                          padding: '11px 12px', borderRadius: 10, cursor: 'pointer',
+                          background: priority === p.id ? 'rgba(200,144,58,0.12)' : c.card,
+                          border: `1px solid ${priority === p.id ? c.goldLine : c.line}` }}>
+                          <input type="radio" name="flexPriority" value={p.id}
+                            checked={priority === p.id}
+                            onChange={() => setPriority(p.id)}
+                            style={{ marginTop: 3, flexShrink: 0 }} />
+                          <span style={{ color: priority === p.id ? c.text : c.dim,
+                            fontSize: '0.88rem', lineHeight: 1.5 }}>{p.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </Field>
+
                   <Field label="Anything that helps us plan"
                     hint="Roughly what time you expect to arrive or leave, who's travelling, anything else">
                     <textarea rows={3} style={{ ...input, resize: 'vertical' }} value={details}
                       onChange={e => setDetails(e.target.value)}
                       placeholder="e.g. driving from Bengaluru overnight with two small children, hoping to arrive around noon" />
                   </Field>
+
+                  <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
+                    padding: '11px 12px', borderRadius: 10, cursor: 'pointer', marginBottom: 12,
+                    background: wantsDirect ? 'rgba(200,144,58,0.12)' : c.card,
+                    border: `1px solid ${wantsDirect ? c.goldLine : c.line}` }}>
+                    <input type="checkbox" checked={wantsDirect}
+                      onChange={e => setWantsDirect(e.target.checked)}
+                      style={{ marginTop: 3, flexShrink: 0 }} />
+                    <span style={{ color: wantsDirect ? c.text : c.dim, fontSize: '0.88rem', lineHeight: 1.5 }}>
+                      {F.form.directInterestLabel || "I'd like to discuss booking directly with you"}
+                    </span>
+                  </label>
                   {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>⚠️ {error}</div>}
                   <button onClick={() => submit('direct')} disabled={busy} style={{
                     width: '100%', padding: 14, borderRadius: 11, border: 'none',

@@ -145,6 +145,28 @@ export default function FlexRequests() {
               <div style={{ marginTop: 10, fontSize: '0.82rem', color: 'var(--text)' }}>
                 {r.need_type || '—'}
               </div>
+
+              {/* Must-have vs nice-to-have decides how this gets handled, not
+                  just how it gets priced: a nice-to-have can wait until the
+                  morning, a must-have needs answering before they travel. */}
+              {r.priority && (
+                <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: '800', padding: '3px 8px',
+                    borderRadius: '7px', letterSpacing: '0.4px',
+                    color:      r.priority === 'must_have' ? '#F59E0B' : '#85B7EB',
+                    background: r.priority === 'must_have' ? 'rgba(245,158,11,0.15)' : 'rgba(133,183,235,0.13)',
+                    border: `1px solid ${r.priority === 'must_have' ? 'rgba(245,158,11,0.45)' : 'rgba(133,183,235,0.35)'}` }}>
+                    {r.priority === 'must_have' ? 'MUST HAVE · will pay' : 'NICE TO HAVE · free if free'}
+                  </span>
+                  {!!r.wants_direct && (
+                    <span style={{ fontSize: '0.68rem', fontWeight: '800', padding: '3px 8px',
+                      borderRadius: '7px', letterSpacing: '0.4px', color: '#34A853',
+                      background: 'rgba(52,168,83,0.14)', border: '1px solid rgba(52,168,83,0.4)' }}>
+                      WANTS TO BOOK DIRECT
+                    </span>
+                  )}
+                </div>
+              )}
               {(r.checkin_date || r.checkout_date) && (
                 <div style={{ fontSize: '0.76rem', color: 'var(--text-dim)', marginTop: 3 }}>
                   {r.checkin_date ? fmtDate(r.checkin_date) : '—'} → {r.checkout_date ? fmtDate(r.checkout_date) : '—'}

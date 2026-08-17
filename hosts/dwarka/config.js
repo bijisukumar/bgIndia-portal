@@ -161,8 +161,23 @@ export const CONFIG = {
     options: {
       heading: "Need to arrive earlier, or leave later? Just ask.",
       body: [
-        'We know family travel rarely fits neatly into a 4:00 PM arrival — a long drive, small children, elderly parents, a wedding to be at. So rather than turn the request down, we hold the adjoining night for you.',
-        "Once we do that, the night can't be offered to anyone else. Even so, we don't charge for a full extra night — we ask for a fraction of it, typically 25% or 50%, depending on how much extra time you need. We'll confirm the exact amount once we've looked at your dates.",
+        'We understand that at times a family needs more flexibility than our normal timings allow — a long drive, small children, elderly parents, a wedding to be at. So rather than turn the request down, tell us which of these two it is, and we will work to it.',
+      ],
+      // Two genuinely different asks, and conflating them is what causes
+      // friction. "It would be nice" costs nothing and can be answered on the
+      // day. "We cannot manage otherwise" needs the adjoining night actually
+      // held, which is a night that can no longer be sold — so it is priced.
+      tiers: [
+        {
+          label: 'Would be nice to have',
+          lead: 'Free, if the house is free.',
+          body: "Tell us and we'll keep it in mind. If nobody is staying the night before, or the previous family leaves early, we'll simply give you the extra time at no charge. We'll confirm on the morning of your check-in, once we know how the night before has gone — so please don't build your travel plans around it.",
+        },
+        {
+          label: 'Must have',
+          lead: 'Held for you, guaranteed, at a fraction of a night.',
+          body: "If your family cannot manage without the earlier arrival or later departure, we hold the adjoining night so it is certain. Once we do, that night can't be offered to anyone else — but we don't charge for a full extra night. We ask for a fraction of it, 25% or 50% depending on how much extra time you need. We'll confirm the exact amount once we've looked at your dates, and it's settled before you travel.",
+        },
       ],
       availabilityNote: "One honest note: when the villa is booked back-to-back, there may simply be no gap to give — and we won't always be able to say yes. If that happens we'll tell you early rather than leave you hoping, and we'll look at every option we have to rearrange things around your family before we do.",
       directNote: "This is something we're able to offer only to guests who book with us directly. Booking direct means the calendar is ours to hold, so we can set a night aside for your family and price it as a courtesy rather than a full night's stay. It's one of the ways we try to keep your costs down.",
@@ -184,8 +199,18 @@ export const CONFIG = {
         'Later check-out on departure day',
         'Both',
       ],
+      // Which of the two tiers above they are actually asking for. Captured
+      // separately from needType so the owner can triage: a "nice to have"
+      // waits until the morning, a "must have" needs a decision and a price
+      // before the family travels.
+      priorityLabel: 'Type of request',
+      priorities: [
+        { id: 'nice_to_have', label: 'Would like it if available — no charge, confirm on the day' },
+        { id: 'must_have',    label: 'Must have — happy to pay to secure it' },
+      ],
+      directInterestLabel: "I'd like to discuss booking directly with you",
       submitLabel: 'Send request',
-      thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do and the exact amount, before you travel.",
+      thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do, before you travel.",
     },
     channels: ['Direct with the villa', 'Airbnb', 'Booking.com', 'MakeMyTrip', 'Goibibo', 'Agoda', 'Expedia', 'VRBO', 'Other platform'],
     directChannel: 'Direct with the villa',

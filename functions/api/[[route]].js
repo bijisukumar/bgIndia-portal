@@ -1195,19 +1195,21 @@ export async function onRequest(ctx) {
     const fBody = await request.json().catch(() => ({}))
     const {
       villaId = DEFAULT_VILLA_ID, guestName, contact, bookingChannel,
-      checkInDate, checkOutDate, needType, details,
+      checkInDate, checkOutDate, needType, details, priority, wantsDirect,
     } = fBody
     if (!guestName || !String(guestName).trim()) return err('guestName required')
     const reqId = genId('FLEX')
     await DB.prepare(`
       INSERT INTO stayvibe_flex_requests
         (request_id, villa_id, guest_name, contact, booking_channel,
-         checkin_date, checkout_date, need_type, details, status)
-      VALUES (?,?,?,?,?,?,?,?,?,'new')
+         checkin_date, checkout_date, need_type, details, status,
+         priority, wants_direct)
+      VALUES (?,?,?,?,?,?,?,?,?,'new',?,?)
     `).bind(
       reqId, villaId, String(guestName).trim(), contact || null,
       bookingChannel || null, checkInDate || null, checkOutDate || null,
-      needType || null, details || null
+      needType || null, details || null,
+      priority || null, wantsDirect ? 1 : 0
     ).run()
 
     // Tell the owner straight away — these are time-sensitive (the guest is
@@ -3054,7 +3056,7 @@ export async function onRequest(ctx) {
         const { results: reqs } = await DB.prepare(
           `SELECT request_id, guest_name, contact, booking_channel, checkin_date,
                   checkout_date, need_type, details, status, quoted_pct,
-                  owner_note, created_at
+                  owner_note, created_at, priority, wants_direct
              FROM stayvibe_flex_requests
             WHERE villa_id = ?
             ORDER BY CASE WHEN status = 'new' THEN 0 ELSE 1 END, created_at DESC

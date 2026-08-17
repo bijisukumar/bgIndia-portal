@@ -151,13 +151,24 @@ export default function FlexRequests() {
                   morning, a must-have needs answering before they travel. */}
               {r.priority && (
                 <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.68rem', fontWeight: '800', padding: '3px 8px',
-                    borderRadius: '7px', letterSpacing: '0.4px',
-                    color:      r.priority === 'must_have' ? '#F59E0B' : '#85B7EB',
-                    background: r.priority === 'must_have' ? 'rgba(245,158,11,0.15)' : 'rgba(133,183,235,0.13)',
-                    border: `1px solid ${r.priority === 'must_have' ? 'rgba(245,158,11,0.45)' : 'rgba(133,183,235,0.35)'}` }}>
-                    {r.priority === 'must_have' ? 'MUST HAVE · will pay' : 'NICE TO HAVE · free if free'}
-                  </span>
+                  {(() => {
+                    // Three states now, and they are handled differently:
+                    // must-have needs pricing and a decision before they
+                    // travel; the other two are free and can wait.
+                    const P = {
+                      must_have:        { label: 'MUST HAVE · will pay',            hue: '245,158,11' },
+                      check_on_arrival: { label: 'WILL CHECK ON ARRIVAL · no charge', hue: '52,168,83' },
+                      nice_to_have:     { label: 'NICE TO HAVE · free if free',     hue: '133,183,235' },
+                    }[r.priority] || { label: String(r.priority).toUpperCase(), hue: '133,183,235' }
+                    return (
+                      <span style={{ fontSize: '0.68rem', fontWeight: '800', padding: '3px 8px',
+                        borderRadius: '7px', letterSpacing: '0.4px',
+                        color: `rgb(${P.hue})`, background: `rgba(${P.hue},0.14)`,
+                        border: `1px solid rgba(${P.hue},0.45)` }}>
+                        {P.label}
+                      </span>
+                    )
+                  })()}
                   {!!r.wants_direct && (
                     <span style={{ fontSize: '0.68rem', fontWeight: '800', padding: '3px 8px',
                       borderRadius: '7px', letterSpacing: '0.4px', color: '#34A853',

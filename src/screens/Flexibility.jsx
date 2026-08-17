@@ -128,7 +128,16 @@ export default function Flexibility() {
     return (
       <div style={{ background: c.card, border: `1px solid ${c.line}`, borderRadius: 12,
         padding: '14px 15px', marginBottom: 12 }}>
-        <div style={{ color: c.gold, fontWeight: 700, fontSize: '0.9rem', marginBottom: 8 }}>{title}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+          gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ color: c.gold, fontWeight: 700, fontSize: '0.9rem' }}>{title}</span>
+          {/* Never let a figure on this page read as a confirmed price. The
+              night still has to be free, and the owner still has to agree it. */}
+          <span style={{ color: c.faint, fontSize: '0.68rem', letterSpacing: '0.3px',
+            textTransform: 'uppercase', fontWeight: 700 }}>
+            Approx · subject to approval
+          </span>
+        </div>
         {rows.map((r, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
             padding: '7px 0', borderTop: i ? `1px solid ${c.line}` : 'none' }}>

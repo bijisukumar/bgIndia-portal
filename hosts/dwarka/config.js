@@ -198,7 +198,7 @@ export const CONFIG = {
         'Talk straight to the family who owns the home — no call centre, no ticket number',
         'Tell us what your family needs and get an answer from someone who can actually say yes',
       ],
-      directOptInLabel: "I'd like to book with you directly.",
+      directOptInLabel: "I'd like to book with you directly, to secure the Must have option above.",
       ctaLabel: 'Send me your direct rates',
       thanks: "Thank you — we'll come straight back to you with our direct rates.",
     },
@@ -217,8 +217,9 @@ export const CONFIG = {
       // before the family travels.
       priorityLabel: 'Type of request',
       priorities: [
-        { id: 'nice_to_have', label: 'Would like it if available — no charge, confirm on the day' },
-        { id: 'must_have',    label: 'Must have — happy to pay to secure it' },
+        { id: 'nice_to_have',     label: 'Would like it if available — tell me on the morning, no charge' },
+        { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no payment needed" },
+        { id: 'must_have',        label: 'Must have — I want it secured, and will pay for it' },
       ],
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do, before you travel.",

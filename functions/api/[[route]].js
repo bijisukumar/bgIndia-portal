@@ -448,6 +448,58 @@ function guestPaidPerNight(r) {
   return Math.round((Number(r && r.gross) || 0) / nights)
 }
 
+// ── SIDE TABLES ──────────────────────────────────────────────────────────
+// stayvibe_stays hit D1's 100-column ALTER TABLE ceiling, and two whole
+// blocks of it were near-empty: immigration/KYC (filled on 2 of 313 rows)
+// and guest preferences (0 of 313). Both now live in their own 1:1 tables,
+// written only when a guest actually supplies something — so a domestic
+// booking creates no KYC row at all.
+//
+// Rows are created lazily on first write. Nothing reads these on the hot
+// path, so the main stay query stays a single-table read.
+async function upsertStaySide(DB, table, stayId, villaId, fields) {
+  if (!stayId) return
+  const keys = Object.keys(fields).filter(k => fields[k] !== undefined)
+  // All-empty means the guest gave us nothing for this block — don't create
+  // a row just to hold nulls.
+  if (!keys.length || keys.every(k => fields[k] === null || fields[k] === '' || fields[k] === 0)) return
+  const cols = ['stay_id', 'villa_id', ...keys]
+  const vals = [stayId, villaId || null, ...keys.map(k => fields[k])]
+  const sets = keys.map(k => `${k} = excluded.${k}`).concat("updated_at = datetime('now')")
+  await DB.prepare(
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(',')})
+       ON CONFLICT(stay_id) DO UPDATE SET ${sets.join(', ')}`
+  ).bind(...vals).run()
+}
+
+// Both check-in paths (update-existing and insert-new) supply the same
+// fields, so the mapping from form names to columns lives once here rather
+// than being duplicated either side of that branch.
+async function writeStaySideBlocks(DB, stayId, villaId, f) {
+  await upsertStaySide(DB, 'stayvibe_stay_kyc', stayId, villaId, {
+    passport_number:      f.passportNumber      || null,
+    passport_issue_date:  f.passportIssueDate   || null,
+    passport_issue_place: f.passportIssuePlace  || null,
+    passport_expiry:      f.passportExpiry      || null,
+    visa_number:          f.visaNumber          || null,
+    visa_type:            f.visaType            || null,
+    visa_issue_date:      f.visaIssueDate       || null,
+    visa_issue_place:     f.visaIssuePlace      || null,
+    arrival_date_india:   f.arrivalDateIndia    || null,
+    port_of_arrival:      f.portOfArrival       || null,
+    next_destination:     f.nextDestination     || null,
+    home_country:         f.homeCountry         || null,
+    home_country_address: f.homeCountryAddress  || null,
+  })
+  await upsertStaySide(DB, 'stayvibe_stay_prefs', stayId, villaId, {
+    request_breakfast:  f.reqBreakfast ? 1 : 0,
+    breakfast_choice:   f.bfChoice     || null,
+    request_cab:        f.reqCab       ? 1 : 0,
+    request_extra_beds: f.reqBeds      ? 1 : 0,
+    extra_beds_count:   parseInt(f.bedsCount) || 0,
+  })
+}
+
 async function syncStayLedger(DB, stayId) {
   try {
     if (!stayId) return
@@ -938,20 +990,13 @@ export async function onRequest(ctx) {
             guest_email = COALESCE(NULLIF(guest_email,''), ?),
             dob = ?, gender = ?, nationality = ?,
             home_address = ?, city = ?, state = ?, country = ?, from_city = ?, pincode = ?,
-            home_country_address = ?, home_country = ?,
             checkout_date = COALESCE(checkout_date, ?),
             nights = COALESCE(NULLIF(nights,0), ?),
             adults = ?, children = ?,
             guest_list = ?, purpose_of_visit = ?,
             mode_of_transport = ?, vehicle_number = ?, eta = ?,
             govt_id_type = ?, govt_id_num = ?,
-            passport_number = ?, passport_issue_date = ?, passport_issue_place = ?,
-            passport_expiry = ?, visa_number = ?, visa_type = ?,
-            visa_issue_date = ?, visa_issue_place = ?,
-            arrival_date_india = ?, port_of_arrival = ?, next_destination = ?,
             request_early_checkin = ?, request_late_checkout = ?,
-            request_breakfast = ?, breakfast_choice = ?, request_cab = ?,
-            request_extra_beds = ?, extra_beds_count = ?,
             source = CASE WHEN source = 'direct' OR source IS NULL THEN ? ELSE source END,
             checkin_form_submitted = 1, checkin_form_submitted_at = ?,
             status = CASE WHEN status IN ('confirmed','booked','pending_review') THEN 'pending_review' ELSE status END,
@@ -961,19 +1006,20 @@ export async function onRequest(ctx) {
           phone||null, email||null,
           dob||null, gender||null, nationality,
           homeAddress||null, city||null, state||null, country, fromCity||city||null, pincode||null,
-          homeCountryAddress||null, homeCountry||null,
           checkOutDate||null, parseInt(nights)||1,
           parseInt(adults)||1, parseInt(children)||0,
           guestList||null, purposeOfVisit||null,
           modeOfTransport||null, vehicleNumber||null, eta||null,
           govtIdType||null, govtIdNum||null,
-          passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
-          passportExpiry||null, visaNumber||null, visaType||null,
-          visaIssueDate||null, visaIssuePlace||null,
-          arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-          reqEarly, reqLate, reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
+          reqEarly, reqLate,
           partner||'direct', submittedAt, submittedAt, stayId
         ).run()
+        await writeStaySideBlocks(DB, stayId, villaId, {
+          passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
+          visaNumber, visaType, visaIssueDate, visaIssuePlace,
+          arrivalDateIndia, portOfArrival, nextDestination, homeCountry, homeCountryAddress,
+          reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
+        })
       } else {
         stayId = genStayId(villaId)
         const n = parseInt(nights) || (checkOutDate
@@ -984,25 +1030,16 @@ export async function onRequest(ctx) {
             stay_id, villa_id, source, guest_name, guest_phone, guest_email,
             checkin_date, checkout_date, nights, adults, children, gross, net,
             dob, gender, nationality,
-            home_address, city, state, country, from_city, pincode, home_country_address, home_country,
+            home_address, city, state, country, from_city, pincode,
             guest_list, purpose_of_visit, mode_of_transport, vehicle_number, eta,
             govt_id_type, govt_id_num,
-            passport_number, passport_issue_date, passport_issue_place, passport_expiry,
-            visa_number, visa_type, visa_issue_date, visa_issue_place,
-            arrival_date_india, port_of_arrival, next_destination,
             request_early_checkin, request_late_checkout,
-            request_breakfast, breakfast_choice, request_cab,
-            request_extra_beds, extra_beds_count,
             checkin_form_submitted, status, created_by, updated_by
           ) VALUES (
             ?,?,?,?,?,?,?,?,?,?,?,0,0,
-            ?,?,?,?,?,?,?,?,?,?,?,
+            ?,?,?,?,?,?,?,?,?,
             ?,?,?,?,?,
             ?,?,
-            ?,?,?,?,
-            ?,?,?,?,
-            ?,?,?,
-            ?,?,?,?,?,
             ?,?,
             1,'pending_review','auto','auto'
           )
@@ -1013,17 +1050,18 @@ export async function onRequest(ctx) {
           parseInt(adults)||1, parseInt(children)||0,
           dob||null, gender||null, nationality,
           homeAddress||null, city||null, state||null, country, fromCity||city||null,
-          pincode||null, homeCountryAddress||null, homeCountry||null,
+          pincode||null,
           guestList||null, purposeOfVisit||null,
           modeOfTransport||null, vehicleNumber||null, eta||null,
           govtIdType||null, govtIdNum||null,
-          passportNumber||null, passportIssueDate||null, passportIssuePlace||null,
-          passportExpiry||null,
-          visaNumber||null, visaType||null, visaIssueDate||null, visaIssuePlace||null,
-          arrivalDateIndia||null, portOfArrival||null, nextDestination||null,
-          reqEarly, reqLate, reqBreakfast, bfChoice, reqCab,
-          reqBeds, bedsCount
+          reqEarly, reqLate
         ).run()
+        await writeStaySideBlocks(DB, stayId, villaId, {
+          passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
+          visaNumber, visaType, visaIssueDate, visaIssuePlace,
+          arrivalDateIndia, portOfArrival, nextDestination, homeCountry, homeCountryAddress,
+          reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
+        })
       }
 
       // Stamp the resolved guest link (Phase 1 column) — starts populating
@@ -2380,7 +2418,7 @@ export async function onRequest(ctx) {
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, request_breakfast, breakfast_choice, request_cab, govt_id_type, govt_id_num FROM stayvibe_stays WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
         ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
@@ -2533,11 +2571,18 @@ export async function onRequest(ctx) {
                   airbnb_conf, folder_created,
                   request_early_checkin, request_late_checkout,
                   early_checkin_time, late_checkout_time,
-                  request_breakfast, breakfast_choice, request_cab,
-                  request_extra_beds, extra_beds_count,
                   nationality, purpose_of_visit, mode_of_transport, eta,
-                  booked_by_guest_id, booked_by_name, checkout_email_sent_at
+                  booked_by_guest_id, booked_by_name, checkout_email_sent_at,
+                  -- Preferences moved to their own table; LEFT JOIN so a stay
+                  -- with no prefs row still comes back, with zeros rather than
+                  -- disappearing from the list.
+                  COALESCE(p.request_breakfast,0)  AS request_breakfast,
+                  p.breakfast_choice               AS breakfast_choice,
+                  COALESCE(p.request_cab,0)        AS request_cab,
+                  COALESCE(p.request_extra_beds,0) AS request_extra_beds,
+                  COALESCE(p.extra_beds_count,0)   AS extra_beds_count
            FROM stayvibe_stays
+           LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id
            WHERE villa_id = ?
              AND status NOT IN ('closed','cancelled','void')
              AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
@@ -4392,6 +4437,12 @@ export async function onRequest(ctx) {
           DB.prepare(`DELETE FROM stayvibe_incidentals WHERE stay_id = ?`).bind(stayId),
           DB.prepare(`DELETE FROM stayvibe_guest_documents  WHERE stay_id = ?`).bind(stayId),
           DB.prepare(`DELETE FROM stayvibe_bookings         WHERE stay_id = ?`).bind(stayId),
+          // Side tables: explicit, not ON DELETE CASCADE — D1 does not
+          // guarantee PRAGMA foreign_keys=ON, and every other child table
+          // here is cleaned up by hand for the same reason.
+          DB.prepare(`DELETE FROM stayvibe_stay_kyc          WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_stay_prefs        WHERE stay_id = ?`).bind(stayId),
+          DB.prepare(`DELETE FROM stayvibe_stay_ext          WHERE stay_id = ?`).bind(stayId),
           DB.prepare(`DELETE FROM infra_processing_log   WHERE stay_id = ?`).bind(stayId),
           DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId),
           DB.prepare(`UPDATE stayvibe_duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = 'stay deleted' WHERE existing_stay_id = ? AND (resolved IS NULL OR resolved = 0)`).bind(actor, stayId),

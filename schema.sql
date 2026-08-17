@@ -46,10 +46,44 @@ CREATE TABLE IF NOT EXISTS stayvibe_stays (
   net           REAL DEFAULT 0,
   status        TEXT DEFAULT 'confirmed',
   drive_folder_id TEXT,
-  converted_to_direct INTEGER DEFAULT 0,
   created_at    TEXT DEFAULT (datetime('now')),
   updated_at    TEXT DEFAULT (datetime('now'))
-, created_by TEXT DEFAULT 'owner', updated_by TEXT DEFAULT 'owner', drive_folder_url TEXT, review_rating    INTEGER DEFAULT 0, review_source    TEXT, review_date      TEXT, home_address TEXT, city TEXT, state TEXT, country TEXT DEFAULT 'India', from_city TEXT, pincode TEXT, govt_id_type TEXT, govt_id_num TEXT, cleaning_fee REAL DEFAULT 0, host_service_fee REAL DEFAULT 0, you_earn REAL DEFAULT 0, guest_service_fee REAL DEFAULT 0, night_fee REAL DEFAULT 0, guest_paid_total REAL DEFAULT 0, dob TEXT, gender TEXT, nationality TEXT DEFAULT 'Indian', purpose_of_visit TEXT, mode_of_transport TEXT, vehicle_number TEXT, eta TEXT, guest_list TEXT, passport_number TEXT, passport_issue_date TEXT, passport_issue_place TEXT, passport_expiry TEXT, visa_number TEXT, visa_type TEXT, visa_issue_date TEXT, visa_issue_place TEXT, arrival_date_india TEXT, port_of_arrival TEXT, next_destination TEXT, home_country_address TEXT, checkin_form_submitted INTEGER DEFAULT 0, checkin_form_submitted_at TEXT, request_early_checkin  INTEGER DEFAULT 0, request_late_checkout  INTEGER DEFAULT 0, request_breakfast      INTEGER DEFAULT 0, breakfast_choice       TEXT, request_cab            INTEGER DEFAULT 0, special_requests       TEXT, folder_created_at TEXT, processing_log    TEXT, folder_created INTEGER DEFAULT 0, request_extra_beds INTEGER DEFAULT 0, extra_beds_count   INTEGER DEFAULT 0, extra_lines TEXT DEFAULT NULL, review_text TEXT DEFAULT NULL, review_note TEXT DEFAULT NULL, review_highlights TEXT DEFAULT NULL, review_chased_at TEXT DEFAULT NULL, review_chase_count INTEGER DEFAULT 0, review_closed INTEGER DEFAULT 0, notes TEXT, home_country TEXT, booked_by_guest_id TEXT, booked_by_name TEXT, is_foreigner INTEGER DEFAULT 0, cform_status TEXT DEFAULT 'not_required', cform_due_at TEXT, guest_id   TEXT, enquiry_id TEXT, hold_confirmation INTEGER DEFAULT 0, early_checkin_time TEXT DEFAULT NULL, late_checkout_time TEXT DEFAULT NULL, checkout_email_sent_at TEXT DEFAULT NULL);
+, created_by TEXT DEFAULT 'owner', updated_by TEXT DEFAULT 'owner', drive_folder_url TEXT, review_rating    INTEGER DEFAULT 0, review_source    TEXT, review_date      TEXT, home_address TEXT, city TEXT, state TEXT, country TEXT DEFAULT 'India', from_city TEXT, pincode TEXT, govt_id_type TEXT, govt_id_num TEXT, cleaning_fee REAL DEFAULT 0, host_service_fee REAL DEFAULT 0, you_earn REAL DEFAULT 0, guest_service_fee REAL DEFAULT 0, night_fee REAL DEFAULT 0, guest_paid_total REAL DEFAULT 0, dob TEXT, gender TEXT, nationality TEXT DEFAULT 'Indian', purpose_of_visit TEXT, mode_of_transport TEXT, vehicle_number TEXT, eta TEXT, guest_list TEXT, checkin_form_submitted INTEGER DEFAULT 0, checkin_form_submitted_at TEXT, request_early_checkin  INTEGER DEFAULT 0, request_late_checkout  INTEGER DEFAULT 0, folder_created_at TEXT, processing_log    TEXT, folder_created INTEGER DEFAULT 0, extra_lines TEXT DEFAULT NULL, review_text TEXT DEFAULT NULL, review_note TEXT DEFAULT NULL, review_highlights TEXT DEFAULT NULL, review_chased_at TEXT DEFAULT NULL, review_chase_count INTEGER DEFAULT 0, review_closed INTEGER DEFAULT 0, notes TEXT, booked_by_guest_id TEXT, booked_by_name TEXT, cform_status TEXT DEFAULT 'not_required', guest_id   TEXT, enquiry_id TEXT, early_checkin_time TEXT DEFAULT NULL, late_checkout_time TEXT DEFAULT NULL, checkout_email_sent_at TEXT DEFAULT NULL);
+
+
+-- ── STAY SIDE TABLES ─────────────────────────────────────────────────────
+-- stayvibe_stays reached D1's 100-column ALTER TABLE ceiling. Two blocks
+-- were near-empty (KYC filled on 2 of 313 rows, preferences on 0) and moved
+-- out 1:1. Rows are created lazily — a domestic booking has no KYC row.
+-- Deletes are explicit in the worker's cascade, NOT ON DELETE CASCADE:
+-- D1 does not guarantee PRAGMA foreign_keys=ON.
+CREATE TABLE IF NOT EXISTS stayvibe_stay_ext (
+  stay_id TEXT PRIMARY KEY, villa_id TEXT,
+  late_checkout_nights INTEGER DEFAULT 0,
+  occupancy_tax REAL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stay_ext_villa ON stayvibe_stay_ext(villa_id);
+
+CREATE TABLE IF NOT EXISTS stayvibe_stay_kyc (
+  stay_id TEXT PRIMARY KEY, villa_id TEXT,
+  passport_number TEXT, passport_issue_date TEXT, passport_issue_place TEXT, passport_expiry TEXT,
+  visa_number TEXT, visa_type TEXT, visa_issue_date TEXT, visa_issue_place TEXT,
+  arrival_date_india TEXT, port_of_arrival TEXT, next_destination TEXT,
+  home_country TEXT, home_country_address TEXT,
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stay_kyc_villa ON stayvibe_stay_kyc(villa_id);
+
+CREATE TABLE IF NOT EXISTS stayvibe_stay_prefs (
+  stay_id TEXT PRIMARY KEY, villa_id TEXT,
+  request_breakfast INTEGER DEFAULT 0, breakfast_choice TEXT,
+  request_cab INTEGER DEFAULT 0,
+  request_extra_beds INTEGER DEFAULT 0, extra_beds_count INTEGER DEFAULT 0,
+  special_requests TEXT,
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stay_prefs_villa ON stayvibe_stay_prefs(villa_id);
 
 CREATE TABLE IF NOT EXISTS stayvibe_guests (
   guest_id      TEXT PRIMARY KEY,

@@ -48,13 +48,21 @@ function Field({ label, required, children, hint }) {
   )
 }
 
-function Done({ text }) {
+function Done({ text, waLink }) {
   return (
     <div style={{ padding: '28px 22px', textAlign: 'center', background: 'rgba(52,168,83,0.08)',
       border: '1px solid rgba(52,168,83,0.3)', borderRadius: 14 }}>
       <div style={{ fontSize: '2.4rem', marginBottom: 12 }}>🙏</div>
       <div style={{ color: c.green, fontWeight: 700, marginBottom: 8 }}>Request received</div>
       <div style={{ color: c.dim, fontSize: '0.88rem', lineHeight: 1.6 }}>{text}</div>
+      {waLink && (
+        <a href={waLink} target="_blank" rel="noreferrer" style={{
+          display: 'inline-block', marginTop: 16, padding: '12px 20px', borderRadius: 11,
+          background: '#25D366', color: '#0B141A', fontWeight: 800, fontSize: '0.9rem',
+          textDecoration: 'none' }}>
+          Send it on WhatsApp
+        </a>
+      )}
     </div>
   )
 }
@@ -68,13 +76,47 @@ export default function Flexibility() {
   const [needType, setNeedType] = useState('')
   const [priority, setPriority] = useState('')
   const [wantsDirect, setWantsDirect] = useState(false)
+  const [inTime,   setInTime]   = useState('')
+  const [outTime,  setOutTime]  = useState('')
+  const [waLink,   setWaLink]   = useState('')
   const [details,  setDetails]  = useState('')
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
   const [sent,     setSent]     = useState(null)   // 'direct' | 'ota'
 
+  // The need type decides which times we ask for — asking a guest who only
+  // wants a late check-out what time they'll arrive is noise.
+  const wantsEarlyIn  = /earlier|both/i.test(needType)
+  const wantsLateOut  = /later|both/i.test(needType)
+
   const isDirect = channel === F.directChannel
   const isOta    = !!channel && !isDirect
+
+  // Prefilled WhatsApp to the owner. Same facts as the saved record, laid
+  // out so it can be read on a phone without opening the portal.
+  function buildWaLink(kind) {
+    const digits = String(CONFIG.ownerWhatsApp || '').replace(/\D/g, '')
+    if (!digits) return ''
+    const L = []
+    L.push(`*Flexibility request — ${villa.name}*`)
+    L.push('')
+    L.push(`Name: ${name.trim()}`)
+    L.push(`Contact: ${contact.trim()}`)
+    L.push(`Booked via: ${channel}`)
+    if (checkIn || checkOut) L.push(`Dates: ${checkIn || '?'} to ${checkOut || '?'}`)
+    if (kind === 'direct') {
+      L.push(`Need: ${needType}`)
+      if (wantsEarlyIn && inTime)  L.push(`Wants to arrive: ${inTime}`)
+      if (wantsLateOut && outTime) L.push(`Wants to leave: ${outTime}`)
+      const p = (F.form.priorities || []).find(x => x.id === priority)
+      if (p) L.push(`Type: ${p.label}`)
+    } else {
+      L.push('Booked through a partner — asking about direct rates')
+    }
+    if (wantsDirect) L.push('Open to booking direct')
+    if (details.trim()) L.push(`Notes: ${details.trim()}`)
+    return `https://wa.me/${digits}?text=${encodeURIComponent(L.join('\n'))}`
+  }
 
   async function submit(kind) {
     if (!name.trim())    { setError('Please tell us your name');  return }
@@ -97,14 +139,26 @@ export default function Flexibility() {
           // An OTA lead is by definition someone we want on direct next time,
           // so that path always carries the interest flag.
           priority: kind === 'direct' ? priority : null,
-          wantsDirect: kind === 'direct' ? wantsDirect : true,
+          wantsDirect: kind === 'direct' ? wantsDirect : wantsDirect,
+          requestedCheckinTime:  kind === 'direct' && wantsEarlyIn ? (inTime  || null) : null,
+          requestedCheckoutTime: kind === 'direct' && wantsLateOut ? (outTime || null) : null,
           details: details || null,
         }),
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error || 'Could not send')
+
+      // Recorded first, then handed to WhatsApp. Saving before opening means
+      // the request still reaches the owner's list if the guest never presses
+      // send in WhatsApp — the message is a faster nudge, not the record.
+      const link = buildWaLink(kind)
+      setWaLink(link)
       setSent(kind)
       window.scrollTo({ top: 0, behavior: 'smooth' })
+      // location.href rather than window.open: a popup opened after an await
+      // has lost the user-gesture chain and gets blocked. The Done screen
+      // still shows the link, so a blocked hand-off is recoverable.
+      if (link) window.location.href = link
     } catch (e) { setError(e.message) }
     finally { setBusy(false) }
   }
@@ -180,7 +234,7 @@ export default function Flexibility() {
         {/* ── REQUEST ── */}
         <div id="request" style={{ scrollMarginTop: 20 }}>
           {sent ? (
-            <Done text={sent === 'direct' ? F.form.thanks : F.ota.thanks} />
+            <Done text={sent === 'direct' ? F.form.thanks : F.ota.thanks} waLink={waLink} />
           ) : (
             <div style={{ background: c.card, border: `1px solid ${c.line}`, borderRadius: 14, padding: '24px 22px' }}>
               <h2 style={{ fontSize: '1.1rem', color: c.gold, margin: '0 0 16px' }}>{F.form.heading}</h2>
@@ -201,6 +255,21 @@ export default function Flexibility() {
                   {F.ota.body.map((p, i) => (
                     <p key={i} style={{ color: c.dim, fontSize: '0.88rem', lineHeight: 1.7, margin: '0 0 12px' }}>{p}</p>
                   ))}
+
+                  {/* The conversion ask, before the inputs — they've just read
+                      why direct is cheaper, so this is the moment it lands. */}
+                  <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start',
+                    padding: '12px 13px', borderRadius: 10, cursor: 'pointer', margin: '4px 0 16px',
+                    background: wantsDirect ? 'rgba(200,144,58,0.12)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${wantsDirect ? c.goldLine : c.line}` }}>
+                    <input type="checkbox" checked={wantsDirect}
+                      onChange={e => setWantsDirect(e.target.checked)}
+                      style={{ marginTop: 3, flexShrink: 0 }} />
+                    <span style={{ color: wantsDirect ? c.text : c.dim, fontSize: '0.88rem', lineHeight: 1.5 }}>
+                      {F.ota.directOptInLabel || "I'm open to booking directly next time, to save on cost"}
+                    </span>
+                  </label>
+
                   <Field label="Your name" required>
                     <input style={input} value={name} onChange={e => setName(e.target.value)} placeholder="Full name" />
                   </Field>
@@ -240,6 +309,28 @@ export default function Flexibility() {
                       {F.form.needTypes.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </Field>
+                  {/* The actual times. Without these the owner has to message
+                      back to ask, which is the round trip this page exists to
+                      remove — and the turnaround maths needs a time, not a
+                      date, to say yes or no. */}
+                  {(wantsEarlyIn || wantsLateOut) && (
+                    <div style={{ display: 'grid',
+                      gridTemplateColumns: wantsEarlyIn && wantsLateOut ? '1fr 1fr' : '1fr', gap: 10 }}>
+                      {wantsEarlyIn && (
+                        <Field label={F.form.checkinTimeLabel || 'What time do you need to arrive?'}>
+                          <input style={input} type="time" value={inTime}
+                            onChange={e => setInTime(e.target.value)} />
+                        </Field>
+                      )}
+                      {wantsLateOut && (
+                        <Field label={F.form.checkoutTimeLabel || 'What time do you need to leave?'}>
+                          <input style={input} type="time" value={outTime}
+                            onChange={e => setOutTime(e.target.value)} />
+                        </Field>
+                      )}
+                    </div>
+                  )}
+
                   {/* Which tier they're asking for. Radios, not a dropdown —
                       the difference between the two is the whole point and
                       shouldn't be hidden behind a tap. */}

@@ -184,11 +184,12 @@ export const CONFIG = {
       advanceNote: 'Please ask ahead of time. Timing changes need to be agreed and settled before you arrive so we can plan the turnaround around your family — our on-site team is not able to approve changes on the day.',
     },
     ota: {
-      heading: 'Booked through Airbnb, Booking.com or another platform?',
+      heading: 'Booked through a partner?',
       body: [
-        "Extra nights for your current stay need to be arranged through them — those dates live in their system, and they'll charge the full nightly rate.",
-        "Worth knowing for next time: guests who book with us directly get flexibility on arrival and departure timings, held as a courtesy at a fraction of a night rather than the full rate. No platform fees either — you're dealing with the family who owns the home.",
+        "Any extra night for your current stay has to be booked through whoever you booked with — those dates live in their system, and they'll charge the full nightly rate for it.",
+        "Booking with us directly is what makes the flexible timings possible: the calendar is ours to hold, so we can set a night aside for your family at a fraction of a night instead of the full rate. No platform fees either — you're dealing with the family who owns the home.",
       ],
+      directOptInLabel: "I'm open to booking directly next time, to save on cost",
       ctaLabel: "Send me your direct rates for next time",
       thanks: "Thank you — we'll be in touch with our direct rates. We'd love to host your family again.",
     },
@@ -199,6 +200,8 @@ export const CONFIG = {
         'Later check-out on departure day',
         'Both',
       ],
+      checkinTimeLabel:  'What time do you need to arrive?',
+      checkoutTimeLabel: 'What time do you need to leave?',
       // Which of the two tiers above they are actually asking for. Captured
       // separately from needType so the owner can triage: a "nice to have"
       // waits until the morning, a "must have" needs a decision and a price
@@ -212,8 +215,11 @@ export const CONFIG = {
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do, before you travel.",
     },
-    channels: ['Direct with the villa', 'Airbnb', 'Booking.com', 'MakeMyTrip', 'Goibibo', 'Agoda', 'Expedia', 'VRBO', 'Other platform'],
-    directChannel: 'Direct with the villa',
+    // Three, not nine. The guest doesn't need to name their platform for us
+    // to answer them — only whether we hold their calendar. OTA and travel
+    // agent behave identically here: we cannot sell them the adjoining night.
+    channels: ['OTA — online partner (Airbnb, Booking.com, MMT…)', 'Direct with us', 'Travel agent'],
+    directChannel: 'Direct with us',
   },
 
   guestMessages: {

@@ -172,6 +172,15 @@ export default function FlexRequests() {
                   {r.checkin_date ? fmtDate(r.checkin_date) : '—'} → {r.checkout_date ? fmtDate(r.checkout_date) : '—'}
                 </div>
               )}
+              {/* The times they actually asked for — without these the owner
+                  has to message back before they can answer at all. */}
+              {(r.requested_checkin_time || r.requested_checkout_time) && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--gold)', marginTop: 4, fontWeight: 600 }}>
+                  {r.requested_checkin_time  && <>🔑 wants in by {r.requested_checkin_time}</>}
+                  {r.requested_checkin_time && r.requested_checkout_time && ' · '}
+                  {r.requested_checkout_time && <>🧳 wants out by {r.requested_checkout_time}</>}
+                </div>
+              )}
               {r.details && (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginTop: 8, fontStyle: 'italic',
                   paddingLeft: 10, borderLeft: '2px solid var(--border-dim)' }}>

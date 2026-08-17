@@ -112,12 +112,15 @@ export const CONFIG = {
         'Extra nights for your current stay need to be arranged through them — those dates live in their system.',
         'Worth knowing for next time: guests who book with us directly get flexibility on arrival and departure timings at a fraction of a night rather than the full rate.',
       ],
+      directOptInLabel: "I'm open to booking directly next time, to save on cost",
       ctaLabel: 'Send me your direct rates for next time',
       thanks: "Thank you — we'll be in touch with our direct rates.",
     },
     form: {
       heading: 'Tell us what you need',
       needTypes: ['Earlier check-in on arrival day', 'Later check-out on departure day', 'Both'],
+      checkinTimeLabel:  'What time do you need to arrive?',
+      checkoutTimeLabel: 'What time do you need to leave?',
       priorityLabel: 'Type of request',
       priorities: [
         { id: 'nice_to_have', label: 'Would like it if available — no charge, confirm on the day' },
@@ -127,8 +130,8 @@ export const CONFIG = {
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request and will come back to you before you travel.",
     },
-    channels: ['Direct with the villa', 'Airbnb', 'Booking.com', 'Other platform'],
-    directChannel: 'Direct with the villa',
+    channels: ['OTA — online partner (Airbnb, Booking.com, MMT…)', 'Direct with us', 'Travel agent'],
+    directChannel: 'Direct with us',
   },
 
   guestMessages: {

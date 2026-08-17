@@ -95,12 +95,12 @@ export const CONFIG = {
         'We understand that at times a family needs more flexibility than our normal timings allow. Tell us which of these two it is, and we will work to it.',
       ],
       tiers: [
-        { label: 'Would be nice to have',
-          lead: 'Free, if the house is free.',
-          body: "If nobody is staying the night before, we'll give you the extra time at no charge, confirmed on the morning of your check-in." },
         { label: 'Must have',
           lead: 'Held for you, guaranteed, at a fraction of a night.',
           body: "We hold the adjoining night so it is certain. That night can't then be sold, so we ask for 25% or 50% of it rather than a full night." },
+        { label: 'Or simply ask on the day',
+          lead: 'No charge, but no promises either.',
+          body: "If nobody stayed the night before, the extra time is yours at no additional cost — just ask when you arrive." },
       ],
       availabilityNote: "One honest note: when the villa is booked back-to-back, there may simply be no gap to give — and we won't always be able to say yes. If that happens we'll tell you early, and we'll look at every option we have before we do.",
       directNote: "This is something we're able to offer only to guests who book with us directly.",
@@ -127,10 +127,13 @@ export const CONFIG = {
       checkinTimeLabel:  'What time do you need to arrive?',
       checkoutTimeLabel: 'What time do you need to leave?',
       priorityLabel: 'Type of request',
+      // Must have first: it is the one that needs a decision before they
+      // travel, and leading with it stops the free option reading as the
+      // default. The old "we'll tell you on the morning" option is gone —
+      // it promised us chasing them, and duplicated this one.
       priorities: [
-        { id: 'nice_to_have',     label: 'Would like it if available — tell me on the morning, no charge' },
-        { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no payment needed" },
         { id: 'must_have',        label: 'Must have — I want it secured, and will pay for it' },
+        { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no additional payment needed" },
       ],
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request and will come back to you before you travel.",

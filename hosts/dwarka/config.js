@@ -169,14 +169,14 @@ export const CONFIG = {
       // held, which is a night that can no longer be sold — so it is priced.
       tiers: [
         {
-          label: 'Would be nice to have',
-          lead: 'Free, if the house is free.',
-          body: "Tell us and we'll keep it in mind. If nobody is staying the night before, or the previous family leaves early, we'll simply give you the extra time at no charge. We'll confirm on the morning of your check-in, once we know how the night before has gone — so please don't build your travel plans around it.",
-        },
-        {
           label: 'Must have',
           lead: 'Held for you, guaranteed, at a fraction of a night.',
           body: "If your family cannot manage without the earlier arrival or later departure, we hold the adjoining night so it is certain. Once we do, that night can't be offered to anyone else — but we don't charge for a full extra night. We ask for a fraction of it, 25% or 50% depending on how much extra time you need. We'll confirm the exact amount once we've looked at your dates, and it's settled before you travel.",
+        },
+        {
+          label: 'Or simply ask on the day',
+          lead: 'No charge, but no promises either.',
+          body: "If it would be a bonus rather than a necessity, don't pay for it. Ask us when you arrive: if nobody stayed the night before, or the previous family left early, the extra time is yours at no additional cost. Just please don't build your travel around it — on a busy week there may be nothing to give.",
         },
       ],
       availabilityNote: "One honest note: when the villa is booked back-to-back, there may simply be no gap to give — and we won't always be able to say yes. If that happens we'll tell you early rather than leave you hoping, and we'll look at every option we have to rearrange things around your family before we do.",
@@ -216,10 +216,13 @@ export const CONFIG = {
       // waits until the morning, a "must have" needs a decision and a price
       // before the family travels.
       priorityLabel: 'Type of request',
+      // Must have first: it is the one that needs a decision before they
+      // travel, and leading with it stops the free option reading as the
+      // default. The old "we'll tell you on the morning" option is gone —
+      // it promised us chasing them, and duplicated this one.
       priorities: [
-        { id: 'nice_to_have',     label: 'Would like it if available — tell me on the morning, no charge' },
-        { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no payment needed" },
         { id: 'must_have',        label: 'Must have — I want it secured, and will pay for it' },
+        { id: 'check_on_arrival', label: "I'll check back on the day of arrival — no additional payment needed" },
       ],
       submitLabel: 'Send request',
       thanks: "Thank you — we've got your request. We'll check the dates and come back to you with what we can do, before you travel.",

@@ -240,7 +240,14 @@ export default function CompleteBooking() {
   // it (D1 caps ALTER TABLE at 100 columns and stayvibe_stays is at the cap).
   // It does not need one — the guest's total minus the parts we already hold
   // IS the tax, and it reconciles to the confirmation email exactly.
-  const guestPaidAmt  = parseFloat(airbnb.guestPaid) || 0
+  // What the guest has paid IN TOTAL, channel plus anything settled with us
+  // directly. guest_paid_total holds only Airbnb's figure, so a stay extended
+  // afterwards — an agreed late check-out, an added night — left the guest's
+  // real outlay understated and the row impossible to reconcile against what
+  // they actually handed over. Extras are money the guest paid us, so they
+  // belong in their total.
+  const guestPaidChannel = parseFloat(airbnb.guestPaid) || 0
+  const guestPaidAmt  = guestPaidChannel > 0 ? guestPaidChannel + extraTotal : 0
   const guestSvcAmt   = parseFloat(airbnb.guestServiceFee) || 0
   const occupancyTax  = (guestPaidAmt > 0 && nightFeeAmt > 0)
     // night_fee is the TOTAL room fee for the stay, not a per-night rate —

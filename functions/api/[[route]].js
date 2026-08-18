@@ -452,7 +452,10 @@ function derivedOccupancyTax(r) {
 // explicable to the guest nor ours to keep.
 function guestPaidPerNight(r, ext) {
   const nights = Math.max(1, parseInt(r && r.nights) || 1)
-  const paid   = Number(r && r.guest_paid_total) || 0
+  // Channel total plus anything the guest settled with us directly. Without
+  // the extras a stay extended after booking quotes off the original figure
+  // and understates what the guest has actually paid.
+  const paid = (Number(r && r.guest_paid_total) || 0) + (Number(r && r.extra_charges) || 0)
   if (paid > 0) return Math.round((paid - occupancyTaxFor(r, ext)) / nights)
   const tariff = Number(r && r.tariff_per_night) || 0
   if (tariff > 0) return Math.round(tariff)
@@ -1021,7 +1024,7 @@ export async function onRequest(ctx) {
             updated_by = 'auto', updated_at = ?
           WHERE stay_id = ?
         `).bind(
-          phone||null, email||null,
+          normalizeStoredPhone(phone), email||null,
           dob||null, gender||null, nationality,
           homeAddress||null, city||null, state||null, country, fromCity||city||null, pincode||null,
           checkOutDate||null, parseInt(nights)||1,
@@ -1063,7 +1066,7 @@ export async function onRequest(ctx) {
           )
         `).bind(
           stayId, villaId, partner || 'direct',
-          safeGuestName, phone||null, email||null,
+          safeGuestName, normalizeStoredPhone(phone), email||null,
           checkInDate, checkOutDate||null, n,
           parseInt(adults)||1, parseInt(children)||0,
           dob||null, gender||null, nationality,
@@ -1322,7 +1325,7 @@ export async function onRequest(ctx) {
     const digits = ct.replace(/\D/g, '')
     const { results: hits } = await DB.prepare(`
       SELECT stay_id, guest_name, booked_by_name, checkin_date, checkout_date, nights,
-             tariff_per_night, gross, guest_paid_total,
+             tariff_per_night, gross, guest_paid_total, extra_charges,
              night_fee, cleaning_fee, guest_service_fee,
              guest_email, guest_phone, source
         FROM stayvibe_stays
@@ -5305,7 +5308,9 @@ export async function onRequest(ctx) {
         // along when a number is copy-pasted from WhatsApp/Contacts — they
         // don't show up visually but break tel: links and any later
         // exact-match phone comparison (duplicate-guest detection etc).
-        const cleanPhone = phone.trim().replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '')
+        // Scrub invisibles, then normalise — the older of the two phone
+        // entry points, and the last one still storing raw input.
+        const cleanPhone = normalizeStoredPhone(phone.trim().replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, ''))
         await DB.prepare(`UPDATE stayvibe_stays SET guest_phone = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
           .bind(cleanPhone, actor, now(), stayId).run()
         return json({ success: true, data: { stayId, phone: cleanPhone } })

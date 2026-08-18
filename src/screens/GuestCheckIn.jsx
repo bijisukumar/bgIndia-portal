@@ -216,6 +216,12 @@ export default function GuestCheckIn() {
 
   // ── Address ───────────────────────────────────────────────
   const [address,          setAddress]         = useState('')
+  const [address2,         setAddress2]        = useState('')
+  // Separate from `country` below, which the foreign branch uses for the
+  // guest's HOME country. This one is the country of the postal address, so
+  // an Indian national living abroad can give a non-Indian address without
+  // the two fields fighting each other.
+  const [addrCountry,      setAddrCountry]     = useState('India')
   const [city,             setCity]            = useState('')
   const [state,            setState]           = useState('')
   const [pincode,          setPincode]         = useState('')
@@ -369,6 +375,7 @@ export default function GuestCheckIn() {
     if (!isForeign && !idType)   return 'Please select your ID type'
     if (!isForeign && !idNumber) return 'Please enter your ID number'
     if (!isForeign && !idPreview) return 'Please upload a photo or scan of your ID document'
+    if (!isForeign && !addrCountry) return 'Please select the country of your address'
     if (isForeign && !homeCountryAddr.trim()) return 'Permanent address in home country is required'
     if (isForeign && !country)   return 'Please select your country'
     if (isForeign && !passportNo)     return 'Passport number is required'
@@ -412,10 +419,11 @@ export default function GuestCheckIn() {
         // India during the stay). The guest's actual home country is a separate
         // field below (homeCountry), so it doesn't get silently overwritten.
         homeAddress: isForeign ? `${villaAddr.address}, ${villaAddr.city}` : address,
+        homeAddressLine2: isForeign ? null : (address2 || null),
         city: isForeign ? villaAddr.city : city,
         state: isForeign ? villaAddr.state : state,
         pincode: isForeign ? villaAddr.pincode : pincode,
-        country: isForeign ? villaAddr.country : 'India',
+        country: isForeign ? villaAddr.country : addrCountry,
         homeCountry: isForeign ? country : 'India',
         fromCity: isForeign ? '' : city,
         homeCountryAddress: isForeign ? homeCountryAddr : null,
@@ -667,20 +675,35 @@ export default function GuestCheckIn() {
           </>
         ) : (
           <>
-            <Field label="Street address">
-              <Input value={address} onChange={setAddress} placeholder="Flat / House, Street, Area" />
+            <Field label="Street address 1">
+              <Input value={address} onChange={setAddress} placeholder="Flat / House number, Street" />
+            </Field>
+            <Field label="Street address 2">
+              <Input value={address2} onChange={setAddress2} placeholder="Apartment, suite, area (optional)" />
             </Field>
             <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'12px' }}>
               <Field label="City / Town" required>
-                <Input value={city} onChange={setCity} placeholder="Bengaluru" />
+                <Input value={city} onChange={setCity} placeholder="San Francisco" />
               </Field>
-              <Field label="Pincode">
-                <Input type="tel" value={pincode} onChange={setPincode} placeholder="560001" maxLength={6} />
+              {/* Not type=tel or maxLength 6 any more — that was an Indian
+                  PIN assumption, and it silently truncated ZIP+4 and most
+                  non-numeric postcodes (UK, Canada, Netherlands). */}
+              <Field label="Pincode / ZIP code">
+                <Input value={pincode} onChange={setPincode} placeholder="94105" maxLength={12} />
               </Field>
             </div>
-            <Field label="State" required>
-              <Select value={state} onChange={setState} options={INDIAN_STATES} placeholder="Select state" />
-            </Field>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+              <Field label={addrCountry === 'India' ? 'State' : 'State / Province'} required>
+                {addrCountry === 'India'
+                  ? <Select value={state} onChange={setState} options={INDIAN_STATES} placeholder="Select state" />
+                  : <Input value={state} onChange={setState} placeholder="California" />}
+              </Field>
+              <Field label="Country" required>
+                <Select value={addrCountry}
+                  onChange={v => { setAddrCountry(v); setState('') }}
+                  options={COUNTRIES} placeholder="Select country" />
+              </Field>
+            </div>
           </>
         )}
 

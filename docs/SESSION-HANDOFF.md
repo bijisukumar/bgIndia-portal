@@ -280,3 +280,39 @@ database (`demovilla-db`) has been migrated and was also missing
 `stayvibe_stay_kyc`/`stayvibe_stay_prefs` entirely from the earlier column
 split, so prefs writes there had nowhere to land. Deploying it needs the
 `wrangler.toml` DB-binding swap, which is a manual step.
+
+## Home address is no longer India-only (2026-08-18)
+
+Section 2 of the check-in form assumed an Indian address: one street line, a
+`Bengaluru` placeholder, a 6-digit numeric PIN, and a hardcoded `country:
+'India'` in the payload. An Indian national living abroad — the NRI/OCI case —
+had nowhere to put a real address.
+
+Now: **Street address 1**, **Street address 2**, City, **Pincode / ZIP code**,
+State and **Country**. The state field switches between the Indian-states
+dropdown and a free-text "State / Province" as the country changes. The
+pincode field lost `type=tel` and `maxLength={6}` — both were Indian-PIN
+assumptions that silently truncated ZIP+4 and rejected the alphanumeric
+postcodes used in the UK, Canada and the Netherlands.
+
+`stayvibe_stays.home_address_line2` is the only new column (78/100 used).
+`country` now carries the guest's actual address country instead of a constant.
+The foreign-guest branch is untouched: for them `city/state/pincode/country`
+deliberately remain the VILLA's India address, which is what Form C asks for,
+and a separate `addrCountry` state keeps the two from colliding.
+
+Verified on production through both worker branches: INSERT stored
+`1200 Market Street / Apartment 14B / San Francisco / California / 94105-2100 /
+United States`, and a follow-up UPDATE correctly rewrote it to the Boston
+address. Placeholder/bind arity was checked programmatically on both
+statements (30/30 and 29/29) before deploying — a miscount there breaks every
+check-in.
+
+**demovilla could not take this column**: `ALTER TABLE` fails with
+`too many columns on sqlite_altertab_stayvibe_stays`. That database never got
+the column split, so its stays table is still at the 100-column ceiling. It
+needs the same split applied before it can take this column or the current
+worker bundle.
+
+**Still write-only**: `getUpcomingStays` returns only `from_city`, so none of
+the address fields reach the owner UI. Captured correctly, not yet displayed.

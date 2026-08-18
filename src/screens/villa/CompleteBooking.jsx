@@ -19,7 +19,7 @@ import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
-import { buildComfortCheckWaLink, buildHostIntroWaLink } from '../../utils/guestMessages'
+import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink } from '../../utils/guestMessages'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Other']
 
@@ -642,6 +642,7 @@ export default function CompleteBooking() {
                   <div style={{background:'var(--dark-card)',borderRadius:'12px',border:'1px solid var(--border-dim)',overflow:'hidden',marginBottom:'20px'}}>
                     {checkedIn.map((stay, i) => {
                       const waLink = buildComfortCheckWaLink(stay)
+                      const farewellLink = buildFarewellWaLink(stay)
                       const emailSending = checkoutEmailBusy === stay.stay_id
                       const emailSent = !!stay.checkout_email_sent_at
                       return (
@@ -676,6 +677,14 @@ export default function CompleteBooking() {
                               </button>
                             ) : (
                               <span style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>No email on file — checkout email can't be sent</span>
+                            )}
+                            {farewellLink && (
+                              <a href={farewellLink} target="_blank" rel="noreferrer"
+                                style={{fontSize:'0.76rem',fontWeight:'700',padding:'8px 12px',borderRadius:'8px',
+                                  background:'rgba(200,144,58,0.1)',border:'1px solid rgba(200,144,58,0.3)',
+                                  color:'var(--gold)',textDecoration:'none'}}>
+                                🙏 Send farewell message
+                              </a>
                             )}
                           </div>
                         </div>

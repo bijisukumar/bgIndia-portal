@@ -126,3 +126,18 @@ export function buildComfortCheckWaLink(stay = {}) {
   if (!phone) return null
   return waLink(phone, buildComfortCheckMessage(stay))
 }
+
+export function buildFarewellMessage(stay = {}) {
+  return renderTemplate(CONFIG.guestMessages.farewell.template, {
+    guestName: (stay.guest_name || '').trim() || 'there',
+    villaName: villa.full,
+    managerName: villa.managerName,
+    managerPhone: villa.managerPhone,
+  })
+}
+
+export function buildFarewellWaLink(stay = {}) {
+  const phone = stay.guest_phone || stay.phone
+  if (!phone) return null
+  return waLink(phone, buildFarewellMessage(stay))
+}

@@ -300,6 +300,21 @@ We hope you had a truly beautiful and enjoyable time in Guruvayur, with wonderfu
 Warm regards,
 {brandName}`,
     },
+    // Manual WhatsApp send, any time during/after checkout — asks how the
+    // stay was and closes the relationship warmly, hotel-front-desk style.
+    farewell: {
+      template:
+`Namaskaram {guestName}! 🙏
+
+As your time with us at {villaName} comes to a close, I wanted to personally thank you for staying with us.
+
+It would mean a lot to know — how was your stay? We do hope our team was able to look after you and your family well, and that {villaName} gave you some truly memorable moments.
+
+Wishing you a very safe journey ahead, whether you're headed home or on to your next destination. It would be our honour to welcome you back again soon.
+
+Snehapoorvam (സ്നേഹപൂർവ്വം),
+{managerName} | Guruvayur Villa (Dwarka)`,
+    },
   },
 
   // Rental properties — monthly income tracker

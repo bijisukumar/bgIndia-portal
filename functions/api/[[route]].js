@@ -599,10 +599,10 @@ async function resolveGuest(DB, { name, phone, email, actor = 'auto' }) {
 async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, excludeStayId = null, guestId = null, phone = null, email = null, guestName = null }) {
   const co = checkoutDate || checkinDate
   const { results } = await DB.prepare(
-    `SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, status, source, created_at, guest_id
+    `SELECT stayvibe_stays.stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, status, source, stayvibe_stays.created_at, guest_id
        FROM stayvibe_stays
-      WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
-        AND stay_id != ?
+      WHERE stayvibe_stays.villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
+        AND stayvibe_stays.stay_id != ?
         AND checkin_date <= ? AND checkout_date >= ?`
   ).bind(villaId, excludeStayId || '', co, checkinDate).all()
 
@@ -2440,7 +2440,7 @@ export async function onRequest(ctx) {
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
+          `SELECT stayvibe_stays.stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
         ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
@@ -2605,7 +2605,7 @@ export async function onRequest(ctx) {
                   COALESCE(p.extra_beds_count,0)   AS extra_beds_count
            FROM stayvibe_stays
            LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id
-           WHERE villa_id = ?
+           WHERE stayvibe_stays.villa_id = ?
              AND status NOT IN ('closed','cancelled','void')
              AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
            ORDER BY checkin_date ASC`

@@ -425,6 +425,17 @@ function genId(prefix) {
 //
 // Returns 0 rather than a guess when the inputs are incomplete, so an older
 // row missing a component reports no tax instead of inventing one.
+// Reads the stored figure from stayvibe_stay_ext when we have one, and only
+// falls back to arithmetic when we don't. The residual is exact against
+// Airbnb's current breakdown, but it is still a residual — if they add
+// another line it would silently absorb it and report an inflated tax.
+// A stored number cannot drift that way.
+function occupancyTaxFor(stay, ext) {
+  const stored = Number(ext && ext.occupancy_tax) || 0
+  if (stored > 0) return stored
+  return derivedOccupancyTax(stay)
+}
+
 function derivedOccupancyTax(r) {
   const paid  = Number(r && r.guest_paid_total)  || 0
   const night = Number(r && r.night_fee)         || 0
@@ -439,10 +450,10 @@ function derivedOccupancyTax(r) {
 // quotes. Occupancy tax is excluded deliberately: it is government money, not
 // the value of the room, and charging a share of it would be neither
 // explicable to the guest nor ours to keep.
-function guestPaidPerNight(r) {
+function guestPaidPerNight(r, ext) {
   const nights = Math.max(1, parseInt(r && r.nights) || 1)
   const paid   = Number(r && r.guest_paid_total) || 0
-  if (paid > 0) return Math.round((paid - derivedOccupancyTax(r)) / nights)
+  if (paid > 0) return Math.round((paid - occupancyTaxFor(r, ext)) / nights)
   const tariff = Number(r && r.tariff_per_night) || 0
   if (tariff > 0) return Math.round(tariff)
   return Math.round((Number(r && r.gross) || 0) / nights)
@@ -526,7 +537,8 @@ async function syncStayLedger(DB, stayId) {
     // Same treatment as the guest service fee: collected from the guest and
     // remitted onward, never ours, so it sits outside the P&L but must appear
     // for the row to reconcile against Airbnb's own total.
-    const occTax = derivedOccupancyTax(s)
+    const sExt = await DB.prepare(`SELECT occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(stayId).first()
+    const occTax = occupancyTaxFor(s, sExt)
     if (occTax > 0)     add('occupancy_tax', 'passthrough', occTax, 'adapter: derived from guest total')
 
     const stmts = [DB.prepare(`DELETE FROM stayvibe_booking_line_items WHERE stay_id = ?`).bind(stayId)]
@@ -703,18 +715,24 @@ function normalizeStoredPhone(raw) {
 // The villa is still opened once and reset once. Left alone, a one-night
 // stay with a late check-out would quietly pay 2,000 instead of 1,000.
 //
-// The held night is identifiable without a new column (stayvibe_stays is at
-// D1's 100-column ceiling for ALTER TABLE): the guest is recorded as
-// departing before the booked checkout date, on a stay flagged as an
-// approved late check-out. Both conditions are required — a guest simply
-// leaving early is not an extension and must not reduce Raman's pay.
+// The count is stored in stayvibe_stay_ext.late_checkout_nights. Where that
+// is absent — every stay predating the side table — it is inferred: the
+// guest is recorded as departing before the booked checkout date, on a stay
+// flagged as an approved late check-out. Both conditions are required, since
+// a guest simply leaving early has extended nothing and must not cost Raman
+// money.
 const COMMISSION_SINGLE_NIGHT = 1000
 const COMMISSION_MULTI_NIGHT  = 2000
 
-function managerCommissionFor(stay) {
+function managerCommissionFor(stay, ext) {
   const nights = parseInt(stay && stay.nights) || 1
   let billable = nights
-  if (stay && stay.request_late_checkout && stay.expected_departure_at && stay.checkout_date) {
+  // An explicit count in stayvibe_stay_ext is authoritative — the inference
+  // below only exists because there was nowhere to record this.
+  const storedHeld = parseInt(ext && ext.late_checkout_nights) || 0
+  if (storedHeld > 0) {
+    billable = nights - storedHeld
+  } else if (stay && stay.request_late_checkout && stay.expected_departure_at && stay.checkout_date) {
     const leaves = String(stay.expected_departure_at).slice(0, 10)
     if (leaves < stay.checkout_date) {
       const held = Math.round(
@@ -1336,7 +1354,8 @@ export async function onRequest(ctx) {
     // guest_paid_total is the guest's side of an Airbnb row; fall back to
     // tariff, then gross, for direct bookings and older rows that never
     // captured it.
-    const nightly = guestPaidPerNight(match)
+    const matchExt = await DB.prepare(`SELECT occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(match.stay_id).first()
+    const nightly = guestPaidPerNight(match, matchExt)
 
     const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1]) * 60 + (+m[2]) : null }
     const fmt   = mins => {
@@ -4894,11 +4913,12 @@ export async function onRequest(ctx) {
         // so this is where the real departure time has to be captured.
         await reconcileStayStamps(DB, stayId, 'checked_out')
         const stay = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, nights, villa_id, request_late_checkout, expected_departure_at FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const stayExt = await DB.prepare(`SELECT late_checkout_nights, occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(stayId).first()
         const coVillaId = stay?.villa_id || DEFAULT_VILLA_ID
         if (stay) {
           const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
-            const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay)
+            const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt)
             await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
 
             ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
@@ -5680,10 +5700,11 @@ export async function onRequest(ctx) {
         if (status === 'cancelled') await syncEnquiryOnStayCancel(DB, stayId, actor, 'cancelled from Complete Booking')
         if (status === 'checked_out') {
           const stay = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, nights, request_late_checkout, expected_departure_at FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+          const stayExt = await DB.prepare(`SELECT late_checkout_nights, occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(stayId).first()
           if (stay) {
             const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
             if (!existing) {
-              const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay)
+              const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt)
               await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
             }
           }

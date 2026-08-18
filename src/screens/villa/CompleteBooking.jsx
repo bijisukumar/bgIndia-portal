@@ -243,7 +243,13 @@ export default function CompleteBooking() {
   const guestPaidAmt  = parseFloat(airbnb.guestPaid) || 0
   const guestSvcAmt   = parseFloat(airbnb.guestServiceFee) || 0
   const occupancyTax  = (guestPaidAmt > 0 && nightFeeAmt > 0)
-    ? Math.max(0, Math.round((guestPaidAmt - (nightFeeAmt * nights) - cleanFeeAmt - guestSvcAmt) * 100) / 100)
+    // night_fee is the TOTAL room fee for the stay, not a per-night rate —
+    // confirmed against four multi-night bookings where guest_paid minus
+    // night_fee, cleaning and the guest service fee lands on exactly 0.00.
+    // Multiplying by nights here produced wildly wrong tax on every
+    // multi-night stay; it only looked right because the row I first tested
+    // was a single night.
+    ? Math.max(0, Math.round((guestPaidAmt - nightFeeAmt - cleanFeeAmt - guestSvcAmt) * 100) / 100)
     : 0
 
   const gross      = isAirbnb
@@ -1481,7 +1487,7 @@ export default function CompleteBooking() {
                   // Direct guests pay us gross, so gross IS their total.
                   const paidForStay = guestPaidAmt > 0
                     ? (guestPaidAmt - occupancyTax)
-                    : (nightFeeAmt * (nights || 1)) + cleanFeeAmt
+                    : nightFeeAmt + cleanFeeAmt
                   const base = isAirbnb
                     ? paidForStay / (nights || 1)
                     : (gross > 0 ? gross / (nights || 1) : tariff)

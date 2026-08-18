@@ -590,7 +590,7 @@ export default function GuestCheckIn() {
         <SectionLabel icon="👤">1 · PERSONAL DETAILS</SectionLabel>
 
         <Field label="Full name (as on ID)" required>
-          <Input value={fullName} onChange={setFullName} placeholder="e.g. Bharat L Rao" />
+          <Input value={fullName} onChange={setFullName} placeholder="e.g. Michael J Carter" />
         </Field>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
@@ -622,7 +622,7 @@ export default function GuestCheckIn() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Input type="tel" value={phone}
                   onChange={v => setPhone(intlPhone ? v : String(v).replace(/\D/g, '').replace(/^0+/, '').slice(0, 10))}
-                  placeholder={intlPhone ? '+971 50 123 4567' : '9880335522'} />
+                  placeholder={intlPhone ? '+1 415 555 0142' : '9995043283'} />
               </div>
             </div>
             <button type="button" onClick={() => { setIntlPhone(!intlPhone); setPhone('') }}
@@ -714,7 +714,7 @@ export default function GuestCheckIn() {
 
         <Field label="Names of other guests in your group" hint="Helps us prepare and keep records">
           <Textarea value={guestList} onChange={setGuestList}
-            placeholder="e.g. Priya Rao, Arjun Rao (age 8), Meena Rao" rows={2} />
+            placeholder="e.g. Sarah Carter, Ethan Carter (age 8), Laura Carter" rows={2} />
         </Field>
 
         <Field label="Purpose of visit" required>

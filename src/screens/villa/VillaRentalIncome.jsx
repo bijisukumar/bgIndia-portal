@@ -54,7 +54,7 @@ export default function VillaRentalIncome() {
         <div className="card">
           <div className="field">
             <label className="field-label">Guest / booker name</label>
-            <input className="field-input" placeholder="e.g. Vikram Ramasubramanian"
+            <input className="field-input" placeholder="e.g. Michael J Carter"
               value={form.guestName} onChange={e=>set('guestName',e.target.value)}/>
           </div>
           <div className="grid-2">

@@ -152,7 +152,7 @@ function SavedQueryModal({ initial, onSave, onCancel }) {
         <div style={{ marginBottom: '12px' }}>
           <div style={{ fontSize: '0.68rem', color: '#5C7080', letterSpacing: '1px', marginBottom: '6px' }}>QUERY NAME</div>
           <input value={name} onChange={e => setName(e.target.value)}
-            placeholder="e.g. Overdue stays, Bharat cleanup..."
+            placeholder="e.g. Overdue stays, duplicate cleanup..."
             style={{
               width: '100%', padding: '10px 12px', borderRadius: '8px',
               background: '#0D1117', border: '1px solid rgba(255,255,255,0.1)',

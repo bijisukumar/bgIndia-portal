@@ -248,7 +248,7 @@ export default function NewBooking() {
         <div className="card">
           <div className="field">
             <label className="field-label">Booker name</label>
-            <input className="field-input" placeholder="e.g. Vikram Ramasubramanian"
+            <input className="field-input" placeholder="e.g. Michael J Carter"
               value={form.bookerName} onChange={e => set('bookerName', e.target.value)} />
           </div>
           <div className="grid-2">

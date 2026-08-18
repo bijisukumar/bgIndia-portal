@@ -65,14 +65,24 @@ CREATE TABLE IF NOT EXISTS stayvibe_stay_ext (
 );
 CREATE INDEX IF NOT EXISTS idx_stay_ext_villa ON stayvibe_stay_ext(villa_id);
 
+-- Form C is filed per foreign national, not per booking, so this is ONE ROW
+-- PER GUEST keyed (stay_id, guest_seq). guest_seq 1 is whoever filled the
+-- check-in form; 2..N are the companions they added. Domestic parties write
+-- no rows here at all.
 CREATE TABLE IF NOT EXISTS stayvibe_stay_kyc (
-  stay_id TEXT PRIMARY KEY, villa_id TEXT,
+  kyc_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  stay_id TEXT NOT NULL, villa_id TEXT,
+  guest_seq INTEGER NOT NULL DEFAULT 1,
+  guest_name TEXT, nationality TEXT, dob TEXT, gender TEXT,
   passport_number TEXT, passport_issue_date TEXT, passport_issue_place TEXT, passport_expiry TEXT,
   visa_number TEXT, visa_type TEXT, visa_issue_date TEXT, visa_issue_place TEXT,
   arrival_date_india TEXT, port_of_arrival TEXT, next_destination TEXT,
   home_country TEXT, home_country_address TEXT,
+  docs_later INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kyc_stay_seq ON stayvibe_stay_kyc(stay_id, guest_seq);
+CREATE INDEX IF NOT EXISTS idx_kyc_stay ON stayvibe_stay_kyc(stay_id);
 CREATE INDEX IF NOT EXISTS idx_stay_kyc_villa ON stayvibe_stay_kyc(villa_id);
 
 CREATE TABLE IF NOT EXISTS stayvibe_stay_prefs (

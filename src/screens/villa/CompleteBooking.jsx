@@ -1327,6 +1327,9 @@ export default function CompleteBooking() {
                   )}
                 </div>
 
+                {/* Form C — one per foreign national, per Indian law */}
+                <FormCPanel stayId={s.stay_id} partySize={(parseInt(s.adults)||0) + (parseInt(s.children)||0)} />
+
                 {/* Channel & Tariff */}
                 <div className="card-section-label">CHANNEL & TARIFF</div>
                 <div className="card">
@@ -1764,4 +1767,78 @@ const reqPill = {
 const extBox = {
   background:'rgba(200,144,58,0.06)', border:'1px solid rgba(200,144,58,0.15)',
   borderRadius:'8px', padding:'10px 12px',
+}
+
+// ── FORM C ────────────────────────────────────────────────────────────────
+// Indian law requires a separate Form C per foreign national, so the check-in
+// form captures one block per guest and this reads them back. Loads lazily —
+// domestic bookings have no rows and cost nothing.
+function FormCPanel({ stayId, partySize }) {
+  const [guests, setGuests] = useState(null)   // null = not loaded yet
+  const [err, setErr]       = useState('')
+
+  useEffect(() => {
+    let alive = true
+    setGuests(null); setErr('')
+    if (!stayId) return
+    api.getFormCGuests(stayId)
+      .then(d => { if (alive) setGuests(Array.isArray(d) ? d : (d?.data || [])) })
+      .catch(e => { if (alive) setErr(e?.message || 'Could not load Form C details') })
+    return () => { alive = false }
+  }, [stayId])
+
+  // Domestic party: nothing to file, so don't take up space on the card.
+  if (!err && Array.isArray(guests) && guests.length === 0) return null
+
+  const missing = Array.isArray(guests) ? Math.max(0, partySize - guests.length) : 0
+  const fmt = v => v || '—'
+
+  return (<>
+    <div className="card-section-label">FORM C · FOREIGN NATIONALS</div>
+    <div className="card" style={{ marginBottom:'14px' }}>
+      {err && <div style={{ color:'#EF4444', fontSize:'0.8rem' }}>{err}</div>}
+      {!err && guests === null && (
+        <div style={{ color:'#6B7280', fontSize:'0.8rem' }}>Loading…</div>
+      )}
+      {!err && Array.isArray(guests) && guests.length > 0 && (<>
+        <div style={{ fontSize:'0.78rem', fontWeight:'600', marginBottom:'10px',
+          padding:'8px 10px', borderRadius:'8px',
+          background: missing ? 'rgba(234,179,8,0.08)' : 'rgba(52,168,83,0.08)',
+          border: '1px solid ' + (missing ? 'rgba(234,179,8,0.35)' : 'rgba(52,168,83,0.35)'),
+          color: missing ? '#EAB308' : '#34A853' }}>
+          {missing
+            ? guests.length + ' of ' + partySize + ' guests have Form C details — ' + missing + ' missing'
+            : 'All ' + guests.length + ' foreign guest' + (guests.length === 1 ? '' : 's') + ' captured'}
+        </div>
+        {guests.map(g => (
+          <div key={g.guest_seq} style={{ padding:'10px 0',
+            borderTop: g.guest_seq === 1 ? 'none' : '1px solid rgba(255,255,255,0.07)' }}>
+            <div style={{ display:'flex', justifyContent:'space-between',
+              alignItems:'baseline', marginBottom:'6px' }}>
+              <span style={{ fontWeight:'700', fontSize:'0.86rem' }}>
+                {g.guest_seq}. {fmt(g.guest_name)}
+              </span>
+              <span style={{ fontSize:'0.72rem', color:'#9AA5B4' }}>{fmt(g.nationality)}</span>
+            </div>
+            <div style={{ fontSize:'0.75rem', color:'#9AA5B4', lineHeight:'1.8' }}>
+              <div>Passport <strong style={{ color:'#C9D4E2' }}>{fmt(g.passport_number)}</strong>
+                {g.passport_expiry ? ' · expires ' + g.passport_expiry : ''}
+                {g.passport_issue_place ? ' · issued ' + g.passport_issue_place : ''}</div>
+              <div>Visa {g.docs_later
+                ? <em style={{ color:'#EAB308' }}>submitting at check-in</em>
+                : <><strong style={{ color:'#C9D4E2' }}>{fmt(g.visa_number)}</strong>
+                    {g.visa_type ? ' · ' + g.visa_type : ''}</>}</div>
+              <div>Arrived {fmt(g.arrival_date_india)}
+                {g.port_of_arrival ? ' at ' + g.port_of_arrival : ''}
+                {g.next_destination ? ' · next ' + g.next_destination : ''}</div>
+              <div style={{ fontSize:'0.72rem', color:'#6B7280' }}>
+                {g.has_passport_doc ? '📎 passport scan' : '⚠️ no passport scan'}
+                {g.docs_later ? '' : (g.has_visa_doc ? ' · 📎 visa scan' : ' · ⚠️ no visa scan')}
+              </div>
+            </div>
+          </div>
+        ))}
+      </>)}
+    </div>
+  </>)
 }

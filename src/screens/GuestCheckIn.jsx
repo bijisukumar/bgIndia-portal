@@ -197,7 +197,7 @@ export default function GuestCheckIn() {
   const isForeign = nationality === 'Foreign'
   // "Enhance Your Stay" comes after section 4 (Indian ID) or section 6
   // (Foreign Form C's arrival section), so its own number shifts accordingly.
-  const enhanceSectionNum = isForeign ? 7 : 5
+  const enhanceSectionNum = isForeign ? 8 : 5
 
   // Submission state
   const [submitting, setSubmitting] = useState(false)
@@ -259,6 +259,38 @@ export default function GuestCheckIn() {
   const [passportOcrBusy, setPassportOcrBusy] = useState(false)  // reading MRZ
   const [passportOcrHint, setPassportOcrHint] = useState('')     // status under the upload
   const visaRef     = useRef()
+
+  // ── Additional foreign nationals (Form C is per person, not per booking) ──
+  // Every foreign national staying at the property needs their own Form C with
+  // their own passport and visa. Guest 1 is whoever is filling this form; each
+  // block below is another person in the party.
+  const BLANK_GUEST = {
+    guestName:'', nationality:'', dob:'', gender:'',
+    passportNumber:'', passportIssueDate:'', passportIssuePlace:'', passportExpiry:'',
+    visaNumber:'', visaType:'', visaIssueDate:'', visaIssuePlace:'',
+    arrivalDateIndia:'', portOfArrival:'', nextDestination:'',
+    docsSubmitLater:false, passportPreview:null, visaPreview:null,
+  }
+  const [extraGuests, setExtraGuests] = useState([])
+  const guestFileRefs = useRef({})
+  const partySize   = (parseInt(adults)||1) + (parseInt(children)||0)
+  const formCFiled  = 1 + extraGuests.length      // guest 1 is this form
+  const formCMissing = Math.max(0, partySize - formCFiled)
+
+  const patchGuest  = (i, patch) =>
+    setExtraGuests(gs => gs.map((g, idx) => idx === i ? { ...g, ...patch } : g))
+  const addGuest    = () => setExtraGuests(gs => [...gs, { ...BLANK_GUEST }])
+  const removeGuest = i => setExtraGuests(gs => gs.filter((_, idx) => idx !== i))
+
+  // Same reader as the primary guest's uploads, but writes into the guest's
+  // own slot. No OCR here — MRZ auto-fill stays on the primary passport only.
+  function handleGuestUpload(e, i, key) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => patchGuest(i, { [key]: ev.target.result })
+    reader.readAsDataURL(file)
+  }
 
   // ── Enhance your stay (optional add-on requests) ───────────
   const [reqEarly,        setReqEarly]        = useState(false)
@@ -344,6 +376,19 @@ export default function GuestCheckIn() {
     if (isForeign && !docsLater && !passportPreview) return 'Please upload your passport photo page'
     if (isForeign && !visaNo && !docsLater)   return 'Visa number is required (or check "I will submit later")'
     if (isForeign && !visaType && !docsLater) return 'Visa type is required'
+    if (isForeign) {
+      for (let i = 0; i < extraGuests.length; i++) {
+        const g = extraGuests[i], who = `Guest ${i + 2}`
+        if (!g.guestName.trim())      return `${who}: full name is required`
+        if (!g.nationality)           return `${who}: nationality is required`
+        if (!g.passportNumber.trim()) return `${who}: passport number is required`
+        if (!g.passportExpiry)        return `${who}: passport expiry date is required`
+        if (!g.docsSubmitLater && !g.visaNumber.trim())
+          return `${who}: visa number is required (or tick "submit at check-in")`
+        if (!g.docsSubmitLater && !g.visaType)
+          return `${who}: visa type is required`
+      }
+    }
     return null
   }
 
@@ -391,6 +436,27 @@ export default function GuestCheckIn() {
         arrivalDateIndia: isForeign ? arrivalIndia : null,
         portOfArrival:    isForeign ? portOfArrival : null,
         nextDestination:  isForeign ? nextDest : null,
+        // One entry per additional foreign national. Previews carry the base64
+        // scan; strip the data: prefix the same way the primary guest's do.
+        formCGuests: isForeign ? extraGuests.map(g => ({
+          guestName: g.guestName.trim(), nationality: g.nationality,
+          dob: g.dob || null, gender: g.gender || null,
+          passportNumber: g.passportNumber.trim(),
+          passportIssueDate: g.passportIssueDate || null,
+          passportIssuePlace: g.passportIssuePlace || null,
+          passportExpiry: g.passportExpiry || null,
+          visaNumber:    g.docsSubmitLater ? null : g.visaNumber.trim(),
+          visaType:      g.docsSubmitLater ? null : g.visaType,
+          visaIssueDate: g.docsSubmitLater ? null : (g.visaIssueDate || null),
+          visaIssuePlace:g.docsSubmitLater ? null : (g.visaIssuePlace || null),
+          arrivalDateIndia: g.arrivalDateIndia || null,
+          portOfArrival:    g.portOfArrival || null,
+          nextDestination:  g.nextDestination || null,
+          homeCountryAddress: null,
+          docsSubmitLater: !!g.docsSubmitLater,
+          passportFileB64: g.passportPreview?.split(',')[1] || null,
+          visaFileB64:     g.visaPreview?.split(',')[1] || null,
+        })) : [],
         docsSubmitLater: docsLater || false,
         idFileB64, idFileName: idFile?.name||null,
         passportFileB64: passportB64,
@@ -804,6 +870,165 @@ export default function GuestCheckIn() {
           <Field label="Next destination after this stay">
             <Input value={nextDest} onChange={setNextDest} placeholder="Kovalam / Mumbai / Home country" />
           </Field>
+
+          {/* 7 - OTHER FOREIGN GUESTS. Form C is per person, so each foreign
+               national in the party needs their own passport and visa here,
+               not just the person who made the booking. */}
+          <SectionLabel icon="👥" color="#85B7EB">7 &middot; OTHER FOREIGN GUESTS (FORM C)</SectionLabel>
+
+          <div style={{ marginBottom:'14px', padding:'12px 14px',
+            background:'rgba(133,183,235,0.06)', border:'1px solid rgba(133,183,235,0.2)',
+            borderRadius:'10px', fontSize:'0.82rem', color:'#9AA5B4', lineHeight:'1.6' }}>
+            Indian law requires a <strong style={{ color:'#C9D4E2' }}>separate Form C for every
+            foreign national</strong> staying at the property &mdash; not just the person who booked.
+            Sections 4&ndash;6 above cover <strong style={{ color:'#C9D4E2' }}>you</strong>. Please add
+            each additional foreign guest below with their own passport and visa.
+          </div>
+
+          <div style={{ marginBottom:'14px', padding:'10px 14px', borderRadius:'10px',
+            fontSize:'0.8rem', fontWeight:'600',
+            background: formCMissing ? 'rgba(234,179,8,0.08)' : 'rgba(52,168,83,0.08)',
+            border: '1px solid ' + (formCMissing ? 'rgba(234,179,8,0.35)' : 'rgba(52,168,83,0.35)'),
+            color: formCMissing ? '#EAB308' : '#34A853' }}>
+            {formCMissing
+              ? formCFiled + ' of ' + partySize + ' guests entered — ' + formCMissing + ' still to add'
+              : 'All ' + partySize + ' guest' + (partySize === 1 ? '' : 's') + ' entered'}
+          </div>
+
+          {extraGuests.map((g, i) => (
+            <div key={i} style={{ marginBottom:'16px', padding:'14px', borderRadius:'12px',
+              border:'1px solid rgba(133,183,235,0.25)', background:'rgba(133,183,235,0.04)' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                marginBottom:'12px' }}>
+                <div style={{ fontSize:'0.85rem', fontWeight:'700', color:'#85B7EB' }}>
+                  GUEST {i + 2}
+                </div>
+                <button type="button" onClick={() => removeGuest(i)}
+                  style={{ background:'none', border:'1px solid rgba(239,68,68,0.4)',
+                    color:'#EF4444', borderRadius:'8px', padding:'5px 12px',
+                    fontSize:'0.75rem', fontWeight:'600', cursor:'pointer' }}>
+                  Remove
+                </button>
+              </div>
+
+              <Field label="Full name (as in passport)" required>
+                <Input value={g.guestName} onChange={v => patchGuest(i, { guestName:v })}
+                  placeholder="Given name + surname" />
+              </Field>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                <Field label="Nationality" required>
+                  <Select value={g.nationality} onChange={v => patchGuest(i, { nationality:v })}
+                    options={COUNTRIES.filter(c => c !== 'India')} placeholder="Select country" />
+                </Field>
+                <Field label="Date of birth">
+                  <Input type="date" value={g.dob} onChange={v => patchGuest(i, { dob:v })} />
+                </Field>
+              </div>
+              <Field label="Gender">
+                <Select value={g.gender} onChange={v => patchGuest(i, { gender:v })}
+                  options={['Male','Female','Other']} placeholder="Select" />
+              </Field>
+
+              <div style={{ fontSize:'0.72rem', fontWeight:'700', color:'#6B7280',
+                letterSpacing:'0.06em', margin:'14px 0 8px' }}>PASSPORT</div>
+              <Field label="Passport number" required>
+                <Input value={g.passportNumber} onChange={v => patchGuest(i, { passportNumber:v })}
+                  placeholder="A1234567" />
+              </Field>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                <Field label="Issue date">
+                  <Input type="date" value={g.passportIssueDate}
+                    onChange={v => patchGuest(i, { passportIssueDate:v })} />
+                </Field>
+                <Field label="Expiry date" required>
+                  <Input type="date" value={g.passportExpiry}
+                    onChange={v => patchGuest(i, { passportExpiry:v })} />
+                </Field>
+              </div>
+              <Field label="Place of issue">
+                <Input value={g.passportIssuePlace}
+                  onChange={v => patchGuest(i, { passportIssuePlace:v })}
+                  placeholder="New Delhi / Mumbai" />
+              </Field>
+              <Field label="Upload passport photo page">
+                <UploadBox label="Upload passport photo page" preview={g.passportPreview}
+                  icon="🛂" color="#85B7EB"
+                  onClick={() => guestFileRefs.current['p' + i]?.click()}
+                  hint="Clear photo of the biographical data page" />
+                <input type="file" accept="image/*,application/pdf"
+                  ref={el => { guestFileRefs.current['p' + i] = el }}
+                  onChange={e => handleGuestUpload(e, i, 'passportPreview')}
+                  style={{ display:'none' }} />
+              </Field>
+
+              <div style={{ fontSize:'0.72rem', fontWeight:'700', color:'#6B7280',
+                letterSpacing:'0.06em', margin:'14px 0 8px' }}>VISA</div>
+              <ServiceToggle label="Submit visa documents at check-in"
+                hint="Skip visa details now - bring originals on arrival"
+                checked={g.docsSubmitLater}
+                onClick={() => patchGuest(i, { docsSubmitLater: !g.docsSubmitLater })} />
+              {!g.docsSubmitLater && (<>
+                <Field label="Visa number" required>
+                  <Input value={g.visaNumber} onChange={v => patchGuest(i, { visaNumber:v })}
+                    placeholder="IN-XXXXXXXX" />
+                </Field>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                  <Field label="Visa type" required>
+                    <Select value={g.visaType} onChange={v => patchGuest(i, { visaType:v })}
+                      options={VISA_TYPES} placeholder="Select..." />
+                  </Field>
+                  <Field label="Issue date">
+                    <Input type="date" value={g.visaIssueDate}
+                      onChange={v => patchGuest(i, { visaIssueDate:v })} />
+                  </Field>
+                </div>
+                <Field label="Place of visa issue">
+                  <Input value={g.visaIssuePlace}
+                    onChange={v => patchGuest(i, { visaIssuePlace:v })}
+                    placeholder="Embassy / Consulate city" />
+                </Field>
+                <Field label="Upload visa page">
+                  <UploadBox label="Upload visa page" preview={g.visaPreview}
+                    icon="📋" color="#85B7EB"
+                    onClick={() => guestFileRefs.current['v' + i]?.click()}
+                    hint="Visa stamp, sticker, or e-Visa printout" />
+                  <input type="file" accept="image/*,application/pdf"
+                    ref={el => { guestFileRefs.current['v' + i] = el }}
+                    onChange={e => handleGuestUpload(e, i, 'visaPreview')}
+                    style={{ display:'none' }} />
+                </Field>
+              </>)}
+
+              <div style={{ fontSize:'0.72rem', fontWeight:'700', color:'#6B7280',
+                letterSpacing:'0.06em', margin:'14px 0 8px' }}>ARRIVAL IN INDIA</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                <Field label="Date of arrival in India">
+                  <Input type="date" value={g.arrivalDateIndia}
+                    onChange={v => patchGuest(i, { arrivalDateIndia:v })} />
+                </Field>
+                <Field label="Port of arrival">
+                  <Input value={g.portOfArrival} onChange={v => patchGuest(i, { portOfArrival:v })}
+                    placeholder="Kochi / Chennai" />
+                </Field>
+              </div>
+              <Field label="Next destination after this stay">
+                <Input value={g.nextDestination}
+                  onChange={v => patchGuest(i, { nextDestination:v })}
+                  placeholder="Kovalam / Mumbai / Home country" />
+              </Field>
+            </div>
+          ))}
+
+          <button type="button" onClick={addGuest}
+            style={{ width:'100%', padding:'14px', borderRadius:'10px',
+              border:'1px dashed rgba(133,183,235,0.5)', background:'rgba(133,183,235,0.06)',
+              color:'#85B7EB', fontSize:'0.88rem', fontWeight:'700', cursor:'pointer',
+              marginBottom:'6px' }}>
+            + Add another foreign guest
+          </button>
+          <div style={{ fontSize:'0.72rem', color:'#6B7280', marginBottom:'14px' }}>
+            Add one block per additional foreign national &mdash; including children with their own passport.
+          </div>
         </>)}
 
         {/* ── ENHANCE YOUR STAY (optional add-ons) ── */}

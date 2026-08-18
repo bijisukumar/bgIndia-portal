@@ -241,3 +241,42 @@ app immediately before its own deploy rather than batching all builds first.
   `new Date(str)` audit on other screens.
 - Separate project: "Project Caprock" (Caprock Cloud company merger) — its
   own conversations, not this repo.
+
+## Form C is per foreign national (2026-08-18)
+
+Indian law requires a **separate Form C for every foreign national** staying at
+the property, not just the person who made the booking. The KYC table was keyed
+`stay_id PRIMARY KEY`, which structurally allowed exactly one — so a family of
+four foreigners could only ever have one filing.
+
+`stayvibe_stay_kyc` is now **one row per guest**, keyed `(stay_id, guest_seq)`:
+
+- `guest_seq = 1` is whoever filled the check-in form (sections 4–6).
+- `guest_seq = 2..N` are the companions added in section 7, "Other foreign guests".
+- Each row carries its own name, nationality, DOB, gender, passport, visa and
+  arrival details. Domestic parties write **no rows at all**.
+- `stayvibe_guest_documents` gained `guest_seq`, so each passport/visa scan is
+  attributable to the person it belongs to.
+
+`writeFormCGuests()` rewrites the whole set rather than upserting row by row:
+if a guest re-submits with a companion removed, that companion's row must
+disappear, otherwise a stale foreign national stays on the filing.
+
+**`docs_later` is enforced server-side.** When a guest ticks "submit visa
+documents at check-in", the worker nulls the visa columns regardless of what
+the payload contained. The form already blanks them, but this is a public
+endpoint and it must not be possible to store visa details against a guest
+flagged as not having supplied them. A direct-POST test proved the client-side
+strip alone was insufficient.
+
+Read it back with `getFormCGuests?stayId=...` (authed, property-scoped). Before
+this endpoint the KYC table was **write-only** — data was captured but nothing
+could retrieve it, which meant it could not actually be used for the filing.
+The owner sees it as a "FORM C · FOREIGN NATIONALS" card on Complete Booking,
+which flags both missing guests and missing scans.
+
+**Not deployed: demovilla.** Its worker still runs the pre-Form-C bundle. The
+database (`demovilla-db`) has been migrated and was also missing
+`stayvibe_stay_kyc`/`stayvibe_stay_prefs` entirely from the earlier column
+split, so prefs writes there had nowhere to land. Deploying it needs the
+`wrangler.toml` DB-binding swap, which is a manual step.

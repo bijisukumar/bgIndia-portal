@@ -131,6 +131,7 @@ export const api = {
   linkBookedBy:         (data)   => post('linkBookedBy', data),
   getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
   getUpcomingStays:     (villaId)=> get('getUpcomingStays', { villaId }),
+  getFormCGuests:       (stayId) => get('getFormCGuests', { stayId }),
 
   // ── VILLA INCOME ─────────────────────────────────────────
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),

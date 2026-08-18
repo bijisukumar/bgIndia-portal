@@ -489,22 +489,64 @@ async function upsertStaySide(DB, table, stayId, villaId, fields) {
 // Both check-in paths (update-existing and insert-new) supply the same
 // fields, so the mapping from form names to columns lives once here rather
 // than being duplicated either side of that branch.
+// ── FORM C ───────────────────────────────────────────────────────────────
+// Form C is filed per foreign national, not per booking, so KYC is one row
+// per guest keyed (stay_id, guest_seq). Seq 1 is whoever filled the form;
+// 2..N are the companions they added. Domestic guests write nothing.
+//
+// Rewrites the whole set rather than upserting row by row: if a guest edits
+// the form and removes a companion, that companion's row has to disappear
+// too, otherwise a stale foreign national stays on the filing.
+async function writeFormCGuests(DB, stayId, villaId, guests) {
+  if (!stayId || !Array.isArray(guests)) return 0
+  const rows = guests
+    .map((g, i) => ({ ...g, guest_seq: parseInt(g.guest_seq) || i + 1 }))
+    // A block with no passport number is a half-filled extra guest the form
+    // shouldn't have sent — skip it rather than storing an unfilable row.
+    .filter(g => (g.passport_number || '').trim() || (g.guest_name || '').trim())
+  if (!rows.length) return 0
+
+  // "I'll submit visa documents at check-in" means we hold no visa data for
+  // that guest. The form already blanks these, but this is a public endpoint —
+  // enforce it here so a stray payload can't leave visa details attached to a
+  // guest flagged as not having supplied them.
+  for (const g of rows) {
+    if (g.docs_later) {
+      g.visa_number = null; g.visa_type = null
+      g.visa_issue_date = null; g.visa_issue_place = null
+    }
+  }
+
+  const seqs = rows.map(r => r.guest_seq)
+  await DB.prepare(
+    `DELETE FROM stayvibe_stay_kyc WHERE stay_id = ? AND guest_seq NOT IN (${seqs.map(() => '?').join(',')})`
+  ).bind(stayId, ...seqs).run()
+
+  const COLS = ['guest_seq','guest_name','nationality','dob','gender',
+    'passport_number','passport_issue_date','passport_issue_place','passport_expiry',
+    'visa_number','visa_type','visa_issue_date','visa_issue_place',
+    'arrival_date_india','port_of_arrival','next_destination',
+    'home_country','home_country_address','docs_later']
+  for (const g of rows) {
+    const cols = ['stay_id','villa_id',...COLS]
+    const vals = [stayId, villaId || null, ...COLS.map(c => {
+      const v = g[c]
+      if (c === 'guest_seq') return v
+      if (c === 'docs_later') return v ? 1 : 0
+      return (v === undefined || v === '') ? null : v
+    })]
+    await DB.prepare(
+      `INSERT INTO stayvibe_stay_kyc (${cols.join(', ')})
+       VALUES (${cols.map(() => '?').join(',')})
+       ON CONFLICT(stay_id, guest_seq) DO UPDATE SET
+         ${COLS.filter(c => c !== 'guest_seq').map(c => `${c} = excluded.${c}`).join(', ')},
+         updated_at = datetime('now')`
+    ).bind(...vals).run()
+  }
+  return rows.length
+}
+
 async function writeStaySideBlocks(DB, stayId, villaId, f) {
-  await upsertStaySide(DB, 'stayvibe_stay_kyc', stayId, villaId, {
-    passport_number:      f.passportNumber      || null,
-    passport_issue_date:  f.passportIssueDate   || null,
-    passport_issue_place: f.passportIssuePlace  || null,
-    passport_expiry:      f.passportExpiry      || null,
-    visa_number:          f.visaNumber          || null,
-    visa_type:            f.visaType            || null,
-    visa_issue_date:      f.visaIssueDate       || null,
-    visa_issue_place:     f.visaIssuePlace      || null,
-    arrival_date_india:   f.arrivalDateIndia    || null,
-    port_of_arrival:      f.portOfArrival       || null,
-    next_destination:     f.nextDestination     || null,
-    home_country:         f.homeCountry         || null,
-    home_country_address: f.homeCountryAddress  || null,
-  })
   await upsertStaySide(DB, 'stayvibe_stay_prefs', stayId, villaId, {
     request_breakfast:  f.reqBreakfast ? 1 : 0,
     breakfast_choice:   f.bfChoice     || null,
@@ -1045,9 +1087,6 @@ export async function onRequest(ctx) {
           partner||'direct', submittedAt, submittedAt, stayId
         ).run()
         await writeStaySideBlocks(DB, stayId, villaId, {
-          passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
-          visaNumber, visaType, visaIssueDate, visaIssuePlace,
-          arrivalDateIndia, portOfArrival, nextDestination, homeCountry, homeCountryAddress,
           reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
         })
       } else {
@@ -1087,11 +1126,59 @@ export async function onRequest(ctx) {
           reqEarly, reqLate
         ).run()
         await writeStaySideBlocks(DB, stayId, villaId, {
-          passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
-          visaNumber, visaType, visaIssueDate, visaIssuePlace,
-          arrivalDateIndia, portOfArrival, nextDestination, homeCountry, homeCountryAddress,
           reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
         })
+      }
+
+      // Form C: the person filling the form is guest 1; anyone they added in
+      // the "other foreign guests" blocks follows as 2..N. Domestic parties
+      // send no foreign guests and write no KYC rows at all.
+      const primaryIsForeign = !!(passportNumber || '').trim()
+      const formCList = []
+      if (primaryIsForeign) {
+        formCList.push({
+          guest_seq: 1,
+          guest_name: safeGuestName,
+          nationality: homeCountry || nationality || null,
+          dob: dob || null,
+          gender: gender || null,
+          passport_number: passportNumber, passport_issue_date: passportIssueDate,
+          passport_issue_place: passportIssuePlace, passport_expiry: passportExpiry,
+          visa_number: visaNumber, visa_type: visaType,
+          visa_issue_date: visaIssueDate, visa_issue_place: visaIssuePlace,
+          arrival_date_india: arrivalDateIndia, port_of_arrival: portOfArrival,
+          next_destination: nextDestination,
+          home_country: homeCountry, home_country_address: homeCountryAddress,
+          docs_later: publicBody.docsSubmitLater ? 1 : 0,
+        })
+      }
+      for (const g of (Array.isArray(publicBody.formCGuests) ? publicBody.formCGuests : [])) {
+        if (!g || typeof g !== 'object') continue
+        formCList.push({
+          guest_seq: formCList.length + 1,
+          guest_name: (g.guestName || '').trim() || null,
+          nationality: g.nationality || null,
+          dob: g.dob || null,
+          gender: g.gender || null,
+          passport_number: (g.passportNumber || '').trim() || null,
+          passport_issue_date: g.passportIssueDate || null,
+          passport_issue_place: g.passportIssuePlace || null,
+          passport_expiry: g.passportExpiry || null,
+          visa_number: (g.visaNumber || '').trim() || null,
+          visa_type: g.visaType || null,
+          visa_issue_date: g.visaIssueDate || null,
+          visa_issue_place: g.visaIssuePlace || null,
+          arrival_date_india: g.arrivalDateIndia || null,
+          port_of_arrival: g.portOfArrival || null,
+          next_destination: g.nextDestination || null,
+          home_country: g.nationality || homeCountry || null,
+          home_country_address: g.homeCountryAddress || homeCountryAddress || null,
+          docs_later: g.docsSubmitLater ? 1 : 0,
+        })
+      }
+      if (formCList.length) {
+        try { await writeFormCGuests(DB, stayId, villaId, formCList) }
+        catch (e) { console.error('Form C write failed:', e?.message || e) }
       }
 
       // Stamp the resolved guest link (Phase 1 column) — starts populating
@@ -1140,6 +1227,18 @@ export async function onRequest(ctx) {
       }
 
       const docId = (type, sid) => `DOC-${sid}-${type}-${Date.now()}`
+      // Store one passport/visa scan per foreign guest. guest_seq mirrors the
+      // KYC row, so the owner can line a scan up with the person it belongs to.
+      const storeDoc = async (type, seq, b64, name) => {
+        if (!b64) return
+        try {
+          await DB.prepare(
+            `INSERT OR REPLACE INTO stayvibe_guest_documents
+             (doc_id, stay_id, doc_type, guest_seq, file_name, file_b64, folder_created, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, 0, datetime('now'))`
+          ).bind(docId(`${type}-g${seq}`, stayId), stayId, type, seq, name, b64).run()
+        } catch (e) { console.warn(`${type} doc store error (guest ${seq}):`, e.message) }
+      }
       if (idFileB64) {
         try {
           await DB.prepare(
@@ -1149,23 +1248,13 @@ export async function onRequest(ctx) {
           ).bind(docId('id', stayId), stayId, 'govt_id', idFileName || ('ID-' + stayId + '.jpg'), idFileB64).run()
         } catch(e) { console.warn('ID doc store error:', e.message) }
       }
-      if (publicBody.passportFileB64) {
-        try {
-          await DB.prepare(
-            `INSERT OR REPLACE INTO stayvibe_guest_documents
-             (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-             VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-          ).bind(docId('passport', stayId), stayId, 'passport', 'passport-' + stayId + '.jpg', publicBody.passportFileB64).run()
-        } catch(e) { console.warn('Passport doc store error:', e.message) }
-      }
-      if (publicBody.visaFileB64) {
-        try {
-          await DB.prepare(
-            `INSERT OR REPLACE INTO stayvibe_guest_documents
-             (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-             VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-          ).bind(docId('visa', stayId), stayId, 'visa', 'visa-' + stayId + '.jpg', publicBody.visaFileB64).run()
-        } catch(e) { console.warn('Visa doc store error:', e.message) }
+      await storeDoc('passport', 1, publicBody.passportFileB64, `passport-${stayId}.jpg`)
+      await storeDoc('visa',     1, publicBody.visaFileB64,     `visa-${stayId}.jpg`)
+      const extraGuests = Array.isArray(publicBody.formCGuests) ? publicBody.formCGuests : []
+      for (let i = 0; i < extraGuests.length; i++) {
+        const seq = i + 2   // seq 1 is the person who filled the form
+        await storeDoc('passport', seq, extraGuests[i]?.passportFileB64, `passport-${stayId}-g${seq}.jpg`)
+        await storeDoc('visa',     seq, extraGuests[i]?.visaFileB64,     `visa-${stayId}-g${seq}.jpg`)
       }
 
       return json({ success: true, data: { stayId, status: 'pending_review' } })
@@ -2754,6 +2843,37 @@ export async function onRequest(ctx) {
           nearby.push(r)
         }
         return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby } })
+      }
+
+      // Form C rows for one stay — one per foreign national, ordered as the
+      // guest entered them. Until this existed the KYC table was write-only:
+      // the data was captured but nothing could read it back for the filing.
+      if (action === 'getFormCGuests') {
+        const stayId = url.searchParams.get('stayId')
+        if (!stayId) return err('stayId is required')
+        const stay = await DB.prepare(
+          `SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!stay) return err('Stay not found')
+        assertPropertyAccess(payload, stay.villa_id)
+        const { results } = await DB.prepare(
+          `SELECT k.guest_seq, k.guest_name, k.nationality, k.dob, k.gender,
+                  k.passport_number, k.passport_issue_date, k.passport_issue_place,
+                  k.passport_expiry, k.visa_number, k.visa_type, k.visa_issue_date,
+                  k.visa_issue_place, k.arrival_date_india, k.port_of_arrival,
+                  k.next_destination, k.home_country, k.home_country_address,
+                  k.docs_later,
+                  (SELECT COUNT(*) FROM stayvibe_guest_documents d
+                    WHERE d.stay_id = k.stay_id AND d.guest_seq = k.guest_seq
+                      AND d.doc_type = 'passport') AS has_passport_doc,
+                  (SELECT COUNT(*) FROM stayvibe_guest_documents d
+                    WHERE d.stay_id = k.stay_id AND d.guest_seq = k.guest_seq
+                      AND d.doc_type = 'visa') AS has_visa_doc
+             FROM stayvibe_stay_kyc k
+            WHERE k.stay_id = ?
+            ORDER BY k.guest_seq`
+        ).bind(stayId).all()
+        return json({ success: true, data: results || [] })
       }
 
       if (action === 'getUpcomingStays') {

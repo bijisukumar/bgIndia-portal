@@ -2582,9 +2582,9 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, guest_phone, guest_email,
+          `SELECT stayvibe_stays.stay_id, guest_name, guest_phone, guest_email,
                   checkin_date, checkout_date, nights, adults, children,
-                  source, status, villa_id, from_city,
+                  source, status, stayvibe_stays.villa_id, from_city,
                   drive_folder_id, drive_folder_url,
                   tariff_per_night, extra_charges, extra_lines, gross, net, notes,
                   commission_pct, commission_amt,

@@ -23,6 +23,59 @@ Update this file at every release milestone — never re-tell the story in chat.
   "manager" for SaaS). Estates managers: Pradosh (Pollachi/coconut),
   RamananKutty (Pavutumuri/rubber).
 
+## Stay data is no longer one table (2026-08-17)
+`stayvibe_stays` hit **D1's 100-column ALTER TABLE ceiling** — ADD COLUMN
+fails outright past it. Split to **77 columns** by dropping 4 genuinely dead
+ones and moving two cold blocks into 1:1 side tables:
+
+- `stayvibe_stay_kyc` — passport/visa/immigration (was filled on 2 of 313 rows)
+- `stayvibe_stay_prefs` — breakfast/cab/extra beds (0 of 313)
+- `stayvibe_stay_ext` — `late_checkout_nights`, `occupancy_tax`, and wherever
+  the next per-stay field should go. **Add new fields here, not to
+  stayvibe_stays.**
+
+Rows are created lazily — a domestic booking writes no KYC row at all. Reads
+that need them LEFT JOIN with COALESCE so a stay lacking a side row still
+appears. Deletes are **explicit** in the worker's hard-delete cascade, never
+ON DELETE CASCADE: D1 does not guarantee `PRAGMA foreign_keys=ON`.
+
+Beware `SELECT *` on stayvibe_stays — 13 such sites exist, and a moved column
+silently stops appearing rather than erroring.
+
+## Money rules that are easy to get wrong
+- **Extended-stay quotes (25%/50%)** are a share of what the **guest paid**,
+  not of what we net — and **occupancy tax is excluded** (government money,
+  not the value of the room). Direct bookings use gross; channel bookings use
+  `guest_paid_total + extra_charges`, minus tax.
+- **`night_fee` is the TOTAL room fee for the stay, not per night.** Confirmed
+  against four multi-night rows where guest_paid − night_fee − cleaning −
+  guest_service_fee lands on exactly 0.00. Multiplying it by nights produces
+  wildly wrong figures and only looks right on one-night stays.
+- **Occupancy tax** (Airbnb started collecting it) is stored in
+  `stayvibe_stay_ext.occupancy_tax`, falling back to the residual
+  `guest_paid_total − night_fee − cleaning_fee − guest_service_fee` for older
+  rows. Prefer the stored value: a residual silently absorbs any new line
+  Airbnb adds.
+- **Manager commission** is per stay serviced, not per night blocked: a night
+  held only for a late check-out must not tip a 1-night stay into the 2,000
+  band. See `late_checkout_nights`.
+
+## Phone numbers have one normaliser
+Guests type India's trunk `0` constantly; `wa.me` rejects it, so the guest
+becomes silently unmessageable. `normalizeStoredPhone()` (worker) and
+`waNumber()` (`src/utils/guestMessages.js`) strip trunk prefixes **before**
+the is-this-international length test. Every write path into `guest_phone`
+goes through it. Do not reintroduce a local copy — there were six.
+
+## Public endpoints and their trust model
+`/flexibility` (guest-facing) calls **`findMyBooking`**, which is public, so
+**the matching IS the security**: both dates and the contact must match
+exactly, only the name is fuzzy, and a miss returns a bare `found:false` —
+never which half matched, or it becomes a way to enumerate guests. Do not
+loosen. Other public actions: `submitGuestCheckIn`, `resolveCheckinLink`,
+`getAgentQuote`, `submitFlexRequest`, `runCheckoutEmailAutosend`
+(CRON_SECRET-guarded).
+
 ## Deploy commands — the directory is NOT interchangeable
 Each Vite config writes to its own `dist/<app>` subfolder; only `build:manage`
 writes to `dist` itself. `wrangler pages deploy dist` therefore uploads the

@@ -760,6 +760,7 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
   const [showAllYears, setShowAllYears] = useState(false)
   const [allYearsData, setAllYearsData] = useState(null)
   const [allYearsLoading, setAllYearsLoading] = useState(false)
+  const [customersOpen, setCustomersOpen] = useState(false)
 
   useEffect(() => {
     if (!showAllYears || allYearsData) return
@@ -809,9 +810,50 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
   const net4margin   = monthData.net || monthData.profit || 0
   const margin = gross4margin > 0 ? Math.round((net4margin / gross4margin) * 100) : 0
 
-  const breakdown = monthData.breakdown || {}
+  // Room tariff vs. extras (floor beds, additional guest, etc.) — split from
+  // the raw stays list rather than trusting monthData.breakdown.tariff, which
+  // is the FULL gross (room + extras already folded in) and would double-
+  // count anything broken out here as its own bar.
+  const grossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
+  const periodStays = (data?.stays || []).filter(s => {
+    if (!s.checkin_date) return false
+    if (month === 'fy') return true
+    return (new Date(s.checkin_date).getMonth()) === month
+  })
+  let floorBed = 0, otherExtras = 0
+  periodStays.forEach(s => {
+    const extraTotal = parseFloat(s.extra_charges) || 0
+    if (extraTotal <= 0) return
+    let lines = []
+    try { lines = s.extra_lines ? JSON.parse(s.extra_lines) : [] } catch { lines = [] }
+    const labeled = lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0)
+    lines.forEach(l => {
+      const amt = parseFloat(l.amount) || 0
+      if (!amt) return
+      if (l.label === 'Floor Bed') floorBed += amt
+      else otherExtras += amt
+    })
+    // extra_charges set without a matching itemized line (e.g. a manual
+    // override) — count it, just not attributable to a specific label.
+    if (extraTotal > labeled) otherExtras += (extraTotal - labeled)
+  })
+  const roomOnly = periodStays.reduce((s, r) => s + (grossOf(r) - (parseFloat(r.extra_charges) || 0)), 0)
+
+  const breakdown = { ...(monthData.breakdown || {}), tariff: roomOnly, floorBed, otherExtras }
   const breakdownVals = Object.values(breakdown).map(v => parseFloat(v)||0).filter(v => !isNaN(v))
   const maxBreakdown = breakdownVals.length > 0 ? Math.max(...breakdownVals, 1) : 1
+
+  // Per-customer revenue for the selected month only — a full-year "All"
+  // view would list every guest of the year, which is more noise than
+  // signal, so this block simply doesn't render then (see JSX below).
+  const customerMap = {}
+  periodStays.forEach(s => {
+    const key = s.guest_id || s.guest_name || 'Unknown'
+    if (!customerMap[key]) customerMap[key] = { name: s.guest_name || 'Unknown', revenue: 0, stays: 0 }
+    customerMap[key].revenue += grossOf(s)
+    customerMap[key].stays += 1
+  })
+  const customers = Object.values(customerMap).sort((a, b) => b.revenue - a.revenue)
 
   return (
     <div>
@@ -923,6 +965,8 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
         {loading ? <Skeleton h={160}/> : (
           <>
             <Bar label="Room tariff"   value={breakdown.tariff}    max={maxBreakdown} color="#C8903A"/>
+            <Bar label="Floor Bed"     value={breakdown.floorBed}   max={maxBreakdown} color="#5FD0AE"/>
+            <Bar label="Other extras"  value={breakdown.otherExtras} max={maxBreakdown} color="#EAB308"/>
             <Bar label="Car rental"    value={breakdown.carRental}  max={maxBreakdown} color="#185FA5"/>
             <Bar label="Kitchen"       value={breakdown.kitchen}    max={maxBreakdown} color="#34A853"/>
             <Bar label="Breakfast"     value={breakdown.breakfast}  max={maxBreakdown} color="#8B5CF6"/>
@@ -930,6 +974,30 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
           </>
         )}
       </div>
+
+      {/* Per-customer revenue — only meaningful for a single month; "All"
+          months would list every guest of the year, so it hides then. */}
+      {!loading && month !== 'fy' && customers.length > 0 && (
+        <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'12px', marginBottom:'16px', overflow:'hidden' }}>
+          <div onClick={() => setCustomersOpen(o => !o)}
+            style={{ display:'flex', alignItems:'center', gap:'10px', padding:'12px 16px', cursor:'pointer' }}>
+            <div style={{ flex:1, fontSize:'0.62rem', color:'var(--gold)', letterSpacing:'1.5px' }}>
+              CUSTOMERS · {MONTHS[month]} · {customers.length}
+            </div>
+            <div style={{ color:'var(--text-dim)', fontSize:'1rem' }}>{customersOpen ? '∧' : '∨'}</div>
+          </div>
+          {customersOpen && (
+            <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)' }}>
+              {customers.map((c, i) => (
+                <div key={c.name + i} className="net-row" style={{ padding:'8px 16px', borderBottom: i < customers.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                  <span className="net-label">{c.name}{c.stays > 1 ? ` (${c.stays} stays)` : ''}</span>
+                  <span className="net-val">{fmt(c.revenue)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card-section-label">QUARTERLY NET PROFIT — {year}</div>
       {loading ? <Skeleton h={80}/> : (

@@ -5,6 +5,7 @@ import { CONFIG } from '../config'
 import TopBar from '../components/TopBar'
 import { parseLocalDate } from '../utils/dates'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
+import { useAuth } from '../hooks/useAuth'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmtDate(d) {
@@ -243,6 +244,11 @@ function UpcomingBlock({ upcoming }) {
 // ── MAIN ───────────────────────────────────────────────────────────────────
 export default function RamanHome() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  // Salaried staff (comp_type='salary', e.g. Pradosh) never accrue a
+  // commission, so their own earnings snapshot has nothing to show — hide
+  // the menu item entirely rather than link to an empty/blocked screen.
+  const showEarnings = (user?.compType || 'commission') === 'commission'
   const [activeStay,  setActiveStay]  = useState(null)
   const [readyCount,  setReadyCount]  = useState(0)
   const [todo,        setTodo]        = useState({ overdue: [], upcoming: [] })
@@ -325,13 +331,13 @@ export default function RamanHome() {
       path: '/raman/inventory',
       disabled: false,
     },
-    {
+    ...(showEarnings ? [{
       icon: '💰', bg: 'rgba(52,168,83,0.08)', arrow: '#34A853',
       title: 'My earnings',
       sub: 'Commission snapshot · paid & outstanding',
       path: '/raman/dashboard',
       disabled: false,
-    },
+    }] : []),
   ]
 
   return (

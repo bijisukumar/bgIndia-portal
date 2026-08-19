@@ -871,7 +871,7 @@ export async function onRequest(ctx) {
     } else {
       const pinHash = await hashPin(pin)
       const row = await DB.prepare(
-        `SELECT tenant_id, role, actor, label FROM platform_auth_tokens WHERE token_hash = ? AND active = 1`
+        `SELECT tenant_id, role, actor, label, comp_type FROM platform_auth_tokens WHERE token_hash = ? AND active = 1`
       ).bind(pinHash).first()
       if (row) {
         const { results: props } = await DB.prepare(
@@ -880,6 +880,7 @@ export async function onRequest(ctx) {
         found = {
           name: row.label || row.actor, role: row.role, actor: row.actor,
           tenantId: row.tenant_id, propertyIds: props.map(p => p.property_id),
+          compType: row.comp_type || 'commission',
         }
       } else {
         // Self-healing migration path: the 3 original users' PINs live
@@ -906,7 +907,8 @@ export async function onRequest(ctx) {
             `SELECT property_id FROM platform_properties WHERE tenant_id = ? AND active = 1`
           ).bind(legacy.tenantId).all()
           found = { name: legacy.actor, role: legacy.role, actor: legacy.actor,
-            tenantId: legacy.tenantId, propertyIds: props.map(p => p.property_id) }
+            tenantId: legacy.tenantId, propertyIds: props.map(p => p.property_id),
+            compType: 'commission' }
         }
       }
     }
@@ -935,6 +937,7 @@ export async function onRequest(ctx) {
       actor:       found.actor,
       tenantId:    found.tenantId,
       propertyIds: found.propertyIds,
+      compType:    found.compType || 'commission',
       iat:         Math.floor(Date.now() / 1000),
       exp:         Math.floor(Date.now() / 1000) + (12 * 60 * 60),
     }, env.JWT_SECRET)
@@ -2174,6 +2177,15 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRamanReport') {
+        // Shared by the owner's full dashboard (RDashboard.jsx) AND a
+        // commission-based manager's own "My earnings" snapshot
+        // (RDashboardSnapshot.jsx) — a salaried manager has no commission
+        // to report, so this is blocked server-side, not just hidden in
+        // the UI. Owner/master_owner are unaffected (they have no
+        // compType at all, so this only ever fires for role='manager').
+        if (payload.role === 'manager' && payload.compType !== 'commission') {
+          return err('Not available — no commission for salaried staff', 403)
+        }
         // Year/month reporting for owner — replaces flat history laundry-list.
         // Also detects "missed" guests: checked_out stays with NO matching
         // raman_commissions row (e.g. commission was never auto-created).
@@ -2244,6 +2256,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRamanDashboard') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const { results: byYear } = await DB.prepare(
           `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year, SUM(commission) as total_paid, COUNT(*) as stays_paid
            FROM stayvibe_manager_commissions WHERE is_paid = 1 GROUP BY year ORDER BY year DESC`
@@ -4954,9 +4967,9 @@ export async function onRequest(ctx) {
         }
         if (!stayId) {
           stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
-          await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.phone), body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, now(), now()).run()
+          await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, checked_in_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.phone), body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, actor, now(), now()).run()
         } else {
-          await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_in', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_in', updated_by = ?, checked_in_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, actor, now(), stayId).run()
         }
         // Same reason as checkOut: this is Raman's real check-in button, so
         // the arrival time must be stamped here or it never gets captured.
@@ -5016,14 +5029,17 @@ export async function onRequest(ctx) {
 
       if (action === 'checkOut') {
         const { stayId } = body
-        await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_out', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_out', updated_by = ?, checked_out_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, actor, now(), stayId).run()
         // This, not updateStayStatus, is the button Raman actually presses —
         // so this is where the real departure time has to be captured.
         await reconcileStayStamps(DB, stayId, 'checked_out')
         const stay = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, nights, villa_id, request_late_checkout, expected_departure_at FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         const stayExt = await DB.prepare(`SELECT late_checkout_nights, occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(stayId).first()
         const coVillaId = stay?.villa_id || DEFAULT_VILLA_ID
-        if (stay) {
+        // Salaried staff (comp_type='salary') never accrue a commission row
+        // at all — not just hidden from view, genuinely never calculated —
+        // since they're paid a fixed salary regardless of stay count.
+        if (stay && payload.compType !== 'salary') {
           const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
             const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt)

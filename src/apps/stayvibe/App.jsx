@@ -101,7 +101,11 @@ function ProtectedRoutes() {
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />
         <Route path="/raman/expenses"         element={<VillaExpenses />} />
-        <Route path="/raman/dashboard"        element={<RDashboardSnapshot />} />
+        {/* Salaried staff (comp_type='salary') have no commission to see —
+            the backend already blocks the data (getRamanReport), this just
+            avoids rendering a screen that would only show an error. */}
+        {(user.compType || 'commission') === 'commission' &&
+          <Route path="/raman/dashboard"      element={<RDashboardSnapshot />} />}
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -66,6 +66,12 @@ function fmtTimeOfDay(dt) {
   return t ? formatTime12h(t) : ''
 }
 const villa = CONFIG.villas[0]
+// checked_in_by/checked_out_by store the raw actor slug (e.g. 'raman',
+// 'staff-pradosh') — light formatting for a readable display name.
+function fmtActor(a) {
+  if (!a) return ''
+  return a.replace(/^staff-/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
 function daysFromNow(d) {
   if (!d) return null
   const parsed = parseLocalDate(d)
@@ -669,6 +675,7 @@ export default function CompleteBooking() {
                               {stay.actual_checkin_at
                                 ? `Checked in ${fmtTimeOfDay(stay.actual_checkin_at)}`
                                 : `Requested ETA ${formatTime12h(stay.eta)}`}
+                              {stay.checked_in_by && ` · by ${fmtActor(stay.checked_in_by)}`}
                             </div>
                           )}
                           <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginTop:'6px'}}>

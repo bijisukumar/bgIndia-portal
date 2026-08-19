@@ -1691,6 +1691,18 @@ export async function onRequest(ctx) {
         }})
       }
 
+      // Maintenance > Photo Storage toggle. Owner-only, deliberately
+      // separate from getTenantConfig (which any authenticated actor can
+      // currently call and which the Apps Script itself reads) — this one
+      // is the human-facing settings surface and gets its own explicit
+      // role guard rather than inheriting whatever getTenantConfig allows.
+      if (action === 'getStoreCarPhotosSetting') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const row = await DB.prepare(`SELECT store_car_photos FROM platform_tenants WHERE tenant_id = ?`).bind(tenantId).first()
+        return json({ success: true, data: { storeCarPhotos: !!row?.store_car_photos } })
+      }
+
       // ── PROPERTY PICKER OPTIONS (post-login, before entering the app) ──
       // Normal tenant login: their own properties. master_owner: every
       // property across every tenant, grouped by tenant, for
@@ -6260,6 +6272,14 @@ export async function onRequest(ctx) {
           parseFloat(body.baseSalary) || 0, parseFloat(body.commissionSingleNight) || 1000, parseFloat(body.commissionMultiNight) || 2000
         ).run()
         return json({ success: true, data: { actorSlug, pin: newPin } })
+      }
+
+      if (action === 'setStoreCarPhotosSetting') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        await DB.prepare(`UPDATE platform_tenants SET store_car_photos = ? WHERE tenant_id = ?`)
+          .bind(body.storeCarPhotos ? 1 : 0, tenantId).run()
+        return json({ success: true, data: { storeCarPhotos: !!body.storeCarPhotos } })
       }
 
       // LEDGER TRANSACTIONS — Create/Update entries

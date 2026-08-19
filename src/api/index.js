@@ -159,6 +159,8 @@ export const api = {
   resetStaffPin:        (data)   => post('resetStaffPin', data),
   setStaffActive:       (data)   => post('setStaffActive', data),
   addStaffAccount:      (data)   => post('addStaffAccount', data),
+  getStoreCarPhotosSetting: ()     => get('getStoreCarPhotosSetting'),
+  setStoreCarPhotosSetting: (data) => post('setStoreCarPhotosSetting', data),
 
   // ── RENTAL PROPERTIES ────────────────────────────────────
   saveRentalIncome:     (data)   => post('saveRentalIncome', data),

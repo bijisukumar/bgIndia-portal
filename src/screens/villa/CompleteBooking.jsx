@@ -17,6 +17,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
+import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink } from '../../utils/guestMessages'
@@ -57,6 +58,14 @@ function fmtDate(d) {
   try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
   catch { return d }
 }
+// actual_checkin_at/actual_checkout_at are full 'YYYY-MM-DD HH:MM:SS'
+// timestamps — pull just the time-of-day for a friendly display.
+function fmtTimeOfDay(dt) {
+  if (!dt) return ''
+  const t = String(dt).split(/[ T]/)[1]
+  return t ? formatTime12h(t) : ''
+}
+const villa = CONFIG.villas[0]
 function daysFromNow(d) {
   if (!d) return null
   const parsed = parseLocalDate(d)
@@ -648,13 +657,21 @@ export default function CompleteBooking() {
                       return (
                         <div key={stay.stay_id} style={{padding:'14px 16px',
                           borderBottom: i < checkedIn.length-1 ? '1px solid var(--border-dim)' : 'none'}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'10px'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
                             <div style={{fontWeight:'600',fontSize:'0.9rem'}}>{stay.guest_name}</div>
                             <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>
                               Checkout {fmtDate(stay.checkout_date)}
+                              {' '}by {stay.request_late_checkout && stay.late_checkout_time ? formatTime12h(stay.late_checkout_time) : villa.checkoutTime}
                             </div>
                           </div>
-                          <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                          {(stay.actual_checkin_at || stay.eta) && (
+                            <div style={{fontSize:'0.68rem',color:'#5FD0AE',marginBottom:'6px'}}>
+                              {stay.actual_checkin_at
+                                ? `Checked in ${fmtTimeOfDay(stay.actual_checkin_at)}`
+                                : `Requested ETA ${formatTime12h(stay.eta)}`}
+                            </div>
+                          )}
+                          <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginTop:'6px'}}>
                             {waLink ? (
                               <a href={waLink} target="_blank" rel="noreferrer"
                                 style={{fontSize:'0.76rem',fontWeight:'700',padding:'8px 12px',borderRadius:'8px',
@@ -759,6 +776,9 @@ export default function CompleteBooking() {
                             <span style={{marginLeft:'8px',color: d<0?'#e74c3c':d<=2?'#e67e22':'var(--text-dim)'}}>
                               {d<0?`${Math.abs(d)}d ago`:`in ${d}d`}
                             </span>
+                          )}
+                          {stay.eta && !stay.request_early_checkin && (
+                            <span style={{marginLeft:'8px'}}>· ETA {formatTime12h(stay.eta)}</span>
                           )}
                         </div>
                         {requestSummary(stay) && (

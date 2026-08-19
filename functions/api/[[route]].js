@@ -4316,6 +4316,13 @@ export async function onRequest(ctx) {
           financialsBackfilled = true
         }
         await DB.batch(stmts)
+        // confirmEnquiry's normal create-stay path always syncs the ledger
+        // after writing financials — this path backfills the same
+        // gross/net/extra_charges columns but was skipping that sync, so a
+        // linked stay's income never reached stayvibe_booking_line_items and
+        // silently dropped out of the detailed (ledger-based) P&L card even
+        // though the simple monthly gross/net tile read it correctly.
+        if (financialsBackfilled) await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId, linked: true, financialsBackfilled } })
       }
 

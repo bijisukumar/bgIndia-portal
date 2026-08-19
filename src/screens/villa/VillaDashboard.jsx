@@ -704,9 +704,10 @@ function MonthlyTrendChart({ stays, currentYear }) {
     const m   = MONTHS[ci.getMonth()]
     const y   = ci.getFullYear()
     const rev = parseFloat(s.gross || 0)
-    if (!matrix[m][y]) matrix[m][y] = { revenue: 0, bookings: 0 }
+    if (!matrix[m][y]) matrix[m][y] = { revenue: 0, bookings: 0, nights: 0 }
     matrix[m][y].revenue  += rev
     matrix[m][y].bookings += 1
+    matrix[m][y].nights   += calcNights(s.checkIn || s.checkInDate, s.checkOut || s.checkOutDate)
   })
 
   // Find best and worst months across all years
@@ -776,11 +777,17 @@ function MonthlyTrendChart({ stays, currentYear }) {
                 {allYears.map(y => {
                   const cell = matrix[m][y]
                   const rev  = cell?.revenue || 0
+                  const nights = cell?.nights || 0
                   return (
-                    <div key={y} title={rev > 0 ? `${m} ${y}: ${fmt(Math.round(rev))} · ${cell?.bookings} booking(s)` : `${m} ${y}: No data`}
+                    <div key={y} title={rev > 0 ? `${m} ${y}: ${fmt(Math.round(rev))} · ${nights} night(s) · ${cell?.bookings} booking(s)` : `${m} ${y}: No data`}
                       style={{ height:'22px', borderRadius:'4px', background: getColor(rev),
                         border: y===currentYear ? '1px solid rgba(200,144,58,0.3)' : 'none',
-                        cursor: rev > 0 ? 'pointer' : 'default' }}/>
+                        cursor: rev > 0 ? 'pointer' : 'default',
+                        display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      {nights > 0 && (
+                        <span style={{ fontSize:'0.52rem', fontWeight:700, color:'rgba(255,255,255,0.85)', lineHeight:1 }}>{nights}</span>
+                      )}
+                    </div>
                   )
                 })}
               </div>

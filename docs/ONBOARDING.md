@@ -88,6 +88,14 @@ by frontend routing.
    lives on the Form itself, not in any script), mark the ID/passport
    upload question **Required** — easy to forget per-host, and without it
    guests can submit check-in with no ID on file.
+   **Time-based triggers to install** (Apps Script editor > Triggers, or
+   run the matching `setupXTrigger` function once): `processPendingCheckInForms`
+   and `pollNewReservations`, every 5 min each — and `processPendingDocumentUploads`
+   (run `setupDocumentUploadTrigger` once), also every 5 min. That third one
+   is easy to miss since it's a separate function from the other two and
+   wasn't previously documented here — without it, car/plate photos taken
+   at physical check-in are captured correctly but never reach the guest's
+   Drive folder (confirmed missing on dwarka in production, Aug 2026).
 6. Acceptance: run /infra TestRunner (full) + SchemaValidation → all green.
    A local dry run against `wrangler pages dev --local` before ever
    touching the real deployment is cheap insurance — see the Release 2.1

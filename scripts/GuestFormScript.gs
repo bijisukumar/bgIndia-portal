@@ -859,6 +859,29 @@ function setupEnquiryReminderTrigger() {
   Logger.log('✅ Trigger installed: sendEnquiryFollowUpReminders (daily ~9am)');
 }
 
+// processPendingCheckInForms (scheduled every 5 min, per docs/onboarding-
+// config.md) only uploads docs for stays still in pending_review — govt_id/
+// passport, submitted at self-check-in. Car/plate photos are taken later,
+// at Raman's physical check-in, by which point the stay has already moved
+// past pending_review — processPendingDocumentUploads is the ONLY function
+// that catches those. Unlike the other two scheduled functions, its
+// trigger was apparently never installed — there's no mention of it in
+// docs/onboarding-config.md's trigger schedule, which is why car/plate
+// photos have never been reaching Drive despite the upload code existing
+// and working correctly once it actually runs. Run this once from the
+// Apps Script editor (Run > setupDocumentUploadTrigger) to install it.
+function setupDocumentUploadTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'processPendingDocumentUploads') {
+      ScriptApp.deleteTrigger(t);
+      Logger.log('Removed existing trigger');
+    }
+  });
+  ScriptApp.newTrigger('processPendingDocumentUploads')
+    .timeBased().everyMinutes(5).create();
+  Logger.log('✅ Trigger installed: processPendingDocumentUploads (every 5 min)');
+}
+
 function sendEnquiryFollowUpReminders() {
   var CLIENT = getClient();
   var resp = callWorker('GET', 'getStaleEnquiries', {});

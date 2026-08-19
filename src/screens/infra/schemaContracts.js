@@ -30,6 +30,8 @@ export const CONTRACTS = [
       'request_breakfast','breakfast_choice','request_cab',
       'request_extra_beds','extra_beds_count',
       'nationality','purpose_of_visit','mode_of_transport','eta',
+      'vehicle_number','actual_checkin_at','actual_checkout_at',
+      'checked_in_by','checked_out_by',
     ],
   },
   {

@@ -2760,6 +2760,8 @@ export async function onRequest(ctx) {
                   early_checkin_time, late_checkout_time,
                   nationality, purpose_of_visit, mode_of_transport, eta,
                   booked_by_guest_id, booked_by_name, checkout_email_sent_at,
+                  vehicle_number, actual_checkin_at, actual_checkout_at,
+                  checked_in_by, checked_out_by,
                   -- Preferences moved to their own table; LEFT JOIN so a stay
                   -- with no prefs row still comes back, with zeros rather than
                   -- disappearing from the list.
@@ -5056,29 +5058,48 @@ export async function onRequest(ctx) {
         // the normal path — under normal operation this clears out in
         // however long it is until the next scheduled Apps Script run, not
         // a full week.
-        const docId = (type) => `DOC-${stayId}-${type}-${Date.now()}`
-        if (body.carPhotoB64) {
-          try {
-            await DB.prepare(
-              `INSERT OR REPLACE INTO stayvibe_guest_documents
-               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-            ).bind(docId('car'), stayId, 'car_photo', `Car-${stayId}.jpg`, body.carPhotoB64).run()
-          } catch (e) { console.error('car photo store error:', e?.message || e) }
+        //
+        // A booking can arrive in more than one car — body.cars is the
+        // array shape (up to 3, from CheckIn.jsx), each producing its own
+        // photo doc pair; the legacy single-field shape (carNumber/
+        // carPhotoB64/platePhotoB64) is still accepted as a one-car
+        // fallback for any caller that hasn't moved to the array. All
+        // cars' numbers land in vehicle_number as one comma-separated
+        // string — that column has always meant "the car number(s) for
+        // this stay", just single-valued until now.
+        const docId = (type, idx) => `DOC-${stayId}-${type}-${idx}-${Date.now()}`
+        const carsInput = Array.isArray(body.cars) && body.cars.length
+          ? body.cars
+          : (body.carNumber || body.carPhotoB64 || body.platePhotoB64)
+            ? [{ number: body.carNumber, carPhotoB64: body.carPhotoB64, platePhotoB64: body.platePhotoB64 }]
+            : []
+        const carNumbers = []
+        for (let idx = 0; idx < carsInput.length; idx++) {
+          const c = carsInput[idx]
+          if (c.carPhotoB64) {
+            try {
+              await DB.prepare(
+                `INSERT OR REPLACE INTO stayvibe_guest_documents
+                 (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+              ).bind(docId('car', idx), stayId, 'car_photo', `Car-${stayId}-${idx + 1}.jpg`, c.carPhotoB64).run()
+            } catch (e) { console.error('car photo store error:', e?.message || e) }
+          }
+          if (c.platePhotoB64) {
+            try {
+              await DB.prepare(
+                `INSERT OR REPLACE INTO stayvibe_guest_documents
+                 (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
+                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
+              ).bind(docId('plate', idx), stayId, 'plate_photo', `Plate-${stayId}-${idx + 1}.jpg`, c.platePhotoB64).run()
+            } catch (e) { console.error('plate photo store error:', e?.message || e) }
+          }
+          if (c.number && String(c.number).trim()) carNumbers.push(String(c.number).trim())
         }
-        if (body.platePhotoB64) {
-          try {
-            await DB.prepare(
-              `INSERT OR REPLACE INTO stayvibe_guest_documents
-               (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-            ).bind(docId('plate'), stayId, 'plate_photo', `Plate-${stayId}.jpg`, body.platePhotoB64).run()
-          } catch (e) { console.error('plate photo store error:', e?.message || e) }
-        }
-        if (body.carNumber) {
+        if (carNumbers.length) {
           try {
             await DB.prepare(`UPDATE stayvibe_stays SET vehicle_number = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
-              .bind(body.carNumber, actor, now(), stayId).run()
+              .bind(carNumbers.join(', '), actor, now(), stayId).run()
           } catch (e) { console.error('vehicle_number update error:', e?.message || e) }
         }
 
@@ -5092,6 +5113,7 @@ export async function onRequest(ctx) {
           `Check-out:  ${body.checkOutDate || '—'}`,
           `Stay ID:    ${stayId}`,
           `Villa:      ${alertVillaId}`,
+          `Car(s):     ${carNumbers.join(', ') || '—'}`,
           '',
           `Checked in by: ${actor}`,
           `Time:          ${now()}`,

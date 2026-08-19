@@ -101,12 +101,12 @@ export default function CheckIn() {
   const [futureGuests, setFutureGuests] = useState([])
   const [selected, setSelected] = useState(null)
   const [tab,      setTab]      = useState('checkin')  // 'checkin' | 'inhouse'
-  const [carNumber, setCarNumber] = useState('')
-  const [carPhoto,  setCarPhoto]  = useState(null)
-  const [platePhoto,setPlatePhoto]= useState(null)
-  const [ocrBusy,   setOcrBusy]   = useState(false)   // reading plate photo
-  const [ocrHint,   setOcrHint]   = useState('')      // status line under the field
-  const [ocrSuggestion, setOcrSuggestion] = useState('') // read value when field already has manual text
+  // One entry per car — most bookings have one, but a family can arrive in
+  // 2-3 vehicles and every one of them needs to be on record. Each entry
+  // carries its own OCR state since each plate photo is read independently.
+  const EMPTY_CAR = () => ({ number: '', photo: null, plate: null, ocrBusy: false, ocrHint: '', ocrSuggestion: '' })
+  const [cars, setCars] = useState([EMPTY_CAR()])
+  const MAX_CARS = 3
   const [saving,  setSaving]    = useState(false)
   // Check-out is the one irreversible-feeling action on this screen, and it
   // has been pressed against the wrong guest. An inline panel rather than
@@ -114,8 +114,9 @@ export default function CheckIn() {
   const [confirmingCheckout, setConfirmingCheckout] = useState(false)
   const [loading, setLoading]   = useState(true)
   const [toast,   setToast]     = useState(null)
-  const carRef   = useRef()
-  const plateRef = useRef()
+  // Per-car file input refs, indexed by car position (up to MAX_CARS).
+  const carRefs   = useRef([])
+  const plateRefs = useRef([])
 
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),4000)
@@ -176,49 +177,49 @@ export default function CheckIn() {
   const pendingList = stays.pending || []
   const inhouseList = stays.inhouse || []
 
-  function handlePhotoCapture(type, e) {
+  const updateCar = (i, patch) => setCars(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c))
+  const addCar = () => setCars(prev => prev.length < MAX_CARS ? [...prev, EMPTY_CAR()] : prev)
+  const removeCar = (i) => setCars(prev => prev.length > 1 ? prev.filter((_, idx) => idx !== i) : prev)
+
+  function handlePhotoCapture(i, type, e) {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
     reader.onload = ev => {
-      if (type==='car')   setCarPhoto({file, preview:ev.target.result})
+      if (type==='car')   updateCar(i, { photo: {file, preview:ev.target.result} })
       if (type==='plate') {
-        setPlatePhoto({file, preview:ev.target.result})
-        // Kick off plate OCR to pre-fill the car number. Fire-and-forget:
+        updateCar(i, { plate: {file, preview:ev.target.result} })
+        // Kick off plate OCR to pre-fill this car's number. Fire-and-forget:
         // it never blocks the photo capture or the check-in itself.
         const b64 = ev.target.result.split(',')[1]
-        runPlateOcr(b64)
+        runPlateOcr(i, b64)
       }
     }
     reader.readAsDataURL(file)
   }
 
-  // Read the number-plate photo via Workers AI and pre-fill "Car number".
-  // Advisory only — Raman verifies/corrects. Any failure just leaves the
-  // field for manual entry with a gentle hint; nothing here can break the
-  // check-in flow.
-  async function runPlateOcr(platePhotoB64) {
+  // Read the number-plate photo via Workers AI and pre-fill this car's
+  // number. Advisory only — Raman verifies/corrects. Any failure just
+  // leaves the field for manual entry with a gentle hint; nothing here can
+  // break the check-in flow.
+  async function runPlateOcr(i, platePhotoB64) {
     if (!platePhotoB64) return
-    setOcrBusy(true); setOcrHint(''); setOcrSuggestion('')
+    updateCar(i, { ocrBusy: true, ocrHint: '', ocrSuggestion: '' })
     try {
       const res = await api.ocrPlate({ platePhotoB64 })
       const plate = res?.plate || ''
       if (!plate) {
-        setOcrHint("Couldn't read the plate — please type it in")
+        updateCar(i, { ocrBusy: false, ocrHint: "Couldn't read the plate — please type it in" })
         return
       }
       // Don't clobber a number Raman already typed; offer it instead.
-      if (carNumber.trim() && carNumber.trim() !== plate) {
-        setOcrSuggestion(plate)
-        setOcrHint('')
-      } else {
-        setCarNumber(plate)
-        setOcrHint('✨ Auto-read from the plate photo — please check it')
-      }
+      setCars(prev => prev.map((c, idx) => {
+        if (idx !== i) return c
+        if (c.number.trim() && c.number.trim() !== plate) return { ...c, ocrBusy: false, ocrSuggestion: plate, ocrHint: '' }
+        return { ...c, ocrBusy: false, number: plate, ocrHint: '✨ Auto-read from the plate photo — please check it' }
+      }))
     } catch (e) {
-      setOcrHint("Couldn't read the plate — please type it in")
-    } finally {
-      setOcrBusy(false)
+      updateCar(i, { ocrBusy: false, ocrHint: "Couldn't read the plate — please type it in" })
     }
   }
 
@@ -227,8 +228,13 @@ export default function CheckIn() {
     if (!selected) { showToast('No guest selected','error'); return }
     setSaving(true)
     try {
-      const carPhotoB64   = carPhoto   ? carPhoto.preview.split(',')[1]   : null
-      const platePhotoB64 = platePhoto ? platePhoto.preview.split(',')[1] : null
+      const carsPayload = cars
+        .filter(c => c.number.trim() || c.photo || c.plate)
+        .map(c => ({
+          number: c.number.trim(),
+          carPhotoB64:   c.photo ? c.photo.preview.split(',')[1] : null,
+          platePhotoB64: c.plate ? c.plate.preview.split(',')[1] : null,
+        }))
 
       await api.confirmCheckIn({
         stayId:       selected.stay_id,
@@ -238,13 +244,10 @@ export default function CheckIn() {
         checkOutDate: selected.checkout_date,
         adultsCount:  selected.adults || 1,
         childrenCount: selected.children || 0,
-        carNumber,
-        carPhotoB64,
-        platePhotoB64,
+        cars: carsPayload,
       })
       showToast('✅ Check-in confirmed! ' + selected.stay_id)
-      setCarPhoto(null); setPlatePhoto(null); setCarNumber('')
-      setOcrBusy(false); setOcrHint(''); setOcrSuggestion('')
+      setCars([EMPTY_CAR()])
       await loadStays()
     } catch(e) {
       showToast('Failed: ' + e.message, 'error')
@@ -491,49 +494,60 @@ export default function CheckIn() {
                     })()}
 
                     {/* Car photos — Raman's main task */}
-                    <div className="card-section-label">YOUR TASK — TAKE CAR PHOTOS</div>
-                    <div className="card">
-                      <div className="photo-row">
-                        <div className={`photo-box ${carPhoto?'captured':''}`} onClick={()=>carRef.current?.click()}>
-                          {carPhoto
-                            ? <img src={carPhoto.preview} alt="car" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'6px'}}/>
-                            : <><div className="photo-icon">📷</div><div className="photo-label">Car photo</div><div className="photo-sub">Tap to take</div></>
-                          }
-                          <input ref={carRef} type="file" accept="image/*" capture="environment"
-                            onChange={e=>handlePhotoCapture('car',e)} style={{display:'none'}}/>
-                        </div>
-                        <div className={`photo-box ${platePhoto?'captured':''}`} onClick={()=>plateRef.current?.click()}>
-                          {platePhoto
-                            ? <img src={platePhoto.preview} alt="plate" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'6px'}}/>
-                            : <><div className="photo-icon">🔢</div><div className="photo-label">Number plate</div><div className="photo-sub">Tap to take</div></>
-                          }
-                          <input ref={plateRef} type="file" accept="image/*" capture="environment"
-                            onChange={e=>handlePhotoCapture('plate',e)} style={{display:'none'}}/>
-                        </div>
-                      </div>
-                      <div className="divider"/>
-                      <div className="field" style={{marginBottom:0}}>
-                        <div className="field-label">
-                          Car number
-                          {ocrBusy && <span style={{marginLeft:8,fontWeight:400,color:'#8a94a6'}}>· reading plate photo…</span>}
-                        </div>
-                        <input className="field-input" placeholder="e.g. KL 07 AB 1234"
-                          value={carNumber}
-                          onChange={e=>{ setCarNumber(e.target.value.toUpperCase()); setOcrHint(''); setOcrSuggestion('') }}
-                          style={{textTransform:'uppercase'}}/>
-                        {ocrHint && (
-                          <div style={{marginTop:6,fontSize:12,color:'#8a94a6'}}>{ocrHint}</div>
-                        )}
-                        {ocrSuggestion && (
-                          <div style={{marginTop:6,fontSize:12,color:'#8a94a6'}}>
-                            Photo reads “{ocrSuggestion}” ·{' '}
-                            <span
-                              onClick={()=>{ setCarNumber(ocrSuggestion); setOcrSuggestion(''); setOcrHint('✨ Using the plate photo reading — please check it') }}
-                              style={{color:'#c9a24b',fontWeight:600,cursor:'pointer'}}>use this</span>
+                    <div className="card-section-label">YOUR TASK — TAKE CAR PHOTOS {cars.length > 1 ? `(${cars.length} cars)` : ''}</div>
+                    {cars.map((car, i) => (
+                      <div className="card" key={i} style={{ marginBottom: cars.length > 1 ? '10px' : undefined }}>
+                        {cars.length > 1 && (
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+                            <span style={{ fontSize:'0.78rem', fontWeight:700, color:'var(--gold)' }}>Car {i + 1}</span>
+                            <span onClick={()=>removeCar(i)} style={{ fontSize:'0.75rem', color:'#EF4444', cursor:'pointer' }}>✕ Remove</span>
                           </div>
                         )}
+                        <div className="photo-row">
+                          <div className={`photo-box ${car.photo?'captured':''}`} onClick={()=>carRefs.current[i]?.click()}>
+                            {car.photo
+                              ? <img src={car.photo.preview} alt="car" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'6px'}}/>
+                              : <><div className="photo-icon">📷</div><div className="photo-label">Car photo</div><div className="photo-sub">Tap to take</div></>
+                            }
+                            <input ref={el => carRefs.current[i] = el} type="file" accept="image/*" capture="environment"
+                              onChange={e=>handlePhotoCapture(i, 'car', e)} style={{display:'none'}}/>
+                          </div>
+                          <div className={`photo-box ${car.plate?'captured':''}`} onClick={()=>plateRefs.current[i]?.click()}>
+                            {car.plate
+                              ? <img src={car.plate.preview} alt="plate" style={{width:'100%',height:'80px',objectFit:'cover',borderRadius:'6px'}}/>
+                              : <><div className="photo-icon">🔢</div><div className="photo-label">Number plate</div><div className="photo-sub">Tap to take</div></>
+                            }
+                            <input ref={el => plateRefs.current[i] = el} type="file" accept="image/*" capture="environment"
+                              onChange={e=>handlePhotoCapture(i, 'plate', e)} style={{display:'none'}}/>
+                          </div>
+                        </div>
+                        <div className="divider"/>
+                        <div className="field" style={{marginBottom:0}}>
+                          <div className="field-label">
+                            Car number
+                            {car.ocrBusy && <span style={{marginLeft:8,fontWeight:400,color:'#8a94a6'}}>· reading plate photo…</span>}
+                          </div>
+                          <input className="field-input" placeholder="e.g. KL 07 AB 1234"
+                            value={car.number}
+                            onChange={e=>updateCar(i, { number: e.target.value.toUpperCase(), ocrHint: '', ocrSuggestion: '' })}
+                            style={{textTransform:'uppercase'}}/>
+                          {car.ocrHint && (
+                            <div style={{marginTop:6,fontSize:12,color:'#8a94a6'}}>{car.ocrHint}</div>
+                          )}
+                          {car.ocrSuggestion && (
+                            <div style={{marginTop:6,fontSize:12,color:'#8a94a6'}}>
+                              Photo reads “{car.ocrSuggestion}” ·{' '}
+                              <span
+                                onClick={()=>updateCar(i, { number: car.ocrSuggestion, ocrSuggestion: '', ocrHint: '✨ Using the plate photo reading — please check it' })}
+                                style={{color:'#c9a24b',fontWeight:600,cursor:'pointer'}}>use this</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    ))}
+                    {cars.length < MAX_CARS && (
+                      <button className="btn" onClick={addCar} style={{ marginBottom:'12px' }}>+ Add another car</button>
+                    )}
 
                     <button className="btn btn-gold" onClick={handleConfirmCheckIn} disabled={saving}>
                       {saving?'Confirming…':'✅ Confirm check-in'}

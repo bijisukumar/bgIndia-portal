@@ -678,6 +678,11 @@ export default function CompleteBooking() {
                               {stay.checked_in_by && ` · by ${fmtActor(stay.checked_in_by)}`}
                             </div>
                           )}
+                          {stay.vehicle_number && (
+                            <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginBottom:'6px'}}>
+                              🚗 {stay.vehicle_number}
+                            </div>
+                          )}
                           <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginTop:'6px'}}>
                             {waLink ? (
                               <a href={waLink} target="_blank" rel="noreferrer"

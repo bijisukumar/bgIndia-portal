@@ -67,6 +67,12 @@ const PEOPLE = {
       path: '/infra/d1',
     },
     {
+      id: 'maintenance', icon: '🛠️', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
+      title: 'Maintenance',
+      sub: 'Staff logins · reset PIN · lock account · schema tools',
+      path: '/owner/maintenance',
+    },
+    {
       id: 'rdashboard', icon: '📊', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Staff Perks',
       sub: `${MANAGER_NAME} commission · Unpaid · History`,

@@ -3141,6 +3141,19 @@ export async function onRequest(ctx) {
         return json({ success: true, data: settings })
       }
 
+      // Maintenance > Staff & Access — never returns token_hash, even to the
+      // owner; there's no legitimate reason for a PIN hash to ever leave
+      // the server, and it's a needless target if it did.
+      if (action === 'getStaffAccounts') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const { results } = await DB.prepare(
+          `SELECT actor, role, label, comp_type, base_salary, commission_single_night, commission_multi_night, active, created_at
+           FROM platform_auth_tokens WHERE tenant_id = ? ORDER BY created_at ASC`
+        ).bind(tenantId).all()
+        return json({ success: true, data: results })
+      }
+
       // Recent alert-email attempts (success + failure) — see sendAlert().
       if (action === 'getAlertLog') {
         const limit = Math.min(parseInt(url.searchParams.get('limit')) || 50, 200)
@@ -6111,6 +6124,70 @@ export async function onRequest(ctx) {
           ON CONFLICT(villa_id, key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at
         `).bind(vId, key, value ?? null, actor, now()).run()
         return json({ success: true, data: { villaId: vId, key, value } })
+      }
+
+      // ── MAINTENANCE > STAFF & ACCESS ─────────────────────────────────
+      // A random numeric PIN, generated server-side and returned to the
+      // owner exactly once — never logged, never stored anywhere but its
+      // one-way hash. Owner is responsible for relaying it to the staff
+      // member (in person / a message they then delete).
+      function genStaffPin(digits = 4) {
+        let p = ''
+        for (let i = 0; i < digits; i++) p += Math.floor(Math.random() * 10)
+        return p
+      }
+
+      if (action === 'resetStaffPin') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const actorSlug = (body.actorSlug || '').trim()
+        if (!actorSlug) return err('actorSlug required', 400)
+        const row = await DB.prepare(`SELECT actor FROM platform_auth_tokens WHERE tenant_id = ? AND actor = ?`).bind(tenantId, actorSlug).first()
+        if (!row) return err('Staff account not found', 404)
+        const newPin = genStaffPin()
+        await DB.prepare(`UPDATE platform_auth_tokens SET token_hash = ? WHERE tenant_id = ? AND actor = ?`).bind(await hashPin(newPin), tenantId, actorSlug).run()
+        return json({ success: true, data: { actorSlug, pin: newPin } })
+      }
+
+      // Locking does NOT force out a session already in progress — auth is
+      // a stateless signed JWT (12h lifetime) checked only for a valid
+      // signature and expiry, not re-verified against `active` on every
+      // request. A locked account simply can't log in again once its
+      // current token expires (or after logout).
+      if (action === 'setStaffActive') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const actorSlug = (body.actorSlug || '').trim()
+        if (!actorSlug) return err('actorSlug required', 400)
+        if (actorSlug === payload.actor && !body.active) return err("You can't lock your own account", 400)
+        await DB.prepare(`UPDATE platform_auth_tokens SET active = ? WHERE tenant_id = ? AND actor = ?`).bind(body.active ? 1 : 0, tenantId, actorSlug).run()
+        return json({ success: true, data: { actorSlug, active: !!body.active } })
+      }
+
+      if (action === 'addStaffAccount') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const label = (body.label || '').trim()
+        if (!label) return err('Name required', 400)
+        let actorSlug = (body.actorSlug || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        if (!actorSlug) actorSlug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        if (!actorSlug) return err('Could not derive a login code from that name — enter one manually', 400)
+        // Only 'manager' is addable here — a second 'owner' login is a much
+        // bigger decision (full access to everything) than this screen
+        // should hand out; that still requires a direct DB seed.
+        const role = 'manager'
+        const compType = ['commission','salary','salary_plus_commission'].includes(body.compType) ? body.compType : 'salary'
+        const existing = await DB.prepare(`SELECT actor FROM platform_auth_tokens WHERE tenant_id = ? AND actor = ?`).bind(tenantId, actorSlug).first()
+        if (existing) return err(`Login code "${actorSlug}" is already in use`, 409)
+        const newPin = genStaffPin()
+        await DB.prepare(`
+          INSERT INTO platform_auth_tokens (token_hash, tenant_id, role, actor, label, comp_type, base_salary, commission_single_night, commission_multi_night, active, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+        `).bind(
+          await hashPin(newPin), tenantId, role, actorSlug, label, compType,
+          parseFloat(body.baseSalary) || 0, parseFloat(body.commissionSingleNight) || 1000, parseFloat(body.commissionMultiNight) || 2000
+        ).run()
+        return json({ success: true, data: { actorSlug, pin: newPin } })
       }
 
       // LEDGER TRANSACTIONS — Create/Update entries

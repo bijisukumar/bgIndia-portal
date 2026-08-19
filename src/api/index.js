@@ -153,6 +153,12 @@ export const api = {
   getAlertLog:          (limit)   => get('getAlertLog', limit ? { limit } : {}),
   saveVillaSetting:     (data)   => post('saveVillaSetting', data),
 
+  // ── MAINTENANCE > STAFF & ACCESS ─────────────────────────────
+  getStaffAccounts:     ()       => get('getStaffAccounts'),
+  resetStaffPin:        (data)   => post('resetStaffPin', data),
+  setStaffActive:       (data)   => post('setStaffActive', data),
+  addStaffAccount:      (data)   => post('addStaffAccount', data),
+
   // ── RENTAL PROPERTIES ────────────────────────────────────
   saveRentalIncome:     (data)   => post('saveRentalIncome', data),
   getRentalIncome:      (m, y)   => get('getRentalIncome', { month: m, year: y }),

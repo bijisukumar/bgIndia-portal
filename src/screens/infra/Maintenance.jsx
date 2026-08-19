@@ -8,6 +8,14 @@ import { useNavigate } from 'react-router-dom'
 
 const ITEMS = [
   {
+    icon: '🔑',
+    bg: 'rgba(95,208,174,0.08)',
+    arrow: '#5FD0AE',
+    title: 'Staff & Access',
+    sub: 'Reset a staff PIN · lock/unlock an account · add a new staff login',
+    path: '/owner/maintenance/staff',
+  },
+  {
     icon: '✅',
     bg: 'rgba(52,168,83,0.08)',
     arrow: '#34A853',

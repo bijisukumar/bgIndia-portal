@@ -41,6 +41,8 @@ import GuestCheckIn   from '../../screens/GuestCheckIn'
 import Flexibility    from '../../screens/Flexibility'
 import RDashboard     from '../../screens/RDashboard'
 import D1Explorer     from '../../screens/infra/D1Explorer'
+import Maintenance    from '../../screens/infra/Maintenance'
+import StaffAccess    from '../../screens/infra/StaffAccess'
 
 // Manager (Raman) screens
 import RamanHome          from '../../screens/RamanHome'
@@ -70,7 +72,7 @@ function ProtectedRoutes() {
     <Routes>
       {/* ── OWNER ── */}
       {(role === 'owner' || role === 'master_owner') && <>
-        <Route path="/"                       element={<OwnerHome sections={['villa', 'marketing', 'guests', 'dbadmin', 'rdashboard', 'agentlinks', 'flexibility']} />} />
+        <Route path="/"                       element={<OwnerHome sections={['villa', 'marketing', 'guests', 'dbadmin', 'maintenance', 'rdashboard', 'agentlinks', 'flexibility']} />} />
         <Route path="/owner/villa"            element={<VillaHub />} />
         <Route path="/owner/marketing"        element={<MarketingCampaigns />} />
         <Route path="/owner/villa/agent-links" element={<AgentLinks />} />
@@ -91,6 +93,8 @@ function ProtectedRoutes() {
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
+        <Route path="/owner/maintenance"        element={<Maintenance />} />
+        <Route path="/owner/maintenance/staff"  element={<StaffAccess />} />
       </>}
 
       {/* ── MANAGER (Raman) ── */}

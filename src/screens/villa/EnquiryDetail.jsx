@@ -370,19 +370,31 @@ export default function EnquiryDetail() {
             load()
           } catch (linkErr) { showToast(linkErr.message || 'Failed to link', 'error') }
         }
-      } else if (err.code === 'double_booking' && err.conflict && namesOverlap(e?.guest_name, err.conflict.guest_name)) {
+      } else if (err.code === 'double_booking' && err.conflict) {
         // The server's strict same-guest check (guest_id/phone/email/exact
         // name) missed this one — e.g. enquiry came in on a family member's
-        // phone, guest checked in on their own — so it 409'd as a stranger
-        // double-booking instead. The names still clearly overlap though
-        // (same pattern as the enquiry/stay match review list), so offer the
-        // same link-instead-of-block resolution rather than a dead-end error.
+        // phone, guest checked in on their own, or (the case that motivated
+        // dropping the namesOverlap gate here) the enquiry's guest_name is
+        // actually an agent/OTA business name rather than the traveler's own
+        // name, so it shares no words with the guest who later checked in
+        // directly. Always offer the link-instead-of-block resolution — never
+        // silently dead-end — but scale the wording to how confident the
+        // word-overlap heuristic is, so a genuine stranger conflict still
+        // reads as a real warning rather than a routine "same person" ask.
         const c = err.conflict
+        const likelySamePerson = namesOverlap(e?.guest_name, c.guest_name)
         const ok = window.confirm(
-          `${e?.guest_name || 'This guest'} didn't exactly match, but "${c.guest_name}" already has a stay ` +
-          `on these same dates (${c.stay_id}: ${c.checkin_date} → ${c.checkout_date}) — likely the same guest, ` +
-          `enquired and checked in with different contact details.\n\n` +
-          `Mark this enquiry Confirmed and link it to that existing stay?`
+          likelySamePerson
+            ? `${e?.guest_name || 'This guest'} didn't exactly match, but "${c.guest_name}" already has a stay ` +
+              `on these same dates (${c.stay_id}: ${c.checkin_date} → ${c.checkout_date}) — likely the same guest, ` +
+              `enquired and checked in with different contact details.\n\n` +
+              `Mark this enquiry Confirmed and link it to that existing stay?`
+            : `The villa is already booked ${c.checkin_date} → ${c.checkout_date} for "${c.guest_name}" — a ` +
+              `different name from this enquiry's "${e?.guest_name || 'guest'}", so this may be an agent/OTA ` +
+              `booking recorded under the agent's name rather than the traveler's.\n\n` +
+              `If "${c.guest_name}" IS the same person who made this enquiry (e.g. via ${e?.guest_name || 'an agent'}), ` +
+              `press OK to mark this enquiry Confirmed and link it to that existing stay.\n\n` +
+              `If these are genuinely two different guests, press Cancel — proceeding would double-book the villa.`
         )
         if (ok) {
           try {

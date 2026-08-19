@@ -74,7 +74,20 @@ function fmtDate(d) {
   return date.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })
 }
 
-function calcNights(ci, co) {
+// THE single nights-booked definition for this screen — every widget here
+// (Monthly Trend heatmap, Bookings-by-month, Nights Booked strip's backend
+// counterpart in getMonthlyNights) must call this, not compute its own.
+// Two different call sites disagreeing on Aug 2026 (16 vs 17) was exactly
+// this: one preferred the stored nights column, the other always
+// recomputed from dates and ignored it. Matches getVillaDashboard's own
+// nightsOf on the backend — stored value wins when present (it can
+// legitimately differ from raw date math, e.g. a correction), date-diff is
+// only a fallback for rows where it was never set.
+function nightsOf(s) {
+  const stored = parseInt(s?.nights, 10)
+  if (stored > 0) return stored
+  const ci = s?.checkIn || s?.checkInDate
+  const co = s?.checkOut || s?.checkOutDate
   if (!ci || !co) return 0
   return Math.max(0, Math.round((parseLocalDate(co) - parseLocalDate(ci)) / (1000*60*60*24)))
 }
@@ -259,7 +272,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
                   <StatusBadge status={s.status} />
                 </div>
                 <div style={{ color:'var(--text-dim)', fontSize:'0.78rem' }}>
-                  {s.stayId} · Checked out {fmtDate(s.checkOut || s.checkOutDate)} · {calcNights(s.checkIn, s.checkOut)} nights
+                  {s.stayId} · Checked out {fmtDate(s.checkOut || s.checkOutDate)} · {nightsOf(s)} nights
                 </div>
                 <div style={{ color:'#E53935', fontSize:'0.75rem', marginTop:'4px' }}>
                   ← Check out not recorded. Update status to close this stay.
@@ -310,7 +323,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
                     </div>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                       <span style={{ color:'var(--text-dim)', fontSize:'0.78rem' }}>
-                        {fmtDate(s.checkIn || s.checkInDate)} · {calcNights(s.checkIn||s.checkInDate, s.checkOut||s.checkOutDate)} nights · {s.channel||'Direct'}
+                        {fmtDate(s.checkIn || s.checkInDate)} · {nightsOf(s)} nights · {s.channel||'Direct'}
                       </span>
                       <span style={{ fontSize:'0.72rem', color: daysAway<=7?'#E53935':daysAway<=14?'#C8903A':'#5C7080', fontWeight:'600' }}>
                         {daysAway===0?'TODAY':daysAway===1?'Tomorrow':`${daysAway}d away`}
@@ -344,7 +357,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
         <>
           <div style={{ display:'flex', gap:'8px', marginBottom:'8px', flexWrap:'wrap' }}>
             <span style={{ fontSize:'0.75rem', color:'var(--text-dim)' }}>
-              {byMonth.length} booking{byMonth.length>1?'s':''} · {byMonth.reduce((s,b)=>s+calcNights(b.checkIn||b.checkInDate,b.checkOut||b.checkOutDate),0)} total nights
+              {byMonth.length} booking{byMonth.length>1?'s':''} · {byMonth.reduce((s,b)=>s+nightsOf(b),0)} total nights
               {selMonth === 'all' ? ` · Full year ${year}` : ` · ${MONTHS_FULL[selMonth]} ${year}`}
             </span>
           </div>
@@ -707,7 +720,7 @@ function MonthlyTrendChart({ stays, currentYear }) {
     if (!matrix[m][y]) matrix[m][y] = { revenue: 0, bookings: 0, nights: 0 }
     matrix[m][y].revenue  += rev
     matrix[m][y].bookings += 1
-    matrix[m][y].nights   += calcNights(s.checkIn || s.checkInDate, s.checkOut || s.checkOutDate)
+    matrix[m][y].nights   += nightsOf(s)
   })
 
   // Find best and worst months across all years

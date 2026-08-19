@@ -1738,9 +1738,13 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const year    = url.searchParams.get('year') || new Date().getFullYear()
+        // Excludes cancelled/void — matches getVillaDashboard/getMonthlyNights,
+        // which both filter the same way. This action didn't, so a cancelled
+        // booking's nights still counted here (e.g. Aug 2026's Monthly Trend
+        // heatmap reading 21 nights against the Nights Booked strip's 16).
         const { results } = year === 'all'
-          ? await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? ORDER BY checkin_date DESC`).bind(villaId).all()
-          : await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? ORDER BY checkin_date DESC`).bind(villaId, `${year}%`).all()
+          ? await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') ORDER BY checkin_date DESC`).bind(villaId).all()
+          : await DB.prepare(`SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void') ORDER BY checkin_date DESC`).bind(villaId, `${year}%`).all()
         const mapped = results.map(r => ({
           ...r,
           stayId:          r.stay_id,

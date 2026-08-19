@@ -101,10 +101,15 @@ function Skeleton({ h=80 }) {
 
 const MONTH_SHORT = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-// Horizontal strip of nights-booked-per-month, oldest -> newest, scrolled to
-// the most recent month by default. Native overflow-x:auto gives free
-// touch-swipe scrolling on mobile — the arrow buttons are a mouse/desktop
-// convenience layered on top, not a replacement for it.
+// One row per year (most recent on top), each a horizontal strip of Jan..Dec
+// tiles — all three rows share ONE scroll container, so scrolling moves
+// every year in lockstep and the same month lines up vertically across
+// years for a direct year-over-year comparison (this replaced an earlier
+// single flattened 36-month strip that couldn't do that). Year labels sit
+// in their own fixed, non-scrolling column on the left. Native
+// overflow-x:auto gives free touch-swipe scrolling on mobile — the arrow
+// buttons are a mouse/desktop convenience layered on top, not a
+// replacement for it.
 function NightsBookedStrip() {
   const [months, setMonths] = useState(null)
   const scrollRef = useRef(null)
@@ -124,6 +129,14 @@ function NightsBookedStrip() {
   const scrollBy = (dir) => scrollRef.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
   const today = new Date()
 
+  // Group the flat oldest->newest list into one row per year, newest year
+  // first, each row in calendar (Jan..Dec) order.
+  const byYear = {}
+  ;(months || []).forEach(m => { (byYear[m.year] ||= []).push(m) })
+  const years = Object.keys(byYear).map(Number).sort((a, b) => b - a)
+
+  const TILE_W = 58, ROW_H = 62
+
   return (
     <>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
@@ -133,22 +146,34 @@ function NightsBookedStrip() {
           <button onClick={() => scrollBy(1)} aria-label="Scroll right" style={S.scrollBtn}>›</button>
         </div>
       </div>
-      {!months ? <Skeleton h={78} /> : (
-        <div ref={scrollRef} style={{ display:'flex', gap:'8px', overflowX:'auto', paddingBottom:'6px', marginBottom:'16px', WebkitOverflowScrolling:'touch' }}>
-          {months.map(m => {
-            const isCur = m.year === today.getFullYear() && m.month === today.getMonth() + 1
-            return (
-              <div key={m.ym} style={{
-                flex:'0 0 auto', width:'62px', textAlign:'center', borderRadius:'10px', padding:'10px 4px',
-                background: isCur ? 'rgba(200,144,58,0.1)' : 'rgba(255,255,255,0.04)',
-                border: isCur ? '1px solid rgba(200,144,58,0.35)' : '1px solid rgba(255,255,255,0.07)',
-              }}>
-                <div style={{ fontSize:'0.6rem', color:'#5C7080', letterSpacing:'0.3px' }}>{MONTH_SHORT[m.month]} '{String(m.year).slice(2)}</div>
-                <div style={{ fontSize:'1.05rem', fontWeight:700, color: m.nights > 0 ? '#EDF2F7' : '#3C4656', marginTop:'4px' }}>{m.nights}</div>
-                <div style={{ fontSize:'0.55rem', color:'#5C7080' }}>nights</div>
+      {!months ? <Skeleton h={3 * ROW_H} /> : (
+        <div style={{ display:'flex', gap:'8px', marginBottom:'16px' }}>
+          <div style={{ flexShrink:0, width:'34px' }}>
+            {years.map(y => (
+              <div key={y} style={{ height:`${ROW_H}px`, display:'flex', alignItems:'center', color:'#8A9BAE', fontSize:'0.72rem', fontWeight:700 }}>
+                {y}
               </div>
-            )
-          })}
+            ))}
+          </div>
+          <div ref={scrollRef} style={{ overflowX:'auto', WebkitOverflowScrolling:'touch', flex:1 }}>
+            {years.map(y => (
+              <div key={y} style={{ display:'flex', gap:'6px', height:`${ROW_H}px` }}>
+                {byYear[y].map(m => {
+                  const isCur = m.year === today.getFullYear() && m.month === today.getMonth() + 1
+                  return (
+                    <div key={m.ym} style={{
+                      flex:`0 0 ${TILE_W}px`, textAlign:'center', borderRadius:'10px', padding:'8px 4px',
+                      background: isCur ? 'rgba(200,144,58,0.1)' : 'rgba(255,255,255,0.04)',
+                      border: isCur ? '1px solid rgba(200,144,58,0.35)' : '1px solid rgba(255,255,255,0.07)',
+                    }}>
+                      <div style={{ fontSize:'0.58rem', color:'#5C7080', letterSpacing:'0.3px' }}>{MONTH_SHORT[m.month]}</div>
+                      <div style={{ fontSize:'1rem', fontWeight:700, color: m.nights > 0 ? '#EDF2F7' : '#3C4656', marginTop:'3px' }}>{m.nights}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </>

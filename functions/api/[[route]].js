@@ -6137,6 +6137,17 @@ export async function onRequest(ctx) {
         return p
       }
 
+      if (action === 'renameStaffAccount') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const actorSlug = (body.actorSlug || '').trim()
+        const label = (body.label || '').trim()
+        if (!actorSlug) return err('actorSlug required', 400)
+        if (!label) return err('Name required', 400)
+        await DB.prepare(`UPDATE platform_auth_tokens SET label = ? WHERE tenant_id = ? AND actor = ?`).bind(label, tenantId, actorSlug).run()
+        return json({ success: true, data: { actorSlug, label } })
+      }
+
       if (action === 'resetStaffPin') {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const tenantId = payload.tenantId || DEFAULT_VILLA_ID

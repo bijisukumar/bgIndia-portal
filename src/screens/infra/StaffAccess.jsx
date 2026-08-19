@@ -55,6 +55,20 @@ export default function StaffAccess() {
     finally { setBusyActor(null) }
   }
 
+  const handleRename = async (row) => {
+    const next = window.prompt(`New display name for "${row.actor}":`, row.label || row.actor)
+    if (next == null) return // cancelled
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === row.label) return
+    setBusyActor(row.actor)
+    try {
+      await api.renameStaffAccount({ actorSlug: row.actor, label: trimmed })
+      showToast(`Renamed to "${trimmed}" ✓`)
+      load()
+    } catch (e) { showToast(e?.message || 'Failed to rename', 'error') }
+    finally { setBusyActor(null) }
+  }
+
   const handleToggleActive = async (row) => {
     const nextActive = !row.active
     if (!nextActive && !window.confirm(`Lock ${row.label || row.actor}'s account? They won't be able to log in again until unlocked.`)) return
@@ -127,6 +141,11 @@ export default function StaffAccess() {
                   {row.role} · {compLabel(row.comp_type)} · code: {row.actor} · since {fmtDate(row.created_at)}
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button onClick={() => handleRename(row)} disabled={busyActor === row.actor}
+                    style={{ fontSize: '0.76rem', fontWeight: 700, padding: '8px 12px', borderRadius: '8px',
+                      background: 'rgba(200,144,58,0.1)', border: '1px solid rgba(200,144,58,0.3)', color: 'var(--gold)', cursor: 'pointer' }}>
+                    ✏️ Rename
+                  </button>
                   <button onClick={() => handleReset(row)} disabled={busyActor === row.actor}
                     style={{ fontSize: '0.76rem', fontWeight: 700, padding: '8px 12px', borderRadius: '8px',
                       background: 'rgba(133,183,235,0.1)', border: '1px solid rgba(133,183,235,0.3)', color: '#85B7EB', cursor: 'pointer' }}>

@@ -251,6 +251,7 @@ export const api = {
 
   // ── DASHBOARDS ───────────────────────────────────────────
   getVillaDashboard:    (vId, y) => get('getVillaDashboard', { villaId: vId, year: y }),
+  getMonthlyNights:     (vId, years) => get('getMonthlyNights', { villaId: vId, years: years || 3 }),
   getChannelMixInsight: (villaId) => get('getChannelMixInsight', { villaId: villaId || DEFAULT_VILLA_ID }),
   getOccupancyGaps:     (villaId) => get('getOccupancyGaps', { villaId: villaId || DEFAULT_VILLA_ID }),
   getStays:             (vId, y) => get('getStays', { villaId: vId, year: y }),

@@ -2066,6 +2066,40 @@ export async function onRequest(ctx) {
         }})
       }
 
+      // Dashboard's "Nights booked" strip — deliberately a separate, lean
+      // endpoint rather than reusing getVillaDashboard (which is scoped to
+      // one year at a time and returns a much heavier payload): this needs
+      // several years of a single number and nothing else.
+      if (action === 'getMonthlyNights') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const yearsBack = Math.min(Math.max(parseInt(url.searchParams.get('years')) || 3, 1), 10)
+        const curYear = new Date().getFullYear()
+        const fromYear = curYear - yearsBack + 1
+        const { results: stays } = await DB.prepare(
+          `SELECT checkin_date, checkout_date, nights FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date >= ?`
+        ).bind(villaId, `${fromYear}-01-01`).all()
+        const nightsOf = r => (r.nights && r.nights > 0)
+          ? r.nights
+          : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
+        const byYearMonth = {}
+        stays.forEach(s => {
+          if (!s.checkin_date) return
+          const ym = s.checkin_date.slice(0, 7)
+          byYearMonth[ym] = (byYearMonth[ym] || 0) + nightsOf(s)
+        })
+        // Oldest -> newest, zero-filled — a flat strip the frontend can
+        // render directly without reconstructing a year/month grid itself.
+        const months = []
+        for (let y = fromYear; y <= curYear; y++) {
+          for (let m = 1; m <= 12; m++) {
+            const ym = `${y}-${String(m).padStart(2, '0')}`
+            months.push({ year: y, month: m, ym, nights: byYearMonth[ym] || 0 })
+          }
+        }
+        return json({ success: true, data: { months } })
+      }
+
       // ── CHANNEL-MIX INSIGHT (owner dashboard card) ───────────────────
       // Shows what OTA commission actually cost this month, per channel,
       // plus an illustrative "what a direct-booking discount would've

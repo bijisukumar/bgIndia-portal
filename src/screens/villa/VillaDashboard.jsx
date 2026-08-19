@@ -1,4 +1,4 @@
-import { useState, useEffect, Component } from 'react'
+import { useState, useEffect, useRef, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
@@ -97,6 +97,62 @@ function Bar({ label, value, max, color }) {
 
 function Skeleton({ h=80 }) {
   return <div style={{ ...S.skeleton, height:h }}/>
+}
+
+const MONTH_SHORT = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+// Horizontal strip of nights-booked-per-month, oldest -> newest, scrolled to
+// the most recent month by default. Native overflow-x:auto gives free
+// touch-swipe scrolling on mobile — the arrow buttons are a mouse/desktop
+// convenience layered on top, not a replacement for it.
+function NightsBookedStrip() {
+  const [months, setMonths] = useState(null)
+  const scrollRef = useRef(null)
+
+  useEffect(() => {
+    api.getMonthlyNights(DEFAULT_VILLA_ID, 3)
+      .then(d => setMonths(d?.months || []))
+      .catch(() => setMonths([]))
+  }, [])
+
+  useEffect(() => {
+    if (months?.length && scrollRef.current) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth
+    }
+  }, [months])
+
+  const scrollBy = (dir) => scrollRef.current?.scrollBy({ left: dir * 280, behavior: 'smooth' })
+  const today = new Date()
+
+  return (
+    <>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }}>
+        <div className="card-section-label" style={{ marginBottom:0 }}>NIGHTS BOOKED · LAST 3 YEARS</div>
+        <div style={{ display:'flex', gap:'6px' }}>
+          <button onClick={() => scrollBy(-1)} aria-label="Scroll left" style={S.scrollBtn}>‹</button>
+          <button onClick={() => scrollBy(1)} aria-label="Scroll right" style={S.scrollBtn}>›</button>
+        </div>
+      </div>
+      {!months ? <Skeleton h={78} /> : (
+        <div ref={scrollRef} style={{ display:'flex', gap:'8px', overflowX:'auto', paddingBottom:'6px', marginBottom:'16px', WebkitOverflowScrolling:'touch' }}>
+          {months.map(m => {
+            const isCur = m.year === today.getFullYear() && m.month === today.getMonth() + 1
+            return (
+              <div key={m.ym} style={{
+                flex:'0 0 auto', width:'62px', textAlign:'center', borderRadius:'10px', padding:'10px 4px',
+                background: isCur ? 'rgba(200,144,58,0.1)' : 'rgba(255,255,255,0.04)',
+                border: isCur ? '1px solid rgba(200,144,58,0.35)' : '1px solid rgba(255,255,255,0.07)',
+              }}>
+                <div style={{ fontSize:'0.6rem', color:'#5C7080', letterSpacing:'0.3px' }}>{MONTH_SHORT[m.month]} '{String(m.year).slice(2)}</div>
+                <div style={{ fontSize:'1.05rem', fontWeight:700, color: m.nights > 0 ? '#EDF2F7' : '#3C4656', marginTop:'4px' }}>{m.nights}</div>
+                <div style={{ fontSize:'0.55rem', color:'#5C7080' }}>nights</div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
 }
 
 function StatusBadge({ status }) {
@@ -1003,6 +1059,8 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
         </div>
       )}
 
+      <NightsBookedStrip />
+
       <div className="card-section-label">QUARTERLY NET PROFIT — {year}</div>
       {loading ? <Skeleton h={80}/> : (
         <div style={S.quarterRow}>
@@ -1272,6 +1330,7 @@ const S = {
   barFill:    { height:'6px', borderRadius:'3px', transition:'width 0.6s ease' },
   barVal:     { color:'#EDF2F7', fontSize:'0.8rem', fontWeight:'600', width:'42px', textAlign:'right', flexShrink:0 },
   skeleton:   { background:'rgba(255,255,255,0.04)', borderRadius:'10px', marginBottom:'12px' },
+  scrollBtn:  { width:'26px', height:'26px', borderRadius:'50%', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#9AA5B4', fontSize:'0.9rem', lineHeight:1, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding:0 },
   quarterRow: { display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'8px', marginBottom:'12px' },
   quarterCard:{ background:'#1E2535', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.06)', padding:'12px 8px', textAlign:'center' },
   qLabel:     { color:'#5C7080', fontSize:'0.7rem', letterSpacing:'1px', marginBottom:'6px' },

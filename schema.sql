@@ -730,7 +730,15 @@ CREATE TABLE IF NOT EXISTS platform_tenants (
   created_at           TEXT,
   billing_contact_name TEXT,
   billing_email        TEXT,
-  primary_hostname     TEXT
+  primary_hostname     TEXT,
+  -- Default OFF — most hosts don't need car/plate PHOTOS kept permanently
+  -- once the plate number itself is on record as text; storing images in
+  -- Drive forever adds up in storage cost across many hosts for little
+  -- benefit. When off, processPendingDocumentUploads (GuestFormScript.gs)
+  -- skips uploading car_photo/plate_photo docs entirely and they just
+  -- expire from D1 on the existing 5-day sweep, same as before either
+  -- feature existed. A host who wants them kept flips this to 1.
+  store_car_photos     INTEGER DEFAULT 0
 );
 
 -- Tenant<->property ownership record (auth/billing layer). property_id

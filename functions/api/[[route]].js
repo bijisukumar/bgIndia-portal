@@ -1667,7 +1667,7 @@ export async function onRequest(ctx) {
           `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
                   address, checkin_time, checkout_time,
                   breakfast_rate, raman_comm_pct, logo_url, plan,
-                  owner_email, owner_email_cc, drive_root_id
+                  owner_email, owner_email_cc, drive_root_id, store_car_photos
            FROM platform_tenants WHERE tenant_id = ? AND active = 1`
         ).bind(tenantId).first()
         if (!tenant) return err('Tenant not found', 404)
@@ -1687,6 +1687,7 @@ export async function onRequest(ctx) {
           ownerEmail:    tenant.owner_email || null,
           ownerEmailCC:  tenant.owner_email_cc || null,
           driveRootId:   tenant.drive_root_id || null,
+          storeCarPhotos: !!tenant.store_car_photos,
         }})
       }
 

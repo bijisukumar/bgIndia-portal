@@ -87,6 +87,7 @@ function getClient() {
         checkoutTime:     resp.data.checkoutTime || '11:00',
         breakfastRate:    resp.data.breakfastRate || 275,
         bedroomCount:     resp.data.bedroomCount  || 4,
+        storeCarPhotos:   !!resp.data.storeCarPhotos,
       };
       Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
       return _CLIENT;
@@ -109,6 +110,7 @@ function getClient() {
     checkoutTime:      '11:00',
     breakfastRate:     275,
     bedroomCount:      4,
+    storeCarPhotos:    false,
   };
   return _CLIENT;
 }
@@ -551,9 +553,19 @@ function processPendingDocumentUploads() {
       var dr = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
       if (!dr || !dr.success || !dr.data || dr.data.length === 0) return;
 
-      var uploaded = 0, failed = 0;
+      var uploaded = 0, failed = 0, skipped = 0;
       dr.data.forEach(function(doc) {
         if (!doc.file_b64) return;
+        // Per-tenant config (platform_tenants.store_car_photos, default
+        // off) — most hosts don't need the raw car/plate IMAGES kept
+        // permanently once the plate number itself is on record as text;
+        // that's real, growing Drive storage cost for little benefit.
+        // Left un-uploaded and un-marked here, these simply expire off
+        // the existing 5-day D1 sweep (cleanupExpiredDocuments) — same as
+        // before this pipeline existed. Any OTHER doc type this function
+        // catches (e.g. a late govt_id) is unaffected.
+        var isCarDoc = doc.doc_type === 'car_photo' || doc.doc_type === 'plate_photo';
+        if (isCarDoc && !CLIENT.storeCarPhotos) { skipped++; return; }
         try {
           var decoded = Utilities.base64Decode(doc.file_b64);
           var ts      = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
@@ -566,7 +578,7 @@ function processPendingDocumentUploads() {
           if (mr && mr.success) uploaded++; else failed++;
         } catch(docErr) { failed++; Logger.log('Doc upload error [' + doc.doc_type + ']: ' + docErr.message); }
       });
-      Logger.log(stay.stayId + ': uploaded ' + uploaded + ', failed ' + failed);
+      Logger.log(stay.stayId + ': uploaded ' + uploaded + ', failed ' + failed + ', skipped (store_car_photos off) ' + skipped);
 
       if (!stay.folderCreated) {
         callWorker('POST', 'updateDriveFolder', {

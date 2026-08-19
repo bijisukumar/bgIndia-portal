@@ -724,10 +724,14 @@ function normalizeStoredPhone(raw) {
 // flagged as an approved late check-out. Both conditions are required, since
 // a guest simply leaving early has extended nothing and must not cost Raman
 // money.
-const COMMISSION_SINGLE_NIGHT = 1000
-const COMMISSION_MULTI_NIGHT  = 2000
+// Fallback only — real rates now live per-staff on platform_auth_tokens
+// (commission_single_night/commission_multi_night), fetched fresh at
+// checkout time. These defaults exist only for a row that somehow has no
+// rate configured (they match Raman's original hardcoded rate exactly).
+const DEFAULT_COMMISSION_SINGLE_NIGHT = 1000
+const DEFAULT_COMMISSION_MULTI_NIGHT  = 2000
 
-function managerCommissionFor(stay, ext) {
+function managerCommissionFor(stay, ext, rates) {
   const nights = parseInt(stay && stay.nights) || 1
   let billable = nights
   // An explicit count in stayvibe_stay_ext is authoritative — the inference
@@ -745,7 +749,9 @@ function managerCommissionFor(stay, ext) {
     }
   }
   billable = Math.max(1, billable)
-  return billable > 1 ? COMMISSION_MULTI_NIGHT : COMMISSION_SINGLE_NIGHT
+  const singleNight = (rates && rates.singleNight) || DEFAULT_COMMISSION_SINGLE_NIGHT
+  const multiNight   = (rates && rates.multiNight)  || DEFAULT_COMMISSION_MULTI_NIGHT
+  return billable > 1 ? multiNight : singleNight
 }
 
 async function syncEnquiryOnStayCancel(DB, stayId, actor, reason) {
@@ -2178,12 +2184,13 @@ export async function onRequest(ctx) {
 
       if (action === 'getRamanReport') {
         // Shared by the owner's full dashboard (RDashboard.jsx) AND a
-        // commission-based manager's own "My earnings" snapshot
-        // (RDashboardSnapshot.jsx) — a salaried manager has no commission
-        // to report, so this is blocked server-side, not just hidden in
-        // the UI. Owner/master_owner are unaffected (they have no
-        // compType at all, so this only ever fires for role='manager').
-        if (payload.role === 'manager' && payload.compType !== 'commission') {
+        // manager's own "My earnings" snapshot (RDashboardSnapshot.jsx) —
+        // a PURELY salaried manager has no commission to report, so this is
+        // blocked server-side, not just hidden in the UI.
+        // 'salary_plus_commission' still earns commission, so it's allowed
+        // through — only 'salary' is excluded. Owner/master_owner are
+        // unaffected (this only ever fires for role='manager').
+        if (payload.role === 'manager' && payload.compType === 'salary') {
           return err('Not available — no commission for salaried staff', 403)
         }
         // Year/month reporting for owner — replaces flat history laundry-list.
@@ -2247,11 +2254,26 @@ export async function onRequest(ctx) {
         const grandTotalPaid   = paidRows.reduce((s,r) => s + (r.commission||0), 0)
         const grandTotalUnpaid = unpaidRows.reduce((s,r) => s + (r.commission||0), 0)
 
+        // Configured rate, for the frontend to ESTIMATE commission on stays
+        // that haven't checked out yet (no stayvibe_manager_commissions row
+        // exists for those, so there's nothing stored to read). This only
+        // makes sense while Raman is the sole commission-earning manager —
+        // once a second differently-rated one exists, a pre-checkout
+        // estimate can't know in advance who'll actually check the guest
+        // out, so it stays a Raman-rate approximation, not a guarantee.
+        const rateRow = await DB.prepare(
+          `SELECT commission_single_night, commission_multi_night FROM platform_auth_tokens WHERE tenant_id = ? AND actor = 'raman' AND active = 1`
+        ).bind(payload.tenantId || 'dwarka').first()
+
         return json({ success: true, data: {
           years,
           missedGuests: missedRows.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, nights: r.nights })),
           grandTotalPaid, grandTotalUnpaid,
           totalGuestsAllTime: paidRows.length + unpaidRows.length,
+          commissionRates: {
+            singleNight: rateRow?.commission_single_night ?? DEFAULT_COMMISSION_SINGLE_NIGHT,
+            multiNight:  rateRow?.commission_multi_night  ?? DEFAULT_COMMISSION_MULTI_NIGHT,
+          },
         }})
       }
 
@@ -5036,13 +5058,19 @@ export async function onRequest(ctx) {
         const stay = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, nights, villa_id, request_late_checkout, expected_departure_at FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         const stayExt = await DB.prepare(`SELECT late_checkout_nights, occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(stayId).first()
         const coVillaId = stay?.villa_id || DEFAULT_VILLA_ID
-        // Salaried staff (comp_type='salary') never accrue a commission row
-        // at all — not just hidden from view, genuinely never calculated —
-        // since they're paid a fixed salary regardless of stay count.
+        // Salaried-only staff (comp_type='salary') never accrue a commission
+        // row at all — not just hidden from view, genuinely never
+        // calculated. 'commission' and 'salary_plus_commission' both earn
+        // it. Rates are fetched fresh here (not trusted from the JWT) so a
+        // rate change takes effect immediately, not just on next login.
         if (stay && payload.compType !== 'salary') {
           const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
           if (!existing) {
-            const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt)
+            const rateRow = await DB.prepare(
+              `SELECT commission_single_night, commission_multi_night FROM platform_auth_tokens WHERE tenant_id = ? AND actor = ? AND active = 1`
+            ).bind(payload.tenantId, actor).first()
+            const rates = { singleNight: rateRow?.commission_single_night, multiNight: rateRow?.commission_multi_night }
+            const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt, rates)
             await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
 
             ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [

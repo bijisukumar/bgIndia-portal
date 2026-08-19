@@ -11,10 +11,17 @@
 --
 -- ── STEP 1: pick a PIN and hash it ─────────────────────────────────────
 --   node -e "console.log(require('crypto').createHash('sha256').update('<CHOSEN_PIN>').digest('hex'))"
+--
+-- comp_type 'salary' means he never accrues commission — commission_single_
+-- night/commission_multi_night are irrelevant for him and left at their
+-- defaults. base_salary is optional (defaults to 0) — no payroll feature
+-- reads it yet, it's just captured for whenever one exists; set it below
+-- if you want the figure on record now.
 -- ============================================================================
 
-INSERT INTO platform_auth_tokens (token_hash, tenant_id, role, actor, label, comp_type, active, created_at)
-VALUES ('<STAFF_PRADOSH_PIN_HASH>', 'dwarka', 'manager', 'staff-pradosh', 'Pradosh', 'salary', 1, datetime('now'));
+INSERT INTO platform_auth_tokens (token_hash, tenant_id, role, actor, label, comp_type, base_salary, active, created_at)
+VALUES ('<STAFF_PRADOSH_PIN_HASH>', 'dwarka', 'manager', 'staff-pradosh', 'Pradosh', 'salary', 0, 1, datetime('now'));
+-- Replace the 0 above with a monthly figure if you want it on record, e.g. 15000
 
 -- Verify:
-SELECT token_hash, tenant_id, role, actor, label, comp_type, active FROM platform_auth_tokens WHERE actor = 'staff-pradosh';
+SELECT token_hash, tenant_id, role, actor, label, comp_type, base_salary, active FROM platform_auth_tokens WHERE actor = 'staff-pradosh';

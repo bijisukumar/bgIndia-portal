@@ -101,10 +101,11 @@ function ProtectedRoutes() {
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />
         <Route path="/raman/expenses"         element={<VillaExpenses />} />
-        {/* Salaried staff (comp_type='salary') have no commission to see —
-            the backend already blocks the data (getRamanReport), this just
-            avoids rendering a screen that would only show an error. */}
-        {(user.compType || 'commission') === 'commission' &&
+        {/* Purely salaried staff (comp_type='salary') have no commission to
+            see — the backend already blocks the data (getRamanReport), this
+            just avoids rendering a screen that would only show an error.
+            'salary_plus_commission' still earns commission, so it's kept. */}
+        {(user.compType || 'commission') !== 'salary' &&
           <Route path="/raman/dashboard"      element={<RDashboardSnapshot />} />}
       </>}
 

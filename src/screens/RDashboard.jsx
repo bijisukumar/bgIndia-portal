@@ -9,16 +9,23 @@ const MANAGER_NAME = ACTIVE_VILLA.managerName || 'Manager'
 const MANAGER_UPI = ACTIVE_VILLA.managerUpi || ''
 
 // ── COMMISSION LOGIC ──────────────────────────────────────────────────────────
-// To change Raman's commission rates, edit ONLY this function.
-// Do NOT display these figures in the UI — Raman doesn't need to see the formula.
+// Rates are now a per-staff config value (platform_auth_tokens.commission_
+// single_night/commission_multi_night — see docs in
+// scripts/migrate-add-staff-comptype-and-checkin-audit.sql), fetched via
+// getRamanReport's `commissionRates` and passed in here — this function no
+// longer hardcodes them. The 1000/2000 fallback only covers the brief
+// window before that first API response lands, and matches Raman's actual
+// configured default exactly.
 //
-// Current rates (owner confirmed May 2026, based on master Excel formula since 2018):
-//   1-night stay  → ₹1,000
-//   2+ night stay → ₹2,000
-//
-function calcCommission(nights) {
-  if (nights <= 1) return 1000
-  return 2000
+// This ESTIMATES commission for a stay that hasn't checked out yet (so has
+// no real stayvibe_manager_commissions row to read) — the actual value
+// created at checkout (functions/api/[[route]].js's managerCommissionFor)
+// is authoritative and can differ (e.g. an approved late check-out that
+// doesn't add a truly extra night of work).
+function calcCommission(nights, rates) {
+  const singleNight = rates?.singleNight ?? 1000
+  const multiNight  = rates?.multiNight  ?? 2000
+  return nights <= 1 ? singleNight : multiNight
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -136,7 +143,7 @@ export default function RDashboard() {
       await api.markRamanPaid({ commIds: [...selected], paidDate: today })
       const total = getAllStays()
         .filter(s => selected.has(s.commId))
-        .reduce((sum, s) => sum + calcCommission(s.nights), 0)
+        .reduce((sum, s) => sum + calcCommission(s.nights, report?.commissionRates), 0)
       showToast(`✅ ${fmt(total)} marked paid for ${selected.size} stay${selected.size > 1 ? 's' : ''}`)
       setSelected(new Set())
       loadData()
@@ -192,7 +199,7 @@ export default function RDashboard() {
   // Total of selected stays using our commission calc
   const selectedTotal = allStays
     .filter(s => selected.has(s.commId))
-    .reduce((sum, s) => sum + calcCommission(s.nights), 0)
+    .reduce((sum, s) => sum + calcCommission(s.nights, report?.commissionRates), 0)
 
   const TABS = [
     { key: 'unpaid',  label: 'Unpaid',  icon: '⏳' },
@@ -373,7 +380,7 @@ export default function RDashboard() {
                                 </div>
                               </div>
                               <div style={{ color: 'var(--gold)', fontWeight: '700', fontSize: '0.9rem', flexShrink: 0 }}>
-                                {fmt(calcCommission(s.nights))}
+                                {fmt(calcCommission(s.nights, report?.commissionRates))}
                               </div>
                             </div>
                           )

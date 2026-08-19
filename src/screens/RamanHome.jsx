@@ -245,10 +245,11 @@ function UpcomingBlock({ upcoming }) {
 export default function RamanHome() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  // Salaried staff (comp_type='salary', e.g. Pradosh) never accrue a
+  // Purely salaried staff (comp_type='salary', e.g. Pradosh) never accrue a
   // commission, so their own earnings snapshot has nothing to show — hide
   // the menu item entirely rather than link to an empty/blocked screen.
-  const showEarnings = (user?.compType || 'commission') === 'commission'
+  // 'salary_plus_commission' still earns commission, so it keeps this link.
+  const showEarnings = (user?.compType || 'commission') !== 'salary'
   const [activeStay,  setActiveStay]  = useState(null)
   const [readyCount,  setReadyCount]  = useState(0)
   const [todo,        setTodo]        = useState({ overdue: [], upcoming: [] })

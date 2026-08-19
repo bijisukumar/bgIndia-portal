@@ -758,11 +758,21 @@ CREATE TABLE IF NOT EXISTS platform_auth_tokens (
   role        TEXT NOT NULL,
   actor       TEXT NOT NULL,
   label       TEXT,
-  -- 'commission' (default — unchanged behavior for existing rows) or
-  -- 'salary'. Only meaningful for role='manager': a salaried manager never
-  -- accrues a stayvibe_manager_commissions row on checkout, and can't view
-  -- the commission report/dashboard even by calling the API directly.
-  comp_type   TEXT DEFAULT 'commission',
+  -- 'commission' (default — unchanged behavior for existing rows),
+  -- 'salary' (fixed pay, no commission ever), or 'salary_plus_commission'
+  -- (both — for a future SaaS host; nobody uses this today). Only
+  -- meaningful for role='manager': a purely salaried manager never accrues
+  -- a stayvibe_manager_commissions row on checkout, and can't view the
+  -- commission report/dashboard even by calling the API directly.
+  comp_type              TEXT DEFAULT 'commission',
+  -- Fixed pay amount — only meaningful for salary/salary_plus_commission.
+  -- Storage only for now; no payroll feature reads this yet.
+  base_salary            REAL DEFAULT 0,
+  -- The commission RATE itself, now a per-staff config value instead of a
+  -- hardcoded constant in the worker. Defaults exactly match Raman's
+  -- existing rate. Only meaningful for commission/salary_plus_commission.
+  commission_single_night REAL DEFAULT 1000,
+  commission_multi_night  REAL DEFAULT 2000,
   active      INTEGER DEFAULT 1,
   created_at  TEXT
 );

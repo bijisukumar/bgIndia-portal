@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stayvibe",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--config", "vite.stayvibe.config.js"],
+      "port": 5173
+    }
+  ]
+}

@@ -13,6 +13,9 @@ import '../../index.css'
 
 // Auth
 import Login from '../../screens/Login'
+import Welcome from '../../screens/Welcome'
+import RequestDemo from '../../screens/RequestDemo'
+import NewHostRegistration from '../../screens/NewHostRegistration'
 
 // Owner — villa screens only
 import OwnerHome      from '../../screens/OwnerHome'
@@ -48,7 +51,11 @@ import RDashboardSnapshot from '../../screens/RDashboardSnapshot'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
-  if (!user) return <Navigate to="/login" replace />
+  // Unauthenticated visits (including plain "/") land on the public
+  // gateway — New Host Registration / Login / Request Demo — instead of
+  // being bounced straight into the PIN screen with no context. Login
+  // itself is still reachable directly via /login.
+  if (!user) return <Welcome />
   const role = user.role
   // master_owner can log in directly to a tenant's own site too (not just
   // the aggregate manage.* console) for in-context troubleshooting.
@@ -111,6 +118,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login"        element={<LoginGate />} />
+          <Route path="/NewHost"      element={<NewHostRegistration />} />
+          <Route path="/demo"         element={<RequestDemo />} />
           <Route path="/quote/:token" element={<AgentQuote />} />
           <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
           <Route path="/flexibility"  element={<Flexibility />} />

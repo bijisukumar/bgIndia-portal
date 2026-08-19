@@ -1172,6 +1172,98 @@ export async function onRequest(ctx) {
     }
   }
 
+  // SAAS LANDING GATEWAY — "Request Demo" (public, no auth). Low-friction
+  // lead capture: name/phone/email only, same trust model as the guest
+  // check-in form. Alerts land in dwarka's own owner inbox since Biji is
+  // both dwarka's owner and the platform operator — there's no separate
+  // sales inbox yet.
+  if (action === 'submitDemoRequest' && method === 'POST') {
+    try {
+      const b = await request.json().catch(() => ({}))
+      const name = (b.name || '').trim()
+      if (!name) return err('Name is required', 400)
+      const leadId = genId('LEAD')
+      await DB.prepare(
+        `INSERT INTO platform_leads (lead_id, source, name, phone, email, notes, created_at)
+         VALUES (?, 'demo_request', ?, ?, ?, ?, datetime('now'))`
+      ).bind(leadId, name, (b.phone || '').trim() || null, (b.email || '').trim() || null, (b.notes || '').trim() || null).run()
+
+      ctx.waitUntil(sendAlert(env, `🎬 New demo request — ${name}`, [
+        'Source: StayVibe landing page > Request Demo',
+        '',
+        `Name:  ${name}`,
+        `Phone: ${b.phone || '—'}`,
+        `Email: ${b.email || '—'}`,
+        b.notes ? `Notes: ${b.notes}` : '',
+        '',
+        `Lead ID: ${leadId}`,
+      ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID))
+
+      return json({ success: true, data: { leadId } })
+    } catch (e) {
+      console.error('submitDemoRequest crash:', e.message)
+      return json({ success: false, error: 'Failed to submit — please try again' }, 500)
+    }
+  }
+
+  // SAAS LANDING GATEWAY — "New Host Registration" (public, no auth). Full
+  // intake per docs/ONBOARDING.md section A. This ONLY captures the
+  // submission — it does not create a platform_tenants row or provision
+  // anything; a human still runs ONBOARDING.md section B by hand using this
+  // data. Every field is optional at the DB layer except the three that
+  // let the team follow up at all (brand name, owner name, owner email).
+  if (action === 'submitHostRegistration' && method === 'POST') {
+    try {
+      const b = await request.json().catch(() => ({}))
+      const brandName  = (b.brandName || '').trim()
+      const ownerName  = (b.ownerName || '').trim()
+      const ownerEmail = (b.ownerEmail || '').trim()
+      if (!brandName || !ownerName || !ownerEmail) return err('Brand name, owner name and owner email are required', 400)
+
+      const registrationId = genId('HREG')
+      const s = (v) => (v == null ? null : String(v).trim() || null)
+      const n = (v) => (v === '' || v == null ? null : parseFloat(v))
+      await DB.prepare(`
+        INSERT INTO platform_host_registrations (
+          registration_id, brand_name, short_name, tagline, brand_color, custom_domains,
+          owner_name, owner_email, owner_whatsapp,
+          villa_code, villa_display_name, villa_full_name, address, maps_link,
+          bedrooms, bed_type_note, checkin_time, checkout_time, max_guests,
+          rate_card_notes, cleaning_fee, extra_charge_menu_notes, booking_channels_notes,
+          staff_notes, expense_categories_notes, breakfast_rate, additional_guest_rate,
+          channel_email, drive_folder_note, notes, created_at
+        ) VALUES (?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?,?, datetime('now'))
+      `).bind(
+        registrationId, brandName, s(b.shortName), s(b.tagline), s(b.brandColor), s(b.customDomains),
+        ownerName, ownerEmail, s(b.ownerWhatsapp),
+        s(b.villaCode), s(b.villaDisplayName), s(b.villaFullName), s(b.address), s(b.mapsLink),
+        n(b.bedrooms) || null, s(b.bedTypeNote), s(b.checkinTime), s(b.checkoutTime), n(b.maxGuests) || null,
+        s(b.rateCardNotes), n(b.cleaningFee), s(b.extraChargeMenuNotes), s(b.bookingChannelsNotes),
+        s(b.staffNotes), s(b.expenseCategoriesNotes), n(b.breakfastRate), n(b.additionalGuestRate),
+        s(b.channelEmail), s(b.driveFolderNote), s(b.notes)
+      ).run()
+
+      ctx.waitUntil(sendAlert(env, `🏡 New host registration — ${brandName}`, [
+        'Source: StayVibe landing page > New Host Registration',
+        '',
+        `Brand:        ${brandName}`,
+        `Owner:        ${ownerName}`,
+        `Owner email:  ${ownerEmail}`,
+        `Owner WhatsApp: ${b.ownerWhatsapp || '—'}`,
+        `Villa:        ${b.villaDisplayName || '—'} (${b.villaCode || 'no code given'})`,
+        `Address:      ${b.address || '—'}`,
+        '',
+        'Full submission saved — see /infra/d1 or query platform_host_registrations.',
+        `Registration ID: ${registrationId}`,
+      ], await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID))
+
+      return json({ success: true, data: { registrationId } })
+    } catch (e) {
+      console.error('submitHostRegistration crash:', e.message)
+      return json({ success: false, error: 'Failed to submit — please try again' }, 500)
+    }
+  }
+
   // RESOLVE CHECKIN LINK — public endpoint (no auth)
   // ── PASSPORT MRZ OCR (public — guest check-in form pre-fill) ──────
   // Reads the passport photo page with the hosted vision model and returns

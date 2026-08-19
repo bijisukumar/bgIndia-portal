@@ -102,6 +102,10 @@ export const api = {
   // ── GUEST CHECK-IN FORM (public) ───────────────────────────
   submitGuestCheckIn:       (data)   => post('submitGuestCheckIn', data),
 
+  // ── SAAS LANDING GATEWAY (public) ───────────────────────────
+  submitDemoRequest:        (data)   => post('submitDemoRequest', data),
+  submitHostRegistration:   (data)   => post('submitHostRegistration', data),
+
   // ── PROVISIONAL / PENDING REVIEW ───────────────────────────
   getPendingReviewStays:    ()       => get('getPendingReviewStays'),
   getDuplicateBookings:     (p)      => get('getDuplicateBookings', p),

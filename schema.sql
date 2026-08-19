@@ -762,6 +762,70 @@ CREATE TABLE IF NOT EXISTS platform_auth_tokens (
   created_at  TEXT
 );
 
+-- SaaS marketing site leads: "Request Demo" (name/phone/email only) — the
+-- landing gateway's low-friction option. status is a simple sales pipeline
+-- marker (new -> contacted -> converted/lost), reviewed by hand, not
+-- surfaced anywhere in-product yet.
+CREATE TABLE IF NOT EXISTS platform_leads (
+  lead_id     TEXT PRIMARY KEY,
+  source      TEXT NOT NULL DEFAULT 'demo_request',
+  name        TEXT NOT NULL,
+  phone       TEXT,
+  email       TEXT,
+  notes       TEXT,
+  status      TEXT DEFAULT 'new',
+  created_at  TEXT DEFAULT (datetime('now'))
+);
+
+-- SaaS marketing site "New Host Registration" — the full intake form from
+-- docs/ONBOARDING.md section A, submitted by a prospective host BEFORE any
+-- provisioning happens. This does NOT create a platform_tenants row or spin
+-- up a new deployment — onboarding today is still the manual checklist in
+-- ONBOARDING.md section B (new D1 pair, Pages project, DNS, Apps Script);
+-- this table just captures everything that checklist needs so the team
+-- isn't re-asking the host on a call. List-shaped answers (rate card,
+-- extra-charge menu, booking channels, staff) are free text (one per line)
+-- rather than structured JSON — this is a one-time intake a human reads,
+-- not something the app parses back out.
+CREATE TABLE IF NOT EXISTS platform_host_registrations (
+  registration_id     TEXT PRIMARY KEY,
+  status               TEXT DEFAULT 'new',  -- new -> reviewing -> provisioned -> declined
+  -- Business
+  brand_name           TEXT NOT NULL,
+  short_name           TEXT,
+  tagline              TEXT,
+  brand_color          TEXT,
+  custom_domains       TEXT,
+  owner_name           TEXT NOT NULL,
+  owner_email          TEXT NOT NULL,
+  owner_whatsapp       TEXT,
+  -- Properties (first villa — more added later via ONBOARDING.md section C)
+  villa_code                 TEXT,
+  villa_display_name         TEXT,
+  villa_full_name             TEXT,
+  address                     TEXT,
+  maps_link                   TEXT,
+  bedrooms                    INTEGER,
+  bed_type_note                TEXT,
+  checkin_time                 TEXT,
+  checkout_time                 TEXT,
+  max_guests                    INTEGER,
+  rate_card_notes                TEXT,
+  cleaning_fee                    REAL,
+  extra_charge_menu_notes          TEXT,
+  booking_channels_notes            TEXT,
+  -- Operations
+  staff_notes                        TEXT,
+  expense_categories_notes            TEXT,
+  breakfast_rate                       REAL,
+  additional_guest_rate                 REAL,
+  -- Integrations
+  channel_email                          TEXT,
+  drive_folder_note                       TEXT,
+  notes                                    TEXT,
+  created_at                                TEXT DEFAULT (datetime('now'))
+);
+
 -- Guest-facing "need flexibility" requests (early check-in / late check-out).
 -- Public page writes here with no auth (same trust model as the check-in
 -- form); the owner reviews, quotes a % of the nightly rate and confirms.

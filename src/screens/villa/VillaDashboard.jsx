@@ -853,7 +853,11 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
     customerMap[key].revenue += grossOf(s)
     customerMap[key].stays += 1
   })
-  const customers = Object.values(customerMap).sort((a, b) => b.revenue - a.revenue)
+  // Zero-revenue rows are near-certainly a stray/placeholder stay for a
+  // guest who already has a real (paid) stay elsewhere in the list — e.g.
+  // a duplicate check-in-form record never linked to the priced booking —
+  // rather than a genuine customer worth ranking, so they're dropped here.
+  const customers = Object.values(customerMap).filter(c => c.revenue > 0).sort((a, b) => b.revenue - a.revenue)
 
   return (
     <div>

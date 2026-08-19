@@ -4280,7 +4280,7 @@ export async function onRequest(ctx) {
       if (action === 'linkEnquiryToExistingStay') {
         const { enquiryId, stayId } = body
         if (!enquiryId || !stayId) return err('enquiryId and stayId required')
-        const enquiry = await DB.prepare(`SELECT villa_id, final_offer_amount, quote_amount, discount_amount, nights FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
+        const enquiry = await DB.prepare(`SELECT villa_id, final_offer_amount, quote_amount, discount_amount, extra_charges, extra_lines, nights FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
         if (!enquiry) return err('Enquiry not found', 404)
         assertPropertyAccess(payload, enquiry.villa_id || DEFAULT_VILLA_ID)
         const stay = await DB.prepare(`SELECT stay_id, gross, net FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
@@ -4299,14 +4299,20 @@ export async function onRequest(ctx) {
         // starting tariff/gross/net when the stay side is still blank (e.g.
         // it came from the public check-in form, which never asks for
         // pricing), never overwriting real financials someone already
-        // entered in Complete Booking.
+        // entered in Complete Booking. bookingValue (= final_offer_amount)
+        // already folds the enquiry's extra charges into gross/net, but
+        // extra_charges/extra_lines must be copied across too — those are
+        // the columns Complete Booking actually reads to render the
+        // itemized "+ Add item…" breakdown (e.g. an extra floor bed), so
+        // without this the total was right but the line item vanished, and
+        // any later tariff-only edit would silently swallow that amount.
         let financialsBackfilled = false
         if (!stay.gross && !stay.net) {
           const roomOnlyTotal = (enquiry.quote_amount || 0) - (enquiry.discount_amount || 0)
           const tariffPerNight = Math.round(roomOnlyTotal / (enquiry.nights || 1)) || 0
           stmts.push(DB.prepare(`
-            UPDATE stayvibe_stays SET gross = ?, net = ?, tariff_per_night = ?, updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?
-          `).bind(bookingValue, bookingValue, tariffPerNight, actor, stayId))
+            UPDATE stayvibe_stays SET gross = ?, net = ?, tariff_per_night = ?, extra_charges = ?, extra_lines = ?, updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?
+          `).bind(bookingValue, bookingValue, tariffPerNight, enquiry.extra_charges || 0, enquiry.extra_lines || null, actor, stayId))
           financialsBackfilled = true
         }
         await DB.batch(stmts)

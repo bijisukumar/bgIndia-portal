@@ -790,6 +790,32 @@ export default function GuestCheckIn() {
 
         {/* ── SECTION 4B: FOREIGN — FORM C ── */}
         {isForeign && (<>
+          {/* The single most-missed rule on this form: guests fill in their
+              own passport and assume they are done. Say it before they start,
+              not after. */}
+          <div style={{ margin:'18px 0 6px', padding:'16px 18px', borderRadius:'12px',
+            background:'rgba(234,179,8,0.10)', border:'2px solid rgba(234,179,8,0.55)' }}>
+            <div style={{ fontSize:'0.95rem', fontWeight:'800', color:'#EAB308',
+              marginBottom:'8px', letterSpacing:'0.3px' }}>
+              &#9888;&#65039; EVERY foreign guest needs their own passport &amp; visa
+            </div>
+            <div style={{ fontSize:'0.85rem', color:'#D8DEE6', lineHeight:'1.7' }}>
+              Indian law requires a <strong style={{ color:'#FFF' }}>separate Form C for each
+              foreign national</strong> staying at the villa &mdash; including children with
+              their own passport.
+              <br /><br />
+              The next sections are for <strong style={{ color:'#FFF' }}>you only</strong>.
+              For everyone else travelling with you, scroll to the bottom and use
+              <strong style={{ color:'#EAB308' }}> &ldquo;+ Add another foreign guest&rdquo;</strong>,
+              then upload <strong style={{ color:'#FFF' }}>their</strong> passport and visa there.
+              <br /><br />
+              <span style={{ color:'#9AA5B4' }}>
+                We cannot complete your registration without a passport and visa for
+                every foreign guest.
+              </span>
+            </div>
+          </div>
+
           <SectionLabel icon="🛂" color="#85B7EB">4 · PASSPORT DETAILS (FORM C)</SectionLabel>
 
           <Field label="Passport number" required>
@@ -1142,6 +1168,25 @@ export default function GuestCheckIn() {
 
         {/* ── SUBMIT ── */}
         {!linkLoading && !linkError && <div style={{ marginTop:'28px' }}>
+          {/* Last chance to catch a party that entered one passport for four
+              people. Warns, but never blocks — a guest stuck at midnight
+              without a companion's passport still has to be able to register. */}
+          {isForeign && formCMissing > 0 && (
+            <div style={{ background:'rgba(234,179,8,0.10)', border:'2px solid rgba(234,179,8,0.55)',
+              borderRadius:'12px', padding:'14px 16px', marginBottom:'14px' }}>
+              <div style={{ fontSize:'0.88rem', fontWeight:'800', color:'#EAB308', marginBottom:'6px' }}>
+                &#9888;&#65039; {formCMissing} foreign guest{formCMissing === 1 ? '' : 's'} still missing a passport
+              </div>
+              <div style={{ fontSize:'0.8rem', color:'#D8DEE6', lineHeight:'1.6' }}>
+                You told us <strong style={{ color:'#FFF' }}>{partySize}</strong> guest{partySize === 1 ? '' : 's'} are
+                staying, but only <strong style={{ color:'#FFF' }}>{formCFiled}</strong> passport
+                {formCFiled === 1 ? '' : 's'} {formCFiled === 1 ? 'has' : 'have'} been entered. Use
+                <strong style={{ color:'#EAB308' }}> &ldquo;+ Add another foreign guest&rdquo;</strong> above
+                for each remaining person. If some of your party are Indian citizens you can
+                continue &mdash; Form C applies only to foreign nationals.
+              </div>
+            </div>
+          )}
           {error && (
             <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)',
               borderRadius:'10px', padding:'12px 16px', color:'#EF4444',

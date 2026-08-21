@@ -598,7 +598,7 @@ export default function GuestCheckIn() {
         <SectionLabel icon="👤">1 · PERSONAL DETAILS</SectionLabel>
 
         <Field label="Full name (as on ID)" required>
-          <Input value={fullName} onChange={setFullName} placeholder="e.g. Michael J Carter" />
+          <Input value={fullName} onChange={setFullName} placeholder={isForeign ? 'e.g. Michael J Carter' : 'e.g. Arjun R Nair'} />
         </Field>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
@@ -683,13 +683,13 @@ export default function GuestCheckIn() {
             </Field>
             <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:'12px' }}>
               <Field label="City / Town" required>
-                <Input value={city} onChange={setCity} placeholder="San Francisco" />
+                <Input value={city} onChange={setCity} placeholder="Bengaluru" />
               </Field>
               {/* Not type=tel or maxLength 6 any more — that was an Indian
                   PIN assumption, and it silently truncated ZIP+4 and most
                   non-numeric postcodes (UK, Canada, Netherlands). */}
               <Field label="Pincode / ZIP code">
-                <Input value={pincode} onChange={setPincode} placeholder="94105" maxLength={12} />
+                <Input value={pincode} onChange={setPincode} placeholder="560001" maxLength={12} />
               </Field>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
@@ -737,7 +737,7 @@ export default function GuestCheckIn() {
 
         <Field label="Names of other guests in your group" hint="Helps us prepare and keep records">
           <Textarea value={guestList} onChange={setGuestList}
-            placeholder="e.g. Sarah Carter, Ethan Carter (age 8), Laura Carter" rows={2} />
+            placeholder={isForeign ? 'e.g. Sarah Carter, Ethan Carter (age 8), Laura Carter' : 'e.g. Priya Nair, Karthik Nair (age 8), Meera Nair'} rows={2} />
         </Field>
 
         <Field label="Purpose of visit" required>

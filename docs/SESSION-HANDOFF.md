@@ -316,3 +316,33 @@ worker bundle.
 
 **Still write-only**: `getUpcomingStays` returns only `from_city`, so none of
 the address fields reach the owner UI. Captured correctly, not yet displayed.
+
+## Multi-machine hazard: ALWAYS `git fetch` before building (2026-08-20)
+
+Two Claude sessions work this repo from different machines. One of them built,
+deployed and **migrated production** from a clone that was 22 commits behind
+`origin/main`, without ever checking. Consequences, in order of severity:
+
+1. **Production was broken for foreign guests.** The Form C migration rebuilt
+   `stayvibe_stay_kyc` so `stay_id` is no longer uniquely indexed, but the
+   *deployed* worker was the older `origin/main` build, which still upserts
+   with `ON CONFLICT(stay_id)`. Every foreign check-in returned
+   `D1_ERROR: ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE
+   constraint`. Domestic guests were unaffected — their path writes no KYC row.
+2. **Four Pages projects briefly served a 22-commit-stale build**, silently
+   reverting car capture, Staff & Access, dashboard fixes and more. This
+   self-healed when the other machine redeployed.
+3. Schema changes do **not** self-heal. A redeploy overwrites code; it cannot
+   undo a migration. That asymmetry is the whole lesson.
+
+**Rule: `git fetch && git status -sb` before any build, deploy or migration.**
+If the branch is behind, rebase first. Never migrate production while the
+deployed worker is code you have not read.
+
+Resolution: rebased the 3 local commits onto `origin/main` (one conflict, in
+the `stayvibe_stays` line of `schema.sql` — kept origin's `checked_in_by` /
+`checked_out_by` and added `home_address_line2`), verified both sides' features
+survived the auto-merge in `[[route]].js` and `CompleteBooking.jsx`, re-checked
+SQL placeholder/bind arity (30/30 and 29/29), pushed, and deployed all four
+projects. Verified against the live domain that the served bundle contains both
+the Form C section and origin's car capture.

@@ -1,30 +1,174 @@
 // ============================================================
 //  ChannelCalendar.jsx
 //  Owner-facing management for OTA iCal sync (Airbnb today; Booking.com,
-//  Agoda etc. are just more feed rows — same sync code, no new code needed).
+//  Agoda etc. are just more feed rows — same sync code, no new code needed)
+//  plus a merged month calendar showing every channel's booked/blocked
+//  dates in one place.
 //  Route: /owner/villa/channel-calendar
 // ============================================================
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 
-function fmtDate(d) {
-  if (!d) return ''
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+// Fixed colors for known channels so they read consistently at a glance;
+// any future channel (added purely by pasting a new feed URL, no code
+// change) gets a stable color hashed from its name instead of grey.
+const CHANNEL_COLORS = {
+  direct: '#34A853', website: '#34A853',
+  airbnb: '#FF5A5F',
+  'booking.com': '#003B95', bookingcom: '#003B95', booking: '#003B95', booking_com: '#003B95',
+  expedia: '#FBC02D',
+  vrbo: '#3D67B1',
+  makemytrip: '#E74C3C', mmt: '#E74C3C',
+  agoda: '#5A2D8C',
+  goibibo: '#D6006C',
+  cleartrip: '#00A19C',
+}
+const FALLBACK_PALETTE = ['#8B5CF6', '#0EA5E9', '#F97316', '#14B8A6', '#EC4899']
+function channelColor(source) {
+  const s = (source || '').trim().toLowerCase()
+  if (CHANNEL_COLORS[s]) return CHANNEL_COLORS[s]
+  let hash = 0
+  for (const ch of s) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return FALLBACK_PALETTE[hash % FALLBACK_PALETTE.length]
+}
+
+function pad2(n) { return String(n).padStart(2, '0') }
+function toISO(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
+function addDays(d, n) { const c = new Date(d); c.setDate(c.getDate() + n); return c }
+
+// Weeks always run Sun→Sat and pad into the adjacent months so every row is
+// a full 7 days — needed to place spanning bars with plain CSS grid columns.
+function buildMonthWeeks(year, month) {
+  const first = new Date(year, month, 1)
+  const last = new Date(year, month + 1, 0)
+  const gridStart = addDays(first, -first.getDay())
+  const totalCells = Math.ceil((first.getDay() + last.getDate()) / 7) * 7
+  const weeks = []
+  let cursor = gridStart
+  for (let w = 0; w < totalCells / 7; w++) {
+    const week = []
+    for (let d = 0; d < 7; d++) { week.push(cursor); cursor = addDays(cursor, 1) }
+    weeks.push(week)
+  }
+  return weeks
+}
+
+// Clips each item's [checkinDate, checkoutDate) span to this week's 7 days
+// and returns a grid-column start/end (1-indexed, end exclusive) for it —
+// lets a multi-night stay render as one continuous bar via CSS grid-column
+// spanning instead of repeating per day cell.
+function weekSegments(week, items) {
+  const weekStartISO = toISO(week[0])
+  const weekEndISO = toISO(addDays(week[6], 1))
+  const segs = []
+  for (const item of items) {
+    if (item.checkoutDate <= weekStartISO || item.checkinDate >= weekEndISO) continue
+    const segStart = item.checkinDate > weekStartISO ? item.checkinDate : weekStartISO
+    const segEnd = item.checkoutDate < weekEndISO ? item.checkoutDate : weekEndISO
+    const startIdx = week.findIndex(d => toISO(d) === segStart)
+    const endIdx = week.findIndex(d => toISO(d) === segEnd)
+    segs.push({
+      item,
+      startCol: startIdx >= 0 ? startIdx + 1 : 1,
+      endCol: endIdx >= 0 ? endIdx + 1 : 8,
+    })
+  }
+  return segs
+}
+
+function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
+  const year = monthCursor.getFullYear()
+  const month = monthCursor.getMonth()
+  const weeks = useMemo(() => buildMonthWeeks(year, month), [year, month])
+  const todayISO = toISO(new Date())
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={onPrev} style={styles.navBtn}>‹</button>
+          <button onClick={onToday} style={{ ...styles.navBtn, width: 'auto', padding: '0 10px', fontSize: '0.68rem' }}>Today</button>
+          <button onClick={onNext} style={styles.navBtn}>›</button>
+        </div>
+        <div style={{ fontWeight: '700', color: 'var(--gold)', fontSize: '0.95rem' }}>{MONTH_NAMES[month]} {year}</div>
+        <div style={{ width: '86px' }} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
+        {WEEKDAYS.map(w => (
+          <div key={w} style={{ textAlign: 'center', fontSize: '0.62rem', color: 'var(--text-dim)', fontWeight: '700', letterSpacing: '0.05em', padding: '2px 0' }}>{w}</div>
+        ))}
+      </div>
+
+      {weeks.map((week, wi) => {
+        const segs = weekSegments(week, items)
+        return (
+          <div key={wi} style={{ marginBottom: '3px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+              {week.map(d => {
+                const inMonth = d.getMonth() === month
+                const isToday = toISO(d) === todayISO
+                return (
+                  <div key={toISO(d)} style={{
+                    ...styles.dayCell,
+                    opacity: inMonth ? 1 : 0.3,
+                    border: isToday ? '1px solid var(--gold)' : styles.dayCell.border,
+                  }}>
+                    {d.getDate()}
+                  </div>
+                )
+              })}
+            </div>
+            {segs.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginTop: '2px' }}>
+                {segs.map((seg, si) => {
+                  const color = channelColor(seg.item.source)
+                  return (
+                    <div key={si} title={`${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
+                      style={{
+                        gridColumn: `${seg.startCol} / ${seg.endCol}`,
+                        background: color,
+                        color: '#fff',
+                        borderRadius: '5px',
+                        padding: '3px 6px',
+                        fontSize: '0.64rem',
+                        fontWeight: '700',
+                        overflow: 'hidden',
+                        whiteSpace: 'nowrap',
+                        textOverflow: 'ellipsis',
+                        outline: seg.item.conflict ? '2px solid #EF4444' : 'none',
+                        outlineOffset: '1px',
+                      }}>
+                      {seg.item.conflict && '⚠️ '}{channelLabel(seg.item.source)}{seg.item.label ? ` · ${seg.item.label}` : ''}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export default function ChannelCalendar() {
   const navigate = useNavigate()
   const [feeds, setFeeds] = useState([])
-  const [blocks, setBlocks] = useState([])
+  const [calItems, setCalItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ channel: '', label: '', icsUrl: '' })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
+  const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); d.setDate(1); return d })
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
 
@@ -33,12 +177,12 @@ export default function ChannelCalendar() {
   async function load() {
     setLoading(true)
     try {
-      const [f, b] = await Promise.all([
+      const [f, c] = await Promise.all([
         api.getIcalFeeds(DEFAULT_VILLA_ID),
-        api.getIcalBlocks(DEFAULT_VILLA_ID),
+        api.getVillaCalendar(DEFAULT_VILLA_ID),
       ])
       setFeeds(Array.isArray(f) ? f : [])
-      setBlocks(Array.isArray(b) ? b : [])
+      setCalItems(Array.isArray(c) ? c : [])
     } catch (e) { showToast('Failed to load: ' + e.message, 'error') }
     finally { setLoading(false) }
   }
@@ -93,7 +237,11 @@ export default function ChannelCalendar() {
   const INP = { width: '100%', padding: '9px 12px', borderRadius: '8px', boxSizing: 'border-box', background: 'var(--dark-input)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.9rem' }
   const LBL = { display: 'block', fontSize: '0.68rem', color: 'var(--text-dim)', letterSpacing: '1px', marginBottom: '4px' }
 
-  const upcomingBlocks = blocks.filter(b => b.checkout_date >= new Date().toISOString().slice(0, 10))
+  const activeChannels = useMemo(() => {
+    const set = new Map()
+    for (const it of calItems) set.set((it.source || '').toLowerCase(), it.source)
+    return [...set.values()]
+  }, [calItems])
 
   return (
     <div className="screen">
@@ -113,9 +261,8 @@ export default function ChannelCalendar() {
         <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '14px', lineHeight: 1.5 }}>
           Add each channel's iCal export URL (Airbnb calendar settings → "Export Calendar") to pull
           in blocked dates automatically. A background sync runs periodically; use "Sync now" for
-          an immediate refresh. A block with no matching booking in the system may just be a manual
-          block you set directly on the channel — a ⚠️ conflict means it overlaps a confirmed booking
-          from a different channel.
+          an immediate refresh. A ⚠️ outline on the calendar below means two different channels
+          claim the same date — a real double-booking to resolve.
         </div>
 
         {showAdd && (
@@ -199,34 +346,37 @@ export default function ChannelCalendar() {
           </div>
         ))}
 
-        <div className="card-section-label" style={{ marginTop: '18px' }}>UPCOMING BLOCKED DATES</div>
+        <div className="card-section-label" style={{ marginTop: '18px', marginBottom: '10px' }}>CALENDAR</div>
 
-        {!loading && upcomingBlocks.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-dim)', fontSize: '0.85rem' }}>
-            No upcoming blocks synced yet.
+        {activeChannels.length > 0 && (
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            {activeChannels.map(src => (
+              <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+                <span style={{ width: '9px', height: '9px', borderRadius: '3px', background: channelColor(src), display: 'inline-block' }} />
+                {channelLabel(src)}
+              </div>
+            ))}
           </div>
         )}
 
-        {upcomingBlocks.map(b => (
-          <div key={b.block_id} style={{ background: 'var(--dark-card)', border: `1px solid ${b.conflict ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.07)'}`, borderRadius: '10px', padding: '12px 14px', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ ...channelPillStyle(b.channel), fontSize: '0.62rem', fontWeight: '700', padding: '2px 7px', borderRadius: '9px' }}>{channelLabel(b.channel)}</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text)', fontWeight: '600' }}>{fmtDate(b.checkin_date)} → {fmtDate(b.checkout_date)}</span>
-                {b.conflict && <span style={{ fontSize: '0.62rem', color: '#EF4444', background: 'rgba(239,68,68,0.12)', padding: '1px 7px', borderRadius: '8px', fontWeight: '700' }}>⚠️ CONFLICT</span>}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '3px' }}>
-                {b.matchingStay
-                  ? `Matches booking: ${b.matchingStay.guestName} (${channelLabel(b.matchingStay.source)})`
-                  : (b.summary || 'No matching booking in the system yet')}
-              </div>
-            </div>
-          </div>
-        ))}
+        {!loading && (
+          <CalendarGrid
+            items={calItems}
+            monthCursor={monthCursor}
+            onPrev={() => setMonthCursor(c => { const d = new Date(c); d.setMonth(d.getMonth() - 1); return d })}
+            onNext={() => setMonthCursor(c => { const d = new Date(c); d.setMonth(d.getMonth() + 1); return d })}
+            onToday={() => { const d = new Date(); d.setDate(1); setMonthCursor(d) }}
+          />
+        )}
 
         <div style={{ height: '20px' }} />
       </div>
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   )
+}
+
+const styles = {
+  navBtn: { width: '30px', height: '26px', borderRadius: '7px', border: '1px solid var(--border-dim)', background: 'var(--dark-card)', color: 'var(--text)', cursor: 'pointer', fontSize: '0.85rem' },
+  dayCell: { background: 'var(--dark-card)', border: '1px solid transparent', borderRadius: '5px', minHeight: '26px', padding: '3px 5px', fontSize: '0.68rem', color: 'var(--text-dim)' },
 }

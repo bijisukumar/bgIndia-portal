@@ -98,7 +98,7 @@ export const api = {
   addIcalFeed:    (data)    => post('addIcalFeed', data),
   toggleIcalFeed: (data)    => post('toggleIcalFeed', data),
   deleteIcalFeed: (data)    => post('deleteIcalFeed', data),
-  getIcalBlocks:  (villaId) => get('getIcalBlocks', { villaId }),
+  getVillaCalendar: (villaId) => get('getVillaCalendar', { villaId }),
   runIcalSyncNow: (data)    => post('runIcalSyncNow', data),
 
   // ── AGENT QUOTE LINKS (stayvibe only) ───────────────────────

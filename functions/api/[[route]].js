@@ -3869,33 +3869,49 @@ export async function onRequest(ctx) {
       // DIFFERENT channel — a block with no matching stay at all is either a
       // manual block the owner set directly on the OTA, or a booking that
       // hasn't been entered here yet, not necessarily a conflict.
-      if (action === 'getIcalBlocks') {
+      // One merged list for the calendar-grid view: every real booking
+      // (any source — direct/website included, not just OTAs with a feed)
+      // plus any synced OTA block that ISN'T yet reflected as a booking here
+      // (a manual block the owner set directly on the channel, or a
+      // reservation that hasn't been entered into the system yet). A stay
+      // already covers its own iCal block by definition, so blocks with a
+      // matching stay are dropped to avoid showing the same occupancy twice.
+      // conflict = true when two items from DIFFERENT sources overlap —
+      // the actual double-booking signal.
+      if (action === 'getVillaCalendar') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const { results: blocks } = await DB.prepare(`
-          SELECT b.block_id, b.feed_id, b.villa_id, b.channel, b.checkin_date, b.checkout_date,
-                 b.summary, b.last_seen_at, f.label AS feed_label
-          FROM stayvibe_ical_blocks b
-          JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
-          WHERE b.villa_id = ? AND b.removed_at IS NULL
-          ORDER BY b.checkin_date
-        `).bind(villaId).all()
         const { results: stays } = await DB.prepare(`
           SELECT stay_id, guest_name, source, checkin_date, checkout_date
-          FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled', 'closed')
+          FROM stayvibe_stays
+          WHERE villa_id = ? AND status NOT IN ('cancelled', 'closed')
+            AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
+        `).bind(villaId).all()
+        const { results: blocks } = await DB.prepare(`
+          SELECT block_id, channel, checkin_date, checkout_date, summary
+          FROM stayvibe_ical_blocks WHERE villa_id = ? AND removed_at IS NULL
         `).bind(villaId).all()
         const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && aEnd > bStart
-        const data = (blocks || []).map(b => {
-          const match = (stays || []).find(s =>
-            s.checkin_date && s.checkout_date &&
-            overlaps(b.checkin_date, b.checkout_date, s.checkin_date, s.checkout_date))
-          const conflict = !!(match && (match.source || '').toLowerCase() !== (b.channel || '').toLowerCase())
-          return {
-            ...b, conflict,
-            matchingStay: match ? { stayId: match.stay_id, guestName: match.guest_name, source: match.source } : null,
+        const items = (stays || []).map(s => ({
+          id: s.stay_id, kind: 'stay', source: s.source || 'direct', label: s.guest_name,
+          checkinDate: s.checkin_date, checkoutDate: s.checkout_date,
+        }))
+        for (const b of (blocks || [])) {
+          const matched = (stays || []).some(s => overlaps(b.checkin_date, b.checkout_date, s.checkin_date, s.checkout_date))
+          if (!matched) {
+            items.push({
+              id: b.block_id, kind: 'block', source: b.channel, label: b.summary || null,
+              checkinDate: b.checkin_date, checkoutDate: b.checkout_date,
+            })
           }
-        })
-        return json({ success: true, data })
+        }
+        for (const item of items) {
+          item.conflict = items.some(o =>
+            o !== item && (o.source || '').toLowerCase() !== (item.source || '').toLowerCase() &&
+            overlaps(item.checkinDate, item.checkoutDate, o.checkinDate, o.checkoutDate))
+        }
+        items.sort((a, b) => a.checkinDate.localeCompare(b.checkinDate))
+        return json({ success: true, data: items })
       }
 
       // Frontend has called these two since OwnerHome's CheckinLinksBlock was

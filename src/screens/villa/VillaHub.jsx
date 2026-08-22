@@ -89,6 +89,7 @@ export default function VillaHub() {
                 { icon: '📨', bg: 'rgba(139,92,246,0.08)',   arrow: '#8B5CF6', title: 'Guest enquiries',   sub: 'Track leads · conversion · repeat guests',              path: `/owner/villa/enquiries` },
                 { icon: '🏨', bg: 'rgba(200,144,58,0.08)',   arrow: '#C8903A', title: 'Complete booking', sub: 'Financials · docs · ready for check-in',              path: `/owner/villa/income` },
                 { icon: '📊', bg: 'rgba(24,95,165,0.08)',    arrow: '#185FA5', title: 'Dashboard',    sub: 'Revenue · profit · breakdown',                          path: `/owner/villa/dashboard` },
+                { icon: '🗓️', bg: 'rgba(200,144,58,0.08)',   arrow: '#C8903A', title: 'Channel calendar', sub: 'Sync Airbnb, Booking.com · spot double-bookings',    path: `/owner/villa/channel-calendar` },
             { icon: '📦', bg: 'rgba(15,110,86,0.08)',    arrow: '#0F6E56', title: 'Inventory',          sub: 'Stock levels · sell prices · restock log',               path: `/owner/villa/inventory` },
                 { icon: '🧾', bg: 'rgba(239,68,68,0.08)',    arrow: '#EF4444', title: 'Expenses',      sub: 'Electricity · maintenance · repairs · recurring costs', path: `/owner/villa/expenses` },
                 { icon: '🔔', bg: 'rgba(139,92,246,0.08)',   arrow: '#8B5CF6', title: 'Notification settings', sub: 'Owner alert email · per-villa config',                path: `/owner/villa/notifications` },

@@ -93,6 +93,14 @@ export const api = {
   createCheckinLink:  (data)   => post('createCheckinLink', data),
   toggleCheckinLink:  (data)   => post('toggleCheckinLink', data),
 
+  // ── CHANNEL CALENDAR (iCal sync) ─────────────────────────────
+  getIcalFeeds:   (villaId) => get('getIcalFeeds', { villaId }),
+  addIcalFeed:    (data)    => post('addIcalFeed', data),
+  toggleIcalFeed: (data)    => post('toggleIcalFeed', data),
+  deleteIcalFeed: (data)    => post('deleteIcalFeed', data),
+  getIcalBlocks:  (villaId) => get('getIcalBlocks', { villaId }),
+  runIcalSyncNow: (data)    => post('runIcalSyncNow', data),
+
   // ── AGENT QUOTE LINKS (stayvibe only) ───────────────────────
   getAgentLinks:   (vId)  => get('getAgentLinks', { villaId: vId }),
   createAgentLink: (data) => post('createAgentLink', data),

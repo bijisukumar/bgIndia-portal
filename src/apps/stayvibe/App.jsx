@@ -36,6 +36,7 @@ import EnquiryConversionDashboard from '../../screens/villa/EnquiryConversionDas
 import MarketingCampaigns from '../../screens/villa/MarketingCampaigns'
 import AgentLinks     from '../../screens/villa/AgentLinks'
 import FlexRequests   from '../../screens/villa/FlexRequests'
+import ChannelCalendar from '../../screens/villa/ChannelCalendar'
 import AgentQuote     from '../../screens/villa/AgentQuote'
 import GuestCheckIn   from '../../screens/GuestCheckIn'
 import Flexibility    from '../../screens/Flexibility'
@@ -80,6 +81,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/booking"    element={<NewBooking />} />
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
+        <Route path="/owner/villa/channel-calendar" element={<ChannelCalendar />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/raman/inventory"        element={<Inventory />} />
         <Route path="/owner/villa/expenses"   element={<VillaExpenses />} />

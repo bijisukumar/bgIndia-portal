@@ -407,6 +407,90 @@ function genId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
+// ── ICAL PARSER (channel calendar sync) ───────────────────────────────────
+// Deliberately hand-rolled instead of a library: OTAs (Airbnb, Booking.com,
+// Agoda, ...) all export a minimal all-day-event subset of RFC 5545 for this
+// exact purpose (blocking dates on other calendars), so a full parser is
+// more surface area than the feeds ever use. Unfolds continuation lines
+// (a line starting with a space/tab continues the previous one) before
+// scanning, since a long DESCRIPTION on some channels wraps that way.
+function parseIcsDate(value) {
+  const m = String(value || '').match(/^(\d{4})(\d{2})(\d{2})/)
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null
+}
+function parseIcsEvents(text) {
+  const unfolded = String(text || '').replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '')
+  const events = []
+  let cur = null
+  for (const raw of unfolded.split('\n')) {
+    const line = raw.trim()
+    if (line === 'BEGIN:VEVENT') { cur = {}; continue }
+    if (line === 'END:VEVENT') { if (cur) events.push(cur); cur = null; continue }
+    if (!cur) continue
+    const idx = line.indexOf(':')
+    if (idx < 0) continue
+    const name = line.slice(0, idx).split(';')[0].toUpperCase()
+    const value = line.slice(idx + 1)
+    if (name === 'DTSTART') cur.checkin = parseIcsDate(value)
+    else if (name === 'DTEND') cur.checkout = parseIcsDate(value)
+    else if (name === 'SUMMARY') cur.summary = value
+    else if (name === 'UID') cur.uid = value
+  }
+  // DTEND on an all-day VEVENT is exclusive (the day after the block ends) —
+  // the same convention this app already uses for checkout_date elsewhere.
+  return events.filter(e => e.uid && e.checkin && e.checkout)
+}
+
+// Shared by the cron-triggered sync and the owner's manual "Sync now" button
+// — one code path, two callers. Upserts by (feed_id, uid) so a re-fetched
+// feed updates dates in place instead of duplicating; a UID that vanished
+// from the feed (the OTA cancelled or unblocked it) is soft-deleted via
+// removed_at rather than hard-deleted, so a transient fetch glitch can never
+// look like a mass-cancellation.
+async function syncIcalFeedsForVillas(DB, villaIdFilter) {
+  const { results: feeds } = await (villaIdFilter
+    ? DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1 AND villa_id = ?`).bind(villaIdFilter)
+    : DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1`)
+  ).all()
+  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  const summary = []
+  for (const feed of (feeds || [])) {
+    try {
+      const res = await fetch(feed.ics_url, { headers: { 'User-Agent': 'StayVibe-Calendar-Sync/1.0' } })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const events = parseIcsEvents(await res.text())
+      for (const ev of events) {
+        await DB.prepare(`
+          INSERT INTO stayvibe_ical_blocks
+            (block_id, feed_id, villa_id, channel, uid, checkin_date, checkout_date, summary, first_seen_at, last_seen_at, removed_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          ON CONFLICT(feed_id, uid) DO UPDATE SET
+            checkin_date = excluded.checkin_date, checkout_date = excluded.checkout_date,
+            summary = excluded.summary, last_seen_at = excluded.last_seen_at, removed_at = NULL
+        `).bind(genId('ICB'), feed.feed_id, feed.villa_id, feed.channel, ev.uid, ev.checkin, ev.checkout, ev.summary || null, nowStr, nowStr).run()
+      }
+      const seenUids = events.map(e => e.uid)
+      if (seenUids.length > 0) {
+        await DB.prepare(
+          `UPDATE stayvibe_ical_blocks SET removed_at = ? WHERE feed_id = ? AND removed_at IS NULL AND uid NOT IN (${seenUids.map(() => '?').join(',')})`
+        ).bind(nowStr, feed.feed_id, ...seenUids).run()
+      } else {
+        await DB.prepare(`UPDATE stayvibe_ical_blocks SET removed_at = ? WHERE feed_id = ? AND removed_at IS NULL`).bind(nowStr, feed.feed_id).run()
+      }
+      await DB.prepare(
+        `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'ok', last_sync_error = NULL, last_sync_count = ? WHERE feed_id = ?`
+      ).bind(nowStr, events.length, feed.feed_id).run()
+      summary.push({ feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length })
+    } catch (e) {
+      await DB.prepare(
+        `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'error', last_sync_error = ? WHERE feed_id = ?`
+      ).bind(nowStr, String(e?.message || e).slice(0, 300), feed.feed_id).run()
+      summary.push({ feedId: feed.feed_id, channel: feed.channel, ok: false, error: String(e?.message || e) })
+    }
+  }
+  return summary
+}
+
 // ── LEDGER ADAPTER (Step C — docs/DB-Ledger-Refactor-Spec.md) ─────────────
 // One mapping, called after every financial write to `stays`, with just the
 // stayId. It re-reads the row post-write, so all write paths share this ONE
@@ -1673,6 +1757,19 @@ export async function onRequest(ctx) {
       }
     }
     return json({ success: true, data: { date: today, checked: (due || []).length, sent, failed } })
+  }
+
+  // ── CHANNEL CALENDAR SYNC (external cron, not a logged-in user) ─────────
+  // Same reasoning and pattern as runCheckoutEmailAutosend above — Pages
+  // Functions have no native `scheduled` handler, so a GitHub Actions
+  // schedule hits this over HTTP instead. Pulls every active OTA iCal feed
+  // (Airbnb today; Booking.com etc. are just more rows in
+  // stayvibe_ical_feeds, same sync code) and upserts blocked-date ranges.
+  if (action === 'syncIcalFeeds' && method === 'POST') {
+    const secret = request.headers.get('X-Cron-Secret') || ''
+    if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
+    const results = await syncIcalFeedsForVillas(DB, null)
+    return json({ success: true, data: { feeds: results.length, results } })
   }
 
   // ── AUTH GUARD — verify JWT on every other request ─────
@@ -3755,6 +3852,52 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // ── CHANNEL CALENDAR (iCal sync) ─────────────────────────────────
+      if (action === 'getIcalFeeds') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results } = await DB.prepare(`
+          SELECT feed_id, villa_id, channel, label, ics_url, is_active,
+                 last_synced_at, last_sync_status, last_sync_error, last_sync_count, created_at
+          FROM stayvibe_ical_feeds WHERE villa_id = ? ORDER BY channel
+        `).bind(villaId).all()
+        return json({ success: true, data: results })
+      }
+
+      // Merges every active feed's blocks for the villa and flags a block as
+      // a conflict when its dates overlap a live stay booked through a
+      // DIFFERENT channel — a block with no matching stay at all is either a
+      // manual block the owner set directly on the OTA, or a booking that
+      // hasn't been entered here yet, not necessarily a conflict.
+      if (action === 'getIcalBlocks') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results: blocks } = await DB.prepare(`
+          SELECT b.block_id, b.feed_id, b.villa_id, b.channel, b.checkin_date, b.checkout_date,
+                 b.summary, b.last_seen_at, f.label AS feed_label
+          FROM stayvibe_ical_blocks b
+          JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
+          WHERE b.villa_id = ? AND b.removed_at IS NULL
+          ORDER BY b.checkin_date
+        `).bind(villaId).all()
+        const { results: stays } = await DB.prepare(`
+          SELECT stay_id, guest_name, source, checkin_date, checkout_date
+          FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled', 'closed')
+        `).bind(villaId).all()
+        const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && aEnd > bStart
+        const data = (blocks || []).map(b => {
+          const match = (stays || []).find(s =>
+            s.checkin_date && s.checkout_date &&
+            overlaps(b.checkin_date, b.checkout_date, s.checkin_date, s.checkout_date))
+          const conflict = !!(match && (match.source || '').toLowerCase() !== (b.channel || '').toLowerCase())
+          return {
+            ...b, conflict,
+            matchingStay: match ? { stayId: match.stay_id, guestName: match.guest_name, source: match.source } : null,
+          }
+        })
+        return json({ success: true, data })
+      }
+
       // Frontend has called these two since OwnerHome's CheckinLinksBlock was
       // built, but no matching action ever existed server-side — the
       // Activate/Deactivate button silently failed, and there was no way to
@@ -4247,6 +4390,54 @@ export async function onRequest(ctx) {
         body = await request.json()
       } catch (e) {
         return err(`Invalid request body: ${e.message}`)
+      }
+
+      // ════════════════ CHANNEL CALENDAR (iCal sync) — POST ════════════════
+      if (action === 'addIcalFeed') {
+        const { villaId, channel, label, icsUrl } = body
+        const vId = villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        if (!channel?.trim()) return err('channel required')
+        if (!icsUrl?.trim() || !/^https?:\/\//i.test(icsUrl.trim())) return err('a valid ics URL is required')
+        const feedId = genId('ICF')
+        await DB.prepare(`
+          INSERT INTO stayvibe_ical_feeds (feed_id, villa_id, channel, label, ics_url, created_by, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(feedId, vId, channel.trim().toLowerCase(), label?.trim() || null, icsUrl.trim(), actor, actor).run()
+        return json({ success: true, data: { feedId } })
+      }
+
+      if (action === 'toggleIcalFeed') {
+        const { feedId } = body
+        if (!feedId) return err('feedId required')
+        const feed = await DB.prepare(`SELECT villa_id FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).first()
+        if (!feed) return err('Feed not found', 404)
+        assertPropertyAccess(payload, feed.villa_id)
+        await DB.prepare(
+          `UPDATE stayvibe_ical_feeds SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_by = ?, updated_at = ? WHERE feed_id = ?`
+        ).bind(actor, now(), feedId).run()
+        return json({ success: true })
+      }
+
+      if (action === 'deleteIcalFeed') {
+        const { feedId } = body
+        if (!feedId) return err('feedId required')
+        const feed = await DB.prepare(`SELECT villa_id FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).first()
+        if (!feed) return err('Feed not found', 404)
+        assertPropertyAccess(payload, feed.villa_id)
+        await DB.prepare(`DELETE FROM stayvibe_ical_blocks WHERE feed_id = ?`).bind(feedId).run()
+        await DB.prepare(`DELETE FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).run()
+        return json({ success: true })
+      }
+
+      // Owner-triggered version of the same sync the cron job runs — lets
+      // the "Sync now" button show fresh results immediately instead of
+      // waiting for the next scheduled run.
+      if (action === 'runIcalSyncNow') {
+        const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const results = await syncIcalFeedsForVillas(DB, villaId)
+        return json({ success: true, data: { feeds: results.length, results } })
       }
 
       // ════════════════ GUEST ENQUIRY MANAGEMENT (CRM) — POST ══════════════

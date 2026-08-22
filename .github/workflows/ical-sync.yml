@@ -1,0 +1,23 @@
+name: Channel calendar iCal sync
+
+# Pulls every active OTA iCal feed (Airbnb, and any others added later —
+# see stayvibe_ical_feeds) and refreshes blocked dates. Same reasoning as
+# checkout-emails.yml: Cloudflare Pages Functions have no native `scheduled`
+# handler, so the periodic trigger lives here and just calls the endpoint
+# over HTTP. Guarded by the same CRON_SECRET; safe to re-run any time.
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # every 2 hours
+  workflow_dispatch: {}     # lets you trigger it manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call syncIcalFeeds
+        run: |
+          curl -sS -X POST "https://manage.stayvibe360.com/api/syncIcalFeeds" \
+            -H "Content-Type: application/json" \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            -d '{}' \
+            --fail-with-body

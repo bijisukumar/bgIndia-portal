@@ -381,6 +381,47 @@ CREATE TABLE IF NOT EXISTS stayvibe_communication_log (
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
+-- Channel calendar sync: one row per OTA's iCal export URL (Airbnb,
+-- Booking.com, ...), one villa can have several (one per channel). The
+-- actual blocked date-ranges pulled from each feed live in
+-- stayvibe_ical_blocks, upserted by (feed_id, uid) on every sync.
+CREATE TABLE IF NOT EXISTS stayvibe_ical_feeds (
+  feed_id          TEXT PRIMARY KEY,
+  villa_id         TEXT NOT NULL DEFAULT 'dwarka',
+  channel          TEXT NOT NULL,
+  label            TEXT,
+  ics_url          TEXT NOT NULL,
+  is_active        INTEGER DEFAULT 1,
+  last_synced_at   TEXT,
+  last_sync_status TEXT,
+  last_sync_error  TEXT,
+  last_sync_count  INTEGER DEFAULT 0,
+  created_by TEXT DEFAULT 'owner', created_at TEXT DEFAULT (datetime('now')),
+  updated_by TEXT DEFAULT 'owner', updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ical_feeds_villa ON stayvibe_ical_feeds(villa_id, is_active);
+
+-- Airbnb's export iCal has no guest name/phone (privacy-redacted) — just a
+-- blocked date range, a UID, and a generic summary. removed_at is a soft
+-- delete: a UID that disappears from the feed on a later sync (the OTA
+-- cancelled or unblocked it) is marked removed rather than deleted outright,
+-- so a transient fetch failure never reads as a mass-cancellation.
+CREATE TABLE IF NOT EXISTS stayvibe_ical_blocks (
+  block_id      TEXT PRIMARY KEY,
+  feed_id       TEXT NOT NULL,
+  villa_id      TEXT NOT NULL,
+  channel       TEXT NOT NULL,
+  uid           TEXT NOT NULL,
+  checkin_date  TEXT NOT NULL,
+  checkout_date TEXT NOT NULL,
+  summary       TEXT,
+  first_seen_at TEXT DEFAULT (datetime('now')),
+  last_seen_at  TEXT DEFAULT (datetime('now')),
+  removed_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ical_blocks_feed_uid ON stayvibe_ical_blocks(feed_id, uid);
+CREATE INDEX IF NOT EXISTS idx_ical_blocks_villa_dates ON stayvibe_ical_blocks(villa_id, checkin_date, checkout_date);
+
 CREATE TABLE IF NOT EXISTS stayvibe_cform_filings (
   filing_id  TEXT PRIMARY KEY,
   stay_id    TEXT NOT NULL,

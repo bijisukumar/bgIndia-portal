@@ -349,13 +349,23 @@ export default function ChannelCalendar() {
         <div className="card-section-label" style={{ marginTop: '18px', marginBottom: '10px' }}>CALENDAR</div>
 
         {activeChannels.length > 0 && (
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '12px' }}>
-            {activeChannels.map(src => (
-              <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: 'var(--text-dim)' }}>
-                <span style={{ width: '9px', height: '9px', borderRadius: '3px', background: channelColor(src), display: 'inline-block' }} />
-                {channelLabel(src)}
-              </div>
-            ))}
+          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            {activeChannels.map(src => {
+              const feed = feeds.find(f => (f.channel || '').toLowerCase() === (src || '').toLowerCase())
+              return (
+                <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+                  <span style={{ width: '9px', height: '9px', borderRadius: '3px', background: channelColor(src), display: 'inline-block' }} />
+                  {channelLabel(src)}
+                  {feed && (
+                    feed.last_sync_status === 'error'
+                      ? <span style={{ color: '#EF4444' }}> · sync failed</span>
+                      : feed.last_synced_at
+                        ? <span> · synced {feed.last_synced_at.slice(0, 16)}</span>
+                        : <span> · not synced yet</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 

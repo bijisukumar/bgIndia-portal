@@ -77,26 +77,39 @@ var STAYS_HEADERS = [
 
 // ── ENTRY POINTS ──────────────────────────────────────────────────────────
 
-// Main poller — runs every 5 minutes via trigger
+// Main poller — runs every 5 minutes via trigger. Apps Script does NOT skip
+// a scheduled run just because the previous one is still going, so a run
+// that takes longer than 5 minutes (slow Gmail/Drive/Worker calls) can
+// genuinely overlap with the next one, both reading the same is:unread
+// threads. LockService turns that into a clean skip instead of a race.
 function pollNewReservations() {
-  Logger.log('=== pollNewReservations START ' + new Date().toISOString() + ' ===');
-  try {
-    pollAirbnbBookings();
-  } catch(e) {
-    Logger.log('pollAirbnbBookings ERROR: ' + e.message);
-    sendAlert('🚨 Poller error', e.message + '\n' + (e.stack||''));
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(0)) {
+    Logger.log('pollNewReservations: previous run still in progress — skipping this trigger');
+    return;
   }
   try {
-    pollAirbnbCancellations();
-  } catch(e) {
-    Logger.log('pollAirbnbCancellations ERROR: ' + e.message);
+    Logger.log('=== pollNewReservations START ' + new Date().toISOString() + ' ===');
+    try {
+      pollAirbnbBookings();
+    } catch(e) {
+      Logger.log('pollAirbnbBookings ERROR: ' + e.message);
+      sendAlert('🚨 Poller error', e.message + '\n' + (e.stack||''));
+    }
+    try {
+      pollAirbnbCancellations();
+    } catch(e) {
+      Logger.log('pollAirbnbCancellations ERROR: ' + e.message);
+    }
+    try {
+      pollAirbnbReviews();
+    } catch(e) {
+      Logger.log('pollAirbnbReviews ERROR: ' + e.message);
+    }
+    Logger.log('=== pollNewReservations END ===');
+  } finally {
+    lock.releaseLock();
   }
-  try {
-    pollAirbnbReviews();
-  } catch(e) {
-    Logger.log('pollAirbnbReviews ERROR: ' + e.message);
-  }
-  Logger.log('=== pollNewReservations END ===');
 }
 
 // ── AIRBNB CANCELLATION POLLER ────────────────────────────────────────────
@@ -650,6 +663,28 @@ function parseAirbnbConfirmation(body, subject) {
   var nights = nightsMatch ? parseInt(nightsMatch[1]) : 0;
   if (!nights && checkIn && checkOut) {
     nights = Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000);
+  }
+
+  // ── DATE SANITY CHECK ────────────────────────────────────────────────────
+  // Dates and nights come from two unrelated regexes (a date-label match vs
+  // a "(\d+) night" match), so they can silently disagree — this is exactly
+  // what happened for the "Anusha Chandran" reservation: nights=2 was
+  // extracted correctly but checkOut came back equal to checkIn, and
+  // nothing ever cross-checked that before writing to D1. Self-heal from
+  // nights when we have it (trustworthy — it comes from a separate part of
+  // the email); otherwise drop the bad checkOut so the booking still
+  // imports (correct guest/financials) with an empty checkout rather than
+  // a wrong one, which is easy to spot and fix later.
+  if (checkOut && checkOut <= checkIn) {
+    if (nights > 0) {
+      var fixedCheckOut = new Date(checkIn);
+      fixedCheckOut.setDate(fixedCheckOut.getDate() + nights);
+      Logger.log('⚠️ checkOut (' + checkOut + ') <= checkIn (' + checkIn + ') — recomputed from nights=' + nights + ' as ' + fixedCheckOut.toISOString().slice(0,10));
+      checkOut = fixedCheckOut.toISOString().slice(0, 10);
+    } else {
+      Logger.log('⚠️ checkOut (' + checkOut + ') <= checkIn (' + checkIn + ') and nights unknown — dropping checkOut, booking will import with it blank');
+      checkOut = null;
+    }
   }
 
   // ── FEES — strip ₹, commas, spaces ─────────────────────────────────────

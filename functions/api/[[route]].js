@@ -5125,6 +5125,16 @@ export async function onRequest(ctx) {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
 
+        // Guard against a checkout <= checkin pair reaching the DB at all —
+        // this exact shape (auto-imported Airbnb booking, correct nights,
+        // checkout_date silently equal to checkin_date) happened once via
+        // the email-parsing Apps Script mis-reading a reservation's dates.
+        // Reject loudly here instead of silently storing a degenerate
+        // 0-night stay that only shows up later as a calendar artifact.
+        if (body.checkInDate && body.checkOutDate && body.checkOutDate <= body.checkInDate) {
+          return err(`checkOutDate (${body.checkOutDate}) must be after checkInDate (${body.checkInDate})`)
+        }
+
         // Identity + overlap classification (Phase 2b) — replaces the fragile
         // exact-checkin_date "provisional" match. A same-guest overlap is this
         // guest's existing hold/enquiry stay → enrich it with the Airbnb data

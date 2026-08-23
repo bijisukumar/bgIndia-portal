@@ -585,9 +585,12 @@ async function writeFormCGuests(DB, stayId, villaId, guests) {
   if (!stayId || !Array.isArray(guests)) return 0
   const rows = guests
     .map((g, i) => ({ ...g, guest_seq: parseInt(g.guest_seq) || i + 1 }))
-    // A block with no passport number is a half-filled extra guest the form
-    // shouldn't have sent — skip it rather than storing an unfilable row.
-    .filter(g => (g.passport_number || '').trim() || (g.guest_name || '').trim())
+    // A block with no passport number is unfilable as a Form C entry, no
+    // matter how complete the rest looks — a guest_name alone (which the
+    // primary guest's own entry always has) used to let a domestic guest's
+    // entry survive here by mistake. Guest name isn't optional either, but
+    // the passport number is what actually makes a row a Form C entry.
+    .filter(g => (g.passport_number || '').trim())
   if (!rows.length) return 0
 
   // "I'll submit visa documents at check-in" means we hold no visa data for
@@ -1264,6 +1267,15 @@ export async function onRequest(ctx) {
       if (formCList.length) {
         try { await writeFormCGuests(DB, stayId, villaId, formCList) }
         catch (e) { console.error('Form C write failed:', e?.message || e) }
+      } else if (stayId) {
+        // No foreign nationals on THIS submission — if an earlier submission
+        // on this same stay (guest toggled to Foreign, then corrected back
+        // to Indian and resubmitted) already wrote Form C rows, they'd
+        // otherwise survive untouched forever since writeFormCGuests's own
+        // cleanup only runs when it's actually called. A domestic
+        // resubmission should always leave a clean slate.
+        try { await DB.prepare(`DELETE FROM stayvibe_stay_kyc WHERE stay_id = ?`).bind(stayId).run() }
+        catch (e) { console.error('Form C cleanup failed:', e?.message || e) }
       }
 
       // Stamp the resolved guest link (Phase 1 column) — starts populating

@@ -314,8 +314,12 @@ the column split, so its stays table is still at the 100-column ceiling. It
 needs the same split applied before it can take this column or the current
 worker bundle.
 
-**Still write-only**: `getUpcomingStays` returns only `from_city`, so none of
-the address fields reach the owner UI. Captured correctly, not yet displayed.
+**Owner UI shows city only — this is a decision, not a gap.** `getUpcomingStays`
+returns `from_city` and nothing else of the address. The full address (street 1,
+street 2, city, state, pincode, country) IS captured and verified on both the
+insert and update paths; Biji reviewed this on 2026-08-23 and confirmed city is
+all the owner screen needs. Do not "fix" this by widening the query — the data
+is in `stayvibe_stays` for anyone who needs it.
 
 ## Multi-machine hazard: ALWAYS `git fetch` before building (2026-08-20)
 

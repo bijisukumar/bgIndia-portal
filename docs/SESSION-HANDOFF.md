@@ -346,3 +346,44 @@ survived the auto-merge in `[[route]].js` and `CompleteBooking.jsx`, re-checked
 SQL placeholder/bind arity (30/30 and 29/29), pushed, and deployed all four
 projects. Verified against the live domain that the served bundle contains both
 the Form C section and origin's car capture.
+
+## Form C invariant: the two nationality flows must never criss-cross
+
+Form C applies to foreign nationals. An Indian guest must carry **no** Form C
+row and **no** passport/visa scan; a foreign guest must carry no Indian ID.
+This kept breaking because state and payload survived a nationality switch.
+
+Four leaks existed, all now closed:
+
+1. **`setNationality` was a bare setter.** Switching branch cleared nothing, so
+   a guest who opened the Foreign flow, uploaded a passport, then corrected to
+   Indian still submitted passport data. `switchNationality()` now wipes the
+   opposite branch — including file inputs — in both directions.
+2. **The three file uploads were ungated.** `idFileB64`/`passportFileB64`/
+   `visaFileB64` were sent unconditionally while every *typed* field was gated
+   on `isForeign`. The scans crossed even when the fields didn't.
+3. **The worker inferred foreignness from the passport field**
+   (`primaryIsForeign = !!passportNumber`). Nationality is now the authority:
+   `declaredForeign` is true for anything not explicitly "Indian", so a client
+   sending a country name still files correctly, and an Indian guest with a
+   passport number never produces a Form C row.
+4. **Cleanup deleted rows but not scans — and ran too early.** The domestic
+   cleanup at the Form C block deleted `passport`/`visa` documents, but the
+   document-storage block runs ~70 lines *later* and re-inserted them. Storage
+   is now gated on `declaredForeign` so they are never written; the delete
+   handles historical rows. The mirror case (stale `govt_id` on a foreign
+   registration) is cleaned too.
+
+An Indian guest choosing "Passport" as their ID is unaffected — that is stored
+as `doc_type = 'govt_id'`, never `'passport'`.
+
+Verified on production with a criss-cross matrix that posts payloads a
+misbehaving client would send (the other branch's data still attached), plus
+the real correction sequence: submit Foreign with a companion and scans, then
+resubmit the same stay as Indian — result is 0 Form C rows, 0 foreign scans,
+1 Aadhaar. Server-side gating is deliberate: the form now prevents this at
+source, but this is a public endpoint and must not depend on the client.
+
+Note: one matrix case failed on first run purely from Pages deploy propagation
+(first request after deploy hit the old worker). Re-running the same code
+passed. Worth waiting a few seconds before testing a fresh deploy.

@@ -1221,7 +1221,13 @@ export async function onRequest(ctx) {
       // Form C: the person filling the form is guest 1; anyone they added in
       // the "other foreign guests" blocks follows as 2..N. Domestic parties
       // send no foreign guests and write no KYC rows at all.
-      const primaryIsForeign = !!(passportNumber || '').trim()
+      // Form C applies to foreign nationals, so NATIONALITY decides — not the
+      // presence of a passport field. Inferring it from the passport meant any
+      // client that sent one for an Indian guest silently created a Form C
+      // row. Anything that isn't explicitly Indian counts as foreign, so a
+      // client sending a country name ("German") still files correctly.
+      const declaredForeign  = String(nationality || 'Indian').trim().toLowerCase() !== 'indian'
+      const primaryIsForeign = declaredForeign && !!(passportNumber || '').trim()
       const formCList = []
       if (primaryIsForeign) {
         formCList.push({
@@ -1240,7 +1246,11 @@ export async function onRequest(ctx) {
           docs_later: publicBody.docsSubmitLater ? 1 : 0,
         })
       }
-      for (const g of (Array.isArray(publicBody.formCGuests) ? publicBody.formCGuests : [])) {
+      // A guest who declares themselves Indian cannot file Form C companions.
+      // Without this a stale formCGuests array would still write rows.
+      const submittedGuests = declaredForeign && Array.isArray(publicBody.formCGuests)
+        ? publicBody.formCGuests : []
+      for (const g of submittedGuests) {
         if (!g || typeof g !== 'object') continue
         formCList.push({
           guest_seq: formCList.length + 1,
@@ -1267,6 +1277,16 @@ export async function onRequest(ctx) {
       if (formCList.length) {
         try { await writeFormCGuests(DB, stayId, villaId, formCList) }
         catch (e) { console.error('Form C write failed:', e?.message || e) }
+        // Mirror of the cleanup below: a guest who started the Indian flow,
+        // uploaded an Aadhaar, then corrected to Foreign would otherwise
+        // leave that scan attached to a foreign registration.
+        if (stayId && !idFileB64) {
+          try {
+            await DB.prepare(
+              `DELETE FROM stayvibe_guest_documents WHERE stay_id = ? AND doc_type = 'govt_id'`
+            ).bind(stayId).run()
+          } catch (e) { console.error('stale govt_id cleanup failed:', e?.message || e) }
+        }
       } else if (stayId) {
         // No foreign nationals on THIS submission — if an earlier submission
         // on this same stay (guest toggled to Foreign, then corrected back
@@ -1274,7 +1294,18 @@ export async function onRequest(ctx) {
         // otherwise survive untouched forever since writeFormCGuests's own
         // cleanup only runs when it's actually called. A domestic
         // resubmission should always leave a clean slate.
-        try { await DB.prepare(`DELETE FROM stayvibe_stay_kyc WHERE stay_id = ?`).bind(stayId).run() }
+        try {
+          await DB.prepare(`DELETE FROM stayvibe_stay_kyc WHERE stay_id = ?`).bind(stayId).run()
+          // The passport/visa IMAGES have to go too. Clearing only the rows
+          // left the scans attached to a domestic booking — the same
+          // criss-cross, one table over. An Indian guest who picked
+          // "Passport" as their ID is unaffected: that is stored as
+          // doc_type 'govt_id', not 'passport'.
+          await DB.prepare(
+            `DELETE FROM stayvibe_guest_documents
+              WHERE stay_id = ? AND doc_type IN ('passport','visa')`
+          ).bind(stayId).run()
+        }
         catch (e) { console.error('Form C cleanup failed:', e?.message || e) }
       }
 
@@ -1336,7 +1367,11 @@ export async function onRequest(ctx) {
           ).bind(docId(`${type}-g${seq}`, stayId), stayId, type, seq, name, b64).run()
         } catch (e) { console.warn(`${type} doc store error (guest ${seq}):`, e.message) }
       }
-      if (idFileB64) {
+      // Document storage is gated on the SAME declaredForeign flag as the
+      // Form C rows. Gating only the rows left the scans behind: this block
+      // runs after the cleanup above, so anything stored here would survive
+      // a delete that had already happened.
+      if (idFileB64 && !declaredForeign) {
         try {
           await DB.prepare(
             `INSERT OR REPLACE INTO stayvibe_guest_documents
@@ -1345,13 +1380,15 @@ export async function onRequest(ctx) {
           ).bind(docId('id', stayId), stayId, 'govt_id', idFileName || ('ID-' + stayId + '.jpg'), idFileB64).run()
         } catch(e) { console.warn('ID doc store error:', e.message) }
       }
-      await storeDoc('passport', 1, publicBody.passportFileB64, `passport-${stayId}.jpg`)
-      await storeDoc('visa',     1, publicBody.visaFileB64,     `visa-${stayId}.jpg`)
-      const extraGuests = Array.isArray(publicBody.formCGuests) ? publicBody.formCGuests : []
-      for (let i = 0; i < extraGuests.length; i++) {
-        const seq = i + 2   // seq 1 is the person who filled the form
-        await storeDoc('passport', seq, extraGuests[i]?.passportFileB64, `passport-${stayId}-g${seq}.jpg`)
-        await storeDoc('visa',     seq, extraGuests[i]?.visaFileB64,     `visa-${stayId}-g${seq}.jpg`)
+      if (declaredForeign) {
+        await storeDoc('passport', 1, publicBody.passportFileB64, `passport-${stayId}.jpg`)
+        await storeDoc('visa',     1, publicBody.visaFileB64,     `visa-${stayId}.jpg`)
+        const extraGuests = Array.isArray(publicBody.formCGuests) ? publicBody.formCGuests : []
+        for (let i = 0; i < extraGuests.length; i++) {
+          const seq = i + 2   // seq 1 is the person who filled the form
+          await storeDoc('passport', seq, extraGuests[i]?.passportFileB64, `passport-${stayId}-g${seq}.jpg`)
+          await storeDoc('visa',     seq, extraGuests[i]?.visaFileB64,     `visa-${stayId}-g${seq}.jpg`)
+        }
       }
 
       return json({ success: true, data: { stayId, status: 'pending_review' } })

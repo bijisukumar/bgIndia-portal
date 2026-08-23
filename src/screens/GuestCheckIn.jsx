@@ -278,6 +278,30 @@ export default function GuestCheckIn() {
     docsSubmitLater:false, passportPreview:null, visaPreview:null,
   }
   const [extraGuests, setExtraGuests] = useState([])
+
+  // Switching nationality must leave NO trace of the other branch. Without
+  // this, a guest who opened the Foreign flow, uploaded a passport, then
+  // corrected themselves to Indian still submitted passport data and scans —
+  // which is how a domestic booking ended up with a Form C row attached.
+  // The two flows must never carry each other's data, in either direction.
+  function switchNationality(next) {
+    if (next === nationality) return
+    setNationality(next)
+    if (next === 'Indian') {
+      setPassportNo(''); setPassportIssueDate(''); setPassportIssuePlace('')
+      setPassportExpiry(''); setPassportPreview(null)
+      setVisaNo(''); setVisaType(''); setVisaIssueDate(''); setVisaIssuePlace('')
+      setVisaPreview(null); setDocsLater(false)
+      setArrivalIndia(''); setPortOfArrival(''); setNextDest('')
+      setHomeCountryAddr(''); setExtraGuests([])
+      setPassportOcrHint(''); setPassportOcrBusy(false)
+      if (passportRef.current) passportRef.current.value = ''
+      if (visaRef.current)     visaRef.current.value = ''
+    } else {
+      setIdType(''); setIdNumber(''); setIdPreview(null); setIdFile(null)
+      if (idRef.current) idRef.current.value = ''
+    }
+  }
   const guestFileRefs = useRef({})
   const partySize   = (parseInt(adults)||1) + (parseInt(children)||0)
   const formCFiled  = 1 + extraGuests.length      // guest 1 is this form
@@ -406,9 +430,13 @@ export default function GuestCheckIn() {
     setSubmitting(true)
     try {
       const nights = Math.max(1, Math.round((new Date(checkOut)-new Date(checkIn))/86400000))
-      const idFileB64    = idPreview?.split(',')[1]      || null
-      const passportB64  = passportPreview?.split(',')[1]|| null
-      const visaB64      = visaPreview?.split(',')[1]    || null
+      // Gated the same way the typed fields are. Previously these three were
+      // sent unconditionally, so a domestic submission could still carry a
+      // passport scan uploaded moments earlier under the Foreign flow.
+      const idFileB64    = !isForeign ? (idPreview?.split(',')[1] || null) : null
+      const passportB64  = isForeign  ? (passportPreview?.split(',')[1] || null) : null
+      const visaB64      = isForeign && !docsLater
+        ? (visaPreview?.split(',')[1] || null) : null
 
       const payload = {
         villaId, partner, stayId: stayId||null,
@@ -465,7 +493,7 @@ export default function GuestCheckIn() {
           passportFileB64: g.passportPreview?.split(',')[1] || null,
           visaFileB64:     g.visaPreview?.split(',')[1] || null,
         })) : [],
-        docsSubmitLater: docsLater || false,
+        docsSubmitLater: isForeign ? (docsLater || false) : false,
         idFileB64, idFileName: idFile?.name||null,
         passportFileB64: passportB64,
         visaFileB64: visaB64,
@@ -572,7 +600,7 @@ export default function GuestCheckIn() {
         {/* ── NATIONALITY TOGGLE ── */}
         <Field label="Nationality" required>
           <div style={{ display:'flex', gap:'8px' }}>
-            <button onClick={() => setNationality('Indian')}
+            <button type="button" onClick={() => switchNationality('Indian')}
               style={{ flex:1, padding:'11px 8px', borderRadius:'10px', cursor:'pointer',
                 display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
                 border: nationality==='Indian' ? '1px solid #C8903A' : '1px solid rgba(255,255,255,0.1)',
@@ -582,7 +610,7 @@ export default function GuestCheckIn() {
               <img src="https://flagcdn.com/w20/in.png" alt="India" style={{ width:'20px', height:'14px', borderRadius:'2px', objectFit:'cover' }} />
               Indian
             </button>
-            <button onClick={() => setNationality('Foreign')}
+            <button type="button" onClick={() => switchNationality('Foreign')}
               style={{ flex:1, padding:'11px 8px', borderRadius:'10px', cursor:'pointer',
                 display:'flex', alignItems:'center', justifyContent:'center', gap:'8px',
                 border: nationality==='Foreign' ? '1px solid #C8903A' : '1px solid rgba(255,255,255,0.1)',

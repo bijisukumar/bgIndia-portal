@@ -2992,7 +2992,7 @@ export async function onRequest(ctx) {
                   nationality, purpose_of_visit, mode_of_transport, eta,
                   booked_by_guest_id, booked_by_name, checkout_email_sent_at,
                   vehicle_number, actual_checkin_at, actual_checkout_at,
-                  checked_in_by, checked_out_by,
+                  checked_in_by, checked_out_by, no_show,
                   -- Preferences moved to their own table; LEFT JOIN so a stay
                   -- with no prefs row still comes back, with zeros rather than
                   -- disappearing from the list.
@@ -3000,9 +3000,11 @@ export async function onRequest(ctx) {
                   p.breakfast_choice               AS breakfast_choice,
                   COALESCE(p.request_cab,0)        AS request_cab,
                   COALESCE(p.request_extra_beds,0) AS request_extra_beds,
-                  COALESCE(p.extra_beds_count,0)   AS extra_beds_count
+                  COALESCE(p.extra_beds_count,0)   AS extra_beds_count,
+                  se.refund_amount AS refund_amount, se.refund_reason AS refund_reason
            FROM stayvibe_stays
            LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id
+           LEFT JOIN stayvibe_stay_ext se ON se.stay_id = stayvibe_stays.stay_id
            WHERE stayvibe_stays.villa_id = ?
              AND status NOT IN ('closed','cancelled','void')
              AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
@@ -6288,6 +6290,51 @@ export async function onRequest(ctx) {
           }
         }
         return json({ success: true, data: { stayId, status, ...stamps } })
+      }
+
+      // No-show: status stays 'cancelled' (already excluded from every
+      // active-stay/calendar/double-booking query in this file) with a
+      // separate no_show flag, rather than a whole new terminal status
+      // threaded through dozens of "status NOT IN ('cancelled',...)"
+      // queries. The distinction only matters for how it reads later
+      // (guest never arrived vs. booking was called off ahead of time).
+      if (action === 'markNoShow') {
+        const { stayId, reason } = body
+        if (!stayId) return err('stayId required')
+        const stay = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        if (['cancelled', 'void', 'closed'].includes(stay.status)) return err('Stay is already inactive')
+        await DB.prepare(`
+          UPDATE stayvibe_stays SET status = 'cancelled', no_show = 1,
+            notes = TRIM(COALESCE(notes,'') || ' | no-show: ' || ?),
+            updated_by = ?, updated_at = ?
+          WHERE stay_id = ?
+        `).bind(reason || 'guest did not arrive', actor, now(), stayId).run()
+        await syncEnquiryOnStayCancel(DB, stayId, actor, 'no-show')
+        return json({ success: true, data: { stayId } })
+      }
+
+      // Refund — deliberately rare/manual, so this just records the fact
+      // (amount, reason, who, when) on the stay's side table rather than
+      // feeding back into gross/net, which stay as the original booking
+      // value for audit purposes. One row per stay: a second refund on the
+      // same stay overwrites the figure rather than accumulating, since
+      // there's no product need yet for multiple partial refunds per stay.
+      if (action === 'recordRefund') {
+        const { stayId, amount, reason } = body
+        if (!stayId) return err('stayId required')
+        const amt = parseFloat(amount)
+        if (isNaN(amt) || amt < 0) return err('A valid refund amount is required')
+        const stay = await DB.prepare(`SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        await DB.prepare(`
+          INSERT INTO stayvibe_stay_ext (stay_id, villa_id, refund_amount, refund_reason, refunded_at, refunded_by, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(stay_id) DO UPDATE SET
+            refund_amount = excluded.refund_amount, refund_reason = excluded.refund_reason,
+            refunded_at = excluded.refunded_at, refunded_by = excluded.refunded_by, updated_at = excluded.updated_at
+        `).bind(stayId, stay.villa_id, amt, reason || null, now(), actor, now()).run()
+        return json({ success: true, data: { stayId, amount: amt } })
       }
 
       if (action === 'markReviewChased') {

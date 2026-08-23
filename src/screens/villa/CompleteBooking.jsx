@@ -402,6 +402,43 @@ export default function CompleteBooking() {
     finally { setTransitioning(false) }
   }
 
+  // No-show — a distinct flavor of cancellation: the guest never arrived,
+  // as opposed to the booking being called off ahead of time. Reuses the
+  // same 'cancelled' status (already correctly excluded everywhere) with a
+  // no_show flag, so it disappears from this list like any cancellation.
+  async function handleMarkNoShow() {
+    if (!selected) return
+    const reason = window.prompt(`Mark ${selected.guest_name} as a no-show? The booking is cancelled. Reason (optional):`, 'guest did not arrive')
+    if (reason === null) return
+    setTransitioning(true)
+    try {
+      await api.markNoShow({ stayId: selected.stay_id, reason: reason || undefined })
+      showToast('Marked as No-Show ✓')
+      setSelected(null)
+      await loadStays()
+    } catch(e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setTransitioning(false) }
+  }
+
+  // Refund — rare, manual, and deliberately simple: records amount/reason
+  // on the stay's side table for the record. Does not touch gross/net,
+  // which stay as the original booking value for audit purposes.
+  async function handleRefund() {
+    if (!selected) return
+    const amountStr = window.prompt(`Refund amount for ${selected.guest_name} (₹):`, '')
+    if (amountStr === null) return
+    const amount = parseFloat(amountStr)
+    if (isNaN(amount) || amount < 0) { showToast('Enter a valid amount', 'error'); return }
+    const reason = window.prompt('Refund reason:', '') || ''
+    setTransitioning(true)
+    try {
+      await api.recordRefund({ stayId: selected.stay_id, amount, reason })
+      showToast(`Refund of ₹${amount.toLocaleString('en-IN')} recorded ✓`)
+      await loadStays()
+    } catch(e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setTransitioning(false) }
+  }
+
   // Hard delete (admin) — removes the stay + child rows, logs a tombstone,
   // auto-blocked by the backend if a paid commission exists.
   async function handleDeleteStay() {
@@ -598,7 +635,11 @@ export default function CompleteBooking() {
   const visibleStays = mergeMode ? stays : stays.filter(s => !absorbedIds.has(s.stay_id))
 
   const s = selected
-  const meta = s ? (STATUS_META[s.status] || STATUS_META.booked) : null
+  const meta = s
+    ? (s.status === 'cancelled' && s.no_show
+        ? { label:'No-Show', color:'#EF4444', bg:'rgba(239,68,68,0.15)' }
+        : (STATUS_META[s.status] || STATUS_META.booked))
+    : null
   const days = s ? daysFromNow(s.checkin_date) : null
 
   // What action buttons to show based on current status
@@ -943,6 +984,20 @@ export default function CompleteBooking() {
                      s.status==='checked_in'?'🏠':'📄'}
                   </div>
                 </div>
+
+                {Number(s.refund_amount) > 0 && (
+                  <div style={{
+                    background:'rgba(14,165,233,0.1)', border:'1px solid rgba(14,165,233,0.35)',
+                    borderRadius:'10px', padding:'10px 14px', marginBottom:'14px',
+                  }}>
+                    <div style={{color:'#0EA5E9',fontWeight:'700',fontSize:'0.85rem'}}>
+                      💸 Refunded {fmt(s.refund_amount)}
+                    </div>
+                    {s.refund_reason && (
+                      <div style={{color:'var(--text-dim)',fontSize:'0.75rem',marginTop:'2px'}}>{s.refund_reason}</div>
+                    )}
+                  </div>
+                )}
 
                 {/* Drive folder — show link or create prompt */}
                 {s.drive_folder_id ? (
@@ -1643,6 +1698,21 @@ export default function CompleteBooking() {
                       disabled={transitioning}
                       style={actionBtn('#c62828')}>
                       {transitioning?'…':'❌ Cancel booking'}
+                    </button>
+                  )}
+
+                  {canCancel && (
+                    <button onClick={handleMarkNoShow}
+                      disabled={transitioning}
+                      style={actionBtn('#EF4444')}>
+                      {transitioning?'…':'👻 Mark as No-Show'}
+                    </button>
+                  )}
+
+                  {selected && (
+                    <button onClick={handleRefund} disabled={transitioning}
+                      style={actionBtn('#0EA5E9')}>
+                      {transitioning?'…':'💸 Record a refund'}
                     </button>
                   )}
 

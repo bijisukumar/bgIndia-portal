@@ -82,15 +82,38 @@ function weekSegments(week, items) {
   return segs
 }
 
+// Nights booked THIS month, per channel — clipped to the month's own
+// boundaries so a stay spanning a month edge only counts the nights that
+// actually fall inside it, matching what the grid itself shows.
+function monthNightsTally(items, year, month) {
+  const startISO = toISO(new Date(year, month, 1))
+  const endISO = toISO(new Date(year, month + 1, 1))
+  const byChannel = {}
+  let total = 0
+  for (const item of items) {
+    if (item.checkoutDate <= startISO || item.checkinDate >= endISO) continue
+    const clipStart = item.checkinDate > startISO ? item.checkinDate : startISO
+    const clipEnd = item.checkoutDate < endISO ? item.checkoutDate : endISO
+    const nights = Math.round((new Date(clipEnd) - new Date(clipStart)) / 86400000)
+    if (nights <= 0) continue
+    const key = (item.source || 'direct').toLowerCase()
+    byChannel[key] = (byChannel[key] || 0) + nights
+    total += nights
+  }
+  return { byChannel, total }
+}
+
 function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
   const year = monthCursor.getFullYear()
   const month = monthCursor.getMonth()
   const weeks = useMemo(() => buildMonthWeeks(year, month), [year, month])
   const todayISO = toISO(new Date())
+  const tally = useMemo(() => monthNightsTally(items, year, month), [items, year, month])
+  const tallyEntries = Object.entries(tally.byChannel).sort((a, b) => b[1] - a[1])
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
         <div style={{ display: 'flex', gap: '6px' }}>
           <button onClick={onPrev} style={styles.navBtn}>‹</button>
           <button onClick={onToday} style={{ ...styles.navBtn, width: 'auto', padding: '0 10px', fontSize: '0.68rem' }}>Today</button>
@@ -99,6 +122,18 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
         <div style={{ fontWeight: '700', color: 'var(--gold)', fontSize: '0.95rem' }}>{MONTH_NAMES[month]} {year}</div>
         <div style={{ width: '86px' }} />
       </div>
+
+      {tallyEntries.length > 0 && (
+        <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '10px' }}>
+          {tallyEntries.map(([src, n], i) => (
+            <span key={src}>
+              {i > 0 && '  ·  '}
+              <span style={{ color: channelColor(src) }}>{channelLabel(src)}</span> {n}n
+            </span>
+          ))}
+          <span style={{ color: 'var(--text)', fontWeight: '700' }}>  =  {tally.total} nights</span>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
         {WEEKDAYS.map(w => (

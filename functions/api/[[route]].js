@@ -3932,10 +3932,15 @@ export async function onRequest(ctx) {
       if (action === 'getVillaCalendar') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
+        // 'closed' is deliberately included here (unlike most other queries
+        // in this file) — it means "completed and financially archived," not
+        // "didn't happen." A reconciliation calendar needs past occupancy
+        // just as much as upcoming, so only cancelled/void (never occupied
+        // the villa at all) are excluded.
         const { results: stays } = await DB.prepare(`
           SELECT stay_id, guest_name, source, checkin_date, checkout_date
           FROM stayvibe_stays
-          WHERE villa_id = ? AND status NOT IN ('cancelled', 'closed', 'void')
+          WHERE villa_id = ? AND status NOT IN ('cancelled', 'void')
             AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
         `).bind(villaId).all()
         const { results: blocks } = await DB.prepare(`

@@ -391,3 +391,70 @@ source, but this is a public endpoint and must not depend on the client.
 Note: one matrix case failed on first run purely from Pages deploy propagation
 (first request after deploy hit the old worker). Re-running the same code
 passed. Worth waiting a few seconds before testing a fresh deploy.
+
+## How deploys actually happen (2026-08-25)
+
+**Four Pages projects auto-deploy from GitHub on every push to `main`:**
+`stayvibe`, `bgindia-portal`, `rev360-gvr`, `estate360`. They are connected to
+`bijisukumar/bgIndia-portal`. `demovilla-portal` and `stayvibe-site` are not
+connected and only move when someone runs wrangler by hand.
+
+**Pushing is deploying.** For the four connected projects a manual
+`wrangler pages deploy` and the git build race each other, and whichever lands
+last wins — normally the git build, because it starts on push and finishes
+later. This is not theoretical; it produced a real incident:
+
+> A manual deploy from a clone 22 commits behind was believed to have been
+> "overwritten by the other machine". It had not been. The other machine
+> *pushed*, GitHub built, and that build replaced the manual upload. The
+> mechanism was invisible because nobody had written down that the git
+> integration existed.
+
+Practical rules:
+
+- For the four connected projects, **push and let the build run.** Only deploy
+  manually to force a specific tree live ahead of a push, and expect the next
+  push to replace it.
+- After any deploy, verify against the **real domain**, not the deploy output:
+  fetch the served bundle and grep for a string the change introduced. The
+  deploy message tells you an upload succeeded, not that the domain serves it.
+- Pages propagation lags a few seconds. A test fired immediately after a deploy
+  can hit the previous worker — this produced a false "still leaking" result
+  during the Form C criss-cross work. Re-run before investigating.
+
+### stayvibe-site is a special case
+
+The marketing site must **never** pick up the repo-root `wrangler.toml` or the
+root `functions/` directory. Doing so bundles the whole portal API onto the
+public marketing domain — which happened on its first deploy.
+
+CLI deploys must run from inside the folder:
+
+```
+cd marketing-site && npx wrangler pages deploy public --project-name=stayvibe-site --branch=main --commit-dirty=true
+```
+
+Git builds must set **Root directory = `marketing-site`**, not merely an output
+directory. Root directory is what makes Cloudflare read
+`marketing-site/wrangler.toml` (`pages_build_output_dir = "public"`) instead of
+the repo root's, and stops it finding `functions/`. Build command stays empty.
+
+A healthy marketing deploy prints **no** "Uploading Functions bundle" line, and
+`https://www.stayvibe360.com/api/anything` returns `text/html`, never JSON.
+
+### Project → domain map
+
+| Pages project | Serves | Git |
+|---|---|---|
+| `stayvibe` | dwarka.stayvibe360.com (portal, worker, D1) | auto |
+| `bgindia-portal` | manage.stayvibe360.com | auto |
+| `rev360-gvr` | rev360.luxuryvillasofguruvayur.com | auto |
+| `estate360` | estate360.luxuryvillasofguruvayur.com | auto |
+| `stayvibe-site` | stayvibe360.com + www (static, no worker) | manual → connecting |
+| `demovilla-portal` | demo.stayvibe360.com | manual, behind |
+
+`stayvibe` and `stayvibe-site` read almost identically in the dashboard list and
+have already been confused once: both apex domains were attached to the portal
+by mistake and served the check-in app at www.stayvibe360.com. The tell is the
+CNAME target — `stayvibe-gvr.pages.dev` is the portal, `stayvibe-site.pages.dev`
+is the marketing site.

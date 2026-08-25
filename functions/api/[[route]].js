@@ -1447,6 +1447,46 @@ export async function onRequest(ctx) {
   // check-in form. Alerts land in dwarka's own owner inbox since Biji is
   // both dwarka's owner and the platform operator — there's no separate
   // sales inbox yet.
+  // ── APP CONFIG (public, no auth) ────────────────────────────────────────
+  // Named getAppConfig, not getTenantConfig: an authed getTenantConfig
+  // already exists further down and returns the flat tenant settings the
+  // owner portal edits. This one returns the whole front-end config bundle.
+  // Serves the config the front end used to have compiled into its bundle.
+  // Public on purpose and no new exposure: this exact object already ships
+  // inside the JavaScript every visitor downloads. Nothing secret belongs in
+  // it, and nothing secret is added here.
+  //
+  // The host is taken from the hostname, so one deployment can serve every
+  // tenant. ?villaId= overrides it for the owner portal, which is served from
+  // a platform hostname that belongs to no single tenant.
+  if (action === 'getAppConfig') {
+    try {
+      const asked = (url.searchParams.get('villaId') || '').trim()
+      const villaId = asked || DEFAULT_VILLA_ID
+      const row = await DB.prepare(
+        `SELECT config_json FROM platform_tenant_config WHERE tenant_id = ?`
+      ).bind(villaId).first()
+
+      if (!row?.config_json) {
+        // No row yet for this tenant. Say so plainly rather than quietly
+        // handing back another tenant's config — the front end falls back to
+        // its bundled copy, and a wrong-branding page is far worse than a
+        // miss.
+        return json({ success: false, error: 'No config for ' + villaId }, 404)
+      }
+      let config
+      try { config = JSON.parse(row.config_json) }
+      catch (e) {
+        console.error('tenant config is not valid JSON:', villaId, e?.message)
+        return json({ success: false, error: 'Config unreadable' }, 500)
+      }
+      return json({ success: true, data: { villaId, config } })
+    } catch (e) {
+      console.error('getTenantConfig crash:', e.message)
+      return json({ success: false, error: 'Could not load config' }, 500)
+    }
+  }
+
   // ── SOFT-LAUNCH INVITE REQUEST (public, no auth) ────────────────────────
   // Fed by the form on www.stayvibe360.com. Separate from
   // submitHostRegistration, which is the full onboarding intake for a host

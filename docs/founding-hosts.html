@@ -1,0 +1,400 @@
+<title>StayVibe Founding Hosts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Karla:wght@400;500;600;700&display=swap">
+
+<style>
+  /* Palette carries the product's own brass-on-dark identity so the page
+     feels like the thing it is selling. Pillar hues match the section
+     colours used inside the app itself. */
+  :root {
+    --ground:      #FBFAF8;
+    --surface:     #FFFFFF;
+    --surface-alt: #F5F2EC;
+    --ink:         #1E1C16;
+    --muted:       #6B6558;
+    --line:        #E4DFD4;
+    --brass:       #96681F;
+    --brass-rule:  #C8903A;
+    --p-legal:     #2F6193;
+    --p-growth:    #96681F;
+    --p-brand:     #6242A0;
+    --p-ops:       #2A6B3D;
+    --shadow:      0 1px 2px rgba(30,28,22,.05), 0 8px 24px rgba(30,28,22,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #131310;
+      --surface:     #1B1A16;
+      --surface-alt: #201E19;
+      --ink:         #EDE9DF;
+      --muted:       #9B9484;
+      --line:        #2E2B24;
+      --brass:       #D9A44A;
+      --brass-rule:  #C8903A;
+      --p-legal:     #85B7EB;
+      --p-growth:    #D9A44A;
+      --p-brand:     #A78BFA;
+      --p-ops:       #58C07C;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #131310;
+    --surface:     #1B1A16;
+    --surface-alt: #201E19;
+    --ink:         #EDE9DF;
+    --muted:       #9B9484;
+    --line:        #2E2B24;
+    --brass:       #D9A44A;
+    --brass-rule:  #C8903A;
+    --p-legal:     #85B7EB;
+    --p-growth:    #D9A44A;
+    --p-brand:     #A78BFA;
+    --p-ops:       #58C07C;
+    --shadow:      0 1px 2px rgba(0,0,0,.4), 0 8px 28px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: Karla, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 43rem;
+    margin: 0 auto;
+    padding: 3.5rem 1.4rem 5rem;
+  }
+
+  .eyebrow {
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 1.1rem;
+  }
+
+  h1 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(2.1rem, 6vw, 3.1rem);
+    line-height: 1.12;
+    letter-spacing: -.015em;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  h1 em { font-style: italic; color: var(--brass); }
+
+  .standfirst {
+    font-size: 1.12rem;
+    color: var(--muted);
+    max-width: 34rem;
+    margin: 0 0 2.5rem;
+  }
+
+  /* ── the offer ─────────────────────────────────────────────── */
+  .offer {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--brass-rule);
+    border-radius: 4px;
+    padding: 1.6rem 1.5rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 3.5rem;
+  }
+  .price-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .7rem;
+    margin-bottom: .7rem;
+  }
+  .price {
+    font-family: Newsreader, Georgia, serif;
+    font-size: 2.5rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--brass);
+    font-variant-numeric: tabular-nums;
+  }
+  .price-was {
+    font-size: 1rem;
+    color: var(--muted);
+    text-decoration: line-through;
+  }
+  .price-note { font-size: .95rem; color: var(--muted); }
+  .offer p { margin: .5rem 0 0; font-size: .97rem; }
+  .offer p:last-child { margin-bottom: 0; }
+
+  /* ── pillars ───────────────────────────────────────────────── */
+  .pillar { margin-bottom: 3.2rem; }
+  .pillar-head {
+    display: flex;
+    align-items: baseline;
+    gap: .8rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: .6rem;
+    margin-bottom: .3rem;
+  }
+  .tick {
+    width: 3px;
+    height: 1.15rem;
+    border-radius: 2px;
+    flex: none;
+    transform: translateY(2px);
+    background: var(--accent);
+  }
+  h2 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 500;
+    font-size: 1.62rem;
+    letter-spacing: -.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .pillar-why {
+    color: var(--muted);
+    font-size: .97rem;
+    margin: .8rem 0 1.5rem;
+  }
+
+  dl { margin: 0; display: flex; flex-direction: column; gap: 1.15rem; }
+  dt {
+    font-weight: 700;
+    font-size: .98rem;
+    color: var(--accent);
+    margin-bottom: .12rem;
+  }
+  dd { margin: 0; color: var(--ink); font-size: .97rem; }
+
+  .p-legal  { --accent: var(--p-legal); }
+  .p-growth { --accent: var(--p-growth); }
+  .p-brand  { --accent: var(--p-brand); }
+  .p-ops    { --accent: var(--p-ops); }
+
+  /* ── plain-dealing block ───────────────────────────────────── */
+  .plain {
+    background: var(--surface-alt);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1.5rem;
+    margin-bottom: 3rem;
+  }
+  .plain h2 { font-size: 1.3rem; margin-bottom: .9rem; }
+  .plain ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .6rem; }
+  .plain li { font-size: .96rem; }
+  .plain strong { color: var(--brass); }
+
+  /* ── close ─────────────────────────────────────────────────── */
+  .close {
+    border-top: 3px solid var(--brass-rule);
+    padding-top: 1.6rem;
+  }
+  .close h2 { font-size: 1.45rem; margin-bottom: .7rem; }
+  .close p { font-size: .99rem; color: var(--muted); margin: 0 0 1.4rem; }
+  .cta {
+    display: inline-block;
+    background: var(--brass);
+    color: var(--ground);
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: .01em;
+    text-decoration: none;
+    padding: .85rem 1.6rem;
+    border-radius: 3px;
+    transition: filter .15s ease;
+  }
+  .cta:hover { filter: brightness(1.08); }
+  .cta:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .steps {
+    margin: 1.6rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: .55rem;
+    font-size: .94rem;
+    color: var(--muted);
+  }
+  .steps li { padding-left: 1.4rem; position: relative; }
+  .steps li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--brass);
+  }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    font-size: .85rem;
+    color: var(--muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">By invitation · Kerala hosts</p>
+  <h1>Run your villa like a business, not a <em>WhatsApp thread</em>.</h1>
+  <p class="standfirst">
+    StayVibe is villa-management software built and run daily at a working
+    Guruvayur property. It is opening to a small group of founding hosts.
+  </p>
+
+  <section class="offer">
+    <div class="price-row">
+      <span class="price">₹500</span>
+      <span class="price-was">₹2,000</span>
+      <span class="price-note">per month, locked for your first 3 months</span>
+    </div>
+    <p>
+      Twelve weeks of soft launch with a handful of hosts. You get the full
+      product at a quarter of the price; in return I want honest feedback from
+      real bookings — what works, what irritates you, what is missing.
+    </p>
+    <p>
+      Hosts on different booking channels are especially welcome — Airbnb,
+      Booking.com, MakeMyTrip, agents, direct. The differences are the point.
+    </p>
+  </section>
+
+  <section class="pillar p-legal">
+    <div class="pillar-head"><span class="tick"></span><h2>Guest registration that satisfies the law</h2></div>
+    <p class="pillar-why">
+      Under the Registration of Foreigners Act and the Kerala Police Hotel Guest
+      Rules, every foreign guest must be registered. Most of us do this with a
+      paper register and a photo of a passport on a phone. This is the part
+      StayVibe was built around first.
+    </p>
+    <dl>
+      <dt>A check-in link per booking channel</dt>
+      <dd>The guest completes registration before they arrive. Nothing to fill in at your gate.</dd>
+
+      <dt>A separate Form C for every foreign guest</dt>
+      <dd>The law asks for one per foreign national, not one per booking — including children travelling on their own passport. The form collects each person's passport, visa and arrival details separately.</dd>
+
+      <dt>The passport photo page reads itself</dt>
+      <dd>Your guest photographs the page and the fields fill in. They confirm before submitting, so a bad scan never silently becomes bad data.</dd>
+
+      <dt>Indian guests follow their own track</dt>
+      <dd>Aadhaar, PAN or licence instead — and the two paths are kept strictly apart, so a domestic booking never picks up foreign paperwork it should not have.</dd>
+    </dl>
+  </section>
+
+  <section class="pillar p-growth">
+    <div class="pillar-head"><span class="tick"></span><h2>More bookings, and more of them direct</h2></div>
+    <p class="pillar-why">
+      Every OTA night costs you commission. The aim is to fill the calendar,
+      then slowly move the guests you already have onto direct terms.
+    </p>
+    <dl>
+      <dt>Enquiries that do not go cold</dt>
+      <dd>Every enquiry logged, quoted and chased, with a dashboard showing where they are being lost.</dd>
+
+      <dt>One calendar across your channels</dt>
+      <dd>Your OTA listings' calendars pulled into a single month view, so a clash between two platforms is visible before it becomes an argument at the door.</dd>
+
+      <dt>Double bookings flagged, not discovered</dt>
+      <dd>If a registration arrives that overlaps an existing stay, it is held for review and you are alerted.</dd>
+
+      <dt>Tracked links for each campaign</dt>
+      <dd>Share a different link per WhatsApp group, listing or agent, then see which ones actually turn into clicks, enquiries and bookings.</dd>
+
+      <dt>A page that turns OTA guests into direct ones</dt>
+      <dd>Guests asking for early check-in or a late check-out get a quote — and a reason to book with you directly next time.</dd>
+
+      <dt>Every past guest, kept</dt>
+      <dd>Their stays, their contacts, their preferences. Repeat guests are the cheapest bookings you will ever get.</dd>
+    </dl>
+  </section>
+
+  <section class="pillar p-brand">
+    <div class="pillar-head"><span class="tick"></span><h2>Reviews and reputation, handled deliberately</h2></div>
+    <p class="pillar-why">
+      Ratings compound. A host who asks well, at the right moment, out-earns a
+      host who hopes.
+    </p>
+    <dl>
+      <dt>Guest messages already written</dt>
+      <dd>Arrival directions, a mid-stay check, an introduction, a farewell note. One tap opens WhatsApp with the message ready — personal, without starting from a blank box each time.</dd>
+
+      <dt>Airbnb reviews collected on their own</dt>
+      <dd>New reviews are matched to the stay and the rating recorded, so you are not updating a spreadsheet by hand.</dd>
+
+      <dt>Stays with no review are tracked</dt>
+      <dd>So the follow-up is a decision, not something you remember three weeks late.</dd>
+
+      <dt>A first impression that looks like a business</dt>
+      <dd>Your villa's name and branding on the registration page, rather than a bare Google Form.</dd>
+    </dl>
+  </section>
+
+  <section class="pillar p-ops">
+    <div class="pillar-head"><span class="tick"></span><h2>The daily running of the place</h2></div>
+    <p class="pillar-why">
+      Most of the work is not booking guests. It is knowing who arrives at what
+      time, what the villa is short of, and where the money went.
+    </p>
+    <dl>
+      <dt>One screen for your caretaker</dt>
+      <dd>Today's guest, the next five arrivals, and the actual check-in and check-out times — with a warning when someone leaves and someone else arrives the same day.</dd>
+
+      <dt>What you actually earned</dt>
+      <dd>Tariff, OTA fees, extra charges, occupancy tax and your net, per booking. The channel fee structures are already built in.</dd>
+
+      <dt>Expenses logged where they happen</dt>
+      <dd>Villa expenses, kitchen incidentals, breakfast and car hire, entered by staff as they occur rather than reconstructed later.</dd>
+
+      <dt>Stock and reordering</dt>
+      <dd>What is in the villa and what needs buying before the next arrival.</dd>
+
+      <dt>Staff, access and pay</dt>
+      <dd>Add your people, control what each can see, and record salary or salary-plus-commission. Check-ins and check-outs are recorded against whoever did them.</dd>
+
+      <dt>No-shows and refunds</dt>
+      <dd>Recorded properly, so the month still reconciles.</dd>
+    </dl>
+  </section>
+
+  <section class="plain">
+    <h2>Plain dealing</h2>
+    <ul>
+      <li><strong>This is early software.</strong> That is why it is ₹500 and not ₹2,000. You will find rough edges, and I would like to hear about them.</li>
+      <li><strong>Your data stays yours,</strong> and is kept separate from every other host's.</li>
+      <li><strong>Setup is done for you.</strong> Property, rates, staff, branding and your check-in links are configured during onboarding — you do not install anything.</li>
+      <li><strong>What it does not do:</strong> it does not send messages on your behalf, and it does not run or spend money on advertising. Messages are prepared for you to send.</li>
+    </ul>
+  </section>
+
+  <section class="close">
+    <h2>If this sounds useful</h2>
+    <p>
+      Put your name down and we will find twenty minutes on a call. I would
+      rather show you the working product than send you a brochure.
+    </p>
+    <a class="cta" href="#">Request an invite</a>
+    <ul class="steps">
+      <li>Fill in the short form — property, channels, how many rooms.</li>
+      <li>A 20-minute call, screen shared, on your own numbers.</li>
+      <li>If it fits, your villa is set up and live the same week.</li>
+    </ul>
+  </section>
+
+  <footer>
+    StayVibe · built and run at Dwarka — GVR Villa, Guruvayur, Kerala.
+  </footer>
+
+</div>

@@ -422,25 +422,36 @@ Practical rules:
   can hit the previous worker — this produced a false "still leaking" result
   during the Form C criss-cross work. Re-run before investigating.
 
-### stayvibe-site is a special case
+### The marketing site lives in its own repository
 
-The marketing site must **never** pick up the repo-root `wrangler.toml` or the
-root `functions/` directory. Doing so bundles the whole portal API onto the
-public marketing domain — which happened on its first deploy.
+`www.stayvibe360.com` is **not** in this repo. It is
+`bijisukumar/stayvibe-web` → Pages project `stayvibe-web`, auto-deploying on
+push. It used to live here as `marketing-site/`, and could not be made safe:
 
-CLI deploys must run from inside the folder:
+**Cloudflare Pages reads `wrangler.toml` from the repository root, and the
+project's "Root directory" setting does not redirect that.** A Pages project
+building the site from inside this repo inherited the portal's
+`pages_build_output_dir = "dist"` *and its bindings* — `DB → bgindia-db`,
+`DB_ESTATES`, Workers AI. Because a `wrangler.toml` was in play, those bindings
+became locked in the dashboard and could not be deleted. The first CLI deploy
+also bundled this repo's `functions/`, putting `POST /api/submitGuestCheckIn`
+on the public marketing domain.
+
+No configuration fixes that from inside this repo. A separate repository with
+no root `wrangler.toml` and no `functions/` has nothing to inherit — its
+bindings list is empty and editable. **Do not add a `wrangler.toml` to
+`stayvibe-web`**; its absence is what keeps the dashboard fields free.
+
+After any marketing-site change, the two checks that matter:
 
 ```
-cd marketing-site && npx wrangler pages deploy public --project-name=stayvibe-site --branch=main --commit-dirty=true
+curl -s https://www.stayvibe360.com/ | grep -o "<title>[^<]*</title>"   # marketing title
+curl -s -o /dev/null -w "%{http_code}
+" -X POST https://www.stayvibe360.com/api/x   # must be 405
 ```
 
-Git builds must set **Root directory = `marketing-site`**, not merely an output
-directory. Root directory is what makes Cloudflare read
-`marketing-site/wrangler.toml` (`pages_build_output_dir = "public"`) instead of
-the repo root's, and stops it finding `functions/`. Build command stays empty.
-
-A healthy marketing deploy prints **no** "Uploading Functions bundle" line, and
-`https://www.stayvibe360.com/api/anything` returns `text/html`, never JSON.
+A 405 means static assets only. JSON or a 401 means a worker has attached
+itself and the isolation has broken again.
 
 ### Project → domain map
 
@@ -450,11 +461,17 @@ A healthy marketing deploy prints **no** "Uploading Functions bundle" line, and
 | `bgindia-portal` | manage.stayvibe360.com | auto |
 | `rev360-gvr` | rev360.luxuryvillasofguruvayur.com | auto |
 | `estate360` | estate360.luxuryvillasofguruvayur.com | auto |
-| `stayvibe-site` | stayvibe360.com + www (static, no worker) | manual → connecting |
+| `stayvibe-web` | stayvibe360.com + www — **separate repo** `stayvibe-web` | auto |
 | `demovilla-portal` | demo.stayvibe360.com | manual, behind |
 
-`stayvibe` and `stayvibe-site` read almost identically in the dashboard list and
-have already been confused once: both apex domains were attached to the portal
-by mistake and served the check-in app at www.stayvibe360.com. The tell is the
-CNAME target — `stayvibe-gvr.pages.dev` is the portal, `stayvibe-site.pages.dev`
-is the marketing site.
+`stayvibe` and the marketing project read similarly in the dashboard list and
+were confused once: both apex domains were attached to the portal by mistake
+and served the check-in app at www.stayvibe360.com. The tell is the CNAME
+target — `stayvibe-gvr.pages.dev` is the portal, `stayvibe-web.pages.dev` is
+the marketing site. (The interim `stayvibe-site` project was deleted; it held
+the poisoned bindings.)
+
+Correction to an earlier note: Pages projects **can** be renamed in place
+(Settings → General → Rename). `stayvibe` is still left alone, but because it
+serves every check-in link already sent to guests, not because renaming is
+impossible.

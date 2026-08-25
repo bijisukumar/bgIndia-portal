@@ -1409,6 +1409,70 @@ export async function onRequest(ctx) {
   // check-in form. Alerts land in dwarka's own owner inbox since Biji is
   // both dwarka's owner and the platform operator — there's no separate
   // sales inbox yet.
+  // ── SOFT-LAUNCH INVITE REQUEST (public, no auth) ────────────────────────
+  // Fed by the form on www.stayvibe360.com. Separate from
+  // submitHostRegistration, which is the full onboarding intake for a host
+  // who has already agreed — this is the two-minute "I'm interested" step
+  // before the call.
+  //
+  // Kept deliberately forgiving: only a name and a contact number are
+  // required. Someone filling this on a phone in a WhatsApp group will
+  // abandon at the first validation error, and a half-filled lead we can
+  // ring is worth far more than a perfect form nobody submits.
+  if (action === 'submitInviteRequest' && method === 'POST') {
+    try {
+      const b = await request.json().catch(() => ({}))
+      const t = v => (v == null ? '' : String(v)).trim()
+      const name     = t(b.name)
+      const whatsapp = t(b.whatsapp)
+      if (!name)     return err('Please tell us your name', 400)
+      if (!whatsapp) return err('A WhatsApp number is required so we can reach you', 400)
+
+      // Same normaliser the guest check-in uses. A domestic trunk 0 makes a
+      // number unusable on wa.me, which would silently cost us the lead.
+      const phone = normalizeStoredPhone(whatsapp)
+
+      const channels = Array.isArray(b.channels)
+        ? b.channels.map(t).filter(Boolean).join(', ')
+        : t(b.channels)
+
+      const requestId = genId('INV')
+      await DB.prepare(
+        `INSERT INTO platform_invite_requests
+           (request_id, name, whatsapp, email, property_name, location,
+            property_count, channels, foreign_guests, call_slot, notes)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+      ).bind(
+        requestId, name, phone, t(b.email) || null, t(b.propertyName) || null,
+        t(b.location) || null, t(b.propertyCount) || null, channels || null,
+        t(b.foreignGuests) || null, t(b.callSlot) || null, t(b.notes) || null
+      ).run()
+
+      ctx.waitUntil(sendAlert(env, `\u2728 Invite request \u2014 ${name}${t(b.location) ? ' (' + t(b.location) + ')' : ''}`, [
+        'Source: www.stayvibe360.com > Request your invite',
+        '',
+        `Name:        ${name}`,
+        `WhatsApp:    ${phone}`,
+        `Email:       ${t(b.email) || '\u2014'}`,
+        `Property:    ${t(b.propertyName) || '\u2014'}`,
+        `Location:    ${t(b.location) || '\u2014'}`,
+        `Properties:  ${t(b.propertyCount) || '\u2014'}`,
+        `Channels:    ${channels || '\u2014'}`,
+        `Foreign guests: ${t(b.foreignGuests) || '\u2014'}`,
+        `Best call time: ${t(b.callSlot) || '\u2014'}`,
+        t(b.notes) ? `Notes: ${t(b.notes)}` : '',
+        '',
+        `Message them: https://wa.me/${phone.replace(/[^0-9]/g, '')}`,
+        `Request ID: ${requestId}`,
+      ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID))
+
+      return json({ success: true, data: { requestId } })
+    } catch (e) {
+      console.error('submitInviteRequest crash:', e.message)
+      return json({ success: false, error: 'Could not submit \u2014 please try again' }, 500)
+    }
+  }
+
   if (action === 'submitDemoRequest' && method === 'POST') {
     try {
       const b = await request.json().catch(() => ({}))

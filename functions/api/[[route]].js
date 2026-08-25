@@ -1432,20 +1432,24 @@ export async function onRequest(ctx) {
       // number unusable on wa.me, which would silently cost us the lead.
       const phone = normalizeStoredPhone(whatsapp)
 
-      const channels = Array.isArray(b.channels)
-        ? b.channels.map(t).filter(Boolean).join(', ')
-        : t(b.channels)
+      const list = v => Array.isArray(v) ? v.map(t).filter(Boolean).join(', ') : t(v)
+      const channels     = list(b.channels)
+      const propertyType = list(b.propertyType)
+      const interests    = list(b.interests)
 
       const requestId = genId('INV')
       await DB.prepare(
         `INSERT INTO platform_invite_requests
            (request_id, name, whatsapp, email, property_name, location,
-            property_count, channels, foreign_guests, call_slot, notes)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+            property_count, channels, foreign_guests, call_slot, notes,
+            property_type, airbnb_link, onboard_3m, interests)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
       ).bind(
         requestId, name, phone, t(b.email) || null, t(b.propertyName) || null,
         t(b.location) || null, t(b.propertyCount) || null, channels || null,
-        t(b.foreignGuests) || null, t(b.callSlot) || null, t(b.notes) || null
+        t(b.foreignGuests) || null, t(b.callSlot) || null, t(b.notes) || null,
+        propertyType || null, t(b.airbnbLink) || null,
+        t(b.onboard3m) || null, interests || null
       ).run()
 
       ctx.waitUntil(sendAlert(env, `\u2728 Invite request \u2014 ${name}${t(b.location) ? ' (' + t(b.location) + ')' : ''}`, [
@@ -1457,7 +1461,11 @@ export async function onRequest(ctx) {
         `Property:    ${t(b.propertyName) || '\u2014'}`,
         `Location:    ${t(b.location) || '\u2014'}`,
         `Properties:  ${t(b.propertyCount) || '\u2014'}`,
-        `Channels:    ${channels || '\u2014'}`,
+        `Property type: ${propertyType || '\u2014'}`,
+        `Hosting on:  ${channels || '\u2014'}`,
+        `Airbnb link: ${t(b.airbnbLink) || '\u2014'}`,
+        `Ready in 3 months: ${t(b.onboard3m) || '\u2014'}`,
+        `Wants help with: ${interests || '\u2014'}`,
         `Foreign guests: ${t(b.foreignGuests) || '\u2014'}`,
         `Best call time: ${t(b.callSlot) || '\u2014'}`,
         t(b.notes) ? `Notes: ${t(b.notes)}` : '',

@@ -462,7 +462,7 @@ itself and the isolation has broken again.
 | `rev360-gvr` | rev360.luxuryvillasofguruvayur.com | auto |
 | `estate360` | estate360.luxuryvillasofguruvayur.com | auto |
 | `stayvibe-web` | stayvibe360.com + www — **separate repo** `stayvibe-web` | auto |
-| `demovilla-portal` | demo.stayvibe360.com | manual, behind |
+| `demovilla-portal` | demo.stayvibe360.com | manual — see below |
 
 `stayvibe` and the marketing project read similarly in the dashboard list and
 were confused once: both apex domains were attached to the portal by mistake
@@ -475,3 +475,48 @@ Correction to an earlier note: Pages projects **can** be renamed in place
 (Settings → General → Rename). `stayvibe` is still left alone, but because it
 serves every check-in link already sent to guests, not because renaming is
 impossible.
+
+## demovilla brought to parity (2026-08-25)
+
+`demovilla-db`'s `stayvibe_stays` was stuck at exactly **100 columns** — SQLite's
+`ALTER TABLE ADD COLUMN` ceiling — because it never received the column split
+that moved KYC and preferences into side tables. It could not take another
+column, so it could not run the current worker, and the demo shown to
+prospective hosts was several features behind the product being sold.
+
+Rebuilt to production parity: **81 columns** (19 of headroom), 23 dead columns
+dropped, 4 gained (`home_address_line2`, `checked_in_by`, `checked_out_by`,
+`no_show`), plus the four tables it never had (`stay_ext`, `flex_requests`,
+`ical_feeds`, `ical_blocks`). All 156 stays preserved.
+
+Two things that will bite again:
+
+1. **`DROP TABLE stayvibe_stays` fails on a foreign key.** Four tables
+   reference it, and `stayvibe_incidentals` had 32 rows. `PRAGMA
+   defer_foreign_keys=ON` is **not honoured** by D1 in a `--file` execution.
+   The migration parks those rows in a temp table, rebuilds, then restores
+   them — the referenced stay_ids survive, so every reference resolves.
+2. **Never deploy demovilla from the repo root.** The root `wrangler.toml`
+   binds `DB → bgindia-db`; deploying demovilla with it in scope points the
+   demo at the production database. There is no `--config` flag on
+   `wrangler pages deploy`.
+
+The safe deploy stages an isolated tree — no swap of the repo's `wrangler.toml`,
+so it can never be left pointing at the wrong database:
+
+```
+npm run build:demovilla
+mkdir -p /tmp/dv && cd /tmp/dv
+cp <repo>/wrangler.demovilla.toml wrangler.toml
+cp -r <repo>/functions <repo>/hosts .          # the worker imports hosts/*/config.js
+mkdir -p dist && cp -r <repo>/dist/demovilla dist/demovilla
+npx wrangler pages deploy dist/demovilla --project-name=demovilla-portal --branch=main --commit-dirty=true
+```
+
+`hosts/` is easy to forget — without it the build fails on
+`Could not resolve "../../hosts/dwarka/config.js"`.
+
+Verified after deploy: the demo serves the current bundle (Form C multi-guest,
+address line 2, car capture), and an end-to-end foreign check-in with a
+companion wrote 2 Form C rows and 2 passport scans **into demovilla-db**, with
+zero rows appearing in `bgindia-db`.

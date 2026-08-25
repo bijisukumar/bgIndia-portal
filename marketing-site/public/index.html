@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StayVibe — Villa management, by invitation</title>
+<meta name="description" content="Villa management software built and run daily at a working Guruvayur property. Opening to a small group of founding hosts, by invitation.">
+<meta property="og:title" content="StayVibe — by invitation">
+<meta property="og:description" content="Villa management built at a working Kerala villa. Opening to a few founding hosts.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://www.stayvibe360.com/">
+<meta name="theme-color" content="#121210">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Karla:wght@400;500;600;700&display=swap">
+
+<style>
+  /* Single committed visual world: warm near-black ground, brass accent —
+     the same identity as the product itself, so the site, the invitation
+     and the app all read as one thing. */
+  :root {
+    --ground:  #121210;
+    --raised:  #1A1915;
+    --ink:     #EFEBE1;
+    --muted:   #9A9384;
+    --line:    #2B2822;
+    --brass:   #C8903A;
+    --brass-lo:#8A6320;
+    --live:    #58C07C;
+    --soon:    #9A9384;
+    --maxw:    64rem;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: Karla, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  a { color: inherit; }
+
+  .shell {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  /* ── masthead ──────────────────────────────────────────────── */
+  header {
+    padding: 2rem 0 0;
+  }
+  .wordmark {
+    font-family: Newsreader, Georgia, serif;
+    font-size: 1.35rem;
+    font-weight: 500;
+    letter-spacing: .01em;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: .1rem;
+  }
+  .wordmark b { font-weight: 500; color: var(--brass); }
+
+  /* ── hero ──────────────────────────────────────────────────── */
+  .hero {
+    padding: clamp(3.5rem, 11vw, 7rem) 0 clamp(2.5rem, 7vw, 4rem);
+  }
+  .invite {
+    display: inline-flex;
+    align-items: center;
+    gap: .55rem;
+    border: 1px solid var(--brass-lo);
+    border-radius: 100px;
+    padding: .38rem .95rem;
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 1.8rem;
+  }
+  .invite::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--brass);
+  }
+
+  h1 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(2.3rem, 7vw, 4.1rem);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+    text-wrap: balance;
+    margin: 0 0 1.4rem;
+    max-width: 18ch;
+  }
+  h1 em { font-style: italic; color: var(--brass); }
+
+  .lede {
+    font-size: clamp(1.02rem, 2.2vw, 1.2rem);
+    color: var(--muted);
+    max-width: 40rem;
+    margin: 0 0 2.4rem;
+  }
+  .lede strong { color: var(--ink); font-weight: 500; }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.1rem;
+  }
+  .cta {
+    display: inline-block;
+    background: var(--brass);
+    color: #17150F;
+    font-weight: 700;
+    font-size: 1rem;
+    text-decoration: none;
+    padding: .9rem 1.75rem;
+    border-radius: 3px;
+    transition: filter .15s ease, transform .15s ease;
+  }
+  .cta:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .cta:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .aside { font-size: .92rem; color: var(--muted); }
+
+  /* ── capability scroller ───────────────────────────────────── */
+  .strip {
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 1.5rem 0;
+    margin: clamp(2.5rem, 7vw, 4.5rem) 0 0;
+    /* full-bleed regardless of the shell's padding */
+    position: relative;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  }
+  .track {
+    display: flex;
+    width: max-content;
+    gap: .9rem;
+    animation: slide 42s linear infinite;
+  }
+  .strip:hover .track { animation-play-state: paused; }
+  @keyframes slide {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .6rem;
+    white-space: nowrap;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    padding: .6rem 1.1rem .6rem .95rem;
+    font-size: .95rem;
+    font-weight: 500;
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--soon);
+  }
+  .chip.is-live .dot { background: var(--live); }
+  .tag {
+    font-size: .66rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--soon);
+    border-left: 1px solid var(--line);
+    padding-left: .65rem;
+  }
+  .chip.is-live .tag { color: var(--live); }
+
+  .strip-note {
+    font-size: .82rem;
+    color: var(--muted);
+    padding-top: 1.5rem;
+  }
+
+  /* ── close ─────────────────────────────────────────────────── */
+  .close {
+    padding: clamp(3rem, 9vw, 5.5rem) 0 0;
+  }
+  .close h2 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    line-height: 1.2;
+    margin: 0 0 .9rem;
+    text-wrap: balance;
+  }
+  .close p { color: var(--muted); max-width: 36rem; margin: 0 0 1.8rem; }
+
+  footer {
+    margin-top: clamp(3rem, 8vw, 5rem);
+    border-top: 1px solid var(--line);
+    padding: 1.4rem 0 3rem;
+    font-size: .85rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem 1.2rem;
+    justify-content: space-between;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .track { animation: none; flex-wrap: wrap; width: auto; justify-content: center; }
+    .strip { -webkit-mask-image: none; mask-image: none; }
+    .cta { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <header>
+    <a class="wordmark" href="/">Stay<b>Vibe</b></a>
+  </header>
+
+  <section class="hero">
+    <p class="invite">By invitation · family &amp; friends</p>
+    <h1>Villa software, built in an actual <em>villa</em>.</h1>
+    <p class="lede">
+      Not a product designed in an office and sold to hosts. StayVibe runs every
+      day at our own property in Guruvayur — the registrations, the calendar, the
+      staff, the accounts. <strong>We are opening it to a few families we
+      know.</strong>
+    </p>
+    <div class="actions">
+      <a class="cta" href="https://dwarka.stayvibe360.com/NewHost">Request your invite</a>
+      <span class="aside">Founding hosts pay ₹500/month &middot; a 20-minute call, no brochure</span>
+    </div>
+  </section>
+</div>
+
+<div class="strip" aria-label="What StayVibe does">
+  <div class="track">
+    <!-- Track is duplicated once so the loop is seamless. Keep both copies
+         identical; the second is hidden from screen readers. -->
+    <span class="chip is-live"><i class="dot"></i>Guest Registration &amp; Form C<span class="tag">Live</span></span>
+    <span class="chip is-live"><i class="dot"></i>Review Management<span class="tag">Live</span></span>
+    <span class="chip is-live"><i class="dot"></i>Channel Calendar &amp; Sync<span class="tag">Live</span></span>
+    <span class="chip is-live"><i class="dot"></i>Dashboards &amp; Analytics<span class="tag">Live</span></span>
+    <span class="chip is-live"><i class="dot"></i>Enquiries &amp; Quotes<span class="tag">Live</span></span>
+    <span class="chip is-live"><i class="dot"></i>Staff, Stock &amp; Expenses<span class="tag">Live</span></span>
+    <span class="chip"><i class="dot"></i>Automated Marketing<span class="tag">Coming</span></span>
+    <span class="chip"><i class="dot"></i>Ad Campaigns<span class="tag">Coming</span></span>
+    <span class="chip"><i class="dot"></i>AI Receptionist<span class="tag">Coming</span></span>
+    <span class="chip"><i class="dot"></i>Smart Scheduling<span class="tag">Coming</span></span>
+
+    <span class="chip is-live" aria-hidden="true"><i class="dot"></i>Guest Registration &amp; Form C<span class="tag">Live</span></span>
+    <span class="chip is-live" aria-hidden="true"><i class="dot"></i>Review Management<span class="tag">Live</span></span>
+    <span class="chip is-live" aria-hidden="true"><i class="dot"></i>Channel Calendar &amp; Sync<span class="tag">Live</span></span>
+    <span class="chip is-live" aria-hidden="true"><i class="dot"></i>Dashboards &amp; Analytics<span class="tag">Live</span></span>
+    <span class="chip is-live" aria-hidden="true"><i class="dot"></i>Enquiries &amp; Quotes<span class="tag">Live</span></span>
+    <span class="chip is-live" aria-hidden="true"><i class="dot"></i>Staff, Stock &amp; Expenses<span class="tag">Live</span></span>
+    <span class="chip" aria-hidden="true"><i class="dot"></i>Automated Marketing<span class="tag">Coming</span></span>
+    <span class="chip" aria-hidden="true"><i class="dot"></i>Ad Campaigns<span class="tag">Coming</span></span>
+    <span class="chip" aria-hidden="true"><i class="dot"></i>AI Receptionist<span class="tag">Coming</span></span>
+    <span class="chip" aria-hidden="true"><i class="dot"></i>Smart Scheduling<span class="tag">Coming</span></span>
+  </div>
+</div>
+
+<div class="shell">
+  <p class="strip-note">
+    Green is running today at our villa. Grey is being built during the soft
+    launch — founding hosts decide the order.
+  </p>
+
+  <section class="close">
+    <h2>Twelve weeks, a few hosts, honest feedback.</h2>
+    <p>
+      Tell us about your property and we will find twenty minutes. You will see
+      the real thing, working, on your own numbers — and if it does not suit
+      you, we will say so.
+    </p>
+    <a class="cta" href="https://dwarka.stayvibe360.com/NewHost">Request your invite</a>
+  </section>
+
+  <footer>
+    <span>StayVibe &middot; Guruvayur, Kerala</span>
+    <span>Built and run at Dwarka — GVR Villa</span>
+  </footer>
+</div>
+
+</body>
+</html>

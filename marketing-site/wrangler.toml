@@ -1,0 +1,10 @@
+# Deliberately standalone. Deploying from THIS directory stops wrangler
+# walking up to the repo root, where the portal's wrangler.toml and its
+# functions/ directory live — the first deploy of this site accidentally
+# bundled the whole portal API onto the marketing domain because of that.
+#
+# There are no bindings here on purpose: the marketing site is static and
+# must never hold a database handle.
+name = "stayvibe-site"
+compatibility_date = "2024-01-01"
+pages_build_output_dir = "public"

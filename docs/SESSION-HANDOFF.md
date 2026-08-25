@@ -570,3 +570,58 @@ is no ambiguous in-between state for a tenant token to fall into.
 **Do not "harden" this to deny-by-default.** It would lock out master-owner
 login and every automated job, and it would not close a gap, because no gap
 exists.
+
+## Tenancy items 5 and 4: config moved to the database and loaded at runtime
+
+**Item 5 — config lives in the database.** `platform_tenant_config` holds one
+JSON document per tenant, seeded from `hosts/<id>/config.js` and verified to
+round-trip identically (13,868 and 9,208 characters, parsed and compared key by
+key). Served by **`getAppConfig`**, public, resolved from the hostname.
+
+It is named `getAppConfig` because an **authed `getTenantConfig` already
+exists** and returns the flat tenant settings the owner portal edits. Adding a
+second handler with that name shadowed it and would have broken DebugPanel, the
+api client and the schema contract. Check for an existing action before adding
+one.
+
+A tenant with no config row gets a **404, not a fallback to another tenant**.
+Serving the wrong branding silently is worse than a miss the client recovers
+from.
+
+**Item 4 — the front end fetches it.** `src/config.js` calls `initConfig()`;
+each entry point awaits that and *only then* dynamically imports `App`.
+
+That ordering is the whole point. Roughly a dozen screens read config at module
+scope:
+
+```js
+const villa = CONFIG.villas[0]        // Flexibility.jsx, CompleteBooking.jsx, …
+```
+
+Module-scope code runs the moment a module is evaluated, so mutating a shared
+object after boot would never reach it. Importing `App` only after the config
+resolves pushes those reads to the right side of the load.
+
+Two constraints worth remembering:
+
+- **No top-level await.** The build targets Chrome 87 / Safari 14; TLA needs
+  Chrome 89 / Safari 15. Raising the floor would lock older phones out of the
+  guest check-in form. The `.then()` chain in each `main.jsx` is deliberate.
+- **Config is replaced, never merged** over the bundled copy. A merge would
+  fill a new host's gaps with Dwarka's branding, pricing and message templates.
+
+**Known cost:** `App` is now a separate chunk fetched after the config call, so
+a first visit pays about one extra round trip (156 KB → config → 574 KB).
+`localStorage` caches per hostname so repeat visits pay nothing, and the entry
+HTML carries a quiet `Loading…` placeholder instead of a blank page. Injecting
+the config into the HTML server-side with HTMLRewriter would remove even that
+round trip — the obvious next optimisation, not yet done.
+
+### What onboarding a host now takes
+
+1. a `platform_tenants` row, with `primary_hostname` set
+2. a `platform_tenant_config` row
+3. a custom domain on the existing Pages project
+
+No new Pages project, no new build, no code change. `hosts/<id>/config.js`
+remains only as an offline fallback.

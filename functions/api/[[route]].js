@@ -907,15 +907,53 @@ async function syncEnquiryOnStayCancel(DB, stayId, actor, reason) {
   } catch (e) { console.error('syncEnquiryOnStayCancel failed:', e?.message || e) }
 }
 
+// ── TENANT BY HOSTNAME ────────────────────────────────────────────────
+// Which host is this request for? Until now the answer came from a
+// per-deployment variable, which meant one Pages project could serve exactly
+// one host. platform_tenants.primary_hostname lets the request answer for
+// itself, so <host>.stayvibe360.com can be added without a new build.
+//
+// Cached per isolate: the mapping changes only when a host is onboarded, and
+// a stale entry for a few minutes is harmless. The cache key is the hostname
+// and the value is only a tenant id — nothing request- or user-specific goes
+// in here.
+const TENANT_HOST_CACHE = new Map()
+const TENANT_HOST_TTL   = 5 * 60 * 1000
+
+async function resolveTenantByHostname(DB, hostname) {
+  if (!DB || !hostname) return null
+  const hit = TENANT_HOST_CACHE.get(hostname)
+  if (hit && Date.now() - hit.at < TENANT_HOST_TTL) return hit.villaId
+  let villaId = null
+  try {
+    const row = await DB.prepare(
+      `SELECT tenant_id FROM platform_tenants
+        WHERE primary_hostname = ? AND active = 1`
+    ).bind(hostname).first()
+    villaId = row?.tenant_id || null
+  } catch (e) {
+    // A tenant database that has no platform_tenants table (the demo) must
+    // not take the whole API down — fall through to the env default.
+    console.warn('tenant hostname lookup failed:', e?.message || e)
+    return null
+  }
+  TENANT_HOST_CACHE.set(hostname, { villaId, at: Date.now() })
+  return villaId
+}
+
 // ── ROUTER ────────────────────────────────────────────────
 export async function onRequest(ctx) {
   const { request, env } = ctx
   const DB         = env.DB || env.bgindia_db
   const DB_ESTATES = env.DB_ESTATES
-  // Per-host default villa id (set via wrangler.toml [vars] — see
-  // Release 2.1 de-hardcode: each host's deployment sets its own value,
-  // falls back to 'dwarka' for the current single-host deployment).
-  const DEFAULT_VILLA_ID = env.DEFAULT_VILLA_ID || 'dwarka'
+  // Which host this request belongs to. Resolved from the hostname first, so
+  // one deployment can serve many hosts; the wrangler.toml variable remains
+  // the fallback for platform hostnames that belong to no tenant — join.,
+  // manage. and the *.pages.dev addresses — and for the demo deployment.
+  // Purely additive: an unmatched hostname behaves exactly as before.
+  const hostVillaId = await resolveTenantByHostname(
+    env.DB || env.bgindia_db, new URL(request.url).hostname)
+  const DEFAULT_VILLA_ID = hostVillaId || env.DEFAULT_VILLA_ID || 'dwarka'
 
   if (!DB) {
     console.error('DB binding missing — env keys:', Object.keys(env).join(', '))

@@ -1,7 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
-
+import { initConfig } from '../../config'
 // Chrome fires beforeinstallprompt as soon as the page qualifies — routinely
 // before React has mounted — and it never replays it. Catch it here at module
 // load and park it on window so InstallAppBanner can claim it whenever it
@@ -13,8 +12,14 @@ window.addEventListener('beforeinstallprompt', e => {
   window.dispatchEvent(new Event('installpromptready'))
 })
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-)
+// Config must be in place before App's module graph evaluates: several
+// screens read CONFIG at module scope, and those reads happen on import.
+initConfig()
+  .then(() => import('./App'))
+  .then(({ default: App }) => {
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    )
+  })

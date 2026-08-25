@@ -520,3 +520,53 @@ Verified after deploy: the demo serves the current bundle (Form C multi-guest,
 address line 2, car capture), and an end-to-end foreign check-in with a
 companion wrote 2 Form C rows and 2 passport scans **into demovilla-db**, with
 zero rows appearing in `bgindia-db`.
+
+## Tenancy: the host is resolved from the hostname (2026-08-25)
+
+`platform_tenants.primary_hostname` had existed unused since the table was
+created. It is now populated and wired up: the worker asks the request which
+host it belongs to, instead of reading a variable fixed per deployment.
+
+```
+resolveTenantByHostname(DB, hostname)   ->  platform_tenants.primary_hostname
+const DEFAULT_VILLA_ID = hostVillaId || env.DEFAULT_VILLA_ID || 'dwarka'
+```
+
+**Purely additive.** An unmatched hostname falls through to the wrangler.toml
+variable exactly as before, so `join.`, `manage.`, the `*.pages.dev` addresses
+and the demo deployment are untouched. `dwarka.stayvibe360.com` now resolves
+by lookup instead of by default — the same answer, reached differently.
+
+Cached per isolate for five minutes; only hostname → tenant id is cached,
+nothing user-specific. A database with no `platform_tenants` table (the demo's)
+is caught and falls back rather than taking the API down.
+
+### What this does and does not unlock
+
+It removes the *worker* half of per-host deployment. The worker already looked
+its host config up at runtime (`getHostConfig(villaId)`), so with hostname
+resolution it can serve many hosts from one deployment.
+
+The **front end is still one build per host** — `VITE_HOST || 'dwarka'` plus
+the `@host-config` Vite alias bake branding, pricing and theme into the bundle.
+Until that reads its config at runtime, adding `newhost.stayvibe360.com` to the
+existing Pages project would serve Dwarka's branding. That is the remaining
+work, and it is the larger half.
+
+### assertPropertyAccess is NOT a fail-open bug
+
+Worth recording because it looks like one and I called it one:
+
+```js
+if (payload.propertyIds == null) return
+```
+
+`propertyIds` is null in exactly two cases — the master-owner PIN (an env
+secret) and the `SYSTEM_TOKEN` server-to-server path used by the Apps Script
+jobs. Both are deliberate bypasses. Every real tenant login sets a concrete
+array from `platform_properties WHERE tenant_id = ?`, even when empty, so there
+is no ambiguous in-between state for a tenant token to fall into.
+
+**Do not "harden" this to deny-by-default.** It would lock out master-owner
+login and every automated job, and it would not close a gap, because no gap
+exists.

@@ -2019,12 +2019,10 @@ export async function onRequest(ctx) {
   async function enforceTenantScope() {
     const fromQuery = url.searchParams.get('villaId')
     if (fromQuery) assertPropertyAccess(payload, fromQuery)
-    if (method === 'POST') {
-      let peek = null
-      try { peek = await request.clone().json() } catch { /* not JSON, nothing to check */ }
-      const fromBody = peek && typeof peek === 'object' ? peek.villaId : null
-      if (fromBody) assertPropertyAccess(payload, fromBody)
-    }
+    // POST bodies are guarded where they are parsed - see the single
+    // request.json() that feeds every authed POST handler. Re-reading the
+    // body from a clone here would parse megabytes twice for ocrReceipt,
+    // which carries a photograph.
   }
   await enforceTenantScope()
 
@@ -4707,6 +4705,12 @@ export async function onRequest(ctx) {
         return err(`Invalid request body: ${e.message}`)
       }
 
+      // Every authed POST that names a villa is checked here, once, before
+      // any handler runs - the body is already parsed, so this costs
+      // nothing. Five handlers previously took body.villaId and wrote with
+      // it unchecked; this makes forgetting impossible rather than unlikely.
+      if (body && body.villaId) assertPropertyAccess(payload, body.villaId)
+
       // ════════════════ CHANNEL CALENDAR (iCal sync) — POST ════════════════
       if (action === 'addIcalFeed') {
         const { villaId, channel, label, icsUrl } = body
@@ -5421,6 +5425,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'createBooking') {
+        assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
 
@@ -5691,6 +5696,7 @@ export async function onRequest(ctx) {
           stayId = found?.stay_id
         }
         if (!stayId) {
+          assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
           stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
           await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, gross, net, status, created_by, updated_by, checked_in_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,'checked_in',?,?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.phone), body.email || null, body.checkInDate, body.checkOutDate, Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000)), body.adultsCount || 1, body.childrenCount || 0, actor, actor, actor, now(), now()).run()
         } else {
@@ -6109,6 +6115,7 @@ export async function onRequest(ctx) {
           await syncStayLedger(DB, body.stayId)
           return json({ success: true, data: { stayId: body.stayId, updated: true } })
         }
+        assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
         const stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
         await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'), body.guestName, body.checkInDate, body.checkOutDate, body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, actor, actor, now(), now()).run()
         // This manual-entry path creates a stay directly in 'closed' state, bypassing
@@ -7763,6 +7770,7 @@ export async function onRequest(ctx) {
 
       // CREATE PROVISIONAL BOOKING — called when guest submits form but no booking exists
       if (action === 'createProvisionalBooking') {
+        assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
         const stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
         const nights = body.checkInDate && body.checkOutDate
           ? Math.max(1, Math.round((new Date(body.checkOutDate) - new Date(body.checkInDate)) / 86400000))

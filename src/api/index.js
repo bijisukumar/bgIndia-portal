@@ -272,6 +272,7 @@ export const api = {
 
   // ── TENANT CONFIG ─────────────────────────────────────────
   getTenantConfig:          (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
+  getTenantUsage:           ()         => get('getTenantUsage'),
   getPropertyPickerOptions: ()         => get('getPropertyPickerOptions'),
 
   // ── RAMAN ────────────────────────────────────────────────

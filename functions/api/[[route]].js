@@ -2002,6 +2002,32 @@ export async function onRequest(ctx) {
     }
   }
 
+  // ── CENTRAL TENANT GUARD ─────────────────────────────────────────
+  // Every authed request that names a villa is checked here, once, before
+  // any handler runs. Previously this was 37 individual assertPropertyAccess
+  // calls and 5 handlers that simply forgot — createBooking, confirmCheckIn,
+  // saveVillaRentalIncome, createProvisionalBooking and ocrReceipt all
+  // accepted body.villaId and wrote with it unchecked. With one tenant that
+  // was harmless; with four it is one tenant writing into another's books.
+  //
+  // Enforcing at the door rather than per handler means a new endpoint is
+  // covered the day it is written, instead of depending on whoever adds it
+  // remembering. The per-handler calls stay — they are now belt and braces.
+  //
+  // The body is read from a clone: handlers call request.json() themselves,
+  // and a request body can only be consumed once.
+  async function enforceTenantScope() {
+    const fromQuery = url.searchParams.get('villaId')
+    if (fromQuery) assertPropertyAccess(payload, fromQuery)
+    if (method === 'POST') {
+      let peek = null
+      try { peek = await request.clone().json() } catch { /* not JSON, nothing to check */ }
+      const fromBody = peek && typeof peek === 'object' ? peek.villaId : null
+      if (fromBody) assertPropertyAccess(payload, fromBody)
+    }
+  }
+  await enforceTenantScope()
+
   // Same principle for estates: raman/pradosh each only work one estate.
   // Previously the client-supplied ?estate= param was trusted outright;
   // now it's validated against the actor's actual assignment.
@@ -2046,6 +2072,73 @@ export async function onRequest(ctx) {
   try {
     // ── GET ROUTES ──────────────────────────────────────
     if (method === 'GET') {
+
+      // ── PER-TENANT USAGE ─────────────────────────────────────────
+      // What each tenant is actually costing in storage. The shared database
+      // makes this easy — one query per villa-scoped table — and it is the
+      // thing that has to exist before usage can ever be billed or a
+      // retention limit defended to a host.
+      //
+      // Tables are discovered from the schema rather than listed, so a table
+      // added next month is metered without anyone remembering to add it.
+      //
+      // Document bytes are reported separately and deliberately: passport and
+      // visa scans are base64 in the row, so they are the one thing that can
+      // grow a tenant fast. Everything else is text measured in kilobytes.
+      if (action === 'getTenantUsage') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') {
+          return err('Owner access required', 403)
+        }
+        const { results: tables } = await DB.prepare(
+          `SELECT m.name AS t FROM sqlite_master m JOIN pragma_table_info(m.name) p
+            WHERE m.type = 'table' AND p.name = 'villa_id'
+            GROUP BY m.name ORDER BY m.name`
+        ).all()
+
+        const byTenant = {}
+        const bump = (villa, key, n) => {
+          const v = villa || '(unassigned)'
+          byTenant[v] = byTenant[v] || { villaId: v, rows: 0, docBytes: 0, tables: {} }
+          byTenant[v][key] += n
+          return byTenant[v]
+        }
+
+        for (const { t } of (tables || [])) {
+          // Table names come from sqlite_master, never from the caller, so
+          // interpolating them here cannot be injected into.
+          const { results } = await DB.prepare(
+            `SELECT villa_id AS v, COUNT(*) AS n FROM ${t} GROUP BY villa_id`
+          ).all()
+          for (const r of (results || [])) {
+            const e = bump(r.v, 'rows', r.n)
+            e.tables[t] = r.n
+          }
+        }
+
+        // Scans hang off the stay, not the villa, so they need the join.
+        try {
+          const { results: docs } = await DB.prepare(
+            `SELECT s.villa_id AS v, COUNT(*) AS n,
+                    COALESCE(SUM(LENGTH(d.file_b64)), 0) AS bytes
+               FROM stayvibe_guest_documents d
+               JOIN stayvibe_stays s ON s.stay_id = d.stay_id
+              GROUP BY s.villa_id`
+          ).all()
+          for (const r of (docs || [])) {
+            const e = bump(r.v, 'docBytes', r.bytes)
+            e.tables['stayvibe_guest_documents'] = r.n
+          }
+        } catch (e) { console.warn('usage: document sizing failed:', e?.message) }
+
+        const tenants = Object.values(byTenant).sort((a, b) => b.rows - a.rows)
+        return json({ success: true, data: {
+          scannedTables: (tables || []).length,
+          tenants: tenants.map(t => ({
+            ...t,
+            docMB: Math.round((t.docBytes / 1048576) * 100) / 100,
+          })),
+        }})
+      }
 
       if (action === 'getTenantConfig') {
         const tenantId = url.searchParams.get('tenantId') || DEFAULT_VILLA_ID

@@ -56,7 +56,7 @@
 
 // ── CONFIG ────────────────────────────────────────────────────────────────
 var WORKER_URL    = 'https://manage.stayvibe360.com/api';
-var OWNER_EMAIL   = 'bijisukumar@gmail.com';   // where booking alerts are sent
+var OWNER_EMAIL   = 'kerala.luxuryvillas@gmail.com';   // where booking alerts are sent
 var DRIVE_ROOT_ID = '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2';  // StayOps folder under kerala.luxuryvillas@gmail.com
 var SPREADSHEET_ID = '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ';
 var STAYS_SHEET   = 'Stays';

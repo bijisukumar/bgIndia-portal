@@ -360,7 +360,7 @@ export default function NewEnquiry() {
               <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(finalOffer)}</span></div>
               {nights > 0 && (
                 <div className="net-row">
-                  <span className="net-label">≈ per night ({nights}n, room only)</span>
+                  <span className="net-label">Per Night Rate ({nights}n)</span>
                   <span className="net-val">{fmt(Math.round((quote - discountAmount) / nights))}</span>
                 </div>
               )}

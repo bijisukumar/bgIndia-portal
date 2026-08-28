@@ -737,7 +737,7 @@ export default function EnquiryDetail() {
             <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(e.final_offer_amount)}</span></div>
             {(e.nights || 0) > 0 && (
               <div className="net-row">
-                <span className="net-label">≈ per night ({e.nights}n, room only)</span>
+                <span className="net-label">Per Night Rate ({e.nights}n)</span>
                 <span className="net-val">{fmt(Math.round(((e.quote_amount || 0) - (e.discount_amount || 0)) / e.nights))}</span>
               </div>
             )}

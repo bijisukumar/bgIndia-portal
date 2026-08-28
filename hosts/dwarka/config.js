@@ -253,15 +253,17 @@ export const CONFIG = {
 
 This is Biji from Guruvayur Villa (Dwarka). I wanted to personally welcome you ahead of your stay on {checkinDateShort}.
 
-At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I'd love to connect briefly to review your reservation, arrival timing, and any special requirements you may have.
+At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I would love to connect briefly to review your reservation details, expected arrival time, and any special requirements you might have.
 
-*YOUR BOOKING*
+*YOUR BOOKING DETAILS*
 • Check-in: {checkinDateFull} — after {checkinTime}
 • Check-out: {checkoutDateFull} — by {checkoutTime}
 • Guests: {guestCount}
-• Nights: {nights}
+• Duration: {nights} Nights
 {checkinPrompt}
-Please let me know a convenient time to connect. We're looking forward to hosting you and your family.
+Happy to connect for a call or message if you have any questions.
+
+We are truly looking forward to hosting you and your family!
 
 Snehapoorvam (സ്നേഹപൂർവ്വം),
 Biji | Guruvayur Villa (Dwarka)`,
@@ -270,9 +272,14 @@ Biji | Guruvayur Villa (Dwarka)`,
       // should never be asked again. Leading/trailing blank lines are
       // deliberate: they keep the paragraph spacing right when present,
       // and collapse cleanly to nothing when omitted.
+      // WhatsApp bold is single *asterisks*, not markdown **double** —
+      // and it renders a bare URL as a tappable link on its own, so the
+      // link line stays plain text, never [text](url) markdown syntax
+      // (WhatsApp shows that literally, brackets and all).
       checkinPrompt:
 `
-📝 If you haven't completed your online check-in registration yet, please do so at your earliest convenience — it's a mandatory government requirement, and it helps us have everything ready before you arrive:
+📝 *Pre-Arrival Registration*
+If you haven't completed your online check-in registration yet, please take a moment to do so at your earliest convenience — it's a mandatory requirement that helps us ensure a smooth, hassle-free arrival:
 {checkinUrl}
 `,
     },

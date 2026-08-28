@@ -3604,6 +3604,17 @@ export async function onRequest(ctx) {
       // status — catches car/plate photos attached at check-in (status
       // already 'checked_in' by then), which getPendingReviewStays alone
       // would never surface since it's scoped to pending_review only.
+      // Deliberately excludes 'pending_review' — the Apps Script comment on
+      // processPendingDocumentUploads (its only caller) already documents
+      // this as "stays already past pending_review... doesn't touch the
+      // pending_review guest-info-txt flow", but this query didn't actually
+      // enforce it. A pending_review stay's docs belong to
+      // processPendingCheckInForms, which writes GuestInfo.txt THEN marks
+      // folder_created — if this query also surfaced it, whichever poller
+      // ran first could mark folder_created=1 first, and the other one's
+      // own skip-check ("folder_created already true, nothing left to do")
+      // would then permanently skip writing GuestInfo.txt for that guest.
+      // Confirmed live: exactly what happened to Vipin C's booking.
       if (action === 'getStaysWithPendingDocuments') {
         const { results } = await DB.prepare(`
           SELECT DISTINCT s.stay_id, s.guest_name, s.checkin_date, s.checkout_date,
@@ -3611,7 +3622,7 @@ export async function onRequest(ctx) {
                  (s.drive_folder_id IS NOT NULL AND s.drive_folder_id != '') as folder_created
           FROM stayvibe_stays s
           JOIN stayvibe_guest_documents d ON d.stay_id = s.stay_id
-          WHERE d.folder_created = 0
+          WHERE d.folder_created = 0 AND s.status != 'pending_review'
         `).all()
         return json({ success: true, data: results.map(r => ({
           stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date,

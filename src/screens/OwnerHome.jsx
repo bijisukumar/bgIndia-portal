@@ -785,13 +785,14 @@ function ReviewChaseBlock() {
               <div onClick={() => setExpanded(p => ({ ...p, [item.stayId]: !p[item.stayId] }))}
                 style={{ padding: '12px 14px', cursor: 'pointer', display: 'flex',
                   alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '1.1rem' }}>
-                  {item.source?.toLowerCase().includes('airbnb') ? '🏡' : '🏠'}
-                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.guestName}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.guestName}
+                    </span>
+                    <span style={{ fontSize: '0.6rem', fontWeight: '700', padding: '1px 6px', borderRadius: '7px',
+                      flexShrink: 0, ...channelPillStyle(item.source) }}>{channelLabel(item.source)}</span>
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
                     Out {fmtDate(item.checkOut)} · {item.daysOut}d ago

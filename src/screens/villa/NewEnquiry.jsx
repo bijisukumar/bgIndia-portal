@@ -358,6 +358,12 @@ export default function NewEnquiry() {
               {discountAmount > 0 && <div className="net-row"><span className="net-label">Discount{form.discountCategory ? ` (${DISCOUNT_CATEGORIES.find(c => c.id === form.discountCategory)?.label}${isCustomDiscount ? ` · ${discountPct.toFixed(1)}%` : ''})` : ''}</span><span className="net-val">−{fmt(discountAmount)}</span></div>}
               <div className="net-divider" />
               <div className="net-row"><span style={{ fontWeight: 700 }}>Final offer</span><span className="net-val big">{fmt(finalOffer)}</span></div>
+              {nights > 0 && (
+                <div className="net-row">
+                  <span className="net-label">≈ per night ({nights}n, room only)</span>
+                  <span className="net-val">{fmt(Math.round((quote - discountAmount) / nights))}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

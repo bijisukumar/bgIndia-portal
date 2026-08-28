@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
 import { parseLocalDate, fmtDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -8,6 +9,8 @@ import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS,
 } from '../../utils/villaPricing'
+
+const villa = CONFIG.villas[0]
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 
@@ -229,7 +232,11 @@ export default function NewEnquiry() {
               <input type="date" className="field-input" value={form.checkOutDate} onChange={e => set('checkOutDate', e.target.value)} />
             </div>
           </div>
-          {nights > 0 && <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '-6px 0 10px' }}>{nights} night{nights === 1 ? '' : 's'}</div>}
+          {nights > 0 && (
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '-6px 0 10px' }}>
+              {nights} night{nights === 1 ? '' : 's'} · Check-in after {villa.checkinTime} · Check-out by {villa.checkoutTime}
+            </div>
+          )}
           {avail === 'loading' && (
             <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '-2px 0 10px' }}>Checking availability…</div>
           )}

@@ -716,6 +716,106 @@ async function resolveGuest(DB, { name, phone, email, actor = 'auto' }) {
   return guestId
 }
 
+// ── CLEANING-TURNAROUND GAP CHECK ─────────────────────────────
+// "6 hours" per the owner is specifically the cleaning-window buffer
+// between one guest's departure and the next guest's arrival — separate
+// from (and not to be confused with) the 25%/50% early-checkin/late-
+// checkout PRICING blocks on Complete Booking's "Extended Stay Reference"
+// card, which price how early/late a guest is relative to house-default
+// times, not the gap between two different guests' stays.
+//
+// Deliberately a NEW, narrowly-scoped helper rather than a refactor of the
+// three pre-existing turnaround implementations (checkAvailability's
+// single-direction check, getFlexRequests' two-direction/precedence-aware
+// version, and RamanHome.jsx's hardcoded-240-minutes client display) —
+// those are relied on daily by staff; this one only serves the new
+// enquiry-stage and Complete-Booking flag.
+function timeStrToMinutes(v) {
+  if (!v) return null
+  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+  if (!m) return null
+  let h = parseInt(m[1], 10)
+  const ap = (m[3] || '').toUpperCase()
+  if (ap === 'PM' && h !== 12) h += 12
+  if (ap === 'AM' && h === 12) h = 0
+  return h * 60 + parseInt(m[2], 10)
+}
+
+async function getTurnaroundHours(DB, villaId) {
+  try {
+    const row = await DB.prepare(`SELECT value FROM stayvibe_villa_settings WHERE villa_id = ? AND key = 'turnaround_hours'`).bind(villaId).first()
+    const n = row && row.value != null ? parseFloat(row.value) : null
+    return (n != null && !isNaN(n) && n > 0) ? n : 6
+  } catch (e) { return 6 }
+}
+
+// Two independent directions — a stay can have an early-checkin ask, a
+// late-checkout ask, both, or neither, and each is checked against a
+// DIFFERENT adjacent stay (whoever checks out the same day this one checks
+// in; whoever checks in the same day this one checks out). Best-available
+// time for the adjacent stay: its own approved early/late time beats the
+// house default — an empty villa the day before/after has nothing to
+// check against, so that direction is simply omitted from the result.
+async function checkTurnaroundGap(DB, villaId, { checkinDate, checkoutDate, earlyCheckinTime, lateCheckoutTime, excludeStayId }) {
+  const turnaroundHours = await getTurnaroundHours(DB, villaId)
+  const TURN_MIN = turnaroundHours * 60
+  const host = getHostConfig(villaId)
+  const villa = (host.villas || [])[0] || {}
+  const result = { turnaroundHours, early: null, late: null }
+
+  if (earlyCheckinTime && checkinDate) {
+    const prior = await DB.prepare(`
+      SELECT stay_id, guest_name, late_checkout_time FROM stayvibe_stays
+      WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkout_date = ? AND stay_id != ?
+      LIMIT 1
+    `).bind(villaId, checkinDate, excludeStayId || '').first()
+    if (prior) {
+      const departTime = prior.late_checkout_time || villa.checkoutTime
+      const departMin  = timeStrToMinutes(departTime)
+      const arriveMin  = timeStrToMinutes(earlyCheckinTime)
+      if (departMin != null && arriveMin != null) {
+        const gapMinutes = arriveMin - departMin
+        result.early = { adjacentGuest: prior.guest_name, departTime, gapMinutes, tooClose: gapMinutes < TURN_MIN }
+      }
+    }
+  }
+
+  if (lateCheckoutTime && checkoutDate) {
+    const next = await DB.prepare(`
+      SELECT stay_id, guest_name, early_checkin_time FROM stayvibe_stays
+      WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date = ? AND stay_id != ?
+      LIMIT 1
+    `).bind(villaId, checkoutDate, excludeStayId || '').first()
+    if (next) {
+      const arriveTime = next.early_checkin_time || villa.checkinTime
+      const arriveMin   = timeStrToMinutes(arriveTime)
+      const departMin   = timeStrToMinutes(lateCheckoutTime)
+      if (departMin != null && arriveMin != null) {
+        const gapMinutes = arriveMin - departMin
+        result.late = { adjacentGuest: next.guest_name, arriveTime, gapMinutes, tooClose: gapMinutes < TURN_MIN }
+      }
+    }
+  }
+
+  return result
+}
+
+// Extra-charge line items are free-form JSON ({label, amount}) — no schema
+// change needed to let one optionally also carry a requested time. Looked
+// up by field, not by label text, so it survives the owner renaming or
+// adding a custom item.
+function extractRequestedTimesFromExtraLines(extraLinesJson) {
+  let lines = []
+  try { lines = extraLinesJson ? JSON.parse(extraLinesJson) : [] } catch (e) { lines = [] }
+  let earlyCheckinTime = null, lateCheckoutTime = null
+  for (const l of lines) {
+    if (!l) continue
+    if (l.earlyCheckinTime) earlyCheckinTime = l.earlyCheckinTime
+    if (l.lateCheckoutTime) lateCheckoutTime = l.lateCheckoutTime
+  }
+  return { earlyCheckinTime, lateCheckoutTime }
+}
+
 // ── STAY OVERLAP CLASSIFIER ───────────────────────────────────
 // Classifies how a candidate date range relates to existing active stays at
 // a villa, using a half-open interval [checkin, checkout): the checkout day
@@ -3233,6 +3333,24 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby } })
       }
 
+      // Live cleaning-turnaround check for a requested early-checkin/late-
+      // checkout TIME — used while composing an enquiry (before any stay
+      // exists) and on Complete Booking (against the actual stay's dates).
+      // stayId, if given, excludes that stay from the adjacent-stay lookup
+      // so an existing booking never "conflicts with itself".
+      if (action === 'checkTurnaroundGap') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const result = await checkTurnaroundGap(DB, villaId, {
+          checkinDate:      url.searchParams.get('checkinDate'),
+          checkoutDate:     url.searchParams.get('checkoutDate'),
+          earlyCheckinTime: url.searchParams.get('earlyCheckinTime') || null,
+          lateCheckoutTime: url.searchParams.get('lateCheckoutTime') || null,
+          excludeStayId:    url.searchParams.get('stayId') || null,
+        })
+        return json({ success: true, data: result })
+      }
+
       // Form C rows for one stay — one per foreign national, ordered as the
       // guest entered them. Until this existed the KYC table was write-only:
       // the data was captured but nothing could read it back for the filing.
@@ -3300,6 +3418,18 @@ export async function onRequest(ctx) {
              AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
            ORDER BY checkin_date ASC`
         ).bind(villaId).all()
+        // Cleaning-turnaround flag — only for stays that actually have an
+        // approved early/late time (the common case has neither, so this
+        // adds no extra query for most rows).
+        for (const r of (results || [])) {
+          if (r.early_checkin_time || r.late_checkout_time) {
+            r.turnaroundGap = await checkTurnaroundGap(DB, villaId, {
+              checkinDate: r.checkin_date, checkoutDate: r.checkout_date,
+              earlyCheckinTime: r.early_checkin_time, lateCheckoutTime: r.late_checkout_time,
+              excludeStayId: r.stay_id,
+            })
+          }
+        }
         return json({ success: true, data: results })
       }
 
@@ -5013,6 +5143,7 @@ export async function onRequest(ctx) {
         // were added on top).
         const roomOnlyTotal = (enquiry.quote_amount || 0) - (enquiry.discount_amount || 0)
         const enquiryTariffPerNight = Math.round(roomOnlyTotal / (enquiry.nights || 1)) || 0
+        const { earlyCheckinTime, lateCheckoutTime } = extractRequestedTimesFromExtraLines(enquiry.extra_lines)
 
         // ── Idempotency / partial-write recovery ──────────────────────
         // The writes below are now atomic (DB.batch), but earlier confirms
@@ -5061,8 +5192,10 @@ export async function onRequest(ctx) {
             INSERT INTO stayvibe_stays (
               stay_id, villa_id, source, guest_name, guest_phone, guest_email,
               checkin_date, checkout_date, nights, adults, children,
-              gross, net, tariff_per_night, extra_charges, extra_lines, status, created_by, updated_by
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
+              gross, net, tariff_per_night, extra_charges, extra_lines,
+              early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout,
+              status, created_by, updated_by
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
           `).bind(
             stayId, villaId, enquiry.source || 'direct', enquiry.guest_name, enquiry.phone, enquiry.email,
             enquiry.checkin_date, enquiry.checkout_date, enquiry.nights || 1, enquiry.guests_count || 1, 0,
@@ -5075,7 +5208,14 @@ export async function onRequest(ctx) {
             // financials there recomputes net from tariff × nights + extra
             // charges — silently dropping the amount for good. Same bug,
             // same fix, as linkEnquiryToExistingStay below.
-            bookingValue, bookingValue, enquiryTariffPerNight, enquiry.extra_charges || 0, enquiry.extra_lines || null, actor, actor
+            bookingValue, bookingValue, enquiryTariffPerNight, enquiry.extra_charges || 0, enquiry.extra_lines || null,
+            // A specific time captured on an Early Check-in / Late Check-out
+            // extra-charge line at the enquiry stage — this is the columns
+            // Complete Booking, Raman's screen, and getFlexRequests all
+            // already read, so once set here it "just works" everywhere else
+            // with no further plumbing.
+            earlyCheckinTime, lateCheckoutTime, earlyCheckinTime ? 1 : 0, lateCheckoutTime ? 1 : 0,
+            actor, actor
           ),
           DB.prepare(`
             INSERT INTO stayvibe_bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
@@ -5143,9 +5283,15 @@ export async function onRequest(ctx) {
         if (!stay.gross && !stay.net) {
           const roomOnlyTotal = (enquiry.quote_amount || 0) - (enquiry.discount_amount || 0)
           const tariffPerNight = Math.round(roomOnlyTotal / (enquiry.nights || 1)) || 0
+          const { earlyCheckinTime, lateCheckoutTime } = extractRequestedTimesFromExtraLines(enquiry.extra_lines)
           stmts.push(DB.prepare(`
-            UPDATE stayvibe_stays SET gross = ?, net = ?, tariff_per_night = ?, extra_charges = ?, extra_lines = ?, updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?
-          `).bind(bookingValue, bookingValue, tariffPerNight, enquiry.extra_charges || 0, enquiry.extra_lines || null, actor, stayId))
+            UPDATE stayvibe_stays SET gross = ?, net = ?, tariff_per_night = ?, extra_charges = ?, extra_lines = ?,
+              early_checkin_time = COALESCE(?, early_checkin_time), late_checkout_time = COALESCE(?, late_checkout_time),
+              request_early_checkin = CASE WHEN ? IS NOT NULL THEN 1 ELSE request_early_checkin END,
+              request_late_checkout = CASE WHEN ? IS NOT NULL THEN 1 ELSE request_late_checkout END,
+              updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?
+          `).bind(bookingValue, bookingValue, tariffPerNight, enquiry.extra_charges || 0, enquiry.extra_lines || null,
+            earlyCheckinTime, lateCheckoutTime, earlyCheckinTime, lateCheckoutTime, actor, stayId))
           financialsBackfilled = true
         }
         await DB.batch(stmts)

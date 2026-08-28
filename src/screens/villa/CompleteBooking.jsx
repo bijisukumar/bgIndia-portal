@@ -1371,6 +1371,17 @@ export default function CompleteBooking() {
                           )}
                         </div>
                       )}
+                      {s.turnaroundGap && (s.turnaroundGap.early?.tooClose || s.turnaroundGap.late?.tooClose) && (
+                        <div style={{fontSize:'0.75rem',padding:'8px 10px',borderRadius:'8px',marginBottom:'8px',
+                          background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.3)',color:'#EF4444'}}>
+                          {s.turnaroundGap.early?.tooClose && (
+                            <div>⚠️ Only {Math.max(0, Math.round(s.turnaroundGap.early.gapMinutes))} min after {s.turnaroundGap.early.adjacentGuest}'s check-out ({s.turnaroundGap.early.departTime}) — less than the {s.turnaroundGap.turnaroundHours}h cleaning window.</div>
+                          )}
+                          {s.turnaroundGap.late?.tooClose && (
+                            <div>⚠️ Only {Math.max(0, Math.round(s.turnaroundGap.late.gapMinutes))} min before {s.turnaroundGap.late.adjacentGuest}'s check-in ({s.turnaroundGap.late.arriveTime}) — less than the {s.turnaroundGap.turnaroundHours}h cleaning window.</div>
+                          )}
+                        </div>
+                      )}
                       {(!!s.request_breakfast || !!s.request_cab || !!s.request_extra_beds) && (
                         <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
                           {!!s.request_breakfast     && <span style={reqPill}>{'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}</span>}

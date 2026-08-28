@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 import DatePicker from '../../components/DatePicker'
@@ -10,6 +11,8 @@ import {
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
   EXTRA_ITEMS,
 } from '../../utils/villaPricing'
+
+const villa = CONFIG.villas[0]
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 function fmtDateTime(d) { if (!d) return ''; return String(d).replace('T', ' ').slice(0, 16) }
@@ -173,8 +176,8 @@ function buildQuoteDefault(e, rich) {
     `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out — we would be truly happy to host your family during your visit to Guruvayur.`,
     ``,
     `We have checked your dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
     ``,
     `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
@@ -204,8 +207,8 @@ function buildQuoteRepeatDiscount(e, rich) {
     `This is Biji from Luxury Villas of Guruvayur. Wonderful to hear from you again — it's always a pleasure to welcome back our guests!`,
     ``,
     `We have checked your dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
     ``,
     `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
@@ -236,8 +239,8 @@ function buildQuoteB2B(e, rich) {
     `This is Biji from Luxury Villas of Guruvayur. Thank you for checking availability with us for your guest's stay in Guruvayur.`,
     ``,
     `We have checked the dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after 4:00 PM)`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by 11:00 AM)`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
     ``,
     `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
     ``,
@@ -294,8 +297,9 @@ export default function EnquiryDetail() {
   const [statusBusy, setStatusBusy] = useState(false)
   const [discountParams, setDiscountParams] = useState(null)   // { discountCategory, discountPct }
   const [discountBusy, setDiscountBusy] = useState(false)
-  const [extraLines, setExtraLines] = useState([])             // [{label, amount}]
+  const [extraLines, setExtraLines] = useState([])             // [{label, amount, earlyCheckinTime?, lateCheckoutTime?}]
   const [extraBusy, setExtraBusy] = useState(false)
+  const [turnaroundInfo, setTurnaroundInfo] = useState(null)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -329,6 +333,25 @@ export default function EnquiryDetail() {
 
   const e = data?.enquiry
   const extraTotal = extraLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
+  const earlyLine = extraLines.find(l => (l.label || '').includes('Early Check-in'))
+  const lateLine  = extraLines.find(l => (l.label || '').includes('Late Check-out'))
+  const requestedEarlyTime = earlyLine?.earlyCheckinTime || ''
+  const requestedLateTime  = lateLine?.lateCheckoutTime || ''
+
+  // Live cleaning-turnaround check as soon as a specific time is set on an
+  // Early Check-in / Late Check-out line — flags whether there's enough
+  // buffer against whoever checks out/in on the adjacent date, per the
+  // villa's configured turnaround-hours setting.
+  useEffect(() => {
+    if (!e || (!requestedEarlyTime && !requestedLateTime)) { setTurnaroundInfo(null); return }
+    let alive = true
+    api.checkTurnaroundGap({
+      villaId: e.villa_id || DEFAULT_VILLA_ID,
+      checkinDate: e.checkin_date, checkoutDate: e.checkout_date,
+      earlyCheckinTime: requestedEarlyTime || undefined, lateCheckoutTime: requestedLateTime || undefined,
+    }).then(r => { if (alive) setTurnaroundInfo(r) }).catch(() => { if (alive) setTurnaroundInfo(null) })
+    return () => { alive = false }
+  }, [requestedEarlyTime, requestedLateTime, e?.checkin_date, e?.checkout_date])
 
   const handleLogComm = async () => {
     if (!commNote.trim()) { showToast('Add a note', 'error'); return }
@@ -692,18 +715,57 @@ export default function EnquiryDetail() {
                 {EXTRA_ITEMS.map(x => <option key={x.label} value={x.label}>{x.label}</option>)}
               </select>
             </div>
-            {extraLines.map((line, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text)' }}>{line.label}</span>
-                <input type="number" value={line.amount} placeholder="0"
-                  onChange={e2 => setExtraLines(prev => prev.map((l, j) => j === i ? { ...l, amount: e2.target.value } : l))}
-                  style={{ width: '90px', padding: '5px 8px', borderRadius: '6px',
-                    background: 'var(--dark-input)', border: '1px solid var(--border-dim)',
-                    color: 'var(--gold)', fontWeight: '600', fontSize: '0.85rem', textAlign: 'right' }} />
-                <button onClick={() => setExtraLines(prev => prev.filter((_, j) => j !== i))}
-                  style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+            {extraLines.map((line, i) => {
+              const isEarly = (line.label || '').includes('Early Check-in')
+              const isLate  = (line.label || '').includes('Late Check-out')
+              return (
+                <div key={i} style={{ marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text)' }}>{line.label}</span>
+                    <input type="number" value={line.amount} placeholder="0"
+                      onChange={e2 => setExtraLines(prev => prev.map((l, j) => j === i ? { ...l, amount: e2.target.value } : l))}
+                      style={{ width: '90px', padding: '5px 8px', borderRadius: '6px',
+                        background: 'var(--dark-input)', border: '1px solid var(--border-dim)',
+                        color: 'var(--gold)', fontWeight: '600', fontSize: '0.85rem', textAlign: 'right' }} />
+                    <button onClick={() => setExtraLines(prev => prev.filter((_, j) => j !== i))}
+                      style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+                  </div>
+                  {(isEarly || isLate) && (
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '4px', paddingLeft: '2px' }}>
+                      {isEarly && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                          Arrival time
+                          <input type="time" value={line.earlyCheckinTime || ''}
+                            onChange={e2 => setExtraLines(prev => prev.map((l, j) => j === i ? { ...l, earlyCheckinTime: e2.target.value } : l))}
+                            style={{ padding: '4px 6px', borderRadius: '6px', background: 'var(--dark-input)',
+                              border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.78rem' }} />
+                        </label>
+                      )}
+                      {isLate && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                          Departure time
+                          <input type="time" value={line.lateCheckoutTime || ''}
+                            onChange={e2 => setExtraLines(prev => prev.map((l, j) => j === i ? { ...l, lateCheckoutTime: e2.target.value } : l))}
+                            style={{ padding: '4px 6px', borderRadius: '6px', background: 'var(--dark-input)',
+                              border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.78rem' }} />
+                        </label>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {turnaroundInfo && (turnaroundInfo.early?.tooClose || turnaroundInfo.late?.tooClose) && (
+              <div style={{ fontSize: '0.75rem', padding: '8px 10px', borderRadius: '8px', marginBottom: '10px',
+                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444' }}>
+                {turnaroundInfo.early?.tooClose && (
+                  <div>⚠️ Only {Math.max(0, Math.round(turnaroundInfo.early.gapMinutes))} min after {turnaroundInfo.early.adjacentGuest}'s check-out ({turnaroundInfo.early.departTime}) — less than the {turnaroundInfo.turnaroundHours}h cleaning window.</div>
+                )}
+                {turnaroundInfo.late?.tooClose && (
+                  <div>⚠️ Only {Math.max(0, Math.round(turnaroundInfo.late.gapMinutes))} min before {turnaroundInfo.late.adjacentGuest}'s check-in ({turnaroundInfo.late.arriveTime}) — less than the {turnaroundInfo.turnaroundHours}h cleaning window.</div>
+                )}
               </div>
-            ))}
+            )}
             {extraLines.length > 0 && (
               <button type="button" className="btn" onClick={handleSaveExtras} disabled={extraBusy} style={{ width: '100%', marginTop: '4px' }}>
                 {extraBusy ? 'Saving...' : `Save extra charges (₹${extraTotal.toLocaleString('en-IN')})`}

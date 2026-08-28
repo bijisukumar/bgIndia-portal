@@ -160,6 +160,7 @@ export const api = {
   getVillaExpenses:     (villaId) => get('getVillaExpenses', { villaId }),
   deleteVillaExpense:   (data)   => post('deleteVillaExpense', data),
   checkAvailability:    (params) => get('checkAvailability', params),
+  checkTurnaroundGap:   (params) => get('checkTurnaroundGap', params),
   getVillaSettings:     (villaId) => get('getVillaSettings', { villaId }),
   getAlertLog:          (limit)   => get('getAlertLog', limit ? { limit } : {}),
   saveVillaSetting:     (data)   => post('saveVillaSetting', data),

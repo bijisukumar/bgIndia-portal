@@ -137,7 +137,7 @@ function OverdueBlock({ overdue }) {
 
 // ── UPCOMING CHECK-INS BLOCK ───────────────────────────────────────────────
 // Guests arriving in next 7 days — Raman can prepare
-function UpcomingBlock({ upcoming }) {
+function UpcomingBlock({ upcoming, turnaroundHours }) {
   const navigate = useNavigate()
   if (!upcoming || upcoming.length === 0) return null
 
@@ -212,7 +212,11 @@ function UpcomingBlock({ upcoming }) {
                             || VILLA_DEFAULTS.checkoutTime || '11:00 AM'
                 const gap   = toMinutes(t.inTime) != null && toMinutes(outT) != null
                             ? toMinutes(t.inTime) - toMinutes(outT) : null
-                const tight = gap != null && gap < 240   // under the 4 hrs a full reset needs
+                // Villa-configured buffer (default 6h — see stayvibe_villa_settings
+                // 'turnaround_hours'), not a hardcoded 4. Flagged even when the
+                // gap is 4 hours: that can still be enough in practice, but it's
+                // still tighter than the villa's normal buffer and worth calling out.
+                const tight = gap != null && gap < (turnaroundHours || 6) * 60
                 return (
                   <div style={{ marginTop: '6px', padding: '7px 9px', borderRadius: '8px',
                     background: tight ? 'rgba(229,57,53,0.16)' : 'rgba(245,158,11,0.14)',
@@ -406,7 +410,7 @@ export default function RamanHome() {
         {!loadingStay && (
           <>
             <OverdueBlock  overdue={todo.overdue} />
-            <UpcomingBlock upcoming={todo.upcoming} />
+            <UpcomingBlock upcoming={todo.upcoming} turnaroundHours={todo.turnaroundHours} />
           </>
         )}
 

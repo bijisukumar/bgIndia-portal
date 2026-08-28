@@ -3218,6 +3218,13 @@ export async function onRequest(ctx) {
       if (action === 'getRamanTodo') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
+        // Same configurable buffer as checkTurnaroundGap (enquiry/Complete
+        // Booking) — Raman's own same-day-turnaround warning used to compare
+        // against a hardcoded 4 hours regardless of this setting. "Flagged
+        // even at 4 hours" is deliberate: a shorter gap can still be enough
+        // in practice, but it should still show as tight against whatever
+        // the villa has actually configured as its normal buffer.
+        const turnaroundHours = await getTurnaroundHours(DB, villaId)
         // daysUntil/daysOver are computed in SQL with julianday, not in JS.
         // The old version subtracted `new Date()` (local, with a time of day)
         // from `new Date('2026-08-13')` (UTC midnight) and added 1 to
@@ -3261,6 +3268,7 @@ export async function onRequest(ctx) {
         }
 
         return json({ success: true, data: {
+          turnaroundHours,
           overdue:  overdueRows.map(r => ({ ...mapRow(r), daysOver: r.days_over })),
           upcoming: upcomingRows.map(r => {
             const sameDay = (departuresByDate[r.checkin_date] || []).filter(d => d.stay_id !== r.stay_id)

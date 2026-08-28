@@ -809,7 +809,14 @@ export default function CompleteBooking() {
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'3px'}}>
                           {!mergeMode && sel && <span style={{color:'var(--gold)'}}>✓</span>}
-                          <span style={{fontWeight:'600',fontSize:'0.9rem',
+                          {/* minWidth:0 is load-bearing here, not decorative: this span
+                              already has overflow:hidden for the ellipsis truncation, and
+                              per the flexbox spec that makes its automatic min-width 0
+                              instead of content-based — so on a narrow screen, with the
+                              channel pill sitting flexShrink:0 beside it, the name could
+                              get squeezed to nothing while the pill stayed full width. The
+                              explicit minWidth guarantees it never fully disappears. */}
+                          <span style={{fontWeight:'600',fontSize:'0.9rem', flex:'1 1 auto', minWidth:'40px',
                             overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                             {stay.guest_name}
                           </span>
@@ -817,12 +824,13 @@ export default function CompleteBooking() {
                             borderRadius:'9px',flexShrink:0, ...channelPillStyle(stay.source)}}>
                             {channelLabel(stay.source)}
                           </span>
-                          {stay.booked_by_name && (
-                            <span style={{fontSize:'0.65rem',color:'#85B7EB',flexShrink:0}}>
-                              🔗 booked by {stay.booked_by_name}
-                            </span>
-                          )}
                         </div>
+                        {stay.booked_by_name && (
+                          <div style={{fontSize:'0.65rem',color:'#85B7EB',marginBottom:'3px',
+                            overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            🔗 booked by {stay.booked_by_name}
+                          </div>
+                        )}
                         <div style={{fontSize:'0.73rem',color:'var(--text-dim)'}}>
                           {fmtDate(stay.checkin_date)} → {fmtDate(stay.checkout_date)}
                           {d !== null && (

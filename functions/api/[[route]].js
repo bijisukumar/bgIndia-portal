@@ -5061,12 +5061,21 @@ export async function onRequest(ctx) {
             INSERT INTO stayvibe_stays (
               stay_id, villa_id, source, guest_name, guest_phone, guest_email,
               checkin_date, checkout_date, nights, adults, children,
-              gross, net, tariff_per_night, status, created_by, updated_by
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
+              gross, net, tariff_per_night, extra_charges, extra_lines, status, created_by, updated_by
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)
           `).bind(
             stayId, villaId, enquiry.source || 'direct', enquiry.guest_name, enquiry.phone, enquiry.email,
             enquiry.checkin_date, enquiry.checkout_date, enquiry.nights || 1, enquiry.guests_count || 1, 0,
-            bookingValue, bookingValue, enquiryTariffPerNight, actor, actor
+            // bookingValue (= final_offer_amount) already folds the enquiry's
+            // extra charges into gross/net — but extra_charges/extra_lines
+            // must be copied too, since those are the columns Complete
+            // Booking actually reads to render the itemized "+ Add item…"
+            // breakdown. Without this the total was right but the line item
+            // (e.g. Early Check-in) vanished from the UI, and saving
+            // financials there recomputes net from tariff × nights + extra
+            // charges — silently dropping the amount for good. Same bug,
+            // same fix, as linkEnquiryToExistingStay below.
+            bookingValue, bookingValue, enquiryTariffPerNight, enquiry.extra_charges || 0, enquiry.extra_lines || null, actor, actor
           ),
           DB.prepare(`
             INSERT INTO stayvibe_bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)

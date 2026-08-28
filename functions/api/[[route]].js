@@ -7062,6 +7062,30 @@ export async function onRequest(ctx) {
         return p
       }
 
+      // Pushes the CURRENT bundled hosts/<id>/config.js (the same static
+      // config the backend already trusts via getHostConfig) into
+      // platform_tenant_config — the D1-backed copy the front end actually
+      // fetches at runtime via getAppConfig. Without this, editing the
+      // static file only ever changes the offline fallback: a real guest's
+      // browser (which fetches from the API, not the bundle) keeps seeing
+      // whatever was last synced, however long ago that was. Discovered the
+      // hard way — a template key added to the file but never synced here
+      // crashed Complete Booking outright (buildCheckinLinkMessage read
+      // CONFIG.guestMessages.checkinLinkOnly.template off the stale D1 copy,
+      // which didn't have the key). Run this after any host-config edit.
+      if (action === 'syncTenantConfig') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = body.villaId || DEFAULT_VILLA_ID
+        const staticConfig = getHostConfig(villaId)
+        const configJson = JSON.stringify(staticConfig)
+        await DB.prepare(`
+          INSERT INTO platform_tenant_config (tenant_id, config_json, updated_at)
+          VALUES (?, ?, datetime('now'))
+          ON CONFLICT(tenant_id) DO UPDATE SET config_json = excluded.config_json, updated_at = excluded.updated_at
+        `).bind(villaId, configJson).run()
+        return json({ success: true, data: { villaId, bytes: configJson.length } })
+      }
+
       if (action === 'renameStaffAccount') {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const tenantId = payload.tenantId || DEFAULT_VILLA_ID

@@ -273,6 +273,7 @@ export const api = {
 
   // ── TENANT CONFIG ─────────────────────────────────────────
   getTenantConfig:          (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
+  syncTenantConfig:         (villaId) => post('syncTenantConfig', { villaId: villaId || DEFAULT_VILLA_ID }),
   getTenantUsage:           ()         => get('getTenantUsage'),
   getPropertyPickerOptions: ()         => get('getPropertyPickerOptions'),
 

@@ -65,7 +65,8 @@ function checkinUrlFor(stay) {
 }
 
 export function buildHostIntroMessage(stay = {}) {
-  const cfg = CONFIG.guestMessages.hostIntro
+  const cfg = CONFIG.guestMessages?.hostIntro
+  if (!cfg?.template) return null   // see buildCheckinLinkMessage — same runtime-config fragility
   const ci = parseLocalDate(stay.checkin_date)
   const co = parseLocalDate(stay.checkout_date)
   const fmtFull  = d => (d ? d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—')
@@ -113,7 +114,9 @@ export function buildHostIntroMessage(stay = {}) {
 export function buildHostIntroWaLink(stay = {}) {
   const phone = stay.guest_phone || stay.phone
   if (!phone) return null
-  return waLink(phone, buildHostIntroMessage(stay))
+  const msg = buildHostIntroMessage(stay)
+  if (!msg) return null
+  return waLink(phone, msg)
 }
 
 // Standalone check-in-link nudge — just the reminder + link, for a guest
@@ -125,7 +128,15 @@ export function buildHostIntroWaLink(stay = {}) {
 export function buildCheckinLinkMessage(stay = {}) {
   const url = checkinUrlFor(stay)
   if (!url || stay.checkin_form_submitted) return null
-  return renderTemplate(CONFIG.guestMessages.checkinLinkOnly.template, { checkinUrl: url })
+  // CONFIG is fetched at runtime (see src/config.js) from a D1-backed copy
+  // that isn't guaranteed to be in sync with a just-edited hosts/<id>/
+  // config.js — a missing key here must never throw, since this runs
+  // unconditionally on every Complete Booking render with no error boundary
+  // above it; an uncaught error here blanks the entire page, not just this
+  // button. Missing config silently means "don't show the button" instead.
+  const tpl = CONFIG.guestMessages?.checkinLinkOnly?.template
+  if (!tpl) return null
+  return renderTemplate(tpl, { checkinUrl: url })
 }
 
 export function buildCheckinLinkWaLink(stay = {}) {
@@ -137,7 +148,9 @@ export function buildCheckinLinkWaLink(stay = {}) {
 }
 
 export function buildComfortCheckMessage(stay = {}) {
-  return renderTemplate(CONFIG.guestMessages.comfortCheck.template, {
+  const tpl = CONFIG.guestMessages?.comfortCheck?.template
+  if (!tpl) return null   // see buildCheckinLinkMessage — same runtime-config fragility
+  return renderTemplate(tpl, {
     guestName: (stay.guest_name || '').trim() || 'there',
     villaName: villa.full,
     managerName: villa.managerName,
@@ -148,11 +161,15 @@ export function buildComfortCheckMessage(stay = {}) {
 export function buildComfortCheckWaLink(stay = {}) {
   const phone = stay.guest_phone || stay.phone
   if (!phone) return null
-  return waLink(phone, buildComfortCheckMessage(stay))
+  const msg = buildComfortCheckMessage(stay)
+  if (!msg) return null
+  return waLink(phone, msg)
 }
 
 export function buildFarewellMessage(stay = {}) {
-  return renderTemplate(CONFIG.guestMessages.farewell.template, {
+  const tpl = CONFIG.guestMessages?.farewell?.template
+  if (!tpl) return null   // see buildCheckinLinkMessage — same runtime-config fragility
+  return renderTemplate(tpl, {
     guestName: (stay.guest_name || '').trim() || 'there',
     villaName: villa.full,
     managerName: villa.managerName,
@@ -163,5 +180,7 @@ export function buildFarewellMessage(stay = {}) {
 export function buildFarewellWaLink(stay = {}) {
   const phone = stay.guest_phone || stay.phone
   if (!phone) return null
-  return waLink(phone, buildFarewellMessage(stay))
+  const msg = buildFarewellMessage(stay)
+  if (!msg) return null
+  return waLink(phone, msg)
 }

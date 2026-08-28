@@ -1590,13 +1590,17 @@ export default function CompleteBooking() {
                   // channels. Occupancy tax is excluded on purpose: it is
                   // government money, not the value of the room, so charging
                   // a share of it is neither explicable nor ours to keep.
-                  // Direct guests pay us gross, so gross IS their total.
+                  // One-time extras (Early Check-in etc.) are excluded too —
+                  // gross/guestPaidAmt fold those in, but a reference meant to
+                  // price "25%/50% of a night" off a total that already
+                  // contains an early-check-in charge is circular and
+                  // inflates the very number it's supposed to help set.
                   const paidForStay = guestPaidAmt > 0
-                    ? (guestPaidAmt - occupancyTax)
+                    ? (guestPaidAmt - occupancyTax - extraTotal)
                     : nightFeeAmt + cleanFeeAmt
                   const base = isAirbnb
                     ? paidForStay / (nights || 1)
-                    : (gross > 0 ? gross / (nights || 1) : tariff)
+                    : tariff
                   if (base <= 0) return null
                   return (
                     <div className="card" style={{marginBottom:'8px'}}>

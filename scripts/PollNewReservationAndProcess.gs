@@ -55,11 +55,45 @@
 // ============================================================
 
 // ── CONFIG ────────────────────────────────────────────────────────────────
-var WORKER_URL    = 'https://manage.stayvibe360.com/api';
-var OWNER_EMAIL   = 'kerala.luxuryvillas@gmail.com';   // where booking alerts are sent
+// Only these two change per client — same convention as GuestFormScript.gs.
+var WORKER_URL = 'https://manage.stayvibe360.com/api';
+var TENANT_ID  = 'dwarka';  // matches tenants.tenant_id in D1
+
+// OWNER_EMAIL / DRIVE_ROOT_ID used to be hardcoded literals here — every
+// call site below now reads them off getClient()'s tenant-config result
+// instead (re-assigned at the top of pollNewReservations(), same pattern
+// GuestFormScript.gs uses). These two remain only as the offline fallback,
+// used if getTenantConfig can't be reached — never as the primary source.
+var OWNER_EMAIL   = 'kerala.luxuryvillas@gmail.com';
 var DRIVE_ROOT_ID = '1NglE0BgsxS4wULHuO2N0ydFIErk6rrf2';  // StayOps folder under kerala.luxuryvillas@gmail.com
 var SPREADSHEET_ID = '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ';
 var STAYS_SHEET   = 'Stays';
+
+// CLIENT config loaded dynamically from D1 on first use — mirrors
+// GuestFormScript.gs's getClient() exactly, so both scripts stay in sync
+// automatically when a tenant's config changes, instead of needing the
+// same literal hand-edited in two files.
+var _CLIENT = null;
+function getClient() {
+  if (_CLIENT) return _CLIENT;
+  try {
+    var resp = callWorker('GET', 'getTenantConfig', { tenantId: TENANT_ID });
+    if (resp && resp.success && resp.data) {
+      _CLIENT = {
+        villaName:    resp.data.villaName,
+        villaId:      resp.data.tenantId || TENANT_ID,
+        ownerEmail:   resp.data.ownerEmail  || OWNER_EMAIL,
+        driveRootId:  resp.data.driveRootId || DRIVE_ROOT_ID,
+      };
+      Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
+      return _CLIENT;
+    }
+  } catch(e) {
+    Logger.log('getTenantConfig error: ' + e.message + ' — using fallback');
+  }
+  _CLIENT = { villaName: 'Guruvayur Villa (Dwarka)', villaId: TENANT_ID, ownerEmail: OWNER_EMAIL, driveRootId: DRIVE_ROOT_ID };
+  return _CLIENT;
+}
 
 // Stays sheet column headers (must match V20 Apps Script STAYS_HEADERS)
 var STAYS_HEADERS = [
@@ -89,6 +123,9 @@ function pollNewReservations() {
     return;
   }
   try {
+    var CLIENT = getClient();
+    OWNER_EMAIL   = CLIENT.ownerEmail;
+    DRIVE_ROOT_ID = CLIENT.driveRootId;
     Logger.log('=== pollNewReservations START ' + new Date().toISOString() + ' ===');
     try {
       pollAirbnbBookings();
@@ -290,7 +327,7 @@ function pollAirbnbReviews() {
       var ambiguous   = null;
 
       for (var y = 0; y <= 1; y++) {
-        var resp = callWorker('GET', 'getStays', { villaId: 'dwarka', year: String(currentYear - y) });
+        var resp = callWorker('GET', 'getStays', { villaId: TENANT_ID, year: String(currentYear - y) });
         if (resp && resp.success && Array.isArray(resp.data)) {
           // Match by first name (Airbnb only shows first name in review emails)
           var firstName = guestName.split(' ')[0].toLowerCase();
@@ -445,7 +482,7 @@ function setupTrigger() {
 
 // Quick smoke test — run manually to verify Worker connection
 function testConnection() {
-  var resp = callWorker('GET', 'getStays', { villaId:'dwarka', year:'2026' });
+  var resp = callWorker('GET', 'getStays', { villaId: TENANT_ID, year:'2026' });
   if (resp && resp.success) {
     Logger.log('✅ Worker connected. 2026 stays: ' + (resp.data ? resp.data.length : 0));
   } else {
@@ -496,7 +533,7 @@ function pollAirbnbBookings() {
 
       // ── Create booking in D1 via Worker ───────────────────────────────
       var resp = callWorker('POST', 'createBooking', {
-        villaId:         'dwarka',
+        villaId:         TENANT_ID,
         source:          'airbnb',
         guestName:       booking.guestName,
         checkInDate:     booking.checkIn,
@@ -836,7 +873,7 @@ function alreadyImported(confCode) {
     var currentYear = new Date().getFullYear();
     var yearsToCheck = [currentYear, currentYear - 1];
     for (var yi = 0; yi < yearsToCheck.length; yi++) {
-      var resp = callWorker('GET', 'getStays', { villaId:'dwarka', year: String(yearsToCheck[yi]) });
+      var resp = callWorker('GET', 'getStays', { villaId: TENANT_ID, year: String(yearsToCheck[yi]) });
       if (resp && resp.success && Array.isArray(resp.data)) {
         var found = resp.data.some(function(s) {
           return String(s.airbnb_conf || s.airbnbConf || '').trim() === confCode ||
@@ -895,7 +932,7 @@ function appendToStaysSheet(data) {
 
   // Build row matching STAYS_HEADERS column order exactly
   var row = [
-    data.stayId||'',    data.villaId||'dwarka', data.guestName||'', data.guestName||'',
+    data.stayId||'',    data.villaId||TENANT_ID, data.guestName||'', data.guestName||'',
     data.checkIn||'',   data.checkOut||'',       data.nights||0,     '',   now,
     gc||0,              data.adults||0,           data.children||0,   0,
     '', '', '', '',  // citizenship blank — unknown at booking time
@@ -959,7 +996,7 @@ function sendAlert(subject, body) {
   try {
     var resp = callWorker('POST', 'sendGuestEmail', {
       to: OWNER_EMAIL, subject: '[GVR Portal] ' + subject, body: body,
-      villaId: 'dwarka', category: 'owner_airbnb',
+      villaId: TENANT_ID, category: 'owner_airbnb',
     });
     if (!resp || !resp.success) {
       Logger.log('sendAlert (via Worker) failed: ' + JSON.stringify(resp));

@@ -5096,10 +5096,16 @@ export async function onRequest(ctx) {
       // calls in GuestFormScript.gs / PollNewReservationAndProcess.gs so
       // guest-facing email isn't a second, unlogged system anymore. Only
       // reachable with SYSTEM_TOKEN auth (same as logScriptEvent above).
+      // Naming collision, now fixed: this ACTION (called by Apps Script for
+      // guest-facing confirmation emails) used to call sendAlert() — the
+      // OWNER/security-branded sender — instead of the sendGuestEmail()
+      // FUNCTION above, which exists specifically to give guests a
+      // guest-appropriate from-address. Every check-in confirmation email
+      // was arriving from "bgIndia Security" instead of the villa's brand.
       if (action === 'sendGuestEmail') {
         const { to, subject, body: emailBody, villaId, category } = body
         if (!to || !subject || !emailBody) return err('to, subject, and body required')
-        await sendAlert(env, subject, [emailBody], to, DB, villaId || null, category || 'guest_checkin')
+        await sendGuestEmail(env, DB, { to, subject, text: emailBody, villaId: villaId || null, category: category || 'guest_checkin' })
         return json({ success: true })
       }
 

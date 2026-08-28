@@ -116,6 +116,26 @@ export function buildHostIntroWaLink(stay = {}) {
   return waLink(phone, buildHostIntroMessage(stay))
 }
 
+// Standalone check-in-link nudge — just the reminder + link, for a guest
+// who's already had the full welcome and only needs a follow-up. Text is
+// host-configurable (CONFIG.guestMessages.checkinLinkOnly), same as every
+// other template here — see hosts/dwarka/config.js for why it isn't shared
+// across hosts. Returns null (no button to show) when there's nothing to
+// send: no channel link configured, or the guest already registered.
+export function buildCheckinLinkMessage(stay = {}) {
+  const url = checkinUrlFor(stay)
+  if (!url || stay.checkin_form_submitted) return null
+  return renderTemplate(CONFIG.guestMessages.checkinLinkOnly.template, { checkinUrl: url })
+}
+
+export function buildCheckinLinkWaLink(stay = {}) {
+  const phone = stay.guest_phone || stay.phone
+  if (!phone) return null
+  const msg = buildCheckinLinkMessage(stay)
+  if (!msg) return null
+  return waLink(phone, msg)
+}
+
 export function buildComfortCheckMessage(stay = {}) {
   return renderTemplate(CONFIG.guestMessages.comfortCheck.template, {
     guestName: (stay.guest_name || '').trim() || 'there',

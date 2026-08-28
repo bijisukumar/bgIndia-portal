@@ -290,6 +290,18 @@ If you haven't completed your online check-in registration yet, please take a mo
 {checkinUrl}
 `,
     },
+    // Standalone nudge — just the check-in link, no full welcome message,
+    // for a guest who's already been introduced and just needs the
+    // reminder. Text is deliberately host-specific (mentions Guruvayur by
+    // name) rather than shared/generic, same as hostIntro above — a
+    // different host onboarding onto this app would write their own here,
+    // not inherit this one.
+    checkinLinkOnly: {
+      template:
+`Request you to complete the online check-in at the earliest. It's a mandatory requirement in Temple Town of Guruvayur.
+
+{checkinUrl}`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

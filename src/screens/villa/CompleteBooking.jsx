@@ -20,7 +20,7 @@ import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
-import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink } from '../../utils/guestMessages'
+import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink } from '../../utils/guestMessages'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Other']
 
@@ -1684,6 +1684,29 @@ export default function CompleteBooking() {
                         textDecoration:'none', marginBottom:'14px',
                       }}>
                       💬 Send WhatsApp intro to {name}
+                    </a>
+                  )
+                })()}
+
+                {/* Standalone check-in-link nudge — same phone/registered-
+                    already gating as the intro button above, via
+                    buildCheckinLinkWaLink. Text is host-configurable
+                    (CONFIG.guestMessages.checkinLinkOnly), not shared. */}
+                {(() => {
+                  const phone = selected?.guest_phone || selected?.phone
+                  const name  = (selected?.guest_name || '').split(' ')[0]
+                  if (!phone) return null
+                  const linkOnlyLink = buildCheckinLinkWaLink(selected)
+                  if (!linkOnlyLink) return null
+                  return (
+                    <a href={linkOnlyLink} target="_blank" rel="noreferrer"
+                      style={{
+                        display:'block', padding:'12px', borderRadius:'10px', textAlign:'center',
+                        background:'rgba(37,211,102,0.06)', border:'1px solid rgba(37,211,102,0.2)',
+                        color:'#25D366', fontWeight:'700', fontSize:'0.85rem',
+                        textDecoration:'none', marginBottom:'14px',
+                      }}>
+                      📝 Send check-in link to {name}
                     </a>
                   )
                 })()}

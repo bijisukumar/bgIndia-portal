@@ -261,13 +261,13 @@ export const CONFIG = {
 This is Biji from Guruvayur Villa (Dwarka). I wanted to personally welcome you ahead of your stay on {checkinDateShort}.
 
 At Guruvayur Villa, we open our home to your family and strive to create a comfortable, memorable experience. To help us prepare for your visit, I would love to connect briefly to review your reservation details, expected arrival time, and any special requirements you might have.
-
+{checkinPrompt}
 *YOUR BOOKING DETAILS*
 • Check-in: {checkinDateFull} — after {checkinTime}
 • Check-out: {checkoutDateFull} — by {checkoutTime}
 • Guests: {guestCount}
 • Duration: {nights} Nights
-{checkinPrompt}
+
 Happy to connect for a call or message if you have any questions.
 
 We are truly looking forward to hosting you and your family!

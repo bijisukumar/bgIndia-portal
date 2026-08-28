@@ -11,7 +11,7 @@
 // ============================================================
 
 import { CONFIG } from '../config'
-import { parseLocalDate } from './dates'
+import { parseLocalDate, formatTime12h } from './dates'
 
 const villa = CONFIG.villas[0]
 
@@ -93,6 +93,10 @@ export function buildHostIntroMessage(stay = {}) {
     ? ''
     : renderTemplate(cfg.checkinPrompt, { checkinUrl: url })
 
+  // An approved early-checkin/late-checkout time overrides the house
+  // default — this is exactly what Complete Booking already shows Raman,
+  // so the guest's own intro message shouldn't quote a stale 4pm/11am when
+  // an 11am arrival (say) was already agreed and captured.
   return renderTemplate(cfg.template, {
     firstName: ((stay.guest_name || '').trim().split(/\s+/)[0]) || 'there',
     checkinDateShort: fmtShort(ci),
@@ -100,8 +104,8 @@ export function buildHostIntroMessage(stay = {}) {
     checkoutDateFull: fmtFull(co),
     guestCount,
     nights: nights || '—',
-    checkinTime:  villa.checkinTime,
-    checkoutTime: villa.checkoutTime,
+    checkinTime:  stay.early_checkin_time ? formatTime12h(stay.early_checkin_time) : villa.checkinTime,
+    checkoutTime: stay.late_checkout_time ? formatTime12h(stay.late_checkout_time) : villa.checkoutTime,
     checkinPrompt,
   })
 }

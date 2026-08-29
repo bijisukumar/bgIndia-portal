@@ -7,6 +7,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { useAuth } from '../../hooks/useAuth'
 
 const ITEMS = [
   {
@@ -29,10 +30,10 @@ const ITEMS = [
     icon: '🔔',
     bg: 'rgba(200,144,58,0.08)',
     arrow: '#C8903A',
-    title: 'Logging & alerts',
-    sub: 'Configure alert email · set immediate vs daily digest · mute specific error types',
-    path: '/owner/maintenance/alerts',
-    badge: 'Coming soon',
+    title: 'Platform error log',
+    sub: 'Script/backend errors and every email send attempt, across all tenants',
+    path: '/infra/error-log',
+    masterOwnerOnly: true,
   },
   {
     icon: '🗄️',
@@ -62,6 +63,8 @@ const ITEMS = [
 
 export default function Maintenance() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const visibleItems = ITEMS.filter(item => !item.masterOwnerOnly || user?.role === 'master_owner')
   const [storeCarPhotos, setStoreCarPhotos] = useState(null) // null = loading
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -102,13 +105,13 @@ export default function Maintenance() {
           border: '1px solid rgba(255,255,255,0.07)',
           overflow: 'hidden', marginBottom: '14px',
         }}>
-          {ITEMS.map((item, i) => (
+          {visibleItems.map((item, i) => (
             <div
               key={item.title}
               className="menu-row"
               style={{
                 padding: '14px 0',
-                borderBottom: i < ITEMS.length - 1 ? '1px solid var(--border-dim)' : 'none',
+                borderBottom: i < visibleItems.length - 1 ? '1px solid var(--border-dim)' : 'none',
                 opacity: item.badge ? 0.6 : 1,
                 cursor: item.badge ? 'default' : 'pointer',
               }}

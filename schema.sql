@@ -729,7 +729,8 @@ CREATE TABLE IF NOT EXISTS infra_alert_log (
   success      INTEGER NOT NULL,
   status_code  INTEGER,
   error_detail TEXT,
-  created_at   TEXT DEFAULT (datetime('now'))
+  created_at   TEXT DEFAULT (datetime('now')),
+  category     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS infra_processing_log (
@@ -790,7 +791,17 @@ CREATE TABLE IF NOT EXISTS platform_tenants (
   -- skips uploading car_photo/plate_photo docs entirely and they just
   -- expire from D1 on the existing 5-day sweep, same as before either
   -- feature existed. A host who wants them kept flips this to 1.
-  store_car_photos     INTEGER DEFAULT 0
+  store_car_photos     INTEGER DEFAULT 0,
+  -- How long infra_alert_log rows are kept before cleanupOldEmailLogs
+  -- deletes them — the "pay more for extended retention" knob. A tenant
+  -- with no row here (or an unrecognised one) falls back to 90 days.
+  email_retention_days INTEGER DEFAULT 90,
+  -- Fed into getTenantConfig -> GuestFormScript.gs's guest confirmation
+  -- email ("Villa: N Bedrooms..."). Was silently absent for a long time —
+  -- every tenant's confirmation email showed a hardcoded fallback of 4
+  -- regardless of this column, which only happened to be correct for
+  -- dwarka. See migrations/2026-08-28-tenant-config.sql.
+  bedroom_count        INTEGER DEFAULT 4
 );
 
 -- Tenant<->property ownership record (auth/billing layer). property_id

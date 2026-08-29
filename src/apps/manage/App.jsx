@@ -51,6 +51,7 @@ import TestRunner        from '../../screens/infra/TestRunner'
 import D1Explorer        from '../../screens/infra/D1Explorer'
 import Maintenance       from '../../screens/infra/Maintenance'
 import SchemaValidation  from '../../screens/infra/SchemaValidation'
+import PlatformErrorLog  from '../../screens/infra/PlatformErrorLog'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -127,6 +128,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/agent-links"    element={<AgentLinks />} />
         <Route path="/owner/villa/flexibility"   element={<FlexRequests />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
+        <Route path="/infra/error-log"        element={<PlatformErrorLog />} />
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

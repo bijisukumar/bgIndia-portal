@@ -2244,7 +2244,8 @@ export async function onRequest(ctx) {
           `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
                   address, checkin_time, checkout_time,
                   breakfast_rate, raman_comm_pct, logo_url, plan,
-                  owner_email, owner_email_cc, drive_root_id, store_car_photos
+                  owner_email, owner_email_cc, drive_root_id, store_car_photos,
+                  bedroom_count
            FROM platform_tenants WHERE tenant_id = ? AND active = 1`
         ).bind(tenantId).first()
         if (!tenant) return err('Tenant not found', 404)
@@ -2265,6 +2266,7 @@ export async function onRequest(ctx) {
           ownerEmailCC:  tenant.owner_email_cc || null,
           driveRootId:   tenant.drive_root_id || null,
           storeCarPhotos: !!tenant.store_car_photos,
+          bedroomCount:  tenant.bedroom_count || 4,
         }})
       }
 
@@ -3867,12 +3869,56 @@ export async function onRequest(ctx) {
       }
 
       // Recent alert-email attempts (success + failure) — see sendAlert().
+      // Owner-only (previously reachable by any authenticated actor, with no
+      // villa scoping at all — a regular owner could pull every tenant's
+      // alert log, not just their own). A plain 'owner' is now hard-scoped
+      // to their own propertyIds regardless of any villaId they pass;
+      // 'master_owner' may optionally filter by villaId, or omit it to see
+      // every tenant — the only role this cross-tenant view is meant for.
       if (action === 'getAlertLog') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const limit = Math.min(parseInt(url.searchParams.get('limit')) || 50, 200)
-        const { results } = await DB.prepare(
-          `SELECT log_id, villa_id, subject, to_email, success, status_code, error_detail, category, created_at
-           FROM infra_alert_log ORDER BY created_at DESC LIMIT ?`
-        ).bind(limit).all()
+        const requestedVillaId = url.searchParams.get('villaId') || null
+        let sql = `SELECT log_id, villa_id, subject, to_email, success, status_code, error_detail, category, created_at FROM infra_alert_log`
+        const binds = []
+        if (payload.role === 'master_owner') {
+          if (requestedVillaId) { sql += ` WHERE villa_id = ?`; binds.push(requestedVillaId) }
+        } else {
+          // Plain owner — ignore any requested villaId, always their own.
+          if (payload.propertyIds != null) {
+            if (payload.propertyIds.length === 0) return json({ success: true, data: [] })
+            sql += ` WHERE villa_id IN (${payload.propertyIds.map(() => '?').join(',')})`
+            binds.push(...payload.propertyIds)
+          }
+        }
+        sql += ` ORDER BY created_at DESC LIMIT ?`
+        binds.push(limit)
+        const { results } = await DB.prepare(sql).bind(...binds).all()
+        return json({ success: true, data: results })
+      }
+
+      // Master-owner-only platform error log. infra_processing_log has no
+      // villa_id column (it's genuinely cross-tenant — a script/backend
+      // error isn't always tied to one villa), so unlike getAlertLog this
+      // can't be scoped down for a plain 'owner' — it's master_owner or
+      // nothing. LEFT JOINs stayvibe_stays for guest/villa context when a
+      // row has a stay_id; system-level errors with no stay_id still show,
+      // just without that extra context.
+      if (action === 'getProcessingLog') {
+        if (payload.role !== 'master_owner') return err('Master owner access only', 403)
+        const limit = Math.min(parseInt(url.searchParams.get('limit')) || 100, 500)
+        const eventType = url.searchParams.get('eventType') || null
+        let sql = `
+          SELECT l.log_id, l.event_type, l.stay_id, l.note, l.created_at,
+                 s.guest_name, s.villa_id
+          FROM infra_processing_log l
+          LEFT JOIN stayvibe_stays s ON s.stay_id = l.stay_id
+        `
+        const binds = []
+        if (eventType) { sql += ` WHERE l.event_type = ?`; binds.push(eventType) }
+        sql += ` ORDER BY l.created_at DESC LIMIT ?`
+        binds.push(limit)
+        const { results } = await DB.prepare(sql).bind(...binds).all()
         return json({ success: true, data: results })
       }
 

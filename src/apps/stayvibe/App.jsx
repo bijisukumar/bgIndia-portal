@@ -44,6 +44,7 @@ import RDashboard     from '../../screens/RDashboard'
 import D1Explorer     from '../../screens/infra/D1Explorer'
 import Maintenance    from '../../screens/infra/Maintenance'
 import StaffAccess    from '../../screens/infra/StaffAccess'
+import PlatformErrorLog from '../../screens/infra/PlatformErrorLog'
 
 // Manager (Raman) screens
 import RamanHome          from '../../screens/RamanHome'
@@ -95,6 +96,7 @@ function ProtectedRoutes() {
         <Route path="/owner/guests"           element={<GuestRepository />} />
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
+        <Route path="/infra/error-log"        element={<PlatformErrorLog />} />
         <Route path="/owner/maintenance"        element={<Maintenance />} />
         <Route path="/owner/maintenance/staff"  element={<StaffAccess />} />
       </>}

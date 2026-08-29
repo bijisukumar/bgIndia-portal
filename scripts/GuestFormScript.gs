@@ -342,6 +342,10 @@ function processPendingCheckInForms() {
   var resp = callWorker('POST', 'getPendingReviewStays', {});
   if (!resp || !resp.success || !resp.data) {
     Logger.log('No pending review stays or error: ' + JSON.stringify(resp));
+    // Deliberately NOT routed through sendEmailViaWorker (unlike every
+    // other alert in this file) — this fires when the WORKER ITSELF is
+    // unreachable, so a Worker-dependent send here would just fail
+    // silently on top of the failure it's meant to report.
     try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ processPendingCheckInForms — worker call failed',
       'getPendingReviewStays returned: ' + JSON.stringify(resp) +
       (LAST_WORKER_ERROR ? '\n\nCause: ' + LAST_WORKER_ERROR : '') +
@@ -371,8 +375,8 @@ function processPendingCheckInForms() {
       if (!folder) {
         folder = getOrCreateGuestFolder(stay.guestName, stay.stayId, stay.checkIn);
         if (!folder) {
-          GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ Folder creation failed — ' + stay.stayId,
-            'Could not create Drive folder for ' + stay.guestName);
+          sendEmailViaWorker(OWNER_EMAIL, '[GVR Portal] ⚠️ Folder creation failed — ' + stay.stayId,
+            'Could not create Drive folder for ' + stay.guestName, 'error_folder_creation', CLIENT.villaId);
           return;
         }
       }
@@ -454,16 +458,15 @@ function processPendingCheckInForms() {
             allDocsConfirmed = true;
           } else {
             Logger.log('⚠️ ' + pending.length + ' doc(s) still folder_created=0 after upload loop — will NOT delete from D1');
-            try {
-              GmailApp.sendEmail(OWNER_EMAIL,
-                '[GVR Portal] ⚠️ Doc upload incomplete — ' + stay.stayId,
-                'Stay: ' + stay.stayId + ' (' + stay.guestName + ')\n' +
-                'Uploaded: ' + docUploadedCount + ' | Failed: ' + docFailedCount + '\n' +
-                'Docs still pending in D1:\n' +
-                pending.map(function(d) { return '  ' + d.doc_type + ' — ' + d.doc_id; }).join('\n') +
-                '\n\nDocs remain in D1 and will be retried next run. They will be auto-deleted after 14 days if never processed.'
-              );
-            } catch(me) {}
+            sendEmailViaWorker(OWNER_EMAIL,
+              '[GVR Portal] ⚠️ Doc upload incomplete — ' + stay.stayId,
+              'Stay: ' + stay.stayId + ' (' + stay.guestName + ')\n' +
+              'Uploaded: ' + docUploadedCount + ' | Failed: ' + docFailedCount + '\n' +
+              'Docs still pending in D1:\n' +
+              pending.map(function(d) { return '  ' + d.doc_type + ' — ' + d.doc_id; }).join('\n') +
+              '\n\nDocs remain in D1 and will be retried next run. They will be auto-deleted after 14 days if never processed.',
+              'error_doc_upload_incomplete', CLIENT.villaId
+            );
           }
         }
       } catch(verifyErr) { Logger.log('Doc status verify error: ' + verifyErr.message); }
@@ -492,8 +495,8 @@ function processPendingCheckInForms() {
 
     } catch(e) {
       Logger.log('Error processing ' + stay.stayId + ': ' + e.message);
-      try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ⚠️ Processing error — ' + stay.stayId,
-        'Error: ' + e.message + '\nStay: ' + stay.stayId); } catch(me) {}
+      sendEmailViaWorker(OWNER_EMAIL, '[GVR Portal] ⚠️ Processing error — ' + stay.stayId,
+        'Error: ' + e.message + '\nStay: ' + stay.stayId, 'error_processing', CLIENT.villaId);
     }
   });
 
@@ -504,13 +507,12 @@ function processPendingCheckInForms() {
     if (cleanResp && cleanResp.success) {
       Logger.log('Cleanup: deleted ' + (cleanResp.data.deleted || 0) + ' doc(s), stale unprocessed: ' + (cleanResp.data.staleUnprocessed || 0));
       if ((cleanResp.data.staleUnprocessed || 0) > 0) {
-        try {
-          GmailApp.sendEmail(OWNER_EMAIL,
-            '[GVR Portal] ⚠️ Stale unprocessed docs cleaned — ' + cleanResp.data.staleUnprocessed + ' doc(s)',
-            cleanResp.data.staleUnprocessed + ' doc(s) were in guest_documents with folder_created=0 for 14+ days and were auto-deleted.\n' +
-            'These docs were never uploaded to Drive. Guest may need to resubmit if not already resolved.'
-          );
-        } catch(me) {}
+        sendEmailViaWorker(OWNER_EMAIL,
+          '[GVR Portal] ⚠️ Stale unprocessed docs cleaned — ' + cleanResp.data.staleUnprocessed + ' doc(s)',
+          cleanResp.data.staleUnprocessed + ' doc(s) were in guest_documents with folder_created=0 for 14+ days and were auto-deleted.\n' +
+          'These docs were never uploaded to Drive. Guest may need to resubmit if not already resolved.',
+          'error_stale_docs_cleaned', CLIENT.villaId
+        );
       }
     }
   } catch(e) { Logger.log('Cleanup error: ' + e.message); }
@@ -824,6 +826,10 @@ function callWorker(method, action, payload) {
     return null;
   }
 }
+// Deliberately direct GmailApp, not sendEmailViaWorker — used from
+// onGuestFormSubmit, the most time-critical trigger in this file. A guest
+// just submitted the form; the notification must not depend on the Worker
+// being reachable at that exact moment.
 function sendAlert(subject, body) {
   try { GmailApp.sendEmail(OWNER_EMAIL, '[GVR Portal] ' + subject, body); }
   catch(e) { Logger.log('sendAlert failed: ' + e.message); }

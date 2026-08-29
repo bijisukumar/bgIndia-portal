@@ -163,6 +163,7 @@ export const api = {
   checkTurnaroundGap:   (params) => get('checkTurnaroundGap', params),
   getVillaSettings:     (villaId) => get('getVillaSettings', { villaId }),
   getAlertLog:          (limit)   => get('getAlertLog', limit ? { limit } : {}),
+  getProcessingLog:     (params)  => get('getProcessingLog', params || {}),
   saveVillaSetting:     (data)   => post('saveVillaSetting', data),
 
   // ── MAINTENANCE > STAFF & ACCESS ─────────────────────────────

@@ -242,6 +242,11 @@ export default function GuestCheckIn() {
   const [submitting, setSubmitting] = useState(false)
   const [submitted,  setSubmitted]  = useState(false)
   const [error,      setError]      = useState('')
+  // Set when the backend saved the registration but the ID/passport photo
+  // itself failed to store (e.g. still too large after compression). Without
+  // this the guest saw "Registration Complete" with no idea their document
+  // never made it through — exactly what happened to Rishab.
+  const [docWarning, setDocWarning] = useState('')
 
   // ── Personal ─────────────────────────────────────────────
   const [fullName, setFullName] = useState('')
@@ -565,6 +570,7 @@ export default function GuestCheckIn() {
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error||'Submission failed')
+      setDocWarning(data.docWarning || '')
       setSubmitted(true)
     } catch(e) {
       setError(e.message)
@@ -590,6 +596,26 @@ export default function GuestCheckIn() {
           <strong style={{ color:'#C8903A' }}>{villaName}</strong><br />
           <span style={{ fontSize:'0.78rem' }}>{villaAddr.phone}</span>
         </div>
+
+        {docWarning && (
+          <div style={{ marginTop:'20px', textAlign:'left', background:'rgba(239,68,68,0.1)',
+            border:'1px solid rgba(239,68,68,0.3)', borderRadius:'10px', padding:'14px 16px' }}>
+            <div style={{ color:'#EF4444', fontSize:'0.85rem', fontWeight:'600', marginBottom:'6px' }}>
+              ⚠️ Photo didn't upload
+            </div>
+            <div style={{ color:'#D0D0D0', fontSize:'0.8rem', lineHeight:'1.6', marginBottom:'10px' }}>
+              {docWarning}
+            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting}
+              style={{ width:'100%', padding:'10px', background:'#EF4444', border:'none',
+                borderRadius:'8px', color:'#fff', fontSize:'0.82rem', fontWeight:'600',
+                cursor: submitting ? 'default' : 'pointer', opacity: submitting ? 0.6 : 1 }}>
+              {submitting ? 'Retrying…' : 'Retry Photo Upload'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

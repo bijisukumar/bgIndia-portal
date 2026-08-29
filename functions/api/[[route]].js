@@ -1493,6 +1493,21 @@ export async function onRequest(ctx) {
       }
 
       const docId = (type, sid) => `DOC-${sid}-${type}-${Date.now()}`
+      // A doc-store failure (most likely cause: an uncompressed phone photo
+      // pushing the base64 payload past the database's row-size limit) used
+      // to only hit console.warn — invisible everywhere except a live
+      // Cloudflare Logs stream nobody was watching, while the rest of the
+      // submission succeeded normally. Confirmed live: a guest's ID photo
+      // never made it into the database at all, and nothing ever showed it.
+      // Client-side compression (GuestCheckIn.jsx) should make this rare
+      // now, but a failure must be visible when it does happen.
+      const logDocStoreFailure = async (label, message) => {
+        try {
+          await DB.prepare(
+            `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'error', ?, ?, datetime('now'))`
+          ).bind(genId('LOG'), stayId, `${label} store failed: ${message}`).run()
+        } catch (e) { console.error('infra_processing_log insert failed:', e?.message || e) }
+      }
       // Store one passport/visa scan per foreign guest. guest_seq mirrors the
       // KYC row, so the owner can line a scan up with the person it belongs to.
       const storeDoc = async (type, seq, b64, name) => {
@@ -1503,7 +1518,7 @@ export async function onRequest(ctx) {
              (doc_id, stay_id, doc_type, guest_seq, file_name, file_b64, folder_created, created_at)
              VALUES (?, ?, ?, ?, ?, ?, 0, datetime('now'))`
           ).bind(docId(`${type}-g${seq}`, stayId), stayId, type, seq, name, b64).run()
-        } catch (e) { console.warn(`${type} doc store error (guest ${seq}):`, e.message) }
+        } catch (e) { await logDocStoreFailure(`${type} (guest ${seq})`, e?.message || e) }
       }
       // Document storage is gated on the SAME declaredForeign flag as the
       // Form C rows. Gating only the rows left the scans behind: this block
@@ -1516,7 +1531,7 @@ export async function onRequest(ctx) {
              (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
              VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
           ).bind(docId('id', stayId), stayId, 'govt_id', idFileName || ('ID-' + stayId + '.jpg'), idFileB64).run()
-        } catch(e) { console.warn('ID doc store error:', e.message) }
+        } catch(e) { await logDocStoreFailure('ID doc', e?.message || e) }
       }
       if (declaredForeign) {
         await storeDoc('passport', 1, publicBody.passportFileB64, `passport-${stayId}.jpg`)

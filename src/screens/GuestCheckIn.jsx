@@ -138,6 +138,45 @@ function ServiceToggle({ label, priceNote, hint, checked, onClick, color='#8B5CF
   )
 }
 
+// Guests upload phone-camera photos with zero client-side size control — a
+// raw high-res photo can be several MB, and base64-encoded even larger.
+// That silently exceeded the backend's storage limit for one guest whose ID
+// photo never made it into the database at all: the insert failed, but the
+// failure only ever hit a console.warn, invisible anywhere else, while the
+// rest of the submission succeeded normally. Downscaling before the file
+// ever leaves the browser fixes this at the source. PDFs pass through
+// untouched — compression only applies to raster images.
+function readAndCompressFile(file, maxDim = 1600, quality = 0.75) {
+  return new Promise((resolve, reject) => {
+    if (!file.type || !file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onload = ev => resolve(ev.target.result)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const img = new window.Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height * maxDim / width); width = maxDim }
+          else { width = Math.round(width * maxDim / height); height = maxDim }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      }
+      img.onerror = reject
+      img.src = ev.target.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 function UploadBox({ label, preview, onClick, color='#C8903A', icon='📷', hint }) {
   return (
     <div onClick={onClick} style={{ padding:'16px', borderRadius:'10px',
@@ -314,12 +353,18 @@ export default function GuestCheckIn() {
 
   // Same reader as the primary guest's uploads, but writes into the guest's
   // own slot. No OCR here — MRZ auto-fill stays on the primary passport only.
-  function handleGuestUpload(e, i, key) {
+  async function handleGuestUpload(e, i, key) {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => patchGuest(i, { [key]: ev.target.result })
-    reader.readAsDataURL(file)
+    try {
+      patchGuest(i, { [key]: await readAndCompressFile(file) })
+    } catch (err) {
+      // Never worse than before — fall back to the uncompressed original
+      // rather than losing the upload if canvas/Image processing fails.
+      const reader = new FileReader()
+      reader.onload = ev => patchGuest(i, { [key]: ev.target.result })
+      reader.readAsDataURL(file)
+    }
   }
 
   // ── Enhance your stay (optional add-on requests) ───────────
@@ -331,30 +376,39 @@ export default function GuestCheckIn() {
   const [extraBedsCount,  setExtraBedsCount]  = useState(1)
   const [reqCab,          setReqCab]          = useState(false)
 
-  function handleFileUpload(e, setPreview, setFile) {
+  async function handleFileUpload(e, setPreview, setFile) {
     const file = e.target.files?.[0]
     if (!file) return
     setFile && setFile(file)
-    const reader = new FileReader()
-    reader.onload = ev => setPreview(ev.target.result)
-    reader.readAsDataURL(file)
+    try {
+      setPreview(await readAndCompressFile(file))
+    } catch (err) {
+      const reader = new FileReader()
+      reader.onload = ev => setPreview(ev.target.result)
+      reader.readAsDataURL(file)
+    }
   }
 
   // Passport upload → preview, then fire MRZ OCR to pre-fill passport fields.
   // Advisory only: the guest verifies everything. Never blocks the form, and
   // only pre-fills fields the guest hasn't already typed.
-  function handlePassportUpload(e) {
+  async function handlePassportUpload(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => {
-      setPassportPreview(ev.target.result)
+    const isImage = file.type && file.type.startsWith('image/')
+    try {
+      const dataUrl = await readAndCompressFile(file)
+      setPassportPreview(dataUrl)
       // Only OCR image uploads — a PDF passport scan skips straight to manual.
-      if (file.type && file.type.startsWith('image/')) {
-        runPassportOcr(ev.target.result.split(',')[1])
+      if (isImage) runPassportOcr(dataUrl.split(',')[1])
+    } catch (err) {
+      const reader = new FileReader()
+      reader.onload = ev => {
+        setPassportPreview(ev.target.result)
+        if (isImage) runPassportOcr(ev.target.result.split(',')[1])
       }
+      reader.readAsDataURL(file)
     }
-    reader.readAsDataURL(file)
   }
 
   async function runPassportOcr(passportPhotoB64) {

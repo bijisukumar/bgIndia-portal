@@ -14,6 +14,14 @@ export const CONFIG = {
 
   landingUrl: 'https://www.demo-not-real.test',
 
+  // Demo tenant: deliberately not pointing at any real villa's assets.
+  marketing: {
+    villaImgBase: 'https://www.demo-not-real.test/images',
+    logoUrl:      '',
+    experiencesLabel: '',
+    experiencesUrl:   '',
+  },
+
   // Google integration (fake placeholders — this host never talks to Google)
   appsScriptUrl: 'https://script.google.com/macros/s/DEMO_NOT_REAL/exec',
   driveRootId:   'demo-drive-root-id',

@@ -22,8 +22,10 @@ function QRCode({ value, size = 160 }) {
 }
 
 // ── Flyer component (printable / canvas-exportable) ───────────
-const VILLA_IMG_BASE = 'https://www.luxuryvillasofguruvayur.com/images'
-const LOGO_URL = 'https://manage.luxuryvillasofguruvayur.com/icons/logo-dark-emblem.png'
+// From tenant config, not hardcoded: a second host's flyer must not pull this
+// villa's photographs or its logo off this villa's own website.
+const VILLA_IMG_BASE = CONFIG.marketing?.villaImgBase || ''
+const LOGO_URL       = CONFIG.marketing?.logoUrl      || ''
 
 function VillaFlyer({ campaign, flyerRef }) {
   const trackUrl = `${LANDING}?ref=${campaign.unique_token}`

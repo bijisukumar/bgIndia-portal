@@ -143,7 +143,11 @@ function familiesBlock(ic) {
     ``,
     `We also help many families plan their Kerala stay beyond Guruvayur — Wildlife, Hill Station, Ayurvedic experiences, Kerala martial arts programs, temple visits, and curated local experiences through our trusted network.`,
     ``,
-    `${ic.link}Explore Kerala experiences: https://www.luxuryvillasofguruvayur.com/KeralaVacay`,
+    // Per tenant: another host's guests should not be sent to this villa's
+    // website. Omitted entirely when the tenant has no experiences link.
+    ...(CONFIG.marketing?.experiencesUrl
+      ? [`${ic.link}${CONFIG.marketing.experiencesLabel || 'Explore local experiences'}: ${CONFIG.marketing.experiencesUrl}`]
+      : []),
   ]
 }
 

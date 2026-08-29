@@ -21,6 +21,17 @@ export const CONFIG = {
   // flyers/QR codes point here with ?ref=<campaign_token>).
   landingUrl: 'https://www.luxuryvillasofguruvayur.com',
 
+  // Assets and links the flyer and enquiry replies use. These were hardcoded
+  // to this villa's own website inside the screens, which meant a second
+  // host's flyers pulled Dwarka's photographs and logo, and their enquiry
+  // replies sent guests to Dwarka's site.
+  marketing: {
+    villaImgBase: 'https://www.luxuryvillasofguruvayur.com/images',
+    logoUrl:      'https://manage.luxuryvillasofguruvayur.com/icons/logo-dark-emblem.png',
+    experiencesLabel: 'Explore Kerala experiences',
+    experiencesUrl:   'https://www.luxuryvillasofguruvayur.com/KeralaVacay',
+  },
+
   // Google integration
   driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
   ownerEmail:    'bijisukumar@gmail.com',

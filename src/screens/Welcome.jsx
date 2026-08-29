@@ -30,7 +30,7 @@ export default function Welcome() {
         <div style={styles.goldLine} />
         <p style={styles.tagline}>VILLA MANAGEMENT, SIMPLIFIED</p>
 
-        <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => navigate('/invite')}>
+        <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => { window.location.href = 'https://www.stayvibe360.com/#invite' }}>
           <span style={styles.optionTitle}>Request Your Invite</span>
           <span style={styles.optionSub}>Join our first group of hosts — 2 min, no commitment</span>
         </button>

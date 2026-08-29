@@ -127,7 +127,7 @@ function VillaFlyer({ campaign, flyerRef }) {
               ENQUIRE / BOOK NOW
             </a>
             <div style={{ fontSize: '0.58rem', color: '#8B6914', marginTop: '6px', textAlign: 'center' }}>
-              +91 99950 43283 · luxuryvillasofguruvayur.com
+              {[CONFIG.marketing?.flyerPhone, CONFIG.marketing?.flyerWebsite].filter(Boolean).join(' · ')}
             </div>
           </div>
         </div>
@@ -142,8 +142,8 @@ function VillaFlyer({ campaign, flyerRef }) {
 
       {/* Gold bottom bar */}
       <div style={{ background: '#B3924A', padding: '8px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ color: '#FAF7F2', fontSize: '0.6rem', letterSpacing: '1px' }}>LUXURY VILLAS OF GURUVAYUR</div>
-        <div style={{ color: '#F0D99A', fontSize: '0.6rem' }}>luxuryvillasofguruvayur.com</div>
+        <div style={{ color: '#FAF7F2', fontSize: '0.6rem', letterSpacing: '1px' }}>{CONFIG.marketing?.flyerBannerText || CONFIG.brandName}</div>
+        <div style={{ color: '#F0D99A', fontSize: '0.6rem' }}>{CONFIG.marketing?.flyerWebsite || ''}</div>
       </div>
     </div>
   )

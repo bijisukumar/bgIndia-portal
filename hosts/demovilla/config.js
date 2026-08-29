@@ -20,11 +20,27 @@ export const CONFIG = {
     logoUrl:      '',
     experiencesLabel: '',
     experiencesUrl:   '',
+    faqUrl:          '',
+    villaDetailsUrl: '',
+    flyerPhone:      '',
+    flyerWebsite:    'demo.stayvibe360.com',
+    flyerBannerText: 'DEMO TEST VILLAS',
+  },
+
+  checkinAddress: {
+    address: 'Demo Street 1',
+    city:    'Demo City',
+    state:   'Kerala',
+    pincode: '000000',
+    country: 'India',
+    phone:   '',
   },
 
   // Google integration (fake placeholders — this host never talks to Google)
   appsScriptUrl: 'https://script.google.com/macros/s/DEMO_NOT_REAL/exec',
   driveRootId:   'demo-drive-root-id',
+  // Signed on guest-facing payment messages.
+  ownerName:     'Demo Owner',
   ownerEmail:    'demo-owner@example.test',
   ownerWhatsApp: '+1 900 000 0000',
   // Demo tenant has no verified sending domain of its own, so it borrows the

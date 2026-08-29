@@ -53,9 +53,12 @@ if (!apply) {
 const file = join(tmpdir(), `seed-tenant-config-${Date.now()}.sql`)
 writeFileSync(file, statements.join('\n') + '\n', 'utf8')
 try {
-  const out = execFileSync('npx.cmd',
+  // shell:true is required on Windows — Node refuses to spawn a .cmd
+  // directly (EINVAL) since the 18.20/20.x security change, and npx resolves
+  // to npx.cmd here.
+  const out = execFileSync('npx', 
     ['wrangler', 'd1', 'execute', 'bgindia-db', '--remote', '--file', file],
-    { encoding: 'utf8', cwd: root })
+    { encoding: 'utf8', cwd: root, shell: true })
   const m = out.match(/"changes":\s*(\d+)/)
   console.log(`\n  Applied. changes: ${m ? m[1] : 'see output above'}`)
 } finally {

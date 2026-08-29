@@ -153,8 +153,10 @@ function familiesBlock(ic) {
 
 function linksBlock(ic) {
   return [
-    `${ic.camera}Villa details: https://luxuryvillasofguruvayur.com/villa`,
-    `${ic.question}FAQs: https://luxuryvillasofguruvayur.com/faq.html`,
+    ...(CONFIG.marketing?.villaDetailsUrl
+      ? [`${ic.camera}Villa details: ${CONFIG.marketing.villaDetailsUrl}`] : []),
+    ...(CONFIG.marketing?.faqUrl
+      ? [`${ic.question}FAQs: ${CONFIG.marketing.faqUrl}`] : []),
   ]
 }
 
@@ -164,9 +166,10 @@ function signoffBlock(ic, closingLine) {
     closingLine,
     ``,
     `സസ്നേഹം (Sasneham)`,
-    `Biji Sukumar`,
-    `Luxury Villas of Guruvayur`,
-    `${ic.phone}+91 99950 43283  (GPay available)`,
+    ...(CONFIG.ownerName ? [`${CONFIG.ownerName}`] : []),
+    `${CONFIG.brandName}`,
+    ...(CONFIG.checkinAddress?.phone
+      ? [`${ic.phone}${CONFIG.checkinAddress.phone}  (GPay available)`] : []),
   ]
 }
 
@@ -183,7 +186,8 @@ function buildQuoteDefault(e, rich) {
     `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
     `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
     ``,
-    `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    ...(CONFIG.marketing?.faqUrl
+      ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
     ``,
     `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `${ic.guests}Guests: ${c.guestCount}`,
@@ -214,7 +218,8 @@ function buildQuoteRepeatDiscount(e, rich) {
     `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
     `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
     ``,
-    `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    ...(CONFIG.marketing?.faqUrl
+      ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
     ``,
     `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `${ic.guests}Guests: ${c.guestCount}`,
@@ -246,7 +251,8 @@ function buildQuoteB2B(e, rich) {
     `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
     `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
     ``,
-    `${ic.link}Timings: https://luxuryvillasofguruvayur.com/faq.html`,
+    ...(CONFIG.marketing?.faqUrl
+      ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
     ``,
     `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `${ic.guests}Guests: ${c.guestCount}`,

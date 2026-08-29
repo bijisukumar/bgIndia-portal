@@ -27,13 +27,43 @@ export const CONFIG = {
   // replies sent guests to Dwarka's site.
   marketing: {
     villaImgBase: 'https://www.luxuryvillasofguruvayur.com/images',
-    logoUrl:      'https://manage.luxuryvillasofguruvayur.com/icons/logo-dark-emblem.png',
+    // Served from the surviving domain, not the legacy alias — same asset,
+    // same Pages project. This is what makes
+    // manage.luxuryvillasofguruvayur.com safe to remove.
+    logoUrl:      'https://manage.stayvibe360.com/icons/logo-dark-emblem.png',
     experiencesLabel: 'Explore Kerala experiences',
     experiencesUrl:   'https://www.luxuryvillasofguruvayur.com/KeralaVacay',
+    // Links sent to guests in enquiry replies and printed on the flyer.
+    faqUrl:          'https://luxuryvillasofguruvayur.com/faq.html',
+    villaDetailsUrl: 'https://luxuryvillasofguruvayur.com/villa',
+    // Printed on the flyer footer. Hardcoding these meant another host's
+    // flyer carried this villa's phone number and website.
+    flyerPhone:      '+91 99950 43283',
+    flyerWebsite:    'luxuryvillasofguruvayur.com',
+    flyerBannerText: 'LUXURY VILLAS OF GURUVAYUR',
+  },
+
+  // The address Form C files as the guest's address in India. Copied
+  // verbatim from the constant that was hardcoded in GuestCheckIn.jsx so the
+  // filed value does not change.
+  //
+  // NOTE: villas[0].address above says pincode 680506, while this and
+  // platform_tenants both say 680101. 680101 is what has actually been filed.
+  // Left as-is deliberately - changing a pincode on a legal filing is not a
+  // tidy-up, and needs the owner to confirm which is correct.
+  checkinAddress: {
+    address: 'Edappully Gandhinagar Rd, Palayoor',
+    city:    'Guruvayur',
+    state:   'Kerala',
+    pincode: '680101',
+    country: 'India',
+    phone:   '+91 99950 43283',
   },
 
   // Google integration
   driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
+  // Signed on guest-facing payment messages.
+  ownerName:     'Biji Sukumar',
   ownerEmail:    'bijisukumar@gmail.com',
   // Owner WhatsApp — for guest change requests only (arrival message routes
   // any date/guest-count/request changes here, not to the on-site manager).

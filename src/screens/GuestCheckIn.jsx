@@ -30,15 +30,11 @@ function LogoImg({ villaId }) {
     />
   )
 }
-const VILLA_ADDRESSES = {
-  dwarka: {
-    address:  'Edappully Gandhinagar Rd, Palayoor',
-    city:     'Guruvayur',
-    state:    'Kerala',
-    pincode:  '680101',
-    country:  'India',
-    phone:    '+91 99950 43283',
-  }
+// From tenant config. This is the address Form C files as the guest's
+// address in India, so it must follow the tenant, not a constant naming one
+// villa. Falls back to the villa's own address fields if a tenant has not
+// set checkinAddress.
+const VILLA_ADDRESSES = {}
 }
 const PARTNER_NAMES = {
   airbnb: 'Airbnb', direct: 'Direct Booking',
@@ -207,7 +203,7 @@ export default function GuestCheckIn() {
   const [linkError,   setLinkError]   = useState('')
 
   const villaName   = VILLA_NAMES[villaId]      || 'Guruvayur Villa'
-  const villaAddr   = VILLA_ADDRESSES[villaId]  || {}
+  const villaAddr   = CONFIG.checkinAddress || VILLA_ADDRESSES[villaId] || {}
   const partnerName = PARTNER_NAMES[partner]    || partner
 
   // Resolve opaque token → villa + partner
@@ -1195,7 +1191,7 @@ export default function GuestCheckIn() {
           border:'1px solid rgba(139,92,246,0.2)', borderRadius:'10px', fontSize:'0.82rem',
           color:'#9AA5B4', lineHeight:'1.6' }}>
           💡 Curious how early check-in, late check-out, or our other services actually work? Take a quick look at our{' '}
-          <a href="https://luxuryvillasofguruvayur.com/faq.html" target="_blank" rel="noreferrer"
+          <a href={CONFIG.marketing?.faqUrl || '#'} target="_blank" rel="noreferrer"
             style={{ color:'#A78BFA', fontWeight:'600' }}>Stay FAQ</a>{' '}
           before choosing below — it only takes a minute, and helps you pick exactly what's right for your stay.
         </div>

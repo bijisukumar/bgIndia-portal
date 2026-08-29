@@ -16,6 +16,12 @@ function getHostConfig(villaId) {
   return HOST_CONFIGS[villaId] || HOST_CONFIGS.dwarka
 }
 
+// Sender for platform-level leads (demo/invite/host-registration requests) —
+// these aren't any one tenant's alert, so they shouldn't borrow dwarka's
+// villa branding the way a genuine tenant security alert does. Domain
+// verified in Resend 2026-08-29.
+const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
+
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -176,7 +182,7 @@ const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // DB/villaId are optional — when passed, every attempt (success or failure)
 // is logged to alert_log so you can check delivery without live Cloudflare
 // Logs access. Browse it via D1 Explorer like any other table.
-async function sendAlert(env, subject, lines, toEmail, DB, villaId, category) {
+async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
@@ -185,10 +191,12 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category) {
       throw new Error(`RESEND_API_KEY not configured (checked env and DB fallback). Run: wrangler pages secret put RESEND_API_KEY, or save it to villa_settings key '_resend_api_key'.`)
     }
     const body = {
-      // Per-host sender: a second tenant's owner must not receive security
-      // alerts from this villa's brand. Falls back to the original address
-      // when a host config predates the email block.
-      from: getHostConfig(villaId)?.email?.alertFrom || 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
+      // fromOverride is for platform-level leads (demo/invite/host
+      // registration) — these aren't any one tenant's alert, so they
+      // shouldn't borrow dwarka's villa branding. Per-host sender still
+      // wins for genuine tenant alerts: a second tenant's owner must not
+      // receive security alerts from this villa's brand.
+      from: fromOverride || getHostConfig(villaId)?.email?.alertFrom || 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
       to: [recipient],
       subject,
       text: lines.join('\n'),
@@ -1681,7 +1689,7 @@ export async function onRequest(ctx) {
         '',
         `Message them: https://wa.me/${phone.replace(/[^0-9]/g, '')}`,
         `Request ID: ${requestId}`,
-      ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID))
+      ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID, 'platform_lead', PLATFORM_LEAD_FROM))
 
       return json({ success: true, data: { requestId } })
     } catch (e) {
@@ -1710,7 +1718,7 @@ export async function onRequest(ctx) {
         b.notes ? `Notes: ${b.notes}` : '',
         '',
         `Lead ID: ${leadId}`,
-      ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID))
+      ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID, 'platform_lead', PLATFORM_LEAD_FROM))
 
       return json({ success: true, data: { leadId } })
     } catch (e) {
@@ -1768,7 +1776,7 @@ export async function onRequest(ctx) {
         '',
         'Full submission saved — see /infra/d1 or query platform_host_registrations.',
         `Registration ID: ${registrationId}`,
-      ], await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID))
+      ], await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID, 'platform_lead', PLATFORM_LEAD_FROM))
 
       return json({ success: true, data: { registrationId } })
     } catch (e) {

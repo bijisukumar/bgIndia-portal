@@ -30,14 +30,19 @@ export default function Welcome() {
         <div style={styles.goldLine} />
         <p style={styles.tagline}>VILLA MANAGEMENT, SIMPLIFIED</p>
 
-        <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => navigate('/NewHost')}>
-          <span style={styles.optionTitle}>New Host Registration</span>
-          <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
+        <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => navigate('/invite')}>
+          <span style={styles.optionTitle}>Request Your Invite</span>
+          <span style={styles.optionSub}>Join our first group of hosts — 2 min, no commitment</span>
         </button>
 
         <button style={styles.optionBtn} onClick={() => navigate('/login')}>
           <span style={styles.optionTitle}>Login</span>
           <span style={styles.optionSub}>Existing owner or manager</span>
+        </button>
+
+        <button style={styles.optionBtn} onClick={() => navigate('/NewHost')}>
+          <span style={styles.optionTitle}>New Host Registration</span>
+          <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
         </button>
 
         <button style={styles.optionBtn} onClick={() => navigate('/demo')}>

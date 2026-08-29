@@ -863,6 +863,33 @@ CREATE TABLE IF NOT EXISTS platform_leads (
   created_at  TEXT DEFAULT (datetime('now'))
 );
 
+-- Soft-launch invite requests from the "Request Your Invite" gateway page.
+-- Deliberately separate from platform_host_registrations: that is the heavy
+-- onboarding intake for a host who has already said yes. This is the
+-- two-minute "I'm interested" form that comes before the 20-min demo call —
+-- property_type/channels/interests exist specifically to pick a diverse
+-- first batch of hosts, not just first-come-first-served.
+CREATE TABLE IF NOT EXISTS platform_invite_requests (
+  request_id      TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  whatsapp        TEXT NOT NULL,
+  email           TEXT,
+  property_name   TEXT,
+  location        TEXT,
+  property_count  TEXT,
+  channels        TEXT,          -- comma separated, from tap-chips
+  foreign_guests  TEXT,          -- Rarely / Sometimes / Often
+  call_slot       TEXT,          -- rough preferred window, improves show-up
+  notes           TEXT,
+  status          TEXT DEFAULT 'new',  -- new -> contacted -> demo_scheduled -> selected/declined
+  created_at      TEXT DEFAULT (datetime('now')),
+  property_type   TEXT,          -- Villa / Apartment / Homestay / etc
+  airbnb_link     TEXT,          -- their live listing, if any
+  onboard_3m      TEXT,          -- Yes / Maybe / Not yet
+  interests       TEXT           -- which problems they want solved, comma separated
+);
+CREATE INDEX IF NOT EXISTS idx_invite_requests_created ON platform_invite_requests(created_at);
+
 -- SaaS marketing site "New Host Registration" — the full intake form from
 -- docs/ONBOARDING.md section A, submitted by a prospective host BEFORE any
 -- provisioning happens. This does NOT create a platform_tenants row or spin

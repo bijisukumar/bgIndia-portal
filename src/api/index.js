@@ -112,6 +112,7 @@ export const api = {
 
   // ── SAAS LANDING GATEWAY (public) ───────────────────────────
   submitDemoRequest:        (data)   => post('submitDemoRequest', data),
+  submitInviteRequest:      (data)   => post('submitInviteRequest', data),
   submitHostRegistration:   (data)   => post('submitHostRegistration', data),
 
   // ── PROVISIONAL / PENDING REVIEW ───────────────────────────

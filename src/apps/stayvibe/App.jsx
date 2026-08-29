@@ -15,6 +15,7 @@ import '../../index.css'
 import Login from '../../screens/Login'
 import Welcome from '../../screens/Welcome'
 import RequestDemo from '../../screens/RequestDemo'
+import RequestInvite from '../../screens/RequestInvite'
 import NewHostRegistration from '../../screens/NewHostRegistration'
 
 // Owner — villa screens only
@@ -133,6 +134,7 @@ export default function App() {
           <Route path="/login"        element={<LoginGate />} />
           <Route path="/NewHost"      element={<NewHostRegistration />} />
           <Route path="/demo"         element={<RequestDemo />} />
+          <Route path="/invite"       element={<RequestInvite />} />
           <Route path="/quote/:token" element={<AgentQuote />} />
           <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
           <Route path="/flexibility"  element={<Flexibility />} />

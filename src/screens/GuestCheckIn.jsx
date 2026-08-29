@@ -35,7 +35,6 @@ function LogoImg({ villaId }) {
 // villa. Falls back to the villa's own address fields if a tenant has not
 // set checkinAddress.
 const VILLA_ADDRESSES = {}
-}
 const PARTNER_NAMES = {
   airbnb: 'Airbnb', direct: 'Direct Booking',
   makemytrip: 'MakeMyTrip', booking: 'Booking.com', goibibo: 'Goibibo',

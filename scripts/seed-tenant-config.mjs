@@ -16,6 +16,7 @@
  */
 import { readdirSync, writeFileSync, unlinkSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -63,4 +64,37 @@ try {
   console.log(`\n  Applied. changes: ${m ? m[1] : 'see output above'}`)
 } finally {
   try { unlinkSync(file) } catch { /* best effort */ }
+}
+
+// Read back what is actually stored and compare it with what we meant to
+// store. "Applied." only means wrangler returned; it has twice been printed
+// while the row stayed stale — once from a Windows spawn failure, once from a
+// run whose error went to stderr and was filtered away. Both times the gap was
+// found much later, by a feature quietly missing its data. Verifying here
+// makes the script itself the thing that notices.
+let stale = 0
+for (const host of hosts) {
+  const mod = await import(`${pathToFileURL(join(root, 'hosts', host, 'config.js')).href}?v=${Date.now()}`)
+  // SQLite length() counts code points; JS .length counts UTF-16 units, so
+  // every emoji in a message template would read as a phantom 1-char gap.
+  const expected = Array.from(JSON.stringify(mod.CONFIG)).length
+  let got = 0
+  try {
+    const check = execFileSync('npx',
+      ['wrangler', 'd1', 'execute', 'bgindia-db', '--remote', '--command',
+       `"SELECT length(config_json) AS n FROM platform_tenant_config WHERE tenant_id='${host}'"`],
+      { encoding: 'utf8', cwd: root, shell: true })
+    got = Number((check.match(/"n":\s*(\d+)/) || [])[1] || 0)
+  } catch (e) {
+    console.error(`  could not verify ${host}: ${e.message}`)
+  }
+  const ok = got === expected
+  if (!ok) stale++
+  console.log(`  ${ok ? 'verified' : 'MISMATCH'}  ${host.padEnd(12)} db=${got} file=${expected}`)
+}
+if (stale) {
+  console.error(`\n  ${stale} tenant(s) did NOT store correctly — the database still holds stale config.`)
+  process.exitCode = 1
+} else {
+  console.log('\n  All tenants verified against the database.')
 }

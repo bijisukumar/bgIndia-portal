@@ -2133,6 +2133,28 @@ export async function onRequest(ctx) {
   // explicit bypass, checked here, never an accidental gap. Any real
   // tenant token always carries a concrete array from login, even if
   // empty, so there's no ambiguous in-between state.
+  // ── QUERY SCOPING ────────────────────────────────────────────────
+  // assertPropertyAccess only checks a villa id the CALLER supplied. Plenty
+  // of list endpoints never take one — they simply select every row in a
+  // tenant table. With a single tenant that is invisible; with two it hands
+  // one host the other's guests, bookings and enquiries.
+  //
+  // This returns a filter for the rows a token may see. A tenant token
+  // carries a concrete propertyIds array from login. master_owner and the
+  // SYSTEM_TOKEN carry null, meaning full access, and get no filter. An
+  // explicit villaId (already checked by the guard) narrows further, which
+  // is how master_owner views one picked tenant.
+  //
+  // Safe to add now: with one tenant every row already belongs to it, so the
+  // filter changes nothing until a second host exists.
+  function villaScope(payload, requested, col = 'villa_id') {
+    if (requested) return { sql: ` AND ${col} = ?`, binds: [requested] }
+    const ids = payload?.propertyIds
+    if (ids == null) return { sql: '', binds: [] }
+    if (!ids.length)  return { sql: ' AND 1=0', binds: [] }
+    return { sql: ` AND ${col} IN (${ids.map(() => '?').join(',')})`, binds: ids }
+  }
+
   function assertPropertyAccess(payload, villaId) {
     if (!villaId) return
     if (payload.propertyIds == null) return
@@ -2453,9 +2475,13 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getPendingCheckIns') {
-        const { results } = await DB.prepare(
-          `SELECT * FROM stayvibe_stays WHERE status = 'ready_for_checkin' ORDER BY checkin_date ASC`
-        ).all()
+        const { results } = await (() => {
+          const sc = villaScope(payload, url.searchParams.get('villaId'))
+          return DB.prepare(
+            `SELECT * FROM stayvibe_stays WHERE status = 'ready_for_checkin'${sc.sql}
+             ORDER BY checkin_date ASC`
+          ).bind(...sc.binds)
+        })().all()
         return json({ success: true, data: results })
       }
 
@@ -3703,7 +3729,14 @@ export async function onRequest(ctx) {
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
         const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)
-        const { results } = await DB.prepare(`SELECT * FROM stayvibe_duplicate_bookings WHERE detected_at >= ? AND (resolved IS NULL OR resolved = 0) ORDER BY detected_at DESC`).bind(cutoff.toISOString().slice(0,10)).all()
+        const { results } = await (() => {
+          const sc = villaScope(payload, url.searchParams.get('villaId'))
+          return DB.prepare(
+            `SELECT * FROM stayvibe_duplicate_bookings
+              WHERE detected_at >= ? AND (resolved IS NULL OR resolved = 0)${sc.sql}
+              ORDER BY detected_at DESC`
+          ).bind(cutoff.toISOString().slice(0,10), ...sc.binds)
+        })().all()
         const byChannel = {}
         results.forEach(r => {
           const ch = r.new_source || 'unknown'
@@ -4689,6 +4722,10 @@ export async function onRequest(ctx) {
         const q = (url.searchParams.get('q') || '').trim()
         if (q.length < 2) return json({ success: true, data: [] })
         const { results } = await DB.prepare(
+          // NOT scoped by villa: stayvibe_guests has no villa_id column. The
+          // guest registry is shared across tenants by construction, so a
+          // filter here would be a SQL error, not a fix. Raised separately —
+          // it needs a schema decision, not a WHERE clause.
           `SELECT guest_id, name, phone, email, total_stays FROM stayvibe_guests
            WHERE name LIKE ? ORDER BY total_stays DESC LIMIT 15`
         ).bind(`%${q}%`).all()

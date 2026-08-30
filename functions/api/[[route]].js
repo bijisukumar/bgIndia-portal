@@ -2248,10 +2248,16 @@ export async function onRequest(ctx) {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') {
           return err('Owner access required', 403)
         }
+        // D1 rejects a correlated join against pragma_table_info(), so the
+        // villa-scoped tables are found by matching the stored DDL instead.
+        // Looser than the pragma - a table merely mentioning villa_id in a
+        // comment or a differently-named column would match - so each count
+        // below is guarded and a table that does not really have the column
+        // is skipped rather than failing the whole screen.
         const { results: tables } = await DB.prepare(
-          `SELECT m.name AS t FROM sqlite_master m JOIN pragma_table_info(m.name) p
-            WHERE m.type = 'table' AND p.name = 'villa_id'
-            GROUP BY m.name ORDER BY m.name`
+          `SELECT name AS t FROM sqlite_master
+            WHERE type = 'table' AND sql LIKE '%villa_id%'
+            ORDER BY name`
         ).all()
 
         const byTenant = {}
@@ -2262,15 +2268,23 @@ export async function onRequest(ctx) {
           return byTenant[v]
         }
 
+        let counted = 0
         for (const { t } of (tables || [])) {
           // Table names come from sqlite_master, never from the caller, so
           // interpolating them here cannot be injected into.
-          const { results } = await DB.prepare(
-            `SELECT villa_id AS v, COUNT(*) AS n FROM ${t} GROUP BY villa_id`
-          ).all()
-          for (const r of (results || [])) {
-            const e = bump(r.v, 'rows', r.n)
-            e.tables[t] = r.n
+          try {
+            const { results } = await DB.prepare(
+              `SELECT villa_id AS v, COUNT(*) AS n FROM ${t} GROUP BY villa_id`
+            ).all()
+            for (const r of (results || [])) {
+              const e = bump(r.v, 'rows', r.n)
+              e.tables[t] = r.n
+            }
+            counted++
+          } catch (e) {
+            // Matched the DDL but has no usable villa_id column — skip it
+            // rather than losing every other table's numbers.
+            console.warn('usage: skipped', t, e?.message)
           }
         }
 
@@ -2291,7 +2305,7 @@ export async function onRequest(ctx) {
 
         const tenants = Object.values(byTenant).sort((a, b) => b.rows - a.rows)
         return json({ success: true, data: {
-          scannedTables: (tables || []).length,
+          scannedTables: counted,
           tenants: tenants.map(t => ({
             ...t,
             docMB: Math.round((t.docBytes / 1048576) * 100) / 100,

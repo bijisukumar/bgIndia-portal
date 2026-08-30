@@ -25,6 +25,12 @@ export default function Login() {
       setLocked(true)
       setRetryMins(result.retryAfter || 15)
       setError(`You've been locked out after multiple failed attempts. Please reach out to the administrator or try again in ${result.retryAfter || 15} minutes.`)
+    } else if (result.reason === 'unreachable') {
+      // Not a credentials problem — the request never reached a server.
+      // Naming the host they are on turns "wrong PIN?" into "wrong link".
+      setError(`Can't reach the server. Check your connection — or this may be an old link (you are on ${location.hostname}). Ask the owner for the current address.`)
+    } else if (result.reason === 'server_error') {
+      setError('Something went wrong at our end, not with your PIN. Please try again shortly.')
     } else {
       setError('Invalid PIN. Please try again.')
       setShake(true)

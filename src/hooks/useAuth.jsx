@@ -51,8 +51,10 @@ export function AuthProvider({ children }) {
       if (res.status === 401) {
         return { ok: false, reason: 'invalid' }
       }
+      // A 5xx is our fault, not a wrong PIN. Reporting it as bad credentials
+      // sends the user hunting for a password problem that does not exist.
       if (!res.ok) {
-        return { ok: false, reason: 'invalid' }
+        return { ok: false, reason: 'server_error' }
       }
 
       const { token } = await res.json()
@@ -64,7 +66,11 @@ export function AuthProvider({ children }) {
       setUser(userData)
       return { ok: true }
     } catch {
-      return { ok: false, reason: 'invalid' }
+      // fetch() only throws when the request never completed — offline, DNS
+      // gone, connection refused. This is exactly how a retired domain looked
+      // to staff whose installed app still pointed at it: the cached shell
+      // rendered, the request died, and the screen said "Invalid PIN".
+      return { ok: false, reason: 'unreachable' }
     }
   }
 

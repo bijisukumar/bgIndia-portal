@@ -625,3 +625,37 @@ round trip — the obvious next optimisation, not yet done.
 
 No new Pages project, no new build, no code change. `hosts/<id>/config.js`
 remains only as an offline fallback.
+
+## Retiring a domain breaks every installed app on it
+
+Learned the hard way on 2026-08-30. `stayvibe.luxuryvillasofguruvayur.com` was
+removed after confirming nothing in the code referenced it. Within the hour
+Raman could not log in — and the screen told him **"Invalid PIN"**.
+
+Nothing was wrong with his PIN. The portal is a PWA that precaches its shell,
+so his phone still rendered the login page perfectly from cache. The
+`/api/login` request went to a hostname that no longer resolved, failed at the
+network layer, and `useAuth` reported every thrown fetch as bad credentials.
+Server-side there was no trace at all — no failed-login row, because the
+request never reached a server. **An empty log is the tell: a wrong PIN always
+logs; an unreachable host cannot.**
+
+Login now distinguishes the three cases — wrong PIN, server error, and
+unreachable (which names the host the user is actually on) — so this
+diagnoses itself next time.
+
+### Before retiring any hostname
+
+1. **Who has the app installed from it?** Owners and staff install the PWA per
+   origin. A removed domain leaves them with a working-looking app that cannot
+   talk to anything. Grep alone will not tell you this — ask the people.
+2. **Send the new link first**, have everyone open it, log in, and re-add to
+   their home screen from the new address. Old icon deleted.
+3. **Only then** remove the domain, and confirm each person again afterwards.
+4. Check-in links already sent to guests are the second exposure. The database
+   stores only a token, never a hostname, so anything the app generated uses
+   the configured `checkinBaseUrl` — but links pasted by hand into an OTA
+   message carry whatever host was copied.
+
+Current domains are settled; the only expected additions are new host
+subdomains, which are additive and break nothing.

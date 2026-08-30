@@ -2163,6 +2163,25 @@ export async function onRequest(ctx) {
     }
   }
 
+  // ── RECORD-LEVEL GUARD ───────────────────────────────────────────
+  // The central guard checks a villa id the caller SENDS. These handlers send
+  // a record id instead — a stay, an expense, an enquiry — so knowing or
+  // guessing another tenant's stay id would be enough to cancel their
+  // booking. This looks up the record's own villa and checks that.
+  //
+  // master_owner and SYSTEM_TOKEN (propertyIds null) skip it, as everywhere
+  // else. A record that does not exist is left alone so the handler can
+  // return its own not-found rather than a confusing 403.
+  //
+  // table and idCol are literals from this file, never caller input.
+  async function assertRecordAccess(DB, payload, table, idCol, id) {
+    if (!id || payload?.propertyIds == null) return
+    const row = await DB.prepare(
+      `SELECT villa_id FROM ${table} WHERE ${idCol} = ?`
+    ).bind(id).first()
+    if (row) assertPropertyAccess(payload, row.villa_id)
+  }
+
   // ── CENTRAL TENANT GUARD ─────────────────────────────────────────
   // Every authed request that names a villa is checked here, once, before
   // any handler runs. Previously this was 37 individual assertPropertyAccess
@@ -4698,6 +4717,10 @@ export async function onRequest(ctx) {
       if (action === 'getEnquiryDetail') {
         const enquiryId = url.searchParams.get('enquiryId') || ''
         if (!enquiryId) return err('enquiryId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_enquiries', 'enquiry_id', enquiryId)
         const enquiry = await DB.prepare(`SELECT * FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
         if (!enquiry) return err('Enquiry not found', 404)
         const { results: timeline } = await DB.prepare(
@@ -6461,6 +6484,10 @@ export async function onRequest(ctx) {
         const { stayId, guestName, guestPhone, guestEmail,
                 checkinDate, checkoutDate, adults, children, eta } = body
         if (!stayId) return err('stayId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const cur = await DB.prepare(`SELECT checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!cur) return err('Stay not found', 404)
 
@@ -6857,6 +6884,10 @@ export async function onRequest(ctx) {
       if (action === 'updateDriveFolder') {
         const { stayId, driveFolderId, driveFolderUrl, processingNote } = body
         if (!stayId) return err('stayId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const existing = await DB.prepare(`SELECT folder_created_at, processing_log, folder_created FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         const folderCreatedAt = existing?.folder_created_at || now()
         const prevLog = existing?.processing_log ? existing.processing_log + '\n' : ''
@@ -6875,6 +6906,10 @@ export async function onRequest(ctx) {
 
       if (action === 'setReadyForCheckIn' || action === 'approvePendingBooking') {
         const { stayId } = body; if (!stayId) return err('stayId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const stay = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return json({ success: true, data: { changed: false, reason: 'stay not found' }})
         if (!['booked','confirmed','docs_uploaded','pending_review'].includes(stay.status)) return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status }})
@@ -6885,6 +6920,10 @@ export async function onRequest(ctx) {
       if (action === 'updateStayStatus') {
         const { stayId, status } = body
         if (!stayId) return err('stayId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!['booked','confirmed','docs_uploaded','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed','cancelled'].includes(status)) return err(`Invalid status: ${status}`)
         await DB.prepare(`UPDATE stayvibe_stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
 
@@ -6921,6 +6960,10 @@ export async function onRequest(ctx) {
       if (action === 'markNoShow') {
         const { stayId, reason } = body
         if (!stayId) return err('stayId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const stay = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
         if (['cancelled', 'void', 'closed'].includes(stay.status)) return err('Stay is already inactive')
@@ -7187,6 +7230,10 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteVillaExpense') {
         const { txnId } = body; if (!txnId) return err('txnId required')
+        // The id came from the caller — confirm the record is theirs before
+        // acting on it. No-op for one tenant; blocks cross-tenant writes once
+        // there are two.
+        await assertRecordAccess(DB, payload, 'stayvibe_villa_expenses', 'txn_id', txnId)
         await DB.prepare(`DELETE FROM stayvibe_villa_expenses WHERE txn_id = ?`).bind(txnId).run()
         return json({ success: true, data: { txnId, deleted: true } })
       }

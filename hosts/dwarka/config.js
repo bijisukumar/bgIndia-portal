@@ -47,10 +47,10 @@ export const CONFIG = {
   // verbatim from the constant that was hardcoded in GuestCheckIn.jsx so the
   // filed value does not change.
   //
-  // NOTE: villas[0].address above says pincode 680506, while this and
-  // platform_tenants both say 680101. 680101 is what has actually been filed.
-  // Left as-is deliberately - changing a pincode on a legal filing is not a
-  // tidy-up, and needs the owner to confirm which is correct.
+  // villas[0].address carried 680506 while this and platform_tenants said
+  // 680101. Owner confirmed 680101 on 2026-08-29 and villas[0] was corrected,
+  // so all three agree. The wrong pincode had been going out in the arrival
+  // WhatsApp message and on the public flexibility page.
   checkinAddress: {
     address: 'Edappully Gandhinagar Rd, Palayoor',
     city:    'Guruvayur',
@@ -100,7 +100,7 @@ export const CONFIG = {
       // duplicate — kept separate on purpose.
       arrivalFullName: 'Dvaraka - Luxury Villas of Guruvayur',
       location: 'Guruvayur',
-      address:  'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680506, India',
+      address:  'Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101, India',
       mapsLink: 'https://maps.app.goo.gl/fjfe4eS4BJmaHh62A',
       bedrooms: 4,
       active:   true,

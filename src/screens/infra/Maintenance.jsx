@@ -27,6 +27,14 @@ const ITEMS = [
     path: '/owner/maintenance/schema',
   },
   {
+    icon: '📊',
+    bg: 'rgba(133,183,235,0.08)',
+    arrow: '#85B7EB',
+    title: 'Tenant usage',
+    sub: 'Rows and document bytes per host · what each tenant is storing in the shared database',
+    path: '/owner/maintenance/usage',
+  },
+  {
     icon: '🔔',
     bg: 'rgba(200,144,58,0.08)',
     arrow: '#C8903A',

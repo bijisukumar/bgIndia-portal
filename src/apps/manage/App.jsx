@@ -51,6 +51,7 @@ import TestRunner        from '../../screens/infra/TestRunner'
 import D1Explorer        from '../../screens/infra/D1Explorer'
 import Maintenance       from '../../screens/infra/Maintenance'
 import SchemaValidation  from '../../screens/infra/SchemaValidation'
+import TenantUsage      from '../../screens/infra/TenantUsage'
 import PlatformErrorLog  from '../../screens/infra/PlatformErrorLog'
 
 function ProtectedRoutes() {
@@ -124,6 +125,7 @@ function ProtectedRoutes() {
         <Route path="/test"                   element={<TestRunner />} />
         <Route path="/owner/maintenance"      element={<Maintenance />} />
         <Route path="/owner/maintenance/schema" element={<SchemaValidation />} />
+        <Route path="/owner/maintenance/usage"  element={<TenantUsage />} />
         <Route path="/owner/marketing"            element={<MarketingCampaigns />} />
         <Route path="/owner/villa/agent-links"    element={<AgentLinks />} />
         <Route path="/owner/villa/flexibility"   element={<FlexRequests />} />

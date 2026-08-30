@@ -168,6 +168,16 @@ export const CONFIG = {
   },
 
   guestMessages: {
+    reviewRequest: {
+      template:
+`Hi {firstName}, thank you for staying with us at {villaName}!
+
+If you have a moment, a short review on {reviewPlatform} would mean a lot.
+
+{reviewLink}Thank you.`,
+      platforms: { airbnb: 'Airbnb', default: 'Google' },
+      links: { default: '' },
+    },
     hostIntro: {
       template:
 `Namaskaram {firstName}! 🙏

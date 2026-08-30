@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { buildReviewRequestWaLink } from '../../utils/guestMessages'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -101,6 +102,11 @@ export default function CheckIn() {
   const [futureGuests, setFutureGuests] = useState([])
   const [selected, setSelected] = useState(null)
   const [tab,      setTab]      = useState('checkin')  // 'checkin' | 'inhouse'
+
+  // Held after a check-out so the review prompt can appear before the guest
+  // drops off the list. The best review is written in the car, not the next
+  // day — this is the only moment staff still have their attention.
+  const [justCheckedOut, setJustCheckedOut] = useState(null)
   // One entry per car — most bookings have one, but a family can arrive in
   // 2-3 vehicles and every one of them needs to be on record. Each entry
   // carries its own OCR state since each plate photo is read independently.
@@ -274,6 +280,7 @@ export default function CheckIn() {
       await api.checkOut({ stayId: selected.stay_id })
       showToast('✅ Check-out complete! Raman commission recorded.')
       setConfirmingCheckout(false)
+      setJustCheckedOut(selected)   // keep it on screen for the review prompt
       setSelected(null)
       await loadStays()
     } catch(e) { showToast('Failed: '+e.message,'error') }
@@ -293,6 +300,42 @@ export default function CheckIn() {
         </div>
         <div style={{width:34}}/>
       </div>
+
+      {justCheckedOut && (() => {
+        const wa = buildReviewRequestWaLink(justCheckedOut)
+        const first = (justCheckedOut.guest_name || '').split(' ')[0]
+        return (
+          <div style={{margin:'12px 14px',padding:'14px 16px',borderRadius:12,
+            background:'rgba(52,168,83,0.08)',border:'1px solid rgba(52,168,83,0.35)'}}>
+            <div style={{fontWeight:700,fontSize:'0.95rem',marginBottom:6}}>
+              {first} has checked out
+            </div>
+            <div style={{fontSize:'0.82rem',color:'var(--text-dim)',lineHeight:1.6,marginBottom:12}}>
+              Ask for the review now, while they are still at the gate or just
+              setting off — it is the best chance you will get.
+            </div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {wa ? (
+                <a href={wa} target="_blank" rel="noreferrer"
+                  onClick={() => { api.markReviewChased({ stayId: justCheckedOut.stay_id }).catch(() => {}) }}
+                  style={{flex:1,minWidth:180,textAlign:'center',padding:'11px 14px',borderRadius:10,
+                    background:'#25D366',color:'#062b13',fontWeight:800,fontSize:'0.9rem',textDecoration:'none'}}>
+                  Request review on WhatsApp
+                </a>
+              ) : (
+                <div style={{flex:1,minWidth:180,fontSize:'0.8rem',color:'var(--text-dim)'}}>
+                  No WhatsApp number on this booking.
+                </div>
+              )}
+              <button onClick={() => setJustCheckedOut(null)}
+                style={{padding:'11px 16px',borderRadius:10,background:'transparent',
+                  border:'1px solid var(--border-dim)',color:'var(--text-dim)',fontSize:'0.85rem',cursor:'pointer'}}>
+                Done
+              </button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Tabs */}
       <div style={{display:'flex',background:'var(--dark-card)',borderBottom:'1px solid var(--border-dim)',flexShrink:0}}>

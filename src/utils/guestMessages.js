@@ -184,3 +184,40 @@ export function buildFarewellWaLink(stay = {}) {
   if (!msg) return null
   return waLink(phone, msg)
 }
+
+// ── REVIEW REQUEST ────────────────────────────────────────────────────────
+// Deliberately available the moment a guest checks out, not the next day.
+// A guest writes their best review from the car; by tomorrow the stay has
+// blurred into the drive home. Both the owner and the staff member who did
+// the check-out can send it.
+//
+// The platform follows the booking channel — asking an Airbnb guest for a
+// Google review sends them somewhere they have no booking.
+export function buildReviewRequestMessage(stay = {}) {
+  const cfg = CONFIG.guestMessages?.reviewRequest
+  if (!cfg?.template) return null   // same runtime-config fragility as the rest
+
+  const src = String(stay.source || '').toLowerCase()
+  const platforms = cfg.platforms || {}
+  const links     = cfg.links || {}
+  const reviewPlatform = platforms[src] || platforms.default || 'Google'
+  const rawLink        = links[src] || links.default || ''
+
+  return renderTemplate(cfg.template, {
+    firstName: ((stay.guest_name || '').trim().split(/\s+/)[0]) || 'there',
+    // The villa's guest-facing name, not CONFIG.brandName — that is the
+    // internal portal brand ("Guruvayur Estates") which no guest recognises.
+    villaName: villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || '',
+    reviewPlatform,
+    // Blank when unset so the message never ends on a dangling label.
+    reviewLink: rawLink ? `${rawLink}\n\n` : '',
+  })
+}
+
+export function buildReviewRequestWaLink(stay = {}) {
+  const phone = stay.guest_phone || stay.phone
+  if (!phone) return null
+  const msg = buildReviewRequestMessage(stay)
+  if (!msg) return null
+  return waLink(phone, msg)
+}

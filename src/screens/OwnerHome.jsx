@@ -4,7 +4,7 @@ import { CONFIG } from '../config'
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { parseLocalDate, fmtDate } from '../utils/dates'
-import { waNumber } from '../utils/guestMessages'
+import { waNumber, buildReviewRequestWaLink } from '../utils/guestMessages'
 import { channelLabel, channelPillStyle } from '../utils/channel'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
@@ -713,15 +713,14 @@ function ReviewChaseBlock() {
     catch { return d }
   }
 
-  function waLink(phone, guestName) {
+  function waLink(phone, guestName, source) {
     // Shared normaliser — also strips the domestic trunk 0 that guests
     // routinely type, which used to produce a dead wa.me link.
     const num = waNumber(phone)
     if (!num) return null
-    const msg   = encodeURIComponent(
-      `Hi ${(guestName || '').split(' ')[0]}, thank you for staying with us at Luxury Villas of Guruvayur! 🙏 We hope you had a wonderful experience. If you have a moment, we'd really appreciate a review on Airbnb — it means a lot to us and helps future guests. Thank you!`
-    )
-    return `https://wa.me/${num}?text=${msg}`
+    // Shared builder. This message was hardcoded here — it named one villa
+    // and always pointed at Airbnb regardless of how the guest booked.
+    return buildReviewRequestWaLink({ guest_phone: phone, guest_name: guestName, source }) || null
   }
 
   const autoCloseable = items.filter(i => i.autoCloseReady)
@@ -823,7 +822,7 @@ function ReviewChaseBlock() {
                   {/* WhatsApp nudge */}
                   {item.phone && (
                     <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                      <a href={waLink(item.phone, item.guestName)} target="_blank" rel="noreferrer"
+                      <a href={waLink(item.phone, item.guestName, item.source)} target="_blank" rel="noreferrer"
                         onClick={() => handleChased(item.stayId)}
                         style={{ flex: 1, padding: '10px', borderRadius: '10px', textAlign: 'center',
                           background: 'rgba(37,211,102,0.12)', border: '1px solid rgba(37,211,102,0.3)',

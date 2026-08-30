@@ -292,6 +292,29 @@ export const CONFIG = {
   },
 
   guestMessages: {
+    // Sent the moment the guest leaves, while the stay is still fresh — the
+    // best review is written in the car, not three days later. Channel-aware
+    // because an Airbnb guest reviews on Airbnb and a direct guest on Google.
+    reviewRequest: {
+      template:
+`Hi {firstName}, thank you for staying with us at {villaName}! 🙏
+
+We hope you had a wonderful stay. If you have a moment while it's still fresh, a short review on {reviewPlatform} would mean a great deal to us — it genuinely helps other families choose us.
+
+{reviewLink}Thank you, and we hope to host you again.`,
+      // Where each channel's guests should leave the review.
+      platforms: {
+        airbnb:  'Airbnb',
+        booking: 'Booking.com',
+        agoda:   'Agoda',
+        default: 'Google',
+      },
+      // Optional direct link per channel, blank when the app's own flow is
+      // easier than a URL (Airbnb prompts inside its app anyway).
+      links: {
+        default: '',
+      },
+    },
     // Owner's personal welcome, sent any time before check-in. Villa/owner
     // names are literal here (not placeholders) since this whole object is
     // already per-host — only per-stay values are substituted.

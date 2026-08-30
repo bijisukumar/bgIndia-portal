@@ -107,6 +107,10 @@ export default function CheckIn() {
   // drops off the list. The best review is written in the car, not the next
   // day — this is the only moment staff still have their attention.
   const [justCheckedOut, setJustCheckedOut] = useState(null)
+  const [settleLines, setSettleLines] = useState([{ label: '', amount: '' }])
+  const [settleNote, setSettleNote]   = useState('')
+  const [settling, setSettling]       = useState(false)
+  const [settled, setSettled]         = useState(false)
   // One entry per car — most bookings have one, but a family can arrive in
   // 2-3 vehicles and every one of them needs to be on record. Each entry
   // carries its own OCR state since each plate photo is read independently.
@@ -273,6 +277,27 @@ export default function CheckIn() {
   }
 
   // Complete checkout (ready_for_checkout → checked_out)
+  // Records what the guest consumed and marks the stay settled. Does not
+  // close it — the owner does that after the review, and closing here would
+  // drop the stay out of their review chase list.
+  async function handleSettle() {
+    if (!justCheckedOut) return
+    const lines = settleLines
+      .map(l => ({ label: (l.label || '').trim(), amount: parseFloat(l.amount) || 0 }))
+      .filter(l => l.label && l.amount > 0)
+    setSettling(true)
+    try {
+      const res = await api.settleStay({ stayId: justCheckedOut.stay_id, lines, note: settleNote })
+      setSettled(true)
+      showToast(lines.length
+        ? `Settled — ${lines.length} charge${lines.length === 1 ? '' : 's'} added, extras now ₹${res.extraCharges}`
+        : 'Settled — no extra charges')
+      await loadStays()
+    } catch (e) { showToast('Could not settle: ' + e.message, 'error') }
+    finally { setSettling(false) }
+  }
+  
+
   async function handleCompleteCheckout() {
     if (!selected) return
     setSaving(true)
@@ -281,6 +306,7 @@ export default function CheckIn() {
       showToast('✅ Check-out complete! Raman commission recorded.')
       setConfirmingCheckout(false)
       setJustCheckedOut(selected)   // keep it on screen for the review prompt
+      setSettleLines([{ label: '', amount: '' }]); setSettleNote(''); setSettled(false)
       setSelected(null)
       await loadStays()
     } catch(e) { showToast('Failed: '+e.message,'error') }
@@ -314,6 +340,46 @@ export default function CheckIn() {
               Ask for the review now, while they are still at the gate or just
               setting off — it is the best chance you will get.
             </div>
+            
+            {!settled && (
+              <div style={{marginBottom:12,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+                <div style={{fontSize:'0.78rem',fontWeight:700,color:'var(--text-dim)',marginBottom:8}}>
+                  ANYTHING TO CHARGE? <span style={{fontWeight:400}}>— leave blank if nothing</span>
+                </div>
+                {settleLines.map((ln, idx) => (
+                  <div key={idx} style={{display:'flex',gap:8,marginBottom:8}}>
+                    <input value={ln.label} placeholder="e.g. Extra bed, Laundry"
+                      onChange={e => setSettleLines(p => p.map((x,i2) => i2===idx ? {...x, label:e.target.value} : x))}
+                      style={{flex:2,minWidth:0,fontSize:16,padding:'9px 10px',borderRadius:8,
+                        background:'rgba(255,255,255,0.05)',border:'1px solid var(--border-dim)',color:'var(--text)'}} />
+                    <input value={ln.amount} placeholder="₹" inputMode="decimal"
+                      onChange={e => setSettleLines(p => p.map((x,i2) => i2===idx ? {...x, amount:e.target.value} : x))}
+                      style={{flex:1,minWidth:80,fontSize:16,padding:'9px 10px',borderRadius:8,
+                        background:'rgba(255,255,255,0.05)',border:'1px solid var(--border-dim)',color:'var(--text)'}} />
+                  </div>
+                ))}
+                <button type="button" onClick={() => setSettleLines(p => [...p, { label:'', amount:'' }])}
+                  style={{background:'none',border:'none',color:'var(--gold)',fontSize:'0.8rem',
+                    padding:0,cursor:'pointer',marginBottom:10}}>
+                  + another charge
+                </button>
+                <input value={settleNote} placeholder="Note for the owner (optional)"
+                  onChange={e => setSettleNote(e.target.value)}
+                  style={{width:'100%',fontSize:16,padding:'9px 10px',borderRadius:8,marginBottom:10,
+                    background:'rgba(255,255,255,0.05)',border:'1px solid var(--border-dim)',color:'var(--text)'}} />
+                <button onClick={handleSettle} disabled={settling}
+                  style={{width:'100%',padding:'11px',borderRadius:10,fontWeight:800,fontSize:'0.9rem',
+                    background:settling?'rgba(200,144,58,0.4)':'var(--gold)',color:'#111',
+                    border:'none',cursor:settling?'default':'pointer'}}>
+                  {settling ? 'Saving…' : 'Save charges & mark settled'}
+                </button>
+              </div>
+            )}
+            {settled && (
+              <div style={{marginBottom:12,fontSize:'0.82rem',color:'#58C07C',fontWeight:600}}>
+                Settled — the owner will close this stay.
+              </div>
+            )}
             <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
               {wa ? (
                 <a href={wa} target="_blank" rel="noreferrer"

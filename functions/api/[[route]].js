@@ -7143,6 +7143,69 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, guestId: guestId || null, guestName, backfilledGuestId } })
       }
 
+      // ── SETTLE A STAY (staff) ─────────────────────────────────
+      // After check-out the caretaker records anything the guest consumed
+      // and marks the stay settled, so the owner knows the numbers are
+      // final before closing it.
+      //
+      // Deliberately does NOT change status. The review chase list filters
+      // on status = 'checked_out', so closing here would silently remove
+      // the owner's follow-up for that guest.
+      //
+      // Deliberately does NOT touch gross or net either. Those are the
+      // owner's to finalise in Complete Booking — staff record what was
+      // consumed, the owner decides what it is worth.
+      if (action === 'settleStay') {
+        const { stayId, lines, note } = body
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+
+        const stay = await DB.prepare(
+          `SELECT villa_id, status, extra_lines, extra_charges FROM stayvibe_stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        if (stay.status !== 'checked_out') {
+          return err('Only a checked-out stay can be settled', 400)
+        }
+
+        // Append rather than replace: the owner may already have entered
+        // lines of their own, and staff must not wipe them.
+        let existing = []
+        try { existing = JSON.parse(stay.extra_lines || '[]') } catch { existing = [] }
+        if (!Array.isArray(existing)) existing = []
+
+        const clean = (Array.isArray(lines) ? lines : [])
+          .map(l => ({
+            label:  String(l?.label ?? '').trim().slice(0, 60),
+            amount: Math.round((Number(l?.amount) || 0) * 100) / 100,
+            by:     'staff',
+          }))
+          .filter(l => l.label && l.amount > 0)
+
+        const merged = existing.concat(clean)
+        const total  = merged.reduce((n, l) => n + (Number(l.amount) || 0), 0)
+
+        await DB.prepare(
+          `UPDATE stayvibe_stays
+              SET extra_lines = ?, extra_charges = ?, updated_by = ?, updated_at = ?
+            WHERE stay_id = ?`
+        ).bind(JSON.stringify(merged), Math.round(total * 100) / 100, actor, now(), stayId).run()
+
+        await DB.prepare(
+          `INSERT INTO stayvibe_stay_ext (stay_id, villa_id, settled_at, settled_by, settle_note)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(stay_id) DO UPDATE SET
+             settled_at = excluded.settled_at,
+             settled_by = excluded.settled_by,
+             settle_note = excluded.settle_note,
+             updated_at = datetime('now')`
+        ).bind(stayId, stay.villa_id, now(), actor, String(note || '').trim().slice(0, 300) || null).run()
+
+        return json({ success: true, data: {
+          stayId, linesAdded: clean.length, extraCharges: Math.round(total * 100) / 100,
+        }})
+      }
+
       if (action === 'closeStayWithReview') {
         const { stayId, rating, closedReason } = body
         if (!stayId) return err('stayId required')

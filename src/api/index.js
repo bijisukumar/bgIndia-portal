@@ -301,6 +301,7 @@ export const api = {
   getReviewChaseList:   ()       => get('getReviewChaseList'),
   markReviewChased:     (data)   => post('markReviewChased', data),
   closeStayWithReview:  (data)   => post('closeStayWithReview', data),
+  settleStay:           (data)   => post('settleStay', data),
 
   // ── INVENTORY ────────────────────────────────────────────
   saveInventoryPrices:         (data)   => post('saveInventoryPrices', data),

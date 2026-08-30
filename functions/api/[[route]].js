@@ -5444,6 +5444,10 @@ export async function onRequest(ctx) {
       // point it at the stay that already exists.
       if (action === 'linkEnquiryToExistingStay') {
         const { enquiryId, stayId } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!enquiryId || !stayId) return err('enquiryId and stayId required')
         const enquiry = await DB.prepare(`SELECT villa_id, final_offer_amount, quote_amount, discount_amount, extra_charges, extra_lines, nights FROM stayvibe_enquiries WHERE enquiry_id = ?`).bind(enquiryId).first()
         if (!enquiry) return err('Enquiry not found', 404)
@@ -5602,6 +5606,10 @@ export async function onRequest(ctx) {
       // commission is left untouched — money is never silently erased.
       if (action === 'resolveStay') {
         const stayId = body.stayId
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         const reason = (body.reason || '').trim() || 'resolved'
         const newStatus = body.status === 'cancelled' ? 'cancelled' : 'void'
@@ -5628,6 +5636,10 @@ export async function onRequest(ctx) {
       // (marks it resolved) rather than erasing history. Requires confirm:true.
       if (action === 'deleteStay') {
         const stayId = body.stayId
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         if (body.confirm !== true && body.confirm !== 'true') return err('confirm:true required for hard delete')
         const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
@@ -6046,6 +6058,10 @@ export async function onRequest(ctx) {
 
       if (action === 'confirmCheckIn') {
         let stayId = body.stayId
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) {
           const found = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName).first()
           stayId = found?.stay_id
@@ -6135,6 +6151,10 @@ export async function onRequest(ctx) {
 
       if (action === 'checkOut') {
         const { stayId } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         await DB.prepare(`UPDATE stayvibe_stays SET status = 'checked_out', updated_by = ?, checked_out_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, actor, now(), stayId).run()
         // This, not updateStayStatus, is the button Raman actually presses —
         // so this is where the real departure time has to be captured.
@@ -6475,6 +6495,10 @@ export async function onRequest(ctx) {
         }
         assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
         const stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, checkin_date, checkout_date, nights, gross, commission_pct, commission_amt, net, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, (body.channel||'Direct').toLowerCase().replace('.','_').replace(' ','_'), body.guestName, body.checkInDate, body.checkOutDate, body.nights || 1, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, actor, actor, now(), now()).run()
         // This manual-entry path creates a stay directly in 'closed' state, bypassing
         // the normal checked_out transition where Raman's commission is normally
@@ -6543,6 +6567,10 @@ export async function onRequest(ctx) {
 
       if (action === 'updateStayGuestPhone') {
         const { stayId, phone } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         if (!phone || !phone.trim()) return err('phone required')
         // Strip invisible bidi/zero-width formatting characters that come
@@ -6564,6 +6592,10 @@ export async function onRequest(ctx) {
       // other's already-saved value.
       if (action === 'updateStayCheckinTimes') {
         const { stayId, earlyCheckinTime, lateCheckoutTime } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         await DB.prepare(`UPDATE stayvibe_stays SET early_checkin_time = ?, late_checkout_time = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
           .bind(earlyCheckinTime || null, lateCheckoutTime || null, actor, now(), stayId).run()
@@ -6576,6 +6608,10 @@ export async function onRequest(ctx) {
       // cover a guest who checked out unexpectedly before the autosend ran.
       if (action === 'sendCheckoutEmailNow') {
         const { stayId } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
@@ -6895,6 +6931,10 @@ export async function onRequest(ctx) {
 
       if (action === 'updateStayLocation') {
         const { stayId, homeAddress, city, state, country, fromCity, phone, email } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         await DB.prepare(`UPDATE stayvibe_stays SET home_address = ?, city = ?, state = ?, country = ?, from_city = ?, guest_phone = COALESCE(NULLIF(guest_phone,''), ?), guest_email = COALESCE(NULLIF(guest_email,''), ?), updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(homeAddress||null, city||null, state||null, country||'India', fromCity||null, normalizeStoredPhone(phone), email||null, now(), stayId).run()
         return json({ success: true, data: { stayId, city, state, country } })
@@ -6918,6 +6958,10 @@ export async function onRequest(ctx) {
 
       if (action === 'saveReview') {
         const { stayId, rating, source, reviewDate, reviewText, reviewNote, highlights } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         await DB.prepare(`UPDATE stayvibe_stays SET review_rating = ?, review_source = ?, review_date = ?, review_text = ?, review_note = ?, review_highlights = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(rating || 0, source || 'airbnb', reviewDate || now(), reviewText || null, reviewNote || null, highlights || null, 'auto', now(), stayId).run()
         return json({ success: true, data: { stayId, rating, source } })
@@ -7004,6 +7048,10 @@ export async function onRequest(ctx) {
       // there's no product need yet for multiple partial refunds per stay.
       if (action === 'recordRefund') {
         const { stayId, amount, reason } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         const amt = parseFloat(amount)
         if (isNaN(amt) || amt < 0) return err('A valid refund amount is required')
@@ -7021,6 +7069,10 @@ export async function onRequest(ctx) {
 
       if (action === 'markReviewChased') {
         const { stayId } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         await DB.prepare(
           `UPDATE stayvibe_stays SET review_chased_at = ?, review_chase_count = COALESCE(review_chase_count, 0) + 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
@@ -7229,6 +7281,10 @@ export async function onRequest(ctx) {
 
       if (action === 'closeStayWithReview') {
         const { stayId, rating, closedReason } = body
+        // Confirm the stay belongs to this tenant before touching it. A no-op
+        // when the id is newly generated — assertRecordAccess ignores a record
+        // that does not exist yet, leaving the handler's own checks in charge.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
         const updates = [`status = 'closed'`, `updated_by = ?`, `updated_at = ?`]
         const binds = [actor, now()]

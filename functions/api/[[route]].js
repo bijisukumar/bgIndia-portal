@@ -458,6 +458,8 @@ function parseIcsEvents(text) {
 async function syncIcalFeedsForVillas(DB, villaIdFilter) {
   const { results: feeds } = await (villaIdFilter
     ? DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1 AND villa_id = ?`).bind(villaIdFilter)
+    // tenant-scope-exempt: the cron caller passes no filter on purpose - it
+    // syncs every tenant's feeds, and each row carries its own villa_id.
     : DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1`)
   ).all()
   const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ')
@@ -630,6 +632,8 @@ async function writeFormCGuests(DB, stayId, villaId, guests) {
       if (c === 'docs_later') return v ? 1 : 0
       return (v === undefined || v === '') ? null : v
     })]
+    // tenant-scope-exempt: cols is built above as ['stay_id','villa_id',...COLS],
+    // so villa_id is always written - the checker just cannot see through the join()
     await DB.prepare(
       `INSERT INTO stayvibe_stay_kyc (${cols.join(', ')})
        VALUES (${cols.map(() => '?').join(',')})
@@ -706,21 +710,23 @@ async function syncStayLedger(DB, stayId) {
 // guest the same way instead of forking its own logic. Returns guest_id, or
 // null when there's nothing to match on (no phone and no email) — the same
 // conservative behavior as before, so we never create blank guest records.
-async function resolveGuest(DB, { name, phone, email, actor = 'auto' }) {
+async function resolveGuest(DB, { name, phone, email, villaId, actor = 'auto' }) {
   const normPhone = (phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
   const normEmail = (email || '').trim().toLowerCase()
   if (!normPhone && !normEmail) return null
+  if (!villaId) throw new Error('resolveGuest requires a villaId')
   const existing = await DB.prepare(
-    `SELECT guest_id FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
-  ).bind(normPhone, normEmail).first()
+    `SELECT guest_id FROM stayvibe_guests
+      WHERE villa_id = ? AND ((phone = ? AND phone != '') OR (email = ? AND email != '')) LIMIT 1`
+  ).bind(villaId, normPhone, normEmail).first()
   if (existing) {
     await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = datetime('now'), updated_by = ?, updated_at = datetime('now') WHERE guest_id = ?`)
       .bind(actor, existing.guest_id).run()
     return existing.guest_id
   }
   const guestId = genId('GST')
-  await DB.prepare(`INSERT INTO stayvibe_guests (guest_id, name, phone, email, created_by, updated_by) VALUES (?,?,?,?,?,?)`)
-    .bind(guestId, name || 'Unknown', normPhone, normEmail, actor, actor).run()
+  await DB.prepare(`INSERT INTO stayvibe_guests (guest_id, villa_id, name, phone, email, created_by, updated_by) VALUES (?,?,?,?,?,?,?)`)
+    .bind(guestId, villaId, name || 'Unknown', normPhone, normEmail, actor, actor).run()
   return guestId
 }
 
@@ -1009,8 +1015,8 @@ async function syncEnquiryOnStayCancel(DB, stayId, actor, reason) {
     await DB.batch([
       DB.prepare(`UPDATE stayvibe_enquiries SET status = 'cancelled', updated_by = ?, updated_at = datetime('now') WHERE enquiry_id = ?`)
         .bind(actor, enquiry.enquiry_id),
-      DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by) VALUES (?, ?, 'status_change', ?, ?)`)
-        .bind(genId('COMM'), enquiry.enquiry_id, `Linked stay ${stayId} was cancelled: ${reason || 'no reason given'}`, actor),
+      DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'status_change', ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))`)
+        .bind(genId('COMM'), enquiry.enquiry_id, `Linked stay ${stayId} was cancelled: ${reason || 'no reason given'}`, actor, enquiry.enquiry_id),
     ])
   } catch (e) { console.error('syncEnquiryOnStayCancel failed:', e?.message || e) }
 }
@@ -1265,7 +1271,7 @@ export async function onRequest(ctx) {
 
       const submittedAt = now()
       let stayId = existingStayId
-      const guestId = await resolveGuest(DB, { name: safeGuestName, phone, email })
+      const guestId = await resolveGuest(DB, { name: safeGuestName, phone, email, villaId: DEFAULT_VILLA_ID })
       let reviewNote = null
       let dupOtherStay = null
 
@@ -2063,6 +2069,8 @@ export async function onRequest(ctx) {
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
 
     const today = new Date().toISOString().slice(0, 10)
+    // tenant-scope-exempt: daily cron behind CRON_SECRET with no user session.
+    // It must sweep every tenant; each stay is emailed to its own owner.
     const { results: due } = await DB.prepare(`
       SELECT * FROM stayvibe_stays
       WHERE checkout_date = ?
@@ -2522,6 +2530,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getGuests') {
+        const gg = villaScope(payload, url.searchParams.get('villaId'))
         const { results } = await DB.prepare(
           `SELECT guest_name, guest_phone, guest_email, source,
             MAX(checkin_date)   as last_stay,
@@ -2538,9 +2547,9 @@ export async function onRequest(ctx) {
             MAX(state)          as state,
             MAX(country)        as country,
             GROUP_CONCAT(DISTINCT source) as all_sources
-           FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')
+           FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')${gg.sql}
            GROUP BY guest_name ORDER BY last_stay DESC`
-        ).all()
+        ).bind(...gg.binds).all()
         const guests = results.map(r => ({
           name:             r.guest_name,
           phone:            r.guest_phone,
@@ -2608,12 +2617,12 @@ export async function onRequest(ctx) {
           const { results: kitchenRows } = isAllYears
             ? await DB.prepare(
                 `SELECT strftime('%m', created_at) as month, SUM(total) as total
-                 FROM stayvibe_incidentals GROUP BY month`
-              ).all()
+                 FROM stayvibe_incidentals WHERE villa_id = ? GROUP BY month`
+              ).bind(villaId).all()
             : await DB.prepare(
                 `SELECT strftime('%m', created_at) as month, SUM(total) as total
-                 FROM stayvibe_incidentals WHERE strftime('%Y', created_at) = ? GROUP BY month`
-              ).bind(String(year)).all()
+                 FROM stayvibe_incidentals WHERE villa_id = ? AND strftime('%Y', created_at) = ? GROUP BY month`
+              ).bind(villaId, String(year)).all()
           kitchenByMonth = Object.fromEntries((kitchenRows||[]).map(r=>[parseInt(r.month), r.total||0]))
         } catch(e) {}
 
@@ -2630,9 +2639,10 @@ export async function onRequest(ctx) {
                        SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
                 FROM stayvibe_incidentals si
                 LEFT JOIN stayvibe_inventory i ON i.item_id = si.inv_item_id
+                WHERE si.villa_id = ?
                 GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
                 ORDER BY revenue DESC
-              `).all()
+              `).bind(villaId).all()
             : await DB.prepare(`
                 SELECT si.inv_item_id as item_id,
                        COALESCE(i.name, si.name) as name,
@@ -2641,10 +2651,10 @@ export async function onRequest(ctx) {
                        SUM(si.qty * COALESCE(i.cost_price, 0)) as cost
                 FROM stayvibe_incidentals si
                 LEFT JOIN stayvibe_inventory i ON i.item_id = si.inv_item_id
-                WHERE strftime('%Y', si.created_at) = ?
+                WHERE si.villa_id = ? AND strftime('%Y', si.created_at) = ?
                 GROUP BY si.inv_item_id, COALESCE(i.name, si.name)
                 ORDER BY revenue DESC
-              `).bind(String(year)).all()
+              `).bind(villaId, String(year)).all()
           const items = (itemRows||[]).map(r => ({
             itemId: r.item_id, name: r.name, qtySold: r.qty_sold || 0,
             revenue: r.revenue || 0, cost: r.cost || 0, profit: (r.revenue||0) - (r.cost||0),
@@ -2731,8 +2741,8 @@ export async function onRequest(ctx) {
           ;(lg || []).forEach(r => { t[r.item_type] = r.total || 0 })
           const r2 = x => Math.round((Number(x) || 0) * 100) / 100
           const staffRow = isAllYears
-            ? await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions`).first()
-            : await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions WHERE strftime('%Y', checkin_date) = ?`).bind(String(year)).first()
+            ? await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions WHERE villa_id = ?`).bind(villaId).first()
+            : await DB.prepare(`SELECT ROUND(SUM(commission),2) AS total FROM stayvibe_manager_commissions WHERE villa_id = ? AND strftime('%Y', checkin_date) = ?`).bind(villaId, String(year)).first()
           const expRow   = isAllYears
             ? await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM stayvibe_villa_expenses WHERE villa_id = ?`).bind(villaId).first()
             : await DB.prepare(`SELECT ROUND(SUM(amount),2) AS total FROM stayvibe_villa_expenses WHERE villa_id = ? AND strftime('%Y', date) = ?`).bind(villaId, String(year)).first()
@@ -2885,11 +2895,14 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRamanUnpaid') {
+        // Commission rows carry their own villa_id now, so these reports no
+        // longer sum every tenant's manager pay into one figure.
+        const rc_s = villaScope(payload, url.searchParams.get('villaId') || null, 'rc.villa_id')
         const { results } = await DB.prepare(
           `SELECT rc.*, COALESCE(s.review_rating, 0) as review_rating
            FROM stayvibe_manager_commissions rc LEFT JOIN stayvibe_stays s ON s.stay_id = rc.stay_id
-           WHERE rc.is_paid = 0 ORDER BY rc.checkin_date ASC`
-        ).all()
+           WHERE rc.is_paid = 0${rc_s.sql} ORDER BY rc.checkin_date ASC`
+        ).bind(...rc_s.binds).all()
         const totalUnpaid = results.reduce((s, r) => s + (r.commission || 0), 0)
         const quarters = {}
         results.forEach(r => {
@@ -2906,10 +2919,13 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRamanHistory') {
+        // Commission rows carry their own villa_id now, so these reports no
+        // longer sum every tenant's manager pay into one figure.
+        const rs = villaScope(payload, url.searchParams.get('villaId') || null)
         const { results } = await DB.prepare(
           `SELECT paid_date, COUNT(*) as stays, SUM(commission) as total
-           FROM stayvibe_manager_commissions WHERE is_paid = 1 GROUP BY paid_date ORDER BY paid_date DESC`
-        ).all()
+           FROM stayvibe_manager_commissions WHERE is_paid = 1${rs.sql} GROUP BY paid_date ORDER BY paid_date DESC`
+        ).bind(...rs.binds).all()
         return json({ success: true, data: results })
       }
 
@@ -2927,21 +2943,23 @@ export async function onRequest(ctx) {
         // Year/month reporting for owner — replaces flat history laundry-list.
         // Also detects "missed" guests: checked_out stays with NO matching
         // raman_commissions row (e.g. commission was never auto-created).
+        const rs = villaScope(payload, url.searchParams.get('villaId') || null)
+        const ss = villaScope(payload, url.searchParams.get('villaId') || null, 's.villa_id')
         const { results: paidRows } = await DB.prepare(
           `SELECT comm_id, guest_name, checkin_date, nights, commission, paid_date
-           FROM stayvibe_manager_commissions WHERE is_paid = 1 ORDER BY checkin_date ASC`
-        ).all()
+           FROM stayvibe_manager_commissions WHERE is_paid = 1${rs.sql} ORDER BY checkin_date ASC`
+        ).bind(...rs.binds).all()
         const { results: unpaidRows } = await DB.prepare(
           `SELECT comm_id, guest_name, checkin_date, nights, commission
-           FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
-        ).all()
+           FROM stayvibe_manager_commissions WHERE is_paid = 0${rs.sql} ORDER BY checkin_date ASC`
+        ).bind(...rs.binds).all()
         const { results: missedRows } = await DB.prepare(
           `SELECT s.stay_id, s.guest_name, s.checkin_date, s.nights
            FROM stayvibe_stays s
            LEFT JOIN stayvibe_manager_commissions rc ON rc.stay_id = s.stay_id
-           WHERE s.status IN ('checked_out','closed') AND rc.comm_id IS NULL
+           WHERE s.status IN ('checked_out','closed') AND rc.comm_id IS NULL${ss.sql}
            ORDER BY s.checkin_date ASC`
-        ).all()
+        ).bind(...ss.binds).all()
 
         // Group paid + unpaid together by year -> month, count guests, sum totals
         const byYearMonth = {}
@@ -3010,13 +3028,16 @@ export async function onRequest(ctx) {
 
       if (action === 'getRamanDashboard') {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        // Commission rows carry their own villa_id now, so these reports no
+        // longer sum every tenant's manager pay into one figure.
+        const rs = villaScope(payload, url.searchParams.get('villaId') || null)
         const { results: byYear } = await DB.prepare(
           `SELECT strftime('%Y', COALESCE(paid_date, created_at)) as year, SUM(commission) as total_paid, COUNT(*) as stays_paid
-           FROM stayvibe_manager_commissions WHERE is_paid = 1 GROUP BY year ORDER BY year DESC`
-        ).all()
+           FROM stayvibe_manager_commissions WHERE is_paid = 1${rs.sql} GROUP BY year ORDER BY year DESC`
+        ).bind(...rs.binds).all()
         const { results: unpaidRows } = await DB.prepare(
-          `SELECT comm_id, guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date ASC`
-        ).all()
+          `SELECT comm_id, guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0${rs.sql} ORDER BY checkin_date ASC`
+        ).bind(...rs.binds).all()
 
         const totalUnpaid = unpaidRows.reduce((s,r) => s + (r.commission||0), 0)
         const unpaidByQ = {}
@@ -3238,23 +3259,31 @@ export async function onRequest(ctx) {
 
       if (action === 'runQuery') {
         const key = url.searchParams.get('key')
+        // Every preset here fed a reporting screen with no villa filter at all,
+        // so "total stays" and "top guests" would have counted every tenant on
+        // the platform. Each one now carries the caller's own scope; the
+        // WHERE 1=1 base is what lets villaScope append uniformly.
+        const vs = villaScope(payload, url.searchParams.get('villaId') || null)
         const PRESET_QUERIES = {
-          total_stays:       `SELECT COUNT(*) as total FROM stayvibe_stays`,
-          by_channel:        `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY source ORDER BY total_net DESC`,
-          by_year:           `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as bookings, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY year ORDER BY year DESC`,
-          top_guests:        `SELECT guest_name, COUNT(*) as visits, ROUND(SUM(net),0) as total_spent FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY guest_name HAVING visits > 1 ORDER BY visits DESC LIMIT 10`,
-          recent_5:          `SELECT stay_id, guest_name, checkin_date, source, ROUND(net,0) as net, status FROM stayvibe_stays ORDER BY checkin_date DESC LIMIT 5`,
-          raman_unpaid:      `SELECT guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0 ORDER BY checkin_date DESC`,
-          raman_summary:     `SELECT is_paid, COUNT(*) as count, SUM(commission) as total FROM stayvibe_manager_commissions GROUP BY is_paid`,
-          inventory_stock:   `SELECT name, category, qty_in_stock, sell_price FROM stayvibe_inventory WHERE villa_id = '${DEFAULT_VILLA_ID}' ORDER BY category, name`,
-          low_stock:         `SELECT name, qty_in_stock, sell_price FROM stayvibe_inventory WHERE villa_id = '${DEFAULT_VILLA_ID}' AND qty_in_stock <= 3 ORDER BY qty_in_stock`,
+          total_stays:       `SELECT COUNT(*) as total FROM stayvibe_stays WHERE 1=1${vs.sql}`,
+          by_channel:        `SELECT source, COUNT(*) as bookings, ROUND(SUM(net),0) as total_net FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')${vs.sql} GROUP BY source ORDER BY total_net DESC`,
+          by_year:           `SELECT strftime('%Y', checkin_date) as year, COUNT(*) as bookings, ROUND(SUM(gross),0) as gross, ROUND(SUM(net),0) as net FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')${vs.sql} GROUP BY year ORDER BY year DESC`,
+          top_guests:        `SELECT guest_name, COUNT(*) as visits, ROUND(SUM(net),0) as total_spent FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')${vs.sql} GROUP BY guest_name HAVING visits > 1 ORDER BY visits DESC LIMIT 10`,
+          recent_5:          `SELECT stay_id, guest_name, checkin_date, source, ROUND(net,0) as net, status FROM stayvibe_stays WHERE 1=1${vs.sql} ORDER BY checkin_date DESC LIMIT 5`,
+          raman_unpaid:      `SELECT guest_name, checkin_date, nights, commission FROM stayvibe_manager_commissions WHERE is_paid = 0${vs.sql} ORDER BY checkin_date DESC`,
+          raman_summary:     `SELECT is_paid, COUNT(*) as count, SUM(commission) as total FROM stayvibe_manager_commissions WHERE 1=1${vs.sql} GROUP BY is_paid`,
+          inventory_stock:   `SELECT name, category, qty_in_stock, sell_price FROM stayvibe_inventory WHERE 1=1${vs.sql} ORDER BY category, name`,
+          low_stock:         `SELECT name, qty_in_stock, sell_price FROM stayvibe_inventory WHERE qty_in_stock <= 3${vs.sql} ORDER BY qty_in_stock`,
           rental_ytd:        `SELECT prop_id, SUM(rent+car_parking) as income, SUM(maintenance+electricity+water+property_tax+land_tax) as expense, SUM(net) as net FROM rev360_rental_income WHERE year = strftime('%Y','now') GROUP BY prop_id`,
-          direct_conversion: `SELECT source, COUNT(*) as bookings FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') GROUP BY source`,
-          avg_tariff_year:   `SELECT strftime('%Y', checkin_date) as year, ROUND(AVG(tariff_per_night),0) as avg_tariff, ROUND(AVG(nights),1) as avg_nights FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') AND tariff_per_night > 0 GROUP BY year ORDER BY year DESC`,
+          direct_conversion: `SELECT source, COUNT(*) as bookings FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')${vs.sql} GROUP BY source`,
+          avg_tariff_year:   `SELECT strftime('%Y', checkin_date) as year, ROUND(AVG(tariff_per_night),0) as avg_tariff, ROUND(AVG(nights),1) as avg_nights FROM stayvibe_stays WHERE status NOT IN ('cancelled','void') AND tariff_per_night > 0${vs.sql} GROUP BY year ORDER BY year DESC`,
         }
+        // rental_ytd reads rev360_rental_income, a different product keyed by
+        // prop_id rather than villa_id, so it takes no villa binds.
+        const NO_SCOPE = new Set(['rental_ytd'])
         const sql = PRESET_QUERIES[key]
         if (!sql) return err(`Unknown query key: ${key}`)
-        const { results } = await DB.prepare(sql).all()
+        const { results } = await DB.prepare(sql).bind(...(NO_SCOPE.has(key) ? [] : vs.binds)).all()
         return json({ success: true, data: results, sql })
       }
 
@@ -3278,8 +3307,8 @@ export async function onRequest(ctx) {
         ).bind(villaId).all()
 
         const { results: staleRows } = await DB.prepare(
-          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stayvibe_stays WHERE status NOT IN ('cancelled','void')`
-        ).all()
+          `SELECT COUNT(*) as total, SUM(CASE WHEN from_city IS NULL OR from_city = '' THEN 1 ELSE 0 END) as missing_city, SUM(CASE WHEN state IS NULL OR state = '' THEN 1 ELSE 0 END) as missing_state, SUM(CASE WHEN country IS NULL OR country = '' THEN 1 ELSE 0 END) as missing_country, SUM(CASE WHEN guest_phone IS NULL OR guest_phone = '' THEN 1 ELSE 0 END) as missing_phone, SUM(CASE WHEN guest_email IS NULL OR guest_email = '' THEN 1 ELSE 0 END) as missing_email FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void')`
+        ).bind(villaId).all()
 
         const { results: monthRows } = await DB.prepare(
           `SELECT strftime('%Y', checkin_date) as year, strftime('%m', checkin_date) as month, COALESCE(NULLIF(state,''), COALESCE(NULLIF(country,''),'India')) as region, COUNT(DISTINCT guest_name) as guests, COUNT(*) as bookings, ROUND(SUM(COALESCE(net,0)),0) as revenue FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND from_city IS NOT NULL AND from_city != '' GROUP BY year, month, region ORDER BY year DESC, month ASC`
@@ -3289,7 +3318,8 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getOpenStays') {
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status FROM stayvibe_stays WHERE status IN ('booked','confirmed','docs_uploaded') ORDER BY checkin_date ASC`).all()
+        const os = villaScope(payload, url.searchParams.get('villaId'))
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, drive_folder_id, drive_folder_url, status FROM stayvibe_stays WHERE status IN ('booked','confirmed','docs_uploaded')${os.sql} ORDER BY checkin_date ASC`).bind(...os.binds).all()
         return json({ success: true, data: results.map(r => ({ stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status })) })
       }
 
@@ -3297,9 +3327,10 @@ export async function onRequest(ctx) {
         const guestName   = url.searchParams.get('guestName')   || ''
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
+        const fo = villaScope(payload, url.searchParams.get('villaId'), 'stayvibe_stays.villa_id')
         const { results } = await DB.prepare(
-          `SELECT stayvibe_stays.stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void') ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
-        ).bind(`%${firstName}%`, checkInDate || new Date().toISOString().slice(0,10)).all()
+          `SELECT stayvibe_stays.stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void')${fo.sql} ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
+        ).bind(`%${firstName}%`, ...fo.binds, checkInDate || new Date().toISOString().slice(0,10)).all()
         if (results.length > 0) {
           const r = results[0]
           return json({ success: true, data: { stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, checkoutDate: r.checkout_date, nights: r.nights, adults: r.adults, children: r.children, phone: r.guest_phone, email: r.guest_email, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status, purposeOfVisit: r.purpose_of_visit, modeOfTransport: r.mode_of_transport, vehicleNumber: r.vehicle_number, eta: r.eta, nationality: r.nationality, city: r.city, state: r.state, country: r.country, requestEarlyCheckin: r.request_early_checkin, requestLateCheckout: r.request_late_checkout, requestBreakfast: r.request_breakfast, breakfastChoice: r.breakfast_choice, requestCab: r.request_cab, govtIdType: r.govt_id_type, govtIdNum: r.govt_id_num } })
@@ -3313,7 +3344,8 @@ export async function onRequest(ctx) {
         if (!guestName || !reviewDate) return err('guestName and reviewDate required')
         const windowStart = new Date(reviewDate)
         windowStart.setDate(windowStart.getDate() - 14)
-        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stayvibe_stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled','void') ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate).all()
+        const fr = villaScope(payload, url.searchParams.get('villaId'))
+        const { results } = await DB.prepare(`SELECT stay_id, guest_name, checkout_date FROM stayvibe_stays WHERE guest_name LIKE ? AND checkout_date >= ? AND checkout_date <= ? AND status NOT IN ('cancelled','void')${fr.sql} ORDER BY checkout_date DESC LIMIT 1`).bind(`%${guestName.split(' ')[0]}%`, windowStart.toISOString().slice(0,10), reviewDate, ...fr.binds).all()
         if (results.length > 0) return json({ success: true, data: { stayId: results[0].stay_id, guestName: results[0].guest_name }})
         return json({ success: true, data: null })
       }
@@ -3719,14 +3751,17 @@ export async function onRequest(ctx) {
       // would then permanently skip writing GuestInfo.txt for that guest.
       // Confirmed live: exactly what happened to Vipin C's booking.
       if (action === 'getStaysWithPendingDocuments') {
+        // No-op for the Apps Script system token (propertyIds == null); a real
+        // login sees only its own stays.
+        const pd = villaScope(payload, url.searchParams.get('villaId'), 's.villa_id')
         const { results } = await DB.prepare(`
           SELECT DISTINCT s.stay_id, s.guest_name, s.checkin_date, s.checkout_date,
                  s.status, s.drive_folder_id, s.drive_folder_url,
                  (s.drive_folder_id IS NOT NULL AND s.drive_folder_id != '') as folder_created
           FROM stayvibe_stays s
           JOIN stayvibe_guest_documents d ON d.stay_id = s.stay_id
-          WHERE d.folder_created = 0 AND s.status != 'pending_review'
-        `).all()
+          WHERE d.folder_created = 0 AND s.status != 'pending_review'${pd.sql}
+        `).bind(...pd.binds).all()
         return json({ success: true, data: results.map(r => ({
           stayId: r.stay_id, guestName: r.guest_name, checkIn: r.checkin_date, checkOut: r.checkout_date,
           status: r.status, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url,
@@ -4589,15 +4624,16 @@ export async function onRequest(ctx) {
 
       // PENDING REVIEW STAYS — GET version (also available as POST)
       if (action === 'getPendingReviewStays') {
+        const pr1 = villaScope(payload, url.searchParams.get('villaId'))
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, created_at,
                   folder_created, folder_created_at, booked_by_name
            FROM stayvibe_stays
            WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
+             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))${pr1.sql}
            ORDER BY checkin_date ASC`
-        ).all()
+        ).bind(...pr1.binds).all()
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
           guestName:       r.guest_name,
@@ -4621,6 +4657,7 @@ export async function onRequest(ctx) {
         // same-day checkout invisible to the owner for a whole day.
         // Kept as a JS comment, not a SQL one — an in-string -- comments out the
         // rest of the line, which is a nasty way to lose a WHERE clause.
+        const rv = villaScope(payload, url.searchParams.get('villaId'))
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
                   source, guest_phone, review_rating, review_date,
@@ -4628,10 +4665,10 @@ export async function onRequest(ctx) {
            FROM stayvibe_stays
            WHERE status = 'checked_out'
              AND checkout_date <= date('now')
-             AND (review_rating IS NULL OR review_rating = 0)
+             AND (review_rating IS NULL OR review_rating = 0)${rv.sql}
            ORDER BY checkout_date DESC
            LIMIT 100`
-        ).all()
+        ).bind(...rv.binds).all()
         const today = new Date()
         return json({ success: true, data: results.map(r => {
           const checkout = new Date(r.checkout_date)
@@ -4704,20 +4741,21 @@ export async function onRequest(ctx) {
       // that once the email goes out, and logCommunication clears it again on
       // any fresh contact, restarting the clock.
       if (action === 'getStaleEnquiries') {
+        const se = villaScope(payload, url.searchParams.get('villaId'))
         const { results } = await DB.prepare(`
           SELECT enquiry_id, guest_name, phone, email, source, checkin_date, checkout_date,
                  nights, guests_count, status, quote_amount, final_offer_amount, notes,
                  date_received, last_contact_date, reminder_2day_sent_at, reminder_5day_sent_at,
                  CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) AS days_since_contact
           FROM stayvibe_enquiries
-          WHERE status NOT IN ('confirmed','lost','cancelled')
+          WHERE status NOT IN ('confirmed','lost','cancelled')${se.sql}
             AND (
               (CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) >= 2 AND reminder_2day_sent_at IS NULL)
               OR
               (CAST((julianday('now') - julianday(COALESCE(last_contact_date, date_received))) AS INTEGER) >= 5 AND reminder_5day_sent_at IS NULL)
             )
           ORDER BY days_since_contact DESC
-        `).all()
+        `).bind(...se.binds).all()
         return json({ success: true, data: results })
       }
 
@@ -4747,15 +4785,19 @@ export async function onRequest(ctx) {
         const phoneRaw = (url.searchParams.get('phone') || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
         const emailRaw = (url.searchParams.get('email') || '').trim().toLowerCase()
         if (!phoneRaw && !emailRaw) return json({ success: true, data: null })
+        // "Repeat guest" means repeat with THIS host. Someone who stayed with
+        // another tenant is a stranger here, and their history is not ours to
+        // show.
+        const gs = villaScope(payload, url.searchParams.get('villaId') || null)
         const guest = await DB.prepare(
-          `SELECT * FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
-        ).bind(phoneRaw, emailRaw).first()
+          `SELECT * FROM stayvibe_guests WHERE ((phone = ? AND phone != '') OR (email = ? AND email != ''))${gs.sql} LIMIT 1`
+        ).bind(phoneRaw, emailRaw, ...gs.binds).first()
         if (!guest) return json({ success: true, data: null })
         const { results: pastStays } = await DB.prepare(
           `SELECT stay_id, checkin_date, checkout_date, net, source FROM stayvibe_stays
-           WHERE (guest_phone = ? OR guest_email = ?) AND status NOT IN ('cancelled','void')
+           WHERE (guest_phone = ? OR guest_email = ?) AND status NOT IN ('cancelled','void')${gs.sql}
            ORDER BY checkin_date DESC LIMIT 10`
-        ).bind(phoneRaw, emailRaw).all()
+        ).bind(phoneRaw, emailRaw, ...gs.binds).all()
         return json({ success: true, data: { guest, pastStays } })
       }
 
@@ -4766,14 +4808,13 @@ export async function onRequest(ctx) {
       if (action === 'searchGuestsByName') {
         const q = (url.searchParams.get('q') || '').trim()
         if (q.length < 2) return json({ success: true, data: [] })
+        // Scoped now. This returned name, phone and email for every tenant's
+        // guests from two typed characters.
+        const gs = villaScope(payload, url.searchParams.get('villaId') || null)
         const { results } = await DB.prepare(
-          // NOT scoped by villa: stayvibe_guests has no villa_id column. The
-          // guest registry is shared across tenants by construction, so a
-          // filter here would be a SQL error, not a fix. Raised separately —
-          // it needs a schema decision, not a WHERE clause.
           `SELECT guest_id, name, phone, email, total_stays FROM stayvibe_guests
-           WHERE name LIKE ? ORDER BY total_stays DESC LIMIT 15`
-        ).bind(`%${q}%`).all()
+           WHERE name LIKE ?${gs.sql} ORDER BY total_stays DESC LIMIT 15`
+        ).bind(`%${q}%`, ...gs.binds).all()
         return json({ success: true, data: results })
       }
 
@@ -5094,8 +5135,9 @@ export async function onRequest(ctx) {
           enquiryId = genId('ENQ')
           if (normPhone || normEmail) {
             const existing = await DB.prepare(
-              `SELECT * FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
-            ).bind(normPhone, normEmail).first()
+              `SELECT * FROM stayvibe_guests
+                WHERE villa_id = ? AND ((phone = ? AND phone != '') OR (email = ? AND email != '')) LIMIT 1`
+            ).bind(villaId, normPhone, normEmail).first()
             if (existing) {
               guestId = existing.guest_id
               await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = ?, updated_by = ?, updated_at = ? WHERE guest_id = ?`)
@@ -5103,9 +5145,9 @@ export async function onRequest(ctx) {
             } else {
               guestId = genId('GST')
               await DB.prepare(`
-                INSERT INTO stayvibe_guests (guest_id, name, phone, email, created_by, updated_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-              `).bind(guestId, body.guestName || 'Unknown', normPhone, normEmail, actor, actor).run()
+                INSERT INTO stayvibe_guests (guest_id, villa_id, name, phone, email, created_by, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+              `).bind(guestId, villaId, body.guestName || 'Unknown', normPhone, normEmail, actor, actor).run()
             }
           }
         }
@@ -5186,9 +5228,9 @@ export async function onRequest(ctx) {
 
         // First entry in the communication timeline
         await DB.prepare(`
-          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
-          VALUES (?, ?, 'internal_note', 'Enquiry received', ?)
-        `).bind(genId('COMM'), enquiryId, actor).run()
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id)
+          VALUES (?, ?, 'internal_note', 'Enquiry received', ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
+        `).bind(genId('COMM'), enquiryId, actor, enquiryId).run()
 
         return json({ success: true, data: { enquiryId, guestId, isRepeatGuest: isRepeat, previousStays, guest } })
       }
@@ -5199,9 +5241,9 @@ export async function onRequest(ctx) {
         const enquiryId = body.enquiryId
         if (!enquiryId) return err('enquiryId required')
         await DB.prepare(`
-          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
-          VALUES (?, ?, ?, ?, ?)
-        `).bind(genId('COMM'), enquiryId, body.type || 'internal_note', body.notes || '', actor).run()
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id)
+          VALUES (?, ?, ?, ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
+        `).bind(genId('COMM'), enquiryId, body.type || 'internal_note', body.notes || '', actor, enquiryId).run()
 
         const updates = []
         const vals = []
@@ -5309,9 +5351,9 @@ export async function onRequest(ctx) {
           UPDATE stayvibe_enquiries SET status = 'lost', lost_reason = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
         `).bind(body.lostReason || 'other', actor, now(), enquiryId).run()
         await DB.prepare(`
-          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
-          VALUES (?, ?, 'status_change', ?, ?)
-        `).bind(genId('COMM'), enquiryId, `Marked Lost — ${body.lostReason || 'other'}`, actor).run()
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id)
+          VALUES (?, ?, 'status_change', ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
+        `).bind(genId('COMM'), enquiryId, `Marked Lost — ${body.lostReason || 'other'}`, actor, enquiryId).run()
         return json({ success: true })
       }
 
@@ -5410,9 +5452,9 @@ export async function onRequest(ctx) {
             actor, actor
           ),
           DB.prepare(`
-            INSERT INTO stayvibe_bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `).bind(bookingId, enquiryId, enquiry.guest_id, stayId, bookingValue, actor),
+            INSERT INTO stayvibe_bookings (booking_id, enquiry_id, guest_id, stay_id, booking_value, created_by, villa_id)
+            VALUES (?, ?, ?, ?, ?, ?, (SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))
+          `).bind(bookingId, enquiryId, enquiry.guest_id, stayId, bookingValue, actor, stayId),
           DB.prepare(`
             UPDATE stayvibe_enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
           `).bind(bookingValue, actor, now(), enquiryId),
@@ -5428,9 +5470,9 @@ export async function onRequest(ctx) {
           `).bind(enquiry.nights || 1, bookingValue, now(), actor, now(), enquiry.guest_id))
         }
         stmts.push(DB.prepare(`
-          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
-          VALUES (?, ?, 'status_change', ?, ?)
-        `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor))
+          INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id)
+          VALUES (?, ?, 'status_change', ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
+        `).bind(genId('COMM'), enquiryId, `Booking confirmed — stay ${stayId}`, actor, enquiryId))
 
         await DB.batch(stmts)
         await syncStayLedger(DB, stayId)
@@ -5460,9 +5502,9 @@ export async function onRequest(ctx) {
             UPDATE stayvibe_enquiries SET status = 'confirmed', booking_confirmed = 1, booking_value = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
           `).bind(bookingValue, actor, now(), enquiryId),
           DB.prepare(`
-            INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by)
-            VALUES (?, ?, 'status_change', ?, ?)
-          `).bind(genId('COMM'), enquiryId, `Linked to existing stay ${stayId} (booked directly, not via this enquiry)`, actor),
+            INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id)
+            VALUES (?, ?, 'status_change', ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
+          `).bind(genId('COMM'), enquiryId, `Linked to existing stay ${stayId} (booked directly, not via this enquiry)`, actor, enquiryId),
         ]
         // The stay is otherwise left exactly as it is — this only fills in a
         // starting tariff/gross/net when the stay side is still blank (e.g.
@@ -5533,8 +5575,8 @@ export async function onRequest(ctx) {
         const stmts = [
           DB.prepare(`UPDATE stayvibe_enquiries SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE enquiry_id = ?`)
             .bind(actor, now(), enquiryId),
-          DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by) VALUES (?, ?, 'status_change', ?, ?)`)
-            .bind(genId('COMM'), enquiryId, `Booking cancelled: ${reason}`, actor),
+          DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'status_change', ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))`)
+            .bind(genId('COMM'), enquiryId, `Booking cancelled: ${reason}`, actor, enquiryId),
         ]
 
         let stayAlsoCancelled = false
@@ -5754,14 +5796,17 @@ export async function onRequest(ctx) {
         //  2. { quarter: 'Q1 2026', paidDate } — pay one whole quarter
         //  3. { paidDate } — pay all unpaid
         const paidDate = body.paidDate || now().slice(0, 10)
+        // master_owner passes propertyIds == null and stays unrestricted,
+        // as it is everywhere else.
+        const payScope = villaScope(payload, body.villaId || null)
 
         if (Array.isArray(body.commIds) && body.commIds.length > 0) {
           // Shape 1: pay selected comm_ids
           const placeholders = body.commIds.map(() => '?').join(',')
           const result = await DB.prepare(
             `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
-             WHERE comm_id IN (${placeholders}) AND is_paid = 0`
-          ).bind(paidDate, actor, now(), ...body.commIds).run()
+             WHERE comm_id IN (${placeholders}) AND is_paid = 0${payScope.sql}`
+          ).bind(paidDate, actor, now(), ...body.commIds, ...payScope.binds).run()
           return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
         }
 
@@ -5779,15 +5824,15 @@ export async function onRequest(ctx) {
 
           const result = await DB.prepare(
             `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ?
-             WHERE checkin_date BETWEEN ? AND ? AND is_paid = 0`
-          ).bind(paidDate, actor, now(), startDate, endDate).run()
+             WHERE checkin_date BETWEEN ? AND ? AND is_paid = 0${payScope.sql}`
+          ).bind(paidDate, actor, now(), startDate, endDate, ...payScope.binds).run()
           return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
         }
 
         // Shape 3: pay all unpaid
         const result = await DB.prepare(
-          `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0`
-        ).bind(paidDate, actor, now()).run()
+          `UPDATE stayvibe_manager_commissions SET is_paid = 1, paid_date = ?, updated_by = ?, updated_at = ? WHERE is_paid = 0${payScope.sql}`
+        ).bind(paidDate, actor, now(), ...payScope.binds).run()
         return json({ success: true, data: { changes: result.meta?.changes ?? 0 } })
       }
 
@@ -6063,7 +6108,10 @@ export async function onRequest(ctx) {
         // that does not exist yet, leaving the handler's own checks in charge.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) {
-          const found = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE guest_name = ? AND status IN ('confirmed','booked') ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName).first()
+          // Without a scope this could adopt a same-named guest's stay from
+          // another tenant and then check them in.
+          const cf2 = villaScope(payload, body.villaId || null)
+          const found = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE guest_name = ? AND status IN ('confirmed','booked')${cf2.sql} ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName, ...cf2.binds).first()
           stayId = found?.stay_id
         }
         if (!stayId) {
@@ -6107,18 +6155,18 @@ export async function onRequest(ctx) {
             try {
               await DB.prepare(
                 `INSERT OR REPLACE INTO stayvibe_guest_documents
-                 (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-              ).bind(docId('car', idx), stayId, 'car_photo', `Car-${stayId}-${idx + 1}.jpg`, c.carPhotoB64).run()
+                 (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at, villa_id)
+                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'), (SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`
+              ).bind(docId('car', idx), stayId, 'car_photo', `Car-${stayId}-${idx + 1}.jpg`, c.carPhotoB64, stayId).run()
             } catch (e) { console.error('car photo store error:', e?.message || e) }
           }
           if (c.platePhotoB64) {
             try {
               await DB.prepare(
                 `INSERT OR REPLACE INTO stayvibe_guest_documents
-                 (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at)
-                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`
-              ).bind(docId('plate', idx), stayId, 'plate_photo', `Plate-${stayId}-${idx + 1}.jpg`, c.platePhotoB64).run()
+                 (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at, villa_id)
+                 VALUES (?, ?, ?, ?, ?, 0, datetime('now'), (SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`
+              ).bind(docId('plate', idx), stayId, 'plate_photo', `Plate-${stayId}-${idx + 1}.jpg`, c.platePhotoB64, stayId).run()
             } catch (e) { console.error('plate photo store error:', e?.message || e) }
           }
           if (c.number && String(c.number).trim()) carNumbers.push(String(c.number).trim())
@@ -6175,7 +6223,7 @@ export async function onRequest(ctx) {
             ).bind(payload.tenantId, actor).first()
             const rates = { singleNight: rateRow?.commission_single_night, multiNight: rateRow?.commission_multi_night }
             const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt, rates)
-            await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
+            await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at, villa_id) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?, (SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now(), stayId).run()
 
             ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
               `Source: Raman > Check-in screen (check-out)`,
@@ -6431,8 +6479,8 @@ export async function onRequest(ctx) {
 
           await DB.prepare(
             `INSERT INTO stayvibe_incidentals (
-              item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+              item_id, stay_id, inv_item_id, name, qty, price_per_unit, total, created_by, updated_by, created_at, updated_at, villa_id
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
           ).bind(
             genId('INC'),
             body.stayId,
@@ -6444,7 +6492,8 @@ export async function onRequest(ctx) {
             currentActor,
             currentActor,
             timestamp,
-            timestamp
+            timestamp,
+            villaId
           ).run();
 
           // Decrement live stock — only for real inventory items. Never let a
@@ -6508,7 +6557,7 @@ export async function onRequest(ctx) {
         {
           const nightsForComm = parseInt(body.nights) || 1
           const ramanComm = nightsForComm > 1 ? 2000 : 1000
-          await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nightsForComm, ramanComm, now(), now()).run()
+          await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at, villa_id) VALUES (?,?,?,?,?,?,0,'system','system',?,?,(SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`).bind(genId('RC'), stayId, body.guestName, body.checkInDate, nightsForComm, ramanComm, now(), now(), stayId).run()
         }
         await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId } })
@@ -7007,7 +7056,7 @@ export async function onRequest(ctx) {
             const existing = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(stayId).first()
             if (!existing) {
               const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt)
-              await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,0,'system','system',?,?)`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now()).run()
+              await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at, villa_id) VALUES (?,?,?,?,?,?,0,'system','system',?,?,(SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now(), stayId).run()
             }
           }
         }
@@ -7192,22 +7241,25 @@ export async function onRequest(ctx) {
         // doesn't silently persist.
         let backfilledGuestId = null
         try {
-          const stay = await DB.prepare(`SELECT guest_name, guest_phone, guest_email FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+          const stay = await DB.prepare(`SELECT guest_name, guest_phone, guest_email, villa_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
           if (stay?.guest_name) {
             const normPhone = (stay.guest_phone || '').replace(/[\s\-]/g, '').replace(/^\+?91/, '')
             const normEmail = (stay.guest_email || '').trim().toLowerCase()
             if (normPhone || normEmail) {
+              // Matched within the stay's own villa, so backfilling a guest here
+              // can never attach this stay to another tenant's guest record.
               const existing = await DB.prepare(
-                `SELECT guest_id FROM stayvibe_guests WHERE (phone = ? AND phone != '') OR (email = ? AND email != '') LIMIT 1`
-              ).bind(normPhone, normEmail).first()
+                `SELECT guest_id FROM stayvibe_guests
+                  WHERE villa_id = ? AND ((phone = ? AND phone != '') OR (email = ? AND email != '')) LIMIT 1`
+              ).bind(stay.villa_id, normPhone, normEmail).first()
               if (existing) {
                 backfilledGuestId = existing.guest_id
               } else {
                 backfilledGuestId = genId('GST')
                 await DB.prepare(`
-                  INSERT INTO stayvibe_guests (guest_id, name, phone, email, total_stays, last_seen_at, created_by, updated_by)
-                  VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-                `).bind(backfilledGuestId, stay.guest_name, normPhone, normEmail, now(), actor, actor).run()
+                  INSERT INTO stayvibe_guests (guest_id, villa_id, name, phone, email, total_stays, last_seen_at, created_by, updated_by)
+                  VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                `).bind(backfilledGuestId, stay.villa_id, stay.guest_name, normPhone, normEmail, now(), actor, actor).run()
               }
             }
           }
@@ -7302,7 +7354,7 @@ export async function onRequest(ctx) {
         // from another tenant would have an entry written onto it.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', body.stayId)
         const id = genId('BF')
-        await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
+        await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at, villa_id) VALUES (?,?,?,?,?,?,?,?,?,(SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
@@ -7311,7 +7363,7 @@ export async function onRequest(ctx) {
         // from another tenant would have an entry written onto it.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', body.stayId)
         const id = genId('CR')
-        await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'car_rental', JSON.stringify({ date: body.date, destination: body.destination || '', amount: body.amount || 0, commission: body.commission || 0, net: body.net || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
+        await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at, villa_id) VALUES (?,?,?,?,?,?,?,?,?,(SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`).bind(id, body.stayId, 'car_rental', JSON.stringify({ date: body.date, destination: body.destination || '', amount: body.amount || 0, commission: body.commission || 0, net: body.net || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
@@ -7570,7 +7622,10 @@ export async function onRequest(ctx) {
 
       if (action === 'toggleCampaign') {
         const { campaignId } = body; if (!campaignId) return err('campaignId required')
-        await DB.prepare(`UPDATE stayvibe_marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?`).bind(campaignId).run()
+        // Same reasoning as deleteCampaign below: campaign ids are guessable.
+        await assertRecordAccess(DB, payload, 'stayvibe_marketing_campaigns', 'id', campaignId)
+        const cs = villaScope(payload, null)
+        await DB.prepare(`UPDATE stayvibe_marketing_campaigns SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END WHERE id = ?${cs.sql}`).bind(campaignId, ...cs.binds).run()
         return json({ success: true })
       }
 
@@ -7578,26 +7633,27 @@ export async function onRequest(ctx) {
         const { campaignId } = body; if (!campaignId) return err('campaignId required')
         // Campaign ids are guessable; deletion must be scoped to the owner.
         await assertRecordAccess(DB, payload, 'stayvibe_marketing_campaigns', 'id', campaignId)
-        await DB.prepare(`DELETE FROM stayvibe_campaign_analytics WHERE campaign_id = ?`).bind(campaignId).run()
-        await DB.prepare(`DELETE FROM stayvibe_marketing_campaigns WHERE id = ?`).bind(campaignId).run()
+        const ds = villaScope(payload, null)
+        await DB.prepare(`DELETE FROM stayvibe_campaign_analytics WHERE campaign_id = ?${ds.sql}`).bind(campaignId, ...ds.binds).run()
+        await DB.prepare(`DELETE FROM stayvibe_marketing_campaigns WHERE id = ?${ds.sql}`).bind(campaignId, ...ds.binds).run()
         return json({ success: true })
       }
 
       if (action === 'trackCampaignClick') {
         const { token, referrer } = body; if (!token) return err('token required')
-        const campaign = await DB.prepare(`SELECT id FROM stayvibe_marketing_campaigns WHERE unique_token = ? AND is_active = 1`).bind(token).first()
+        const campaign = await DB.prepare(`SELECT id, villa_id FROM stayvibe_marketing_campaigns WHERE unique_token = ? AND is_active = 1`).bind(token).first()
         if (!campaign) return json({ success: false, error: 'Unknown token' })
         const cf = request.cf || {}; const id = 'evt_' + Date.now()
-        await DB.prepare(`INSERT INTO stayvibe_campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaign.id, 'click', cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null, referrer || null).run()
+        await DB.prepare(`INSERT INTO stayvibe_campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, referrer, villa_id) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, campaign.id, 'click', cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null, referrer || null, campaign.villa_id).run()
         return json({ success: true })
       }
 
       if (action === 'trackCampaignAction') {
         const { token, eventType } = body; if (!token) return err('token required')
-        const campaign = await DB.prepare(`SELECT id FROM stayvibe_marketing_campaigns WHERE unique_token = ?`).bind(token).first()
+        const campaign = await DB.prepare(`SELECT id, villa_id FROM stayvibe_marketing_campaigns WHERE unique_token = ?`).bind(token).first()
         if (!campaign) return json({ success: false })
         const cf = request.cf || {}; const id = 'evt_' + Date.now()
-        await DB.prepare(`INSERT INTO stayvibe_campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent) VALUES (?,?,?,?,?,?,?)`).bind(id, campaign.id, eventType, cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null).run()
+        await DB.prepare(`INSERT INTO stayvibe_campaign_analytics (id, campaign_id, event_type, country, region, city, user_agent, villa_id) VALUES (?,?,?,?,?,?,?,?)`).bind(id, campaign.id, eventType, cf.country || null, cf.region || null, cf.city || null, request.headers.get('user-agent') || null, campaign.villa_id).run()
         return json({ success: true })
       }
 
@@ -8349,12 +8405,15 @@ export async function onRequest(ctx) {
         //  - everything else (govt_id, passport, ...): unchanged — a
         //    14-day sweep that should rarely fire, since those get
         //    explicitly deleted right after confirmed upload already.
+        // tenant-scope-exempt: retention sweep, platform-wide by design -
+        // document expiry is a storage policy, not a per-tenant report.
         const staleUnprocessed = await DB.prepare(
           `SELECT COUNT(*) as cnt FROM stayvibe_guest_documents
            WHERE folder_created = 0
              AND created_at < datetime('now', '-14 days')`
         ).first()
         const result = await DB.prepare(
+          // tenant-scope-exempt: same retention sweep as the count above.
           `DELETE FROM stayvibe_guest_documents
            WHERE (doc_type IN ('car_photo','plate_photo') AND created_at < datetime('now', '-5 days'))
               OR (doc_type NOT IN ('car_photo','plate_photo') AND created_at < datetime('now', '-14 days'))`
@@ -8368,15 +8427,16 @@ export async function onRequest(ctx) {
 
       // GET PENDING REVIEW STAYS — POST version (Apps Script calls this as POST)
       if (action === 'getPendingReviewStays') {
+        const pr2 = villaScope(payload, body?.villaId || null)
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, drive_folder_id,
                   created_at, folder_created, folder_created_at
            FROM stayvibe_stays
            WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))
+             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))${pr2.sql}
            ORDER BY checkin_date ASC`
-        ).all()
+        ).bind(...pr2.binds).all()
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
           guestName:       r.guest_name,

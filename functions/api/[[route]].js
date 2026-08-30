@@ -7298,12 +7298,18 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'saveBreakfastEntry') {
+        // Logs a charge against a stay the caller names. Without this, a stay id
+        // from another tenant would have an entry written onto it.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', body.stayId)
         const id = genId('BF')
         await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'breakfast', JSON.stringify({ date: body.date, guestCount: body.guestCount || 1, ratePerPerson: body.ratePerPerson || 0, total: body.total || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })
       }
 
       if (action === 'saveCarRental') {
+        // Logs a charge against a stay the caller names. Without this, a stay id
+        // from another tenant would have an entry written onto it.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', body.stayId)
         const id = genId('CR')
         await DB.prepare(`INSERT INTO stayvibe_guest_requests (req_id, stay_id, type, detail, status, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id, body.stayId, 'car_rental', JSON.stringify({ date: body.date, destination: body.destination || '', amount: body.amount || 0, commission: body.commission || 0, net: body.net || 0, notes: body.notes || '' }), 'done', actor, actor, now(), now()).run()
         return json({ success: true, data: { id } })

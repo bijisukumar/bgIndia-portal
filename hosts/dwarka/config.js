@@ -311,8 +311,25 @@ We hope you had a wonderful stay. If you have a moment while it's still fresh, a
       },
       // Optional direct link per channel, blank when the app's own flow is
       // easier than a URL (Airbnb prompts inside its app anyway).
+      // Per channel. A guest reviews where they booked — sending an Airbnb
+      // guest to Google asks them to review a place they have no booking with.
+      // An entry set to '' means "name the platform but offer no link".
       links: {
-        default: '',
+        // Universal link: opens the Airbnb app straight to Trips if it is
+        // installed, and the website if it is not. Airbnb has no public URL
+        // that opens the review form for a specific reservation.
+        airbnb: {
+          url:   'https://www.airbnb.com/trips',
+          label: 'Open your Airbnb app and find this stay under Trips:',
+        },
+        // Direct and website guests review on Google.
+        default: {
+          url:   'https://g.page/r/CW1511SVNE2IEAE/review',
+          label: 'You can leave it here:',
+        },
+        // No usable deep link — the message still names the platform.
+        booking: { url: '', label: '' },
+        agoda:   { url: '', label: '' },
       },
     },
     // Owner's personal welcome, sent any time before check-in. Villa/owner

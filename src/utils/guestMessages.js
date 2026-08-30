@@ -214,7 +214,13 @@ export function buildReviewRequestMessage(stay = {}) {
   const platforms = cfg.platforms || {}
   const links     = cfg.links || {}
   const reviewPlatform = platforms[src] || platforms.default || 'Google'
-  const rawLink        = links[src] || links.default || ''
+  // hasOwnProperty, not ||: a channel deliberately set to blank must mean
+  // "no link for this platform", not "fall through to the default". Otherwise
+  // a Booking.com guest is told to review on Booking.com and handed a Google
+  // link.
+  const entry = Object.prototype.hasOwnProperty.call(links, src) ? links[src] : links.default
+  const linkUrl   = typeof entry === 'string' ? entry : (entry?.url || '')
+  const linkLabel = typeof entry === 'string' ? '' : (entry?.label || '')
 
   return renderTemplate(cfg.template, {
     firstName: ((stay.guest_name || '').trim().split(/\s+/)[0]) || 'there',
@@ -223,7 +229,9 @@ export function buildReviewRequestMessage(stay = {}) {
     villaName: villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || '',
     reviewPlatform,
     // Blank when unset so the message never ends on a dangling label.
-    reviewLink: rawLink ? `${rawLink}\n\n` : '',
+    // Label then URL on its own line, so WhatsApp makes the URL tappable.
+    // Blank when the platform has no usable link, leaving no dangling text.
+    reviewLink: linkUrl ? `${linkLabel ? linkLabel + '\n' : ''}${linkUrl}\n\n` : '',
   })
 }
 

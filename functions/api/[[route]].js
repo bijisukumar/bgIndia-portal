@@ -2473,7 +2473,10 @@ export async function onRequest(ctx) {
         // processed checked_out/closed stays follow, capped at 7 days so
         // a stale one from a slow period doesn't linger as "recent".
         const { results } = await DB.prepare(
-          `SELECT stay_id, guest_name, guest_phone, checkin_date, checkout_date, status, adults, nights
+         // source drives which platform the request names; review_rating lets
+         // the caller hide guests who have already left one.
+          `SELECT stay_id, guest_name, guest_phone, checkin_date, checkout_date, status, adults, nights,
+                  source, review_rating, airbnb_conf
            FROM stayvibe_stays WHERE villa_id = ?
            AND (
              status = 'ready_for_checkout'
@@ -4613,13 +4616,18 @@ export async function onRequest(ctx) {
 
       // REVIEW CHASE LIST — GET version
       if (action === 'getReviewChaseList') {
+        // checkout_date <= today, not <: a guest who left this morning is exactly
+        // who you want to chase while the stay is fresh. The old strict < made a
+        // same-day checkout invisible to the owner for a whole day.
+        // Kept as a JS comment, not a SQL one — an in-string -- comments out the
+        // rest of the line, which is a nasty way to lose a WHERE clause.
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
                   source, guest_phone, review_rating, review_date,
                   review_chased_at, review_chase_count
            FROM stayvibe_stays
            WHERE status = 'checked_out'
-             AND checkout_date < date('now')
+             AND checkout_date <= date('now')
              AND (review_rating IS NULL OR review_rating = 0)
            ORDER BY checkout_date DESC
            LIMIT 100`
@@ -5671,9 +5679,17 @@ export async function onRequest(ctx) {
         const conf = (body.confirmationCode || '').trim()
         if (!conf) return err('confirmationCode required')
         const stay = await DB.prepare(
-          `SELECT stay_id, guest_name, status, checkin_date, checkout_date, source FROM stayvibe_stays WHERE airbnb_conf = ? LIMIT 1`
+          `SELECT stay_id, guest_name, status, checkin_date, checkout_date, source, villa_id
+             FROM stayvibe_stays WHERE airbnb_conf = ? LIMIT 1`
         ).bind(conf).first()
         if (!stay) return json({ success: true, data: { matched: false, confirmationCode: conf } })
+        // Keyed on a confirmation code rather than an id, so assertRecordAccess
+        // does not fit. A code belonging to another tenant is reported as no
+        // match rather than 403 — deliberately, since a 403 would confirm the
+        // code exists on the platform.
+        if (payload?.propertyIds != null && !payload.propertyIds.includes(stay.villa_id)) {
+          return json({ success: true, data: { matched: false, confirmationCode: conf } })
+        }
         if (stay.status === 'cancelled') {
           return json({ success: true, data: { matched: true, stayId: stay.stay_id, alreadyCancelled: true } })
         }
@@ -6176,6 +6192,9 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'cancelStay') {
+        // Cancelling someone else's booking is the worst case of acting on a
+        // caller-supplied id — check it is theirs first.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         await DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), body.stayId).run()
         await DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(body.stayId).run()
         return json({ success: true })
@@ -7088,6 +7107,8 @@ export async function onRequest(ctx) {
       if (action === 'linkBookedBy') {
         const { stayId, guestId } = body
         if (!stayId) return err('stayId required')
+        // Links a guest record to a stay — both must belong to this tenant.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         let guestName = null, guestPhone = null, guestEmail = null
         if (guestId) {
           const guest = await DB.prepare(`SELECT name, phone, email FROM stayvibe_guests WHERE guest_id = ?`).bind(guestId).first()
@@ -7493,6 +7514,8 @@ export async function onRequest(ctx) {
 
       if (action === 'deleteCampaign') {
         const { campaignId } = body; if (!campaignId) return err('campaignId required')
+        // Campaign ids are guessable; deletion must be scoped to the owner.
+        await assertRecordAccess(DB, payload, 'stayvibe_marketing_campaigns', 'id', campaignId)
         await DB.prepare(`DELETE FROM stayvibe_campaign_analytics WHERE campaign_id = ?`).bind(campaignId).run()
         await DB.prepare(`DELETE FROM stayvibe_marketing_campaigns WHERE id = ?`).bind(campaignId).run()
         return json({ success: true })

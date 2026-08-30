@@ -107,6 +107,10 @@ export default function CheckIn() {
   // drops off the list. The best review is written in the car, not the next
   // day — this is the only moment staff still have their attention.
   const [justCheckedOut, setJustCheckedOut] = useState(null)
+  // Everyone who left in the last few days, so a review can still be
+  // requested after the post-checkout panel is gone. Without this a guest
+  // checked out in an earlier session was unreachable from this screen.
+  const [recentOuts, setRecentOuts] = useState([])
   const [settleLines, setSettleLines] = useState([{ label: '', amount: '' }])
   const [settleNote, setSettleNote]   = useState('')
   const [settling, setSettling]       = useState(false)
@@ -138,6 +142,16 @@ export default function CheckIn() {
   useEffect(() => { setConfirmingCheckout(false) }, [selected?.stay_id])
 
   async function loadStays() {
+
+    // Independent of the check-in list — a failure here must not stop
+
+    // the screen loading.
+
+    api.getRecentCheckouts(DEFAULT_VILLA_ID)
+
+      .then(r => setRecentOuts(Array.isArray(r) ? r : (r?.stays || [])))
+
+      .catch(() => setRecentOuts([]))
     setLoading(true)
     try {
       // Load ready_for_checkin stays
@@ -402,6 +416,44 @@ export default function CheckIn() {
           </div>
         )
       })()}
+
+      {/* Recent check-outs still awaiting a review request. Persistent, unlike
+           the panel above which only survives the session that did the
+           check-out. */}
+      {recentOuts.filter(s => s.status === 'checked_out' && !s.review_rating).length > 0 && (
+        <div style={{margin:'0 14px 12px',padding:'12px 14px',borderRadius:12,
+          background:'var(--dark-card)',border:'1px solid var(--border-dim)'}}>
+          <div style={{fontSize:'0.72rem',fontWeight:700,letterSpacing:'0.08em',
+            color:'var(--text-dim)',marginBottom:10}}>
+            RECENTLY CHECKED OUT · ASK FOR A REVIEW
+          </div>
+          {recentOuts.filter(s => s.status === 'checked_out' && !s.review_rating).map(s => {
+            const wa = buildReviewRequestWaLink(s)
+            return (
+              <div key={s.stay_id} style={{display:'flex',alignItems:'center',gap:10,
+                padding:'8px 0',borderTop:'1px solid rgba(255,255,255,0.05)'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:'0.88rem'}}>{s.guest_name}</div>
+                  <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>
+                    Out {s.checkout_date}
+                  </div>
+                </div>
+                {wa ? (
+                  <a href={wa} target="_blank" rel="noreferrer"
+                    onClick={() => { api.markReviewChased({ stayId: s.stay_id }).catch(() => {}) }}
+                    style={{padding:'8px 12px',borderRadius:8,background:'#25D366',
+                      color:'#062b13',fontWeight:700,fontSize:'0.78rem',textDecoration:'none',
+                      whiteSpace:'nowrap'}}>
+                    Ask for review
+                  </a>
+                ) : (
+                  <span style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>no number</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{display:'flex',background:'var(--dark-card)',borderBottom:'1px solid var(--border-dim)',flexShrink:0}}>

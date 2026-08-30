@@ -67,6 +67,9 @@ function checkinUrlFor(stay) {
 export function buildHostIntroMessage(stay = {}) {
   const cfg = CONFIG.guestMessages?.hostIntro
   if (!cfg?.template) return null   // see buildCheckinLinkMessage — same runtime-config fragility
+  // Same reasoning as the check-in link: this message says "ahead of your
+  // stay", so it makes no sense once the guest has arrived or left.
+  if (ARRIVED_OR_DONE.has(String(stay.status || '').trim().toLowerCase())) return null
   const ci = parseLocalDate(stay.checkin_date)
   const co = parseLocalDate(stay.checkout_date)
   const fmtFull  = d => (d ? d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '—')
@@ -125,9 +128,19 @@ export function buildHostIntroWaLink(stay = {}) {
 // other template here — see hosts/dwarka/config.js for why it isn't shared
 // across hosts. Returns null (no button to show) when there's nothing to
 // send: no channel link configured, or the guest already registered.
+// Stages at which a check-in link is pointless: the guest is already in the
+// villa, has left, or the booking is dead. Sending one then is confusing at
+// best — this was showing on Complete Booking for a guest who had checked out
+// the day before.
+const ARRIVED_OR_DONE = new Set([
+  'checked_in', 'ready_for_checkout', 'checked_out', 'closed',
+  'cancelled', 'void', 'no_show',
+])
+
 export function buildCheckinLinkMessage(stay = {}) {
   const url = checkinUrlFor(stay)
   if (!url || stay.checkin_form_submitted) return null
+  if (ARRIVED_OR_DONE.has(String(stay.status || '').trim().toLowerCase())) return null
   // CONFIG is fetched at runtime (see src/config.js) from a D1-backed copy
   // that isn't guaranteed to be in sync with a just-edited hosts/<id>/
   // config.js — a missing key here must never throw, since this runs

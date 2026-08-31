@@ -250,8 +250,14 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
       // So retry once from a domain we know is verified. The mail still
       // arrives, from a less pretty address, and the log records that it fell
       // back so the misconfiguration is still visible rather than papered over.
-      if (res.status === 403 && /not authorized to send emails from/i.test(detail)
-          && body.from !== SAFE_ALERT_FROM) {
+      // Any 403 on a non-fallback sender, not just one particular wording.
+      // The first version matched only "not authorized to send emails from",
+      // and Resend then returned "The <domain> domain is not verified" for the
+      // very same misconfiguration - so the retry did not fire and the alert
+      // was lost outright. Matching on the status code is the durable form:
+      // whatever Resend chooses to call it, a refused sender should still be
+      // retried from one we know works.
+      if (res.status === 403 && body.from !== SAFE_ALERT_FROM) {
         const refusedFrom = body.from
         // Keep Resend's own words. The first version of this dropped them, and
         // then a fallback that kept firing gave no clue whether the domain was

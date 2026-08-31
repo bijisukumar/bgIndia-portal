@@ -35,6 +35,16 @@ function getHostConfig(villaId) {
 // "it is still misconfigured".
 const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
 
+// stayvibe360.com can SEND but cannot RECEIVE: there is no MX on the root, only
+// the send.* record Resend uses for bounces. A reply to
+// invitation@stayvibe360.com therefore bounces, which is worse for a prospect
+// than getting no mail at all. So anything from that address carries a reply-to
+// that reaches a real inbox.
+//
+// Swap this for an @stayvibe360.com address once Cloudflare Email Routing is
+// set up; until then a reply lands in the villa inbox.
+const PLATFORM_REPLY_TO = 'kerala.luxuryvillas@gmail.com'
+
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -219,6 +229,10 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
       subject,
       text: lines.join('\n'),
     }
+    // Only for the platform sender, whose domain has no inbox behind it.
+    // Tenant alerts already come from a domain that can receive.
+    if (body.from === PLATFORM_LEAD_FROM) body.reply_to = PLATFORM_REPLY_TO
+
     const res = await fetch('https://api.resend.com/emails', {
       method:  'POST',
       headers: {

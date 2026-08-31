@@ -253,6 +253,11 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
       if (res.status === 403 && /not authorized to send emails from/i.test(detail)
           && body.from !== SAFE_ALERT_FROM) {
         const refusedFrom = body.from
+        // Keep Resend's own words. The first version of this dropped them, and
+        // then a fallback that kept firing gave no clue whether the domain was
+        // unverified or the key simply lacked permission for it - which are
+        // different problems with different fixes.
+        const refusedBecause = detail.replace(/\s+/g, ' ').slice(0, 200)
         const retry = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -260,7 +265,7 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
         })
         ok = retry.ok
         statusCode = retry.status
-        detail = `[sender ${refusedFrom} refused, resent from ${SAFE_ALERT_FROM}] ` +
+        detail = `[sender ${refusedFrom} refused: ${refusedBecause}] [resent from ${SAFE_ALERT_FROM}] ` +
                  (retry.ok ? '' : await retry.text().catch(() => ''))
       }
 

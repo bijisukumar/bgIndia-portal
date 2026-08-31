@@ -20,7 +20,23 @@ function getHostConfig(villaId) {
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
 // villa branding the way a genuine tenant security alert does. Domain
 // verified in Resend 2026-08-29.
-const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
+// Sent FROM a verified domain, not from stayvibe360.com. These three alerts
+// (invite request, demo request, host registration) are internal notifications
+// TO the operator - the prospect never sees this address - so there is nothing
+// to gain from a prettier sending domain and everything to lose: Resend 403s
+// any domain the key is not authorised for, and the failure is silent to the
+// person who filled in the form.
+//
+// It failed exactly that way between 2026-08-29 21:33 and 2026-08-31 07:08:
+// stayvibe360.com was never added to Resend, so five real signups arrived with
+// no notification at all. The rows were safe in platform_invite_requests and
+// the Signups screen shows them, but nobody knew to look.
+//
+// Move this to invitation@stayvibe360.com only once that domain is verified in
+// Resend AND the API key in use has permission for it - and when mail actually
+// goes to the lead rather than to us, which is the only case where the sending
+// domain is worth anything.
+const PLATFORM_LEAD_FROM = 'StayVibe <alerts@luxuryvillasofguruvayur.com>'
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',

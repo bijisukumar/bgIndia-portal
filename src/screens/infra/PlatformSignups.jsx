@@ -33,6 +33,20 @@ export default function PlatformSignups() {
   const [days, setDays] = useState(90)
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
+  // Keyed by request id: 'sending' | 'sent' | an error string. Local to this
+  // view; the server's ackSent is the durable record.
+  const [acks, setAcks] = useState({})
+
+  const sendAck = async (r) => {
+    if (acks[r.id] === 'sending') return
+    setAcks(a => ({ ...a, [r.id]: 'sending' }))
+    try {
+      await api.sendInviteAck(r.id)
+      setAcks(a => ({ ...a, [r.id]: 'sent' }))
+    } catch (e) {
+      setAcks(a => ({ ...a, [r.id]: e?.message || 'Failed' }))
+    }
+  }
 
   useEffect(() => {
     setData(null); setError('')
@@ -88,6 +102,7 @@ export default function PlatformSignups() {
                 <Line label="Ready in 6-8 wks" value={r.onboard_3m} />
                 <Line label="Interested in" value={r.interests} />
                 <Line label="Notes" value={r.notes} />
+                <AckButton r={r} state={acks[r.id]} onSend={() => sendAck(r)} />
               </>
             )} />
 
@@ -115,6 +130,33 @@ export default function PlatformSignups() {
             )} />
         </>
       )}
+    </div>
+  )
+}
+
+// The confirmation email goes out automatically on new signups. This is for
+// the ones who arrived before that existed - and as a manual resend if one
+// ever fails.
+function AckButton({ r, state, onSend }) {
+  if (!r.email) return null
+  const done = state === 'sent' || (r.ackSent && !state)
+  const failed = state && state !== 'sending' && state !== 'sent'
+  return (
+    <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <button
+        onClick={onSend}
+        disabled={state === 'sending'}
+        style={{
+          padding: '7px 12px', borderRadius: 8, fontSize: '0.76rem', fontWeight: 700,
+          cursor: state === 'sending' ? 'default' : 'pointer',
+          border: '1px solid ' + (done ? 'rgba(95,208,174,0.4)' : 'rgba(200,144,58,0.4)'),
+          background: done ? 'rgba(95,208,174,0.10)' : 'rgba(200,144,58,0.12)',
+          color: done ? '#5FD0AE' : '#C8903A',
+        }}>
+        {state === 'sending' ? 'Sending...' : done ? 'Send again' : 'Send confirmation email'}
+      </button>
+      {done && <span style={{ fontSize: '0.72rem', color: '#5FD0AE' }}>confirmation sent</span>}
+      {failed && <span style={{ fontSize: '0.72rem', color: '#EF9A9A' }}>{state}</span>}
     </div>
   )
 }

@@ -2477,6 +2477,46 @@ export async function onRequest(ctx) {
       // Document bytes are reported separately and deliberately: passport and
       // visa scans are base64 in the row, so they are the one thing that can
       // grow a tenant fast. Everything else is text measured in kilobytes.
+      // Sends the acknowledgement to one existing signup. Exists because the
+      // automatic version only fires on NEW submissions, and five real hosts
+      // signed up before it existed. Deliberately one lead per click rather
+      // than a bulk send: mail to real people should be a decision each time,
+      // and a loop over a list is how the wrong list gets emailed.
+      if (action === 'sendInviteAck' && method === 'POST') {
+        const platformTenant = env.PLATFORM_TENANT_ID || 'dwarka'
+        const isOperator = payload.role === 'master_owner' ||
+          (payload.role === 'owner' && payload.tenantId === platformTenant)
+        if (!isOperator) return err('Not available for this account', 403)
+
+        const requestId = String(body.requestId || '').trim()
+        if (!requestId) return err('requestId required', 400)
+
+        const row = await DB.prepare(
+          `SELECT name, email FROM platform_invite_requests WHERE request_id = ?`
+        ).bind(requestId).first()
+        if (!row) return err('Signup not found', 404)
+        if (!String(row.email || '').includes('@')) {
+          return err('That signup left no email address', 400)
+        }
+
+        // Awaited, not waitUntil: the operator clicked send and deserves to be
+        // told whether it actually went.
+        await sendAlert(
+          env, 'Thanks for your interest in StayVibe360', inviteAckLines(row.name),
+          row.email, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM,
+          await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID)
+        )
+
+        const sent = await DB.prepare(
+          `SELECT success FROM infra_alert_log
+            WHERE category = 'platform_lead_ack' AND to_email = ?
+            ORDER BY created_at DESC LIMIT 1`
+        ).bind(row.email).first()
+        if (!sent?.success) return err('Send failed - check the platform error log', 502)
+
+        return json({ success: true, data: { requestId, email: row.email } })
+      }
+
       // ── PLATFORM SIGNUPS ──────────────────────────────────────────
       // The three public intake forms wrote to the database and emailed the
       // operator, and that was the whole story - there was no way to see who
@@ -2528,6 +2568,11 @@ export async function onRequest(ctx) {
           catch (e) { console.error('getPlatformSignups:', e?.message || e); return [] }
         }
 
+        const acked = new Set((await grab(
+          `SELECT DISTINCT to_email FROM infra_alert_log
+            WHERE category = 'platform_lead_ack' AND success = 1`
+        )).map(r => (r.to_email || '').toLowerCase()))
+
         const invites = await grab(
           `SELECT request_id AS id, name, whatsapp, email, location, property_name,
                   property_type, property_count, channels, foreign_guests, onboard_3m,
@@ -2548,6 +2593,10 @@ export async function onRequest(ctx) {
              FROM platform_leads
             WHERE created_at >= datetime('now', ?)
             ORDER BY created_at DESC LIMIT 500`, [since])
+
+        // Computed, not stored: the alert log already knows who was emailed,
+        // and a second source of truth would only drift from it.
+        for (const r of invites) r.ackSent = acked.has((r.email || '').toLowerCase())
 
         return json({ success: true, data: { days, invites, hosts, leads } })
       }

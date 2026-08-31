@@ -20,23 +20,20 @@ function getHostConfig(villaId) {
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
 // villa branding the way a genuine tenant security alert does. Domain
 // verified in Resend 2026-08-29.
-// Sent FROM a verified domain, not from stayvibe360.com. These three alerts
-// (invite request, demo request, host registration) are internal notifications
-// TO the operator - the prospect never sees this address - so there is nothing
-// to gain from a prettier sending domain and everything to lose: Resend 403s
-// any domain the key is not authorised for, and the failure is silent to the
-// person who filled in the form.
+// Platform lead alerts - invite request, demo request, host registration.
 //
-// It failed exactly that way between 2026-08-29 21:33 and 2026-08-31 07:08:
-// stayvibe360.com was never added to Resend, so five real signups arrived with
-// no notification at all. The rows were safe in platform_invite_requests and
-// the Signups screen shows them, but nobody knew to look.
+// stayvibe360.com is verified on Resend, but on the kerala.luxuryvillas team,
+// while the API key belongs to the biji.sukumar team - and a key can only send
+// from domains on its own team. That mismatch is what made every one of these
+// alerts 403 between 2026-08-29 21:33 and 2026-08-31 07:08, losing five real
+// signups' notifications.
 //
-// Move this to invitation@stayvibe360.com only once that domain is verified in
-// Resend AND the API key in use has permission for it - and when mail actually
-// goes to the lead rather than to us, which is the only case where the sending
-// domain is worth anything.
-const PLATFORM_LEAD_FROM = 'StayVibe <alerts@luxuryvillasofguruvayur.com>'
+// Safe to point here anyway: sendAlert now retries from a verified domain when
+// a sender is refused, so the alert still arrives while the domain sits on the
+// wrong team, and starts using this address by itself once the transfer is
+// done. The fallback is recorded in infra_alert_log, so "it works" never hides
+// "it is still misconfigured".
+const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -198,6 +195,11 @@ const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // DB/villaId are optional — when passed, every attempt (success or failure)
 // is logged to alert_log so you can check delivery without live Cloudflare
 // Logs access. Browse it via D1 Explorer like any other table.
+// Last-resort sender on a domain that is verified on the same Resend team as
+// the API key. Only used to retry a send Resend refused for the sender's
+// domain - see the 403 retry below.
+const SAFE_ALERT_FROM = 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>'
+
 async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
@@ -238,8 +240,36 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
         : `(len ${apiKey.length}, too short to preview safely)`
       const keySource = env.RESEND_API_KEY ? 'env secret' : 'DB fallback'
       detail = await res.text().catch(() => '')
-      detail = `[key used: ${masked}, source: ${keySource}] ${detail}`
-      console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
+
+      // Resend refuses any sender whose domain is not verified ON THE SAME
+      // TEAM as the API key, with 403 "not authorized to send emails from".
+      // Left alone, that failure is invisible to whoever filled in the form
+      // and the alert is simply lost - which is how five real signups arrived
+      // overnight on 2026-08-31 with nobody notified.
+      //
+      // So retry once from a domain we know is verified. The mail still
+      // arrives, from a less pretty address, and the log records that it fell
+      // back so the misconfiguration is still visible rather than papered over.
+      if (res.status === 403 && /not authorized to send emails from/i.test(detail)
+          && body.from !== SAFE_ALERT_FROM) {
+        const refusedFrom = body.from
+        const retry = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({ ...body, from: SAFE_ALERT_FROM }),
+        })
+        ok = retry.ok
+        statusCode = retry.status
+        detail = `[sender ${refusedFrom} refused, resent from ${SAFE_ALERT_FROM}] ` +
+                 (retry.ok ? '' : await retry.text().catch(() => ''))
+      }
+
+      if (!ok) {
+        detail = `[key used: ${masked}, source: ${keySource}] ${detail}`
+        console.error(`sendAlert failed: ${res.status} ${res.statusText} — ${detail.slice(0, 300)}`)
+      } else {
+        console.warn(`sendAlert fell back to ${SAFE_ALERT_FROM}: ${detail.slice(0, 200)}`)
+      }
     }
   } catch (e) {
     detail = e?.message || String(e)

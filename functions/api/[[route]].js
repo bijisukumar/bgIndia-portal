@@ -7524,7 +7524,22 @@ export async function onRequest(ctx) {
 
       if (action === 'addStaffAccount') {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
-        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        // A tenant's own owner always creates staff under their own tenant.
+        // master_owner (payload.tenantId is null) otherwise falls through to
+        // DEFAULT_VILLA_ID, which comes from the hostname - so from the platform
+        // console there was no way to create the FIRST login for a tenant that
+        // has no hostname of its own yet. That is a chicken-and-egg an operator
+        // hits on every new host, so master_owner may name the tenant
+        // explicitly. Validated against platform_properties so a typo creates a
+        // login nobody can ever use rather than silently working.
+        let tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        if (payload.role === 'master_owner' && body.tenantId) {
+          const known = await DB.prepare(
+            `SELECT 1 AS ok FROM platform_properties WHERE property_id = ? AND active = 1`
+          ).bind(body.tenantId).first()
+          if (!known) return err(`Unknown tenant "${body.tenantId}"`, 400)
+          tenantId = body.tenantId
+        }
         const label = (body.label || '').trim()
         if (!label) return err('Name required', 400)
         let actorSlug = (body.actorSlug || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

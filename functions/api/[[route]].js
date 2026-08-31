@@ -1334,6 +1334,33 @@ export async function onRequest(ctx) {
       return json({ success: false, error: 'Invalid PIN' }, 401)
     }
 
+    // A valid PIN is only valid ON ITS OWN TENANT'S DOMAIN. Everything past
+    // this point (villaScope, assertPropertyAccess, assertRecordAccess) only
+    // ever governs what an ISSUED token can see — none of it stops a
+    // perfectly valid dwarka PIN from logging in on demo.stayvibe360.com in
+    // the first place, and once logged in, features gated on role+tenantId
+    // alone (not a villa_id row, e.g. the platform-signups pipeline) have no
+    // per-request hostname check to catch. master_owner is exempt by design:
+    // "log into a tenant's own site for in-context troubleshooting" is a
+    // real, intended use of that PIN. Every other PIN belongs to exactly the
+    // one tenant it was issued for.
+    if (found.tenantId && hostVillaId && found.tenantId !== hostVillaId) {
+      await sendAlert(env, '🚨 bgIndia — PIN used on the wrong tenant\'s domain', [
+        'Source: Login screen',
+        `A valid PIN for "${found.tenantId}" was entered on "${hostVillaId}"'s own site — refused.`,
+        '',
+        `Actor:      ${found.actor}`,
+        `Time:       ${timestamp}`,
+        `IP Address: ${ip}`,
+        locationLine,
+        ispLine,
+        `User Agent: ${userAgent}`,
+        '',
+        'If this was you on the wrong tab, no action needed. If not, that PIN may be shared or guessed.',
+      ], undefined, DB, null)
+      return json({ success: false, error: 'Invalid PIN' }, 401)
+    }
+
     const token = await signJwt({
       name:        found.name,
       role:        found.role,
@@ -2269,6 +2296,17 @@ export async function onRequest(ctx) {
     payload = token ? await verifyJwt(token, env.JWT_SECRET) : null
   }
   if (!payload) return json({ success: false, error: 'Unauthorized' }, 401)
+
+  // A token only stays valid on the tenant's own domain it was issued for —
+  // enforced HERE, on every request, not only at login. Login already
+  // refuses to ISSUE a cross-domain token; this catches everything login
+  // can't: a token issued before this fix existed, one copied into another
+  // tab, JWT_SECRET-signed replay, anything. master_owner/SYSTEM_TOKEN carry
+  // no tenantId and are unaffected — this only ever narrows a token that was
+  // already scoped to one tenant.
+  if (payload.tenantId && hostVillaId && payload.tenantId !== hostVillaId) {
+    return json({ success: false, error: 'Unauthorized' }, 401)
+  }
 
   const actor = payload.actor || 'owner'
   const now   = () => new Date().toISOString().slice(0, 19).replace('T', ' ')

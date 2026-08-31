@@ -299,7 +299,7 @@ export const CONFIG = {
       template:
 `Hi {firstName}, we loved hosting your family at {villaName} and hope to welcome you back again soon to seek blessings from Guruvayurappan. 🙏
 
-Unlike a typical online booking, our team makes a genuine effort to speak with each guest and see how we can make your stay even better. That same care goes into asking for your review — if you have a few minutes while it's still fresh, a {reviewPlatform} review means a great deal to us and helps other families find us.
+Unlike a typical online booking, our team makes a genuine effort to speak with each guest and see how we can make your stay even better. That same care goes into asking for your review — if you have a few minutes while it's still fresh, a review on {reviewPlatform} means a great deal to us and helps other families find us.
 
 {reviewLink}Thank you, and we hope to host you again.`,
       // Where each channel's guests should leave the review.

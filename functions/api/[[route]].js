@@ -44,6 +44,45 @@ const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
 // Swap this for an @stayvibe360.com address once Cloudflare Email Routing is
 // set up; until then a reply lands in the villa inbox.
 const PLATFORM_REPLY_TO = 'kerala.luxuryvillas@gmail.com'
+const PLATFORM_WHATSAPP = '+91 99950 43283'
+
+// Acknowledgement sent to whoever fills in the invite form.
+//
+// Until now the form wrote a row, emailed the operator, and told the person
+// nothing at all. Five real hosts signed up on 2026-08-31 and heard silence
+// for a day, which for a stranger is indistinguishable from a form that went
+// nowhere - and they are exactly the people whose second thought is "is this
+// real?".
+//
+// Deliberately plain text and deliberately modest: it confirms a human has the
+// details, says what happens next with a timeframe, and gives a number that
+// reaches someone. No pricing (the site quotes none), no marketing claims.
+function inviteAckLines(name) {
+  return [
+    `Hi ${name},`,
+    '',
+    'Thanks for requesting an invite - this is to confirm your details reached',
+    'us, and a real person has read them.',
+    '',
+    'WHAT IT IS',
+    'Software I built to run my own villa in Guruvayur. Bookings from Airbnb,',
+    'Booking.com, Agoda and direct in one calendar; guest check-in including',
+    'Form C for foreign guests; staff pay; and the accounts - on a phone,',
+    'not a spreadsheet.',
+    '',
+    'WHAT HAPPENS NEXT',
+    "We're opening it to a small group of hosts over the next 6-8 weeks. I'll",
+    'be in touch within a few days with a Zoom link and a couple of times for a',
+    "20-minute call. On that call I'll show you the system running on our real",
+    'numbers - not a slide deck - and you can decide.',
+    '',
+    'Nothing to prepare, and no commitment either way.',
+    '',
+    'Biji Sukumar',
+    'StayVibe360',
+    `WhatsApp: ${PLATFORM_WHATSAPP}`,
+  ]
+}
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
@@ -1767,6 +1806,17 @@ export async function onRequest(ctx) {
         `Message them: https://wa.me/${phone.replace(/[^0-9]/g, '')}`,
         `Request ID: ${requestId}`,
       ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID, 'platform_lead', PLATFORM_LEAD_FROM))
+
+      // Only when they gave an email, and never allowed to break the
+      // submission: the row is already saved, and a failed acknowledgement
+      // must not turn a captured lead into an error on their screen.
+      const leadEmail = t(b.email)
+      if (leadEmail.includes('@')) {
+        ctx.waitUntil(sendAlert(
+          env, 'Thanks for your interest in StayVibe360', inviteAckLines(name),
+          leadEmail, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM
+        ))
+      }
 
       return json({ success: true, data: { requestId } })
     } catch (e) {

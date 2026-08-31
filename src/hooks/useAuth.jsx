@@ -6,6 +6,7 @@
 //  Session clears when the tab closes (sessionStorage).
 // ============================================================
 import { createContext, useContext, useState } from 'react'
+import { clearActiveVillaId } from '../utils/villaContext'
 
 const AuthContext = createContext(null)
 
@@ -77,6 +78,12 @@ export function AuthProvider({ children }) {
   const logout = () => {
     setUser(null)
     sessionStorage.removeItem('ge_token')
+    // The picked property has to go too. It lived in sessionStorage, which
+    // outlives a logout, so signing out and back in silently reused the
+    // previous pick and skipped the picker entirely - master_owner landed
+    // straight back on whichever tenant they last looked at, with no sign
+    // that a choice had been made for them.
+    clearActiveVillaId()
   }
 
   return (

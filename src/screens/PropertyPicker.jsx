@@ -11,6 +11,10 @@ export default function PropertyPicker({ onResolved }) {
   const [options, setOptions]   = useState(null)
   const [isMaster, setIsMaster] = useState(false)
   const [error, setError]       = useState('')
+  // master_owner accumulates every host on the platform, so this list only
+  // grows. Typing to narrow it beats scrolling a list that will eventually
+  // be dozens long.
+  const [query, setQuery]       = useState('')
 
   useEffect(() => {
     api.getPropertyPickerOptions()
@@ -43,19 +47,45 @@ export default function PropertyPicker({ onResolved }) {
     </div>
   )
 
+  // Match on host name and id too, not just the property name - an operator
+  // looking for a tenant usually remembers the host, and the id is what shows
+  // up in logs and error reports.
+  const q = query.trim().toLowerCase()
+  const matches = !q ? options : options.filter(p =>
+    [p.name, p.propertyId, p.tenantName, p.tenantId]
+      .some(v => String(v || '').toLowerCase().includes(q)))
+
   const grouped = isMaster
-    ? options.reduce((acc, p) => {
+    ? matches.reduce((acc, p) => {
         (acc[p.tenantName] ||= []).push(p)
         return acc
       }, {})
-    : { '': options }
+    : { '': matches }
+
+  // Enter picks when the search has narrowed to exactly one, so a known host
+  // is a few keystrokes and a return rather than a hunt with the mouse.
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && matches.length === 1) choose(matches[0].propertyId)
+    if (e.key === 'Escape') setQuery('')
+  }
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
         <p style={styles.title}>Select a property</p>
         {error && <p style={styles.error}>{error}</p>}
+        <input
+          autoFocus
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Search host or property…"
+          style={styles.search}
+        />
         <div style={styles.list}>
+          {matches.length === 0 && (
+            <p style={styles.empty}>No host or property matches “{query}”.</p>
+          )}
           {Object.entries(grouped).map(([tenantName, props]) => (
             <div key={tenantName || 'default'}>
               {tenantName && <p style={styles.groupLabel}>{tenantName}</p>}
@@ -68,6 +98,11 @@ export default function PropertyPicker({ onResolved }) {
             </div>
           ))}
         </div>
+        {isMaster && options.length > 1 && (
+          <p style={styles.count}>
+            {matches.length} of {options.length} {options.length === 1 ? 'property' : 'properties'}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -112,6 +147,10 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+    // Caps the card at roughly seven rows so a platform with many hosts
+    // scrolls the list instead of running the card off the screen.
+    maxHeight: '46vh',
+    overflowY: 'auto',
   },
   groupLabel: {
     fontSize: '0.65rem',
@@ -133,6 +172,32 @@ const styles = {
     cursor: 'pointer',
     fontFamily: 'DM Sans, sans-serif',
     fontSize: '0.85rem',
+  },
+  search: {
+    width: '100%',
+    padding: '10px 12px',
+    marginBottom: '12px',
+    borderRadius: '10px',
+    border: '1px solid rgba(200,144,58,0.3)',
+    background: '#141820',
+    color: '#F0F0F0',
+    // 16px keeps iOS from zooming the viewport when the field takes focus.
+    fontSize: '16px',
+    fontFamily: 'DM Sans, sans-serif',
+    boxSizing: 'border-box',
+    outline: 'none',
+  },
+  empty: {
+    color: '#8A9BAE',
+    fontSize: '0.8rem',
+    textAlign: 'center',
+    padding: '14px 4px',
+  },
+  count: {
+    color: '#5C7080',
+    fontSize: '0.68rem',
+    textAlign: 'center',
+    marginTop: '12px',
   },
   optionName: { fontWeight: '600' },
   optionType: { fontSize: '0.7rem', color: '#8A9BAE', textTransform: 'capitalize' },

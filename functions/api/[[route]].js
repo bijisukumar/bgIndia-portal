@@ -2318,7 +2318,17 @@ export async function onRequest(ctx) {
 
   function assertPropertyAccess(payload, villaId) {
     if (!villaId) return
-    if (payload.propertyIds == null) return
+    if (payload.propertyIds == null) {
+      // Unrestricted (master_owner / SYSTEM_TOKEN) is still pinned to the
+      // CURRENT request's own hostname-resolved tenant, when one exists —
+      // same reasoning as villaScope above. Without this, master_owner
+      // logged into one tenant's own domain could still name a DIFFERENT
+      // tenant's villaId and act on it; only the platform-wide consoles
+      // (manage., join., *.pages.dev — hostVillaId null there) get true
+      // cross-tenant reach.
+      if (hostVillaId && villaId !== hostVillaId) throw new Error('FORBIDDEN_PROPERTY')
+      return
+    }
     if (!payload.propertyIds.includes(villaId)) {
       throw new Error('FORBIDDEN_PROPERTY')
     }
@@ -2330,13 +2340,18 @@ export async function onRequest(ctx) {
   // guessing another tenant's stay id would be enough to cancel their
   // booking. This looks up the record's own villa and checks that.
   //
-  // master_owner and SYSTEM_TOKEN (propertyIds null) skip it, as everywhere
-  // else. A record that does not exist is left alone so the handler can
-  // return its own not-found rather than a confusing 403.
+  // Still runs the lookup for master_owner/SYSTEM_TOKEN (propertyIds null) —
+  // it used to skip entirely, but assertPropertyAccess is what decides
+  // whether unrestricted access is REALLY unrestricted (only off a
+  // tenant-specific hostname) or pinned to the current tenant's own domain,
+  // so this can no longer take the shortcut of never asking.
+  //
+  // A record that does not exist is left alone so the handler can return
+  // its own not-found rather than a confusing 403.
   //
   // table and idCol are literals from this file, never caller input.
   async function assertRecordAccess(DB, payload, table, idCol, id) {
-    if (!id || payload?.propertyIds == null) return
+    if (!id) return
     const row = await DB.prepare(
       `SELECT villa_id FROM ${table} WHERE ${idCol} = ?`
     ).bind(id).first()
@@ -3946,6 +3961,9 @@ export async function onRequest(ctx) {
       if (action === 'getGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
+        // ID/passport scans — knowing another tenant's stay id must not be
+        // enough to read them.
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const { results } = await DB.prepare(`SELECT doc_id, stay_id, doc_type, file_name, file_b64 FROM stayvibe_guest_documents WHERE stay_id = ? AND folder_created = 0`).bind(stayId).all()
         return json({ success: true, data: results })
       }
@@ -3956,6 +3974,7 @@ export async function onRequest(ctx) {
       if (action === 'getStayPhotos') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const { results } = await DB.prepare(
           `SELECT doc_id, doc_type, file_name, file_b64, created_at
            FROM stayvibe_guest_documents WHERE stay_id = ? AND doc_type IN ('car_photo','plate_photo')
@@ -4130,6 +4149,7 @@ export async function onRequest(ctx) {
       if (action === 'getCampaignAnalytics') {
         const campaignId = url.searchParams.get('campaignId') || ''
         if (!campaignId) return err('campaignId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_marketing_campaigns', 'id', campaignId)
         const events = await DB.prepare(`SELECT event_type, country, region, city, strftime('%H', ts) as hour, DATE(ts) as day, COUNT(*) as n FROM stayvibe_campaign_analytics WHERE campaign_id = ? GROUP BY event_type, country, region, city, hour, day ORDER BY day DESC, hour DESC`).bind(campaignId).all()
         return json({ success: true, data: events.results })
       }
@@ -4706,7 +4726,8 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getCheckinLinks') {
-        const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM stayvibe_checkin_links ORDER BY villa_id, partner`).all()
+        const cl = villaScope(payload, url.searchParams.get('villaId'))
+        const { results } = await DB.prepare(`SELECT token, villa_id, partner, label, is_active, use_count, created_at FROM stayvibe_checkin_links WHERE 1=1${cl.sql} ORDER BY villa_id, partner`).bind(...cl.binds).all()
         return json({ success: true, data: results })
       }
 
@@ -4928,6 +4949,7 @@ export async function onRequest(ctx) {
       if (action === 'getDocumentStatus') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const { results } = await DB.prepare(
           `SELECT doc_id, stay_id, doc_type, file_name, folder_created, created_at, updated_at
            FROM stayvibe_guest_documents WHERE stay_id = ?`
@@ -4940,6 +4962,7 @@ export async function onRequest(ctx) {
       if (action === 'deleteGuestDocuments') {
         const stayId = url.searchParams.get('stayId') || ''
         if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const result = await DB.prepare(
           `DELETE FROM stayvibe_guest_documents WHERE stay_id = ?`
         ).bind(stayId).run()
@@ -5468,6 +5491,7 @@ export async function onRequest(ctx) {
       if (action === 'logCommunication') {
         const enquiryId = body.enquiryId
         if (!enquiryId) return err('enquiryId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_enquiries', 'enquiry_id', enquiryId)
         await DB.prepare(`
           INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id)
           VALUES (?, ?, ?, ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
@@ -5499,6 +5523,7 @@ export async function onRequest(ctx) {
       if (action === 'markReminderSent') {
         const { enquiryId, threshold } = body
         if (!enquiryId || !['2day','5day'].includes(threshold)) return err('enquiryId and threshold (2day|5day) required')
+        await assertRecordAccess(DB, payload, 'stayvibe_enquiries', 'enquiry_id', enquiryId)
         const col = threshold === '2day' ? 'reminder_2day_sent_at' : 'reminder_5day_sent_at'
         await DB.prepare(`UPDATE stayvibe_enquiries SET ${col} = ? WHERE enquiry_id = ?`).bind(now(), enquiryId).run()
         return json({ success: true })
@@ -5575,6 +5600,7 @@ export async function onRequest(ctx) {
       if (action === 'markEnquiryLost') {
         const enquiryId = body.enquiryId
         if (!enquiryId) return err('enquiryId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_enquiries', 'enquiry_id', enquiryId)
         await DB.prepare(`
           UPDATE stayvibe_enquiries SET status = 'lost', lost_reason = ?, updated_by = ?, updated_at = ? WHERE enquiry_id = ?
         `).bind(body.lostReason || 'other', actor, now(), enquiryId).run()
@@ -5943,6 +5969,7 @@ export async function onRequest(ctx) {
       if (action === 'resolveDuplicate') {
         const dupId = body.dupId
         if (!dupId) return err('dupId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_duplicate_bookings', 'dup_id', dupId)
         await DB.prepare(`UPDATE stayvibe_duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = ? WHERE dup_id = ?`)
           .bind(actor, (body.resolution || 'reviewed').trim(), dupId).run()
         return json({ success: true, data: { dupId, resolved: true } })
@@ -7383,6 +7410,13 @@ export async function onRequest(ctx) {
         const src = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(sourceStayId).first()
         const tgt = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(targetStayId).first()
         if (!src || !tgt) return err('Stay not found', 404)
+        // Both named by the caller — a tenant scoped to one villa must not be
+        // able to move money onto/off a stay it doesn't own by naming it here.
+        assertPropertyAccess(payload, src.villa_id)
+        assertPropertyAccess(payload, tgt.villa_id)
+        // Financials must never cross tenant books, even for master_owner —
+        // this is a merge tool for one host's own duplicate, not a transfer.
+        if (src.villa_id !== tgt.villa_id) return err('Source and target belong to different tenants — refusing to merge across tenants')
         if (['cancelled','void','closed'].includes(tgt.status)) return err('Target stay is not active')
         if (src.status === 'void') return err('Source stay is already void')
         if ((src.gross || 0) <= 0 && (src.net || 0) <= 0) return err('Source stay has no financials to absorb')
@@ -7605,6 +7639,7 @@ export async function onRequest(ctx) {
         const vId = villaId || DEFAULT_VILLA_ID
 
         if (txnId) {
+          await assertRecordAccess(DB, payload, 'stayvibe_villa_expenses', 'txn_id', txnId)
           await DB.prepare(`
             UPDATE stayvibe_villa_expenses SET date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=?
             WHERE txn_id = ?
@@ -8629,6 +8664,7 @@ export async function onRequest(ctx) {
       if (action === 'markDocumentUploaded') {
         const { docId } = body
         if (!docId) return err('docId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_guest_documents', 'doc_id', docId)
         await DB.prepare(
           `UPDATE stayvibe_guest_documents SET folder_created = 1, updated_at = ? WHERE doc_id = ?`
         ).bind(now(), docId).run()

@@ -1792,24 +1792,31 @@ export async function onRequest(ctx) {
       ).run()
 
       ctx.waitUntil(sendAlert(env, `\u2728 Invite request \u2014 ${name}${t(b.location) ? ' (' + t(b.location) + ')' : ''}`, [
-        'Source: www.stayvibe360.com > Request your invite',
+        // Deliberately terse. Two things ruined the old version: a "Source:"
+        // line that never varied (every invite comes from the same form), and
+        // bare URLs - Outlook rewrites each one into a multi-line SafeLinks
+        // blob, so two links buried the actual answers. The number is plain
+        // text, which phones linkify anyway, and the Signups screen is where a
+        // lead is acted on.
+        //
+        // Empty answers are dropped rather than printed as dashes: these forms
+        // are filled on a phone and mostly half-completed, and a column of
+        // dashes hides the answers somebody did give.
+        `Name             ${name}`,
+        `WhatsApp         ${phone}`,
+        t(b.email)          ? `Email            ${t(b.email)}` : '',
+        t(b.location)       ? `Location         ${t(b.location)}` : '',
+        t(b.propertyName)   ? `Property         ${t(b.propertyName)}` : '',
+        propertyType        ? `Property type    ${propertyType}` : '',
+        t(b.propertyCount)  ? `How many         ${t(b.propertyCount)}` : '',
+        channels            ? `Hosting on       ${channels}` : '',
+        t(b.airbnbLink)     ? `Airbnb link      ${t(b.airbnbLink)}` : '',
+        t(b.onboard3m)      ? `Ready in 6-8wk   ${t(b.onboard3m)}` : '',
+        t(b.foreignGuests)  ? `Foreign guests   ${t(b.foreignGuests)}` : '',
+        interests           ? `Wants help with  ${interests}` : '',
+        t(b.callSlot)       ? `Best call time   ${t(b.callSlot)}` : '',
+        t(b.notes)          ? `Notes            ${t(b.notes)}` : '',
         '',
-        `Name:        ${name}`,
-        `WhatsApp:    ${phone}`,
-        `Email:       ${t(b.email) || '\u2014'}`,
-        `Property:    ${t(b.propertyName) || '\u2014'}`,
-        `Location:    ${t(b.location) || '\u2014'}`,
-        `Properties:  ${t(b.propertyCount) || '\u2014'}`,
-        `Property type: ${propertyType || '\u2014'}`,
-        `Hosting on:  ${channels || '\u2014'}`,
-        `Airbnb link: ${t(b.airbnbLink) || '\u2014'}`,
-        `Ready in 3 months: ${t(b.onboard3m) || '\u2014'}`,
-        `Wants help with: ${interests || '\u2014'}`,
-        `Foreign guests: ${t(b.foreignGuests) || '\u2014'}`,
-        `Best call time: ${t(b.callSlot) || '\u2014'}`,
-        t(b.notes) ? `Notes: ${t(b.notes)}` : '',
-        '',
-        `Message them: https://wa.me/${phone.replace(/[^0-9]/g, '')}`,
         `Request ID: ${requestId}`,
       ].filter(Boolean), await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID), DB, DEFAULT_VILLA_ID, 'platform_lead', PLATFORM_LEAD_FROM))
 

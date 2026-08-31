@@ -185,6 +185,25 @@ function AddStaffForm({ onDone, onCancel, showToast }) {
   const [busy, setBusy] = useState(false)
   const [slugTouched, setSlugTouched] = useState(false)
 
+  // A tenant's own owner always creates staff under their own tenant, so this
+  // picker is master_owner only. Without it there was no way to create the
+  // FIRST login for a tenant that has no hostname of its own yet - the tenant
+  // came from whichever host you happened to be on.
+  const { user } = useAuth()
+  const isMaster = user?.role === 'master_owner'
+  const [tenants, setTenants] = useState([])
+  const [tenantId, setTenantId] = useState('')
+  useEffect(() => {
+    if (!isMaster) return
+    api.getPropertyPickerOptions()
+      .then(r => {
+        const seen = new Map()
+        for (const p of (r?.properties || [])) if (!seen.has(p.tenantId)) seen.set(p.tenantId, p.tenantName || p.tenantId)
+        setTenants([...seen].map(([id, name]) => ({ id, name })))
+      })
+      .catch(() => setTenants([]))
+  }, [isMaster])
+
   const setLabelAndSlug = (v) => {
     setLabel(v)
     if (!slugTouched) setActorSlug(v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))
@@ -192,10 +211,14 @@ function AddStaffForm({ onDone, onCancel, showToast }) {
 
   const submit = async () => {
     if (!label.trim()) { showToast('Enter a name', 'error'); return }
+    if (isMaster && !tenantId) { showToast('Pick which host this login belongs to', 'error'); return }
     setBusy(true)
     try {
       const r = await api.addStaffAccount({
         label: label.trim(), actorSlug, compType,
+        // Ignored by the server for a normal owner; only master_owner may
+        // target another tenant, and it is validated there.
+        ...(isMaster && tenantId ? { tenantId } : {}),
         baseSalary: baseSalary || 0,
         commissionSingleNight: commissionSingle, commissionMultiNight: commissionMulti,
       })
@@ -208,6 +231,18 @@ function AddStaffForm({ onDone, onCancel, showToast }) {
 
   return (
     <div className="card" style={{ marginBottom: '14px' }}>
+      {isMaster && (
+        <div className="field" style={{ marginBottom: '10px' }}>
+          <label className="field-label">Host</label>
+          <select style={inp} value={tenantId} onChange={e => setTenantId(e.target.value)}>
+            <option value="">Select a host…</option>
+            {tenants.map(t => <option key={t.id} value={t.id}>{t.name} ({t.id})</option>)}
+          </select>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: 4 }}>
+            Which host's staff this login belongs to. They will only ever see that host's data.
+          </div>
+        </div>
+      )}
       <div className="field" style={{ marginBottom: '10px' }}>
         <label className="field-label">Name</label>
         <input style={inp} value={label} onChange={e => setLabelAndSlug(e.target.value)} placeholder="e.g. Pradosh" />

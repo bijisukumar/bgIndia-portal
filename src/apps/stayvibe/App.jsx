@@ -56,11 +56,15 @@ import RDashboardSnapshot from '../../screens/RDashboardSnapshot'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
-  // Unauthenticated visits (including plain "/") land on the public
-  // gateway — New Host Registration / Login / Request Demo — instead of
-  // being bounced straight into the PIN screen with no context. Login
-  // itself is still reachable directly via /login.
-  if (!user) return <Welcome />
+  // On an acquisition host an unauthenticated visit lands on the public
+  // gateway - Request Your Invite / Login / New Host Registration / Request a
+  // Demo - because a first-time visitor needs the context.
+  //
+  // A tenant's own host goes straight to the PIN screen. Everyone arriving
+  // there is already a customer or their staff, mostly from an installed PWA
+  // several times a day, and a gateway card offering one button was pure
+  // friction between them and the keypad.
+  if (!user) return isAcquisitionHost() ? <Welcome /> : <Navigate to="/login" replace />
   const role = user.role
   // master_owner can log in directly to a tenant's own site too (not just
   // the aggregate manage.* console) for in-context troubleshooting.

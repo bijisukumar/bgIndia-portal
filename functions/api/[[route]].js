@@ -2271,6 +2271,51 @@ export async function onRequest(ctx) {
       // Document bytes are reported separately and deliberately: passport and
       // visa scans are base64 in the row, so they are the one thing that can
       // grow a tenant fast. Everything else is text measured in kilobytes.
+      // ── PLATFORM SIGNUPS ──────────────────────────────────────────
+      // The three public intake forms wrote to the database and emailed the
+      // operator, and that was the whole story - there was no way to see who
+      // had signed up except by scrolling a mailbox. That is fine for one
+      // enquiry a month and useless during a launch campaign, where the whole
+      // question is how many came in and who has not been called back.
+      //
+      // Platform-level data, not tenant data: a signup belongs to nobody's
+      // villa yet, which is exactly why it needs the master console.
+      if (action === 'getPlatformSignups') {
+        if (payload.role !== 'master_owner') return err('Master owner only', 403)
+        const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get('days')) || 90))
+        const since = `-${days} days`
+
+        const grab = async (sql, binds = []) => {
+          // One bad table must not blank the whole screen - an empty section
+          // is far better than a page that will not load.
+          try { return (await DB.prepare(sql).bind(...binds).all()).results || [] }
+          catch (e) { console.error('getPlatformSignups:', e?.message || e); return [] }
+        }
+
+        const invites = await grab(
+          `SELECT request_id AS id, name, whatsapp, email, location, property_name,
+                  property_type, property_count, channels, foreign_guests, onboard_3m,
+                  interests, call_slot, notes, status, created_at
+             FROM platform_invite_requests
+            WHERE created_at >= datetime('now', ?)
+            ORDER BY created_at DESC LIMIT 500`, [since])
+
+        const hosts = await grab(
+          `SELECT registration_id AS id, brand_name, owner_name, owner_email,
+                  owner_whatsapp, villa_display_name, address, bedrooms, status, created_at
+             FROM platform_host_registrations
+            WHERE created_at >= datetime('now', ?)
+            ORDER BY created_at DESC LIMIT 500`, [since])
+
+        const leads = await grab(
+          `SELECT lead_id AS id, source, name, phone, email, notes, status, created_at
+             FROM platform_leads
+            WHERE created_at >= datetime('now', ?)
+            ORDER BY created_at DESC LIMIT 500`, [since])
+
+        return json({ success: true, data: { days, invites, hosts, leads } })
+      }
+
       if (action === 'getTenantUsage') {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') {
           return err('Owner access required', 403)

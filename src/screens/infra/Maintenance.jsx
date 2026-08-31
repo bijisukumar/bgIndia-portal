@@ -27,6 +27,15 @@ const ITEMS = [
     path: '/owner/maintenance/schema',
   },
   {
+    icon: '📥',
+    bg: 'rgba(200,144,58,0.08)',
+    arrow: '#C8903A',
+    title: 'Signups',
+    sub: 'Invite requests, host registrations and demo requests from the public forms',
+    path: '/owner/maintenance/signups',
+    masterOwnerOnly: true,
+  },
+  {
     icon: '📊',
     bg: 'rgba(133,183,235,0.08)',
     arrow: '#85B7EB',

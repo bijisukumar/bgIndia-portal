@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { isAcquisitionHost } from '../utils/hostContext'
 
 // This gateway pitches the StayVibe PLATFORM, not the tenant currently
 // serving this domain — deliberately not CONFIG.brandName/tagline (that's
@@ -8,11 +9,15 @@ import { useNavigate } from 'react-router-dom'
 // Public landing gateway — shown instead of dropping straight into the PIN
 // screen. Three doors: an existing tenant logs in, a prospective host
 // registers interest, or a curious visitor asks for a demo. This is the
-// SaaS pitch's front door (dwarka.stayvibe360.com doubles as both a real
-// tenant's portal and the marketing entry point until there's a dedicated
-// marketing domain).
+// SaaS pitch's front door. That used to be dwarka.stayvibe360.com doing
+// double duty as a real tenant's portal AND the marketing entry point,
+// because there was no dedicated marketing domain. There is now
+// (join.stayvibe360.com), so a tenant's own portal shows only the login door -
+// offering "Request Your Invite" to someone who is already a customer, or to
+// their staff, reads as a mistake.
 export default function Welcome() {
   const navigate = useNavigate()
+  const acquisition = isAcquisitionHost()
 
   return (
     <div style={styles.container}>
@@ -30,25 +35,31 @@ export default function Welcome() {
         <div style={styles.goldLine} />
         <p style={styles.tagline}>VILLA MANAGEMENT, SIMPLIFIED</p>
 
-        <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => { window.location.href = 'https://www.stayvibe360.com/#invite' }}>
-          <span style={styles.optionTitle}>Request Your Invite</span>
-          <span style={styles.optionSub}>Join our first group of hosts — 2 min, no commitment</span>
-        </button>
+        {acquisition && (
+          <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => { window.location.href = 'https://www.stayvibe360.com/#invite' }}>
+            <span style={styles.optionTitle}>Request Your Invite</span>
+            <span style={styles.optionSub}>Join our first group of hosts — 2 min, no commitment</span>
+          </button>
+        )}
 
-        <button style={styles.optionBtn} onClick={() => navigate('/login')}>
+        <button style={acquisition ? styles.optionBtn : { ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => navigate('/login')}>
           <span style={styles.optionTitle}>Login</span>
           <span style={styles.optionSub}>Existing owner or manager</span>
         </button>
 
-        <button style={styles.optionBtn} onClick={() => navigate('/NewHost')}>
-          <span style={styles.optionTitle}>New Host Registration</span>
-          <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
-        </button>
+        {acquisition && (
+          <>
+            <button style={styles.optionBtn} onClick={() => navigate('/NewHost')}>
+              <span style={styles.optionTitle}>New Host Registration</span>
+              <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
+            </button>
 
-        <button style={styles.optionBtn} onClick={() => navigate('/demo')}>
-          <span style={styles.optionTitle}>Request a Demo</span>
-          <span style={styles.optionSub}>See StayVibe in action, no commitment</span>
-        </button>
+            <button style={styles.optionBtn} onClick={() => navigate('/demo')}>
+              <span style={styles.optionTitle}>Request a Demo</span>
+              <span style={styles.optionSub}>See StayVibe in action, no commitment</span>
+            </button>
+          </>
+        )}
       </div>
 
       <p style={styles.footer}>

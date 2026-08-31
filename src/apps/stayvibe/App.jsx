@@ -16,6 +16,7 @@ import Login from '../../screens/Login'
 import Welcome from '../../screens/Welcome'
 import RequestDemo from '../../screens/RequestDemo'
 import NewHostRegistration from '../../screens/NewHostRegistration'
+import { isAcquisitionHost } from '../../utils/hostContext'
 
 // Owner — villa screens only
 import OwnerHome      from '../../screens/OwnerHome'
@@ -131,8 +132,12 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login"        element={<LoginGate />} />
-          <Route path="/NewHost"      element={<NewHostRegistration />} />
-          <Route path="/demo"         element={<RequestDemo />} />
+          {/* Signup and demo belong to the acquisition hosts only. Hiding the
+              buttons is not enough on its own: these URLs get pasted into
+              WhatsApp groups and would still open on a tenant's own portal,
+              inviting an existing customer to sign up again. */}
+          <Route path="/NewHost"      element={isAcquisitionHost() ? <NewHostRegistration /> : <Navigate to="/login" replace />} />
+          <Route path="/demo"         element={isAcquisitionHost() ? <RequestDemo />        : <Navigate to="/login" replace />} />
           <Route path="/quote/:token" element={<AgentQuote />} />
           <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
           <Route path="/flexibility"  element={<Flexibility />} />

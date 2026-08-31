@@ -251,7 +251,7 @@ const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // domain - see the 403 retry below.
 const SAFE_ALERT_FROM = 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>'
 
-async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride) {
+async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride, bccEmail) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
@@ -273,6 +273,10 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
     // Only for the platform sender, whose domain has no inbox behind it.
     // Tenant alerts already come from a domain that can receive.
     if (body.from === PLATFORM_LEAD_FROM) body.reply_to = PLATFORM_REPLY_TO
+    // BCC, never CC: the recipient must not see an internal address on a mail
+    // addressed to them, nor be able to reply-all into the operator's inbox.
+    // Skipped when it would copy the recipient to themselves.
+    if (bccEmail && bccEmail !== recipient) body.bcc = [bccEmail]
 
     const res = await fetch('https://api.resend.com/emails', {
       method:  'POST',
@@ -1814,9 +1818,15 @@ export async function onRequest(ctx) {
       // must not turn a captured lead into an error on their screen.
       const leadEmail = t(b.email)
       if (leadEmail.includes('@')) {
+        // Blind-copied to the operator so there is a record of exactly what the
+        // lead received - the alert above says what they submitted, which is a
+        // different thing, and reconstructing the sent copy from a template is
+        // guesswork the moment the template changes.
+        const ackBcc = await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID)
         ctx.waitUntil(sendAlert(
           env, 'Thanks for your interest in StayVibe360', inviteAckLines(name),
-          leadEmail, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM
+          leadEmail, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM,
+          ackBcc
         ))
       }
 

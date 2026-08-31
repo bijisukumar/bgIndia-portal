@@ -44,7 +44,9 @@ const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
 // Swap this for an @stayvibe360.com address once Cloudflare Email Routing is
 // set up; until then a reply lands in the villa inbox.
 const PLATFORM_REPLY_TO = 'kerala.luxuryvillas@gmail.com'
-const PLATFORM_WHATSAPP = '+91 99950 43283'
+// The US number. Platform leads reach Biji directly, not the villa's Indian
+// line, which is answered by staff for guest matters.
+const PLATFORM_WHATSAPP = '+1 972 876 5101'
 
 // Acknowledgement sent to whoever fills in the invite form.
 //

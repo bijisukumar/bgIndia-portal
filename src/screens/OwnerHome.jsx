@@ -1146,8 +1146,10 @@ function GapAlertBlock() {
 // simply renders nothing for an ordinary host rather than needing its own
 // copy of that rule - one place decides, and it is the server.
 //
-// Hidden when there is nothing waiting: a permanent "0 new" tile becomes
-// furniture within a week, and the full list is always on the master console.
+// Shown even at zero during the launch. A tile that vanishes when empty is
+// ambiguous - "nothing came in" and "this is broken" look identical - and
+// while the campaign is running that reassurance is worth the line. The zero
+// state is deliberately muted so it reads as calm rather than as an alert.
 function SignupsBlock() {
   const navigate = useNavigate()
   const [counts, setCounts] = useState(null)
@@ -1156,9 +1158,11 @@ function SignupsBlock() {
     api.getPlatformSignups(30, true).then(setCounts).catch(() => setCounts(null))
   }, [])
 
+  // Null only when the API refused - an ordinary host, who must never see it.
   if (!counts) return null
   const pending = (counts.invites?.pending || 0) + (counts.hosts?.pending || 0) + (counts.leads?.pending || 0)
-  if (pending === 0) return null
+  const total   = (counts.invites?.total || 0) + (counts.hosts?.total || 0) + (counts.leads?.total || 0)
+  const waiting = pending > 0
 
   const parts = [
     counts.invites?.pending ? `${counts.invites.pending} invite${counts.invites.pending === 1 ? '' : 's'}` : null,
@@ -1166,24 +1170,34 @@ function SignupsBlock() {
     counts.leads?.pending   ? `${counts.leads.pending} demo request${counts.leads.pending === 1 ? '' : 's'}` : null,
   ].filter(Boolean)
 
+  // Everyone followed up is still worth saying out loud - it is the
+  // difference between "nobody has come in" and "you are on top of it".
+  const subline = waiting
+    ? parts.join(' · ') + ' · last 30 days'
+    : total > 0
+      ? `${total} received, all followed up · last 30 days`
+      : 'Nothing yet · last 30 days'
+
   return (
     <div
       onClick={() => navigate('/owner/maintenance/signups')}
       style={{
         display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
-        background: 'rgba(200,144,58,0.08)', border: '1px solid rgba(200,144,58,0.3)',
+        background: waiting ? 'rgba(200,144,58,0.08)' : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${waiting ? 'rgba(200,144,58,0.3)' : 'rgba(255,255,255,0.08)'}`,
         borderRadius: 12, padding: '12px 14px', margin: '0 0 14px',
       }}>
-      <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>&#128229;</span>
+      <span style={{ fontSize: '1.5rem', lineHeight: 1, opacity: waiting ? 1 : 0.5 }}>&#128229;</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#C8903A' }}>
-          {pending} signup{pending === 1 ? '' : 's'} to call back
+        <div style={{ fontWeight: waiting ? 800 : 600, fontSize: '0.92rem',
+          color: waiting ? '#C8903A' : '#8A9BAE' }}>
+          {waiting
+            ? `${pending} signup${pending === 1 ? '' : 's'} to call back`
+            : 'No signups waiting'}
         </div>
-        <div style={{ fontSize: '0.74rem', color: '#8A9BAE' }}>
-          {parts.join(' · ')} &middot; last 30 days
-        </div>
+        <div style={{ fontSize: '0.74rem', color: '#5C7080' }}>{subline}</div>
       </div>
-      <span style={{ color: '#C8903A', fontSize: '1.1rem' }}>&rsaquo;</span>
+      <span style={{ color: waiting ? '#C8903A' : '#5C7080', fontSize: '1.1rem' }}>&rsaquo;</span>
     </div>
   )
 }

@@ -297,9 +297,9 @@ export const CONFIG = {
     // because an Airbnb guest reviews on Airbnb and a direct guest on Google.
     reviewRequest: {
       template:
-`Hi {firstName}, thank you for staying with us at {villaName}! 🙏
+`Hi {firstName}, we loved hosting your family at {villaName} and hope to welcome you back again soon to seek blessings from Guruvayurappan. 🙏
 
-We hope you had a wonderful stay. If you have a moment while it's still fresh, a short review on {reviewPlatform} would mean a great deal to us — it genuinely helps other families choose us.
+Unlike a typical online booking, our team makes a genuine effort to speak with each guest and see how we can make your stay even better. That same care goes into asking for your review — if you have a few minutes while it's still fresh, a {reviewPlatform} review means a great deal to us and helps other families find us.
 
 {reviewLink}Thank you, and we hope to host you again.`,
       // Where each channel's guests should leave the review.

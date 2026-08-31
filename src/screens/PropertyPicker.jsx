@@ -82,22 +82,42 @@ export default function PropertyPicker({ onResolved }) {
           placeholder="Search host or property…"
           style={styles.search}
         />
-        <div style={styles.list}>
-          {matches.length === 0 && (
-            <p style={styles.empty}>No host or property matches “{query}”.</p>
-          )}
+        {/* A dropdown rather than a stack of cards: at fifty hosts a stacked
+            list is a scroll hunt, while a closed dropdown stays one line
+            however many hosts exist. The search above narrows what is inside
+            it, so typing "d" leaves only the d-hosts to choose between. */}
+        <select
+          style={styles.select}
+          value=""
+          disabled={matches.length === 0}
+          onChange={e => { if (e.target.value) choose(e.target.value) }}
+        >
+          <option value="">
+            {matches.length === 0
+              ? 'No match — clear the search'
+              : `Select a property… (${matches.length})`}
+          </option>
           {Object.entries(grouped).map(([tenantName, props]) => (
-            <div key={tenantName || 'default'}>
-              {tenantName && <p style={styles.groupLabel}>{tenantName}</p>}
-              {props.map(p => (
-                <button key={p.propertyId} style={styles.option} onClick={() => choose(p.propertyId)}>
-                  <span style={styles.optionName}>{p.name || p.propertyId}</span>
-                  <span style={styles.optionType}>{p.unitType || 'villa'}</span>
-                </button>
-              ))}
-            </div>
+            tenantName
+              ? (
+                <optgroup key={tenantName} label={tenantName}>
+                  {props.map(p => (
+                    <option key={p.propertyId} value={p.propertyId}>
+                      {p.name || p.propertyId} · {p.unitType || 'villa'}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+              : props.map(p => (
+                <option key={p.propertyId} value={p.propertyId}>
+                  {p.name || p.propertyId} · {p.unitType || 'villa'}
+                </option>
+              ))
           ))}
-        </div>
+        </select>
+        {matches.length === 0 && (
+          <p style={styles.empty}>No host or property matches “{query}”.</p>
+        )}
         {isMaster && options.length > 1 && (
           <p style={styles.count}>
             {matches.length} of {options.length} {options.length === 1 ? 'property' : 'properties'}
@@ -143,35 +163,20 @@ const styles = {
     marginBottom: '12px',
     textAlign: 'center',
   },
-  list: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    // Caps the card at roughly seven rows so a platform with many hosts
-    // scrolls the list instead of running the card off the screen.
-    maxHeight: '46vh',
-    overflowY: 'auto',
-  },
-  groupLabel: {
-    fontSize: '0.65rem',
-    color: '#5C7080',
-    letterSpacing: '1.5px',
-    fontWeight: '700',
-    margin: '12px 0 6px',
-  },
-  option: {
+  select: {
     width: '100%',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '12px 14px',
-    background: '#141820',
-    border: '1px solid rgba(200,144,58,0.2)',
+    padding: '11px 12px',
     borderRadius: '10px',
+    border: '1px solid rgba(200,144,58,0.3)',
+    background: '#141820',
     color: '#F0F0F0',
-    cursor: 'pointer',
+    fontSize: '16px',
     fontFamily: 'DM Sans, sans-serif',
-    fontSize: '0.85rem',
+    boxSizing: 'border-box',
+    cursor: 'pointer',
+    // The options popup is drawn by the OS, not by this page. Without this it
+    // renders as white-on-white against the dark card.
+    colorScheme: 'dark',
   },
   search: {
     width: '100%',

@@ -2298,7 +2298,20 @@ export async function onRequest(ctx) {
   function villaScope(payload, requested, col = 'villa_id') {
     if (requested) return { sql: ` AND ${col} = ?`, binds: [requested] }
     const ids = payload?.propertyIds
-    if (ids == null) return { sql: '', binds: [] }
+    if (ids == null) {
+      // master_owner/SYSTEM_TOKEN carry no propertyIds — genuinely
+      // unrestricted, by design, on a platform-wide hostname like
+      // manage./join.stayvibe360.com. But a request landing on a REAL
+      // tenant's own domain (hostVillaId resolved) is master_owner
+      // "logging into a tenant's own site for in-context troubleshooting"
+      // — every report screen that forgets to pass ?villaId (most of
+      // them do) must still only see that one tenant's data, not every
+      // tenant's mixed together. Caught live: dwarka's real guest names
+      // showing up on demo.stayvibe360.com's commission/review-chase
+      // lists, because master_owner is the only login demo.* has.
+      if (hostVillaId) return { sql: ` AND ${col} = ?`, binds: [hostVillaId] }
+      return { sql: '', binds: [] }
+    }
     if (!ids.length)  return { sql: ' AND 1=0', binds: [] }
     return { sql: ` AND ${col} IN (${ids.map(() => '?').join(',')})`, binds: ids }
   }
@@ -3227,7 +3240,7 @@ export async function onRequest(ctx) {
         // out, so it stays a Raman-rate approximation, not a guarantee.
         const rateRow = await DB.prepare(
           `SELECT commission_single_night, commission_multi_night FROM platform_auth_tokens WHERE tenant_id = ? AND actor = 'raman' AND active = 1`
-        ).bind(payload.tenantId || 'dwarka').first()
+        ).bind(payload.tenantId || hostVillaId || 'dwarka').first()
 
         return json({ success: true, data: {
           years,

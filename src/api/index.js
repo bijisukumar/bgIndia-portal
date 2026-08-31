@@ -277,7 +277,7 @@ export const api = {
   getTenantConfig:          (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
   syncTenantConfig:         (villaId) => post('syncTenantConfig', { villaId: villaId || DEFAULT_VILLA_ID }),
   getTenantUsage:           ()         => get('getTenantUsage'),
-  getPlatformSignups:       (days)     => get('getPlatformSignups', { days }),
+  getPlatformSignups:       (days, counts) => get('getPlatformSignups', counts ? { days, counts: 1 } : { days }),
   getPropertyPickerOptions: ()         => get('getPropertyPickerOptions'),
 
   // ── RAMAN ────────────────────────────────────────────────

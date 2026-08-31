@@ -2281,9 +2281,39 @@ export async function onRequest(ctx) {
       // Platform-level data, not tenant data: a signup belongs to nobody's
       // villa yet, which is exactly why it needs the master console.
       if (action === 'getPlatformSignups') {
-        if (payload.role !== 'master_owner') return err('Master owner only', 403)
+        // master_owner always. Beyond that, only the owner of the tenant that
+        // IS the platform operator - Biji is both dwarka's owner and the person
+        // running StayVibe, the same reason sales alerts land in dwarka's owner
+        // inbox. A future host's owner must never see the signup pipeline: it
+        // is a list of their competitors' contact details.
+        const platformTenant = env.PLATFORM_TENANT_ID || 'dwarka'
+        const isOperator = payload.role === 'master_owner' ||
+          (payload.role === 'owner' && payload.tenantId === platformTenant)
+        if (!isOperator) return err('Not available for this account', 403)
+
         const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get('days')) || 90))
         const since = `-${days} days`
+
+        // Counts-only mode for the owner home tile, which wants a number and
+        // not five hundred rows of contact details on every page load.
+        if (url.searchParams.get('counts') === '1') {
+          const one = async (table) => {
+            try {
+              const r = await DB.prepare(
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN COALESCE(status,'new') = 'new' THEN 1 ELSE 0 END) AS pending
+                   FROM ${table} WHERE created_at >= datetime('now', ?)`
+              ).bind(since).first()
+              return { total: r?.total || 0, pending: r?.pending || 0 }
+            } catch (e) { console.error('signup counts:', e?.message || e); return { total: 0, pending: 0 } }
+          }
+          return json({ success: true, data: {
+            days,
+            invites: await one('platform_invite_requests'),
+            hosts:   await one('platform_host_registrations'),
+            leads:   await one('platform_leads'),
+          }})
+        }
 
         const grab = async (sql, binds = []) => {
           // One bad table must not blank the whole screen - an empty section

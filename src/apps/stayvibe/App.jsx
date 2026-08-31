@@ -45,6 +45,7 @@ import RDashboard     from '../../screens/RDashboard'
 import D1Explorer     from '../../screens/infra/D1Explorer'
 import Maintenance    from '../../screens/infra/Maintenance'
 import StaffAccess    from '../../screens/infra/StaffAccess'
+import PlatformSignups from '../../screens/infra/PlatformSignups'
 import PlatformErrorLog from '../../screens/infra/PlatformErrorLog'
 
 // Manager (Raman) screens
@@ -104,6 +105,9 @@ function ProtectedRoutes() {
         <Route path="/infra/error-log"        element={<PlatformErrorLog />} />
         <Route path="/owner/maintenance"        element={<Maintenance />} />
         <Route path="/owner/maintenance/staff"  element={<StaffAccess />} />
+        {/* The endpoint refuses anyone who is not the platform operator, so a
+            host who guesses this URL gets a clean refusal, not a pipeline. */}
+        <Route path="/owner/maintenance/signups" element={<PlatformSignups />} />
       </>}
 
       {/* ── MANAGER (Raman) ── */}

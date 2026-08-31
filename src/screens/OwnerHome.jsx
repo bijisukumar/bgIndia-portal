@@ -1140,6 +1140,54 @@ function GapAlertBlock() {
   )
 }
 
+// ── SIGNUPS ────────────────────────────────────────────────────────
+// The launch pipeline, surfaced where the operator actually looks each
+// morning. The API refuses anyone who is not the platform operator, so this
+// simply renders nothing for an ordinary host rather than needing its own
+// copy of that rule - one place decides, and it is the server.
+//
+// Hidden when there is nothing waiting: a permanent "0 new" tile becomes
+// furniture within a week, and the full list is always on the master console.
+function SignupsBlock() {
+  const navigate = useNavigate()
+  const [counts, setCounts] = useState(null)
+
+  useEffect(() => {
+    api.getPlatformSignups(30, true).then(setCounts).catch(() => setCounts(null))
+  }, [])
+
+  if (!counts) return null
+  const pending = (counts.invites?.pending || 0) + (counts.hosts?.pending || 0) + (counts.leads?.pending || 0)
+  if (pending === 0) return null
+
+  const parts = [
+    counts.invites?.pending ? `${counts.invites.pending} invite${counts.invites.pending === 1 ? '' : 's'}` : null,
+    counts.hosts?.pending   ? `${counts.hosts.pending} host registration${counts.hosts.pending === 1 ? '' : 's'}` : null,
+    counts.leads?.pending   ? `${counts.leads.pending} demo request${counts.leads.pending === 1 ? '' : 's'}` : null,
+  ].filter(Boolean)
+
+  return (
+    <div
+      onClick={() => navigate('/owner/maintenance/signups')}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+        background: 'rgba(200,144,58,0.08)', border: '1px solid rgba(200,144,58,0.3)',
+        borderRadius: 12, padding: '12px 14px', margin: '0 0 14px',
+      }}>
+      <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>&#128229;</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#C8903A' }}>
+          {pending} signup{pending === 1 ? '' : 's'} to call back
+        </div>
+        <div style={{ fontSize: '0.74rem', color: '#8A9BAE' }}>
+          {parts.join(' · ')} &middot; last 30 days
+        </div>
+      </div>
+      <span style={{ color: '#C8903A', fontSize: '1.1rem' }}>&rsaquo;</span>
+    </div>
+  )
+}
+
 export default function OwnerHome({ sections }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -1191,6 +1239,9 @@ export default function OwnerHome({ sections }) {
       </div>
 
       <div className="screen-body">
+        {/* Only renders for the platform operator; the API decides. */}
+        <SignupsBlock />
+
         {showVillaBlocks && <>
           {/* Needs Attention — urgent items at top of page */}
           <NeedsAttentionBlock refreshKey={pendingRefreshKey} />

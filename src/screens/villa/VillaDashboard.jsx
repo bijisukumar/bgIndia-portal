@@ -616,6 +616,7 @@ function BookingLeadTimeChart({ allStays }) {
 
 function EarningsComparisonChart({ allStays, selectedYears }) {
   const [compareYears, setCompareYears] = useState(selectedYears.slice(0, 2))
+  const [showTrend, setShowTrend] = useState(true)
 
   const COLORS = ['#C8903A', '#8B5CF6', '#34A853', '#185FA5', '#E53935']
 
@@ -656,26 +657,65 @@ function EarningsComparisonChart({ allStays, selectedYears }) {
           </button>
         ))}
         <span style={{ fontSize:'0.7rem', color:'var(--text-dim)', alignSelf:'center' }}>Pick up to 3</span>
+        <button onClick={() => setShowTrend(t => !t)}
+          style={{ marginLeft:'auto', padding:'5px 12px', borderRadius:'20px', cursor:'pointer',
+            border:`1px solid ${showTrend ? 'rgba(200,144,58,0.5)' : 'rgba(255,255,255,0.08)'}`,
+            background: showTrend ? 'rgba(200,144,58,0.14)' : 'transparent',
+            color: showTrend ? '#C8903A' : 'var(--text-dim)',
+            fontSize:'0.72rem', fontWeight: showTrend ? '700' : '400' }}>
+          Trend line
+        </button>
       </div>
 
       {/* Chart */}
       <div className="card" style={{ padding:'12px' }}>
         {/* Y-axis labels + bars */}
-        <div style={{ display:'flex', gap:'4px', alignItems:'flex-end', height:'160px', marginBottom:'6px' }}>
+        <div style={{ position:'relative', display:'flex', gap:'4px', alignItems:'flex-end', height:'160px', marginBottom:'6px' }}>
           {MONTHS.map((m, mi) => (
-            <div key={m} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:'2px', height:'100%', justifyContent:'flex-end' }}>
+            <div key={m} style={{ flex:1, display:'flex', flexDirection:'row', alignItems:'flex-end', gap:'1px', height:'100%' }}>
               {compareYears.map((y, yi) => {
                 const rev = (byYearMonth[y] || [])[mi] || 0
                 const pct = maxVal > 0 ? (rev / maxVal) * 100 : 0
                 return (
                   <div key={y} title={`${m} ${y}: ${rev > 0 ? '₹'+Math.round(rev).toLocaleString('en-IN') : 'No data'}`}
-                    style={{ width:'100%', height:`${Math.max(pct, rev > 0 ? 2 : 0)}%`,
-                      background: COLORS[yi], borderRadius:'3px 3px 0 0', minHeight: rev > 0 ? '3px' : '0',
-                      transition:'height 0.4s ease', cursor:'pointer' }}/>
+                    style={{ flex:1, height:`${Math.max(pct, rev > 0 ? 2 : 0)}%`,
+                      background: COLORS[yi], borderRadius:'2px 2px 0 0', minHeight: rev > 0 ? '3px' : '0',
+                      opacity: showTrend ? 0.55 : 1,
+                      transition:'height 0.4s ease, opacity 0.2s ease', cursor:'pointer' }}/>
                 )
               })}
             </div>
           ))}
+          {showTrend && (
+            // preserveAspectRatio="none" stretches the viewBox to the box, so
+            // the stroke is drawn with vector-effect to stop it stretching too.
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none"
+              style={{ position:'absolute', inset:0, width:'100%', height:'100%', pointerEvents:'none' }}>
+              {compareYears.map((y, yi) => {
+                const vals = byYearMonth[y] || []
+                // A month with no bookings is a gap, not a zero. Joining across
+                // it would draw a collapse to zero for a month that simply has
+                // not happened yet - which is the opposite of the trend.
+                const runs = []
+                let run = []
+                MONTHS.forEach((_, mi) => {
+                  const rev = vals[mi] || 0
+                  if (rev > 0) {
+                    run.push([((mi + 0.5) / 12) * 100, 100 - (rev / maxVal) * 100])
+                  } else if (run.length) { runs.push(run); run = [] }
+                })
+                if (run.length) runs.push(run)
+                return runs.map((pts, ri) => (
+                  pts.length > 1
+                    ? <polyline key={y + '-' + ri} points={pts.map(p => p.join(',')).join(' ')}
+                        fill="none" stroke={COLORS[yi]} strokeWidth="2"
+                        strokeLinejoin="round" strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke" />
+                    : null
+                ))
+              })}
+            </svg>
+          )}
         </div>
         {/* X-axis */}
         <div style={{ display:'flex', gap:'4px' }}>

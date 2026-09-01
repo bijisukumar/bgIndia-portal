@@ -1057,6 +1057,14 @@ async function reconcileStayStamps(DB, stayId, status) {
 // well as at link time, so bad numbers stop entering the database at all.
 // A '+' or a country code already present is left alone — prepending 91 to
 // a real international number is a corruption this codebase has hit before.
+// A booking is "direct" when no channel took a commission on it - which is
+// what the ratio actually measures. The villa's own website and a WhatsApp
+// enquiry both qualify; only an OTA does not. The dashboard used to compare
+// against 'direct' alone, so a website booking showed as channel there and as
+// direct on the quote screen.
+const DIRECT_SOURCES = ['direct', 'website', 'whatsapp']
+const isDirectSource = (src) => DIRECT_SOURCES.includes(String(src || '').toLowerCase())
+
 function normalizeStoredPhone(raw) {
   const s = String(raw || '').trim()
   if (!s) return null
@@ -2168,7 +2176,7 @@ export async function onRequest(ctx) {
       // The channel comes from the booking, so the page never has to ask
       // "how did you book?" — and can't be told the wrong answer.
       source: match.source || null,
-      isDirect: ['direct','website','whatsapp'].includes(String(match.source || '').toLowerCase()),
+      isDirect: isDirectSource(match.source),
       standardCheckin:  turn.defaultCheckinTime  || '16:00',
       standardCheckout: turn.defaultCheckoutTime || '11:00',
       earlyCheckin: build(inMin,  -1),
@@ -2980,7 +2988,7 @@ export async function onRequest(ctx) {
           const net     = mStays.reduce((s, r) => s + (r.net || 0), 0)
           const nights  = mStays.reduce((s, r) => s + nightsOf(r), 0)
           const kitchen   = kitchenByMonth[m]   || 0
-          const direct    = mStays.filter(s => (s.source || '').toLowerCase() === 'direct').length
+          const direct    = mStays.filter(s => isDirectSource(s.source)).length
 
           months[m] = {
             bookings:  mStays.length,
@@ -3002,14 +3010,14 @@ export async function onRequest(ctx) {
           Q4: [10,11,12].reduce((s,m) => s + (months[m].net||0), 0),
         }
 
-        const totalDirect = stays.filter(s => (s.source||'').toLowerCase() === 'direct').length
+        const totalDirect = stays.filter(s => isDirectSource(s.source)).length
         const bestMonthIdx = Object.keys(months).reduce((b,m) => (months[m].gross||0) > (months[b]?.gross||0) ? m : b, 1)
         const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
         const bestMonth = MONTH_NAMES[bestMonthIdx] || '—'
         const channelTotals = {}
         stays.forEach(s => { const ch = s.source||'direct'; if(!channelTotals[ch])channelTotals[ch]=0; channelTotals[ch]+=(s.net||0) })
         const topChannel = Object.keys(channelTotals).sort((a,b)=>channelTotals[b]-channelTotals[a])[0] || '—'
-        const directSaving = stays.filter(s=>(s.source||'').toLowerCase()!=='direct').reduce((sum,s)=>sum+(s.commission_amt||0),0)
+        const directSaving = stays.filter(s => !isDirectSource(s.source)).reduce((sum,s)=>sum+(s.commission_amt||0),0)
         const avgNights = totalBookings > 0 ? Math.round((totalNights/totalBookings)*10)/10 : 0
 
         // ── P&L (Step D) — computed FROM the ledger, upsell broken out ──

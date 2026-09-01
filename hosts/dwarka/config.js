@@ -391,9 +391,11 @@ I hope you had a comfortable travel to Guruvayur and that our team took great ca
 
 We want to make sure your stay at {villaName} is fantastic right from day one. How are things looking?
 
-- Awesome so far!
-- All good, just relaxing.
-- Could use a quick fix/help.
+1. Awesome so far!
+2. All good, just relaxing.
+3. Could use a quick fix/help.
+
+Just reply 1, 2, or 3 — that's all we need!
 
 If you need absolutely anything during your stay, {managerName} is right at hand at {managerPhone}.
 

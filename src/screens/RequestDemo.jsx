@@ -30,7 +30,7 @@ export default function RequestDemo() {
       <div style={styles.card}>
         <button style={styles.back} onClick={() => navigate('/')}>‹ Back</button>
         <h1 style={styles.title}>Request a Demo</h1>
-        <p style={styles.sub}>See how StayVibe runs a villa's bookings, check-ins and P&amp;L in one place. No commitment.</p>
+        <p style={styles.sub}>See how StayVibe360 runs a villa's bookings, check-ins and P&amp;L in one place. No commitment.</p>
 
         {done ? (
           <div style={styles.doneBox}>

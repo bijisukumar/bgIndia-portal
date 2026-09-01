@@ -33,7 +33,7 @@ function getHostConfig(villaId) {
 // wrong team, and starts using this address by itself once the transfer is
 // done. The fallback is recorded in infra_alert_log, so "it works" never hides
 // "it is still misconfigured".
-const PLATFORM_LEAD_FROM = 'StayVibe <invitation@stayvibe360.com>'
+const PLATFORM_LEAD_FROM = 'StayVibe360 <invitation@stayvibe360.com>'
 
 // stayvibe360.com can SEND but cannot RECEIVE: there is no MX on the root, only
 // the send.* record Resend uses for bounces. A reply to
@@ -1891,7 +1891,7 @@ export async function onRequest(ctx) {
       ).bind(leadId, name, (b.phone || '').trim() || null, (b.email || '').trim() || null, (b.notes || '').trim() || null).run()
 
       ctx.waitUntil(sendAlert(env, `🎬 New demo request — ${name}`, [
-        'Source: StayVibe landing page > Request Demo',
+        'Source: StayVibe360 landing page > Request Demo',
         '',
         `Name:  ${name}`,
         `Phone: ${b.phone || '—'}`,
@@ -1946,7 +1946,7 @@ export async function onRequest(ctx) {
       ).run()
 
       ctx.waitUntil(sendAlert(env, `🏡 New host registration — ${brandName}`, [
-        'Source: StayVibe landing page > New Host Registration',
+        'Source: StayVibe360 landing page > New Host Registration',
         '',
         `Brand:        ${brandName}`,
         `Owner:        ${ownerName}`,

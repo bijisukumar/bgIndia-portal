@@ -159,7 +159,7 @@ export default function NewHostRegistration() {
           <button style={styles.helpToggle} onClick={() => setHelpOpen(o => !o)}>{helpOpen ? '✕ Close help' : '❓ Help — what does each field mean?'}</button>
         </div>
         <h1 style={styles.title}>New Host Registration</h1>
-        <p style={styles.sub}>Tell us about your property — this is everything we need to set you up on StayVibe. Only brand name, owner name and email are required; fill in as much of the rest as you can now, the rest can follow on our onboarding call.</p>
+        <p style={styles.sub}>Tell us about your property — this is everything we need to set you up on StayVibe360. Only brand name, owner name and email are required; fill in as much of the rest as you can now, the rest can follow on our onboarding call.</p>
 
         {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
 

@@ -30,7 +30,7 @@ export default function Welcome() {
         <div style={styles.logoWrap}>
           <img
             src="/icons/StayVibe360Logo.png"
-            alt="StayVibe"
+            alt="StayVibe360"
             style={styles.logo}
           />
         </div>
@@ -41,7 +41,7 @@ export default function Welcome() {
         {acquisition && (
           <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => navigate('/NewHost')}>
             <span style={styles.optionTitle}>New Host Registration</span>
-            <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
+            <span style={styles.optionSub}>Bring your villa onto StayVibe360</span>
           </button>
         )}
 
@@ -52,7 +52,7 @@ export default function Welcome() {
       </div>
 
       <p style={styles.footer}>
-        StayVibe © {new Date().getFullYear()} · All rights reserved
+        StayVibe360 © {new Date().getFullYear()} · All rights reserved
       </p>
     </div>
   )

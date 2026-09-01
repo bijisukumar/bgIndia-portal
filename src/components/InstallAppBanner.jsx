@@ -89,7 +89,7 @@ export default function InstallAppBanner() {
 
       <div style={{flex:1, minWidth:0}}>
         <div style={{color:'var(--text)', fontWeight:'700', fontSize:'0.88rem'}}>
-          Add StayVibe to your home screen
+          Add StayVibe360 to your home screen
         </div>
         <div style={{color:'var(--text-dim)', fontSize:'0.74rem', lineHeight:'1.45'}}>
           Opens full screen, no browser bar — and you stay signed in.

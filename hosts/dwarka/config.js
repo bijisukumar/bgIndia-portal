@@ -385,13 +385,19 @@ If you haven't completed your online check-in registration yet, please take a mo
     },
     comfortCheck: {
       template:
-`Namaskaram {guestName}! 🙏
+`Namaskaram {guestName}!
 
-We hope your travel to Guruvayur was comfortable, and that check-in went smoothly with our staff able to assist you well.
+I hope you had a comfortable travel to Guruvayur and that our team took great care of your check-in!
 
-Wishing you a wonderful stay at {villaName}! If you need anything at all during your time here, {managerName} is just a phone call away — {managerPhone}.
+We want to make sure your stay at {villaName} is fantastic right from day one. How are things looking?
 
-Enjoy your stay! 🏡`,
+- Awesome so far!
+- All good, just relaxing.
+- Could use a quick fix/help.
+
+If you need absolutely anything during your stay, {managerName} is right at hand at {managerPhone}.
+
+Have a wonderful time!`,
     },
     checkoutDay: {
       subject: 'Checkout day today — {villaName}',

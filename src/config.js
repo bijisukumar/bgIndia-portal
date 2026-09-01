@@ -76,10 +76,16 @@ export function initConfig() {
   const cached = readCache()
   if (cached) {
     // Repeat visit: render straight from cache and refresh in the background,
-    // so only the very first load pays for the round trip.
+    // so only the very first load pays for the round trip. The background
+    // fetch used to only write the fresh copy to localStorage for NEXT time —
+    // this session kept using the stale in-memory CONFIG until a SECOND
+    // reload picked the new cache back up. Updating CONFIG in place here
+    // means anything that reads it fresh (every guest-message template is a
+    // function call, not a value captured once at module load) picks up the
+    // change immediately, same tab, no reload at all.
     replaceConfig(cached, 'cache')
     started = Promise.resolve()
-    fetchConfig().then(fresh => { if (fresh) writeCache(fresh) })
+    fetchConfig().then(fresh => { if (fresh) { replaceConfig(fresh, 'runtime'); writeCache(fresh) } })
     return started
   }
   started = fetchConfig().then(fresh => {

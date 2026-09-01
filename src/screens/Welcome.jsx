@@ -7,14 +7,17 @@ import { isAcquisitionHost } from '../utils/hostContext'
 // prospective host reading "join Guruvayur Estates" would be misled.
 
 // Public landing gateway — shown instead of dropping straight into the PIN
-// screen. Three doors: an existing tenant logs in, a prospective host
-// registers interest, or a curious visitor asks for a demo. This is the
-// SaaS pitch's front door. That used to be dwarka.stayvibe360.com doing
-// double duty as a real tenant's portal AND the marketing entry point,
-// because there was no dedicated marketing domain. There is now
-// (join.stayvibe360.com), so a tenant's own portal shows only the login door -
-// offering "Request Your Invite" to someone who is already a customer, or to
-// their staff, reads as a mistake.
+// screen. Two doors: a prospective host registers, or an existing owner or
+// manager logs in. On a non-acquisition host (a tenant's own portal) the
+// registration door is hidden and login is all that remains.
+//
+// It used to carry four. "Request Your Invite" did nothing but `location.href`
+// to www.stayvibe360.com/#invite — two doors onto one form, and this was the
+// worse one, since the form and all its copy live on the marketing site.
+// "Request a Demo" was removed to move that ask onto www. as well, next to the
+// invite form: the same prospect was otherwise being captured in two places
+// and landing in two different tables. The /demo route still exists and still
+// works by direct link; nothing here points at it.
 export default function Welcome() {
   const navigate = useNavigate()
   const acquisition = isAcquisitionHost()
@@ -36,9 +39,9 @@ export default function Welcome() {
         <p style={styles.tagline}>VILLA MANAGEMENT, SIMPLIFIED</p>
 
         {acquisition && (
-          <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => { window.location.href = 'https://www.stayvibe360.com/#invite' }}>
-            <span style={styles.optionTitle}>Request Your Invite</span>
-            <span style={styles.optionSub}>Join our first group of hosts — 2 min, no commitment</span>
+          <button style={{ ...styles.optionBtn, ...styles.primaryBtn }} onClick={() => navigate('/NewHost')}>
+            <span style={styles.optionTitle}>New Host Registration</span>
+            <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
           </button>
         )}
 
@@ -46,20 +49,6 @@ export default function Welcome() {
           <span style={styles.optionTitle}>Login</span>
           <span style={styles.optionSub}>Existing owner or manager</span>
         </button>
-
-        {acquisition && (
-          <>
-            <button style={styles.optionBtn} onClick={() => navigate('/NewHost')}>
-              <span style={styles.optionTitle}>New Host Registration</span>
-              <span style={styles.optionSub}>Bring your villa onto StayVibe</span>
-            </button>
-
-            <button style={styles.optionBtn} onClick={() => navigate('/demo')}>
-              <span style={styles.optionTitle}>Request a Demo</span>
-              <span style={styles.optionSub}>See StayVibe in action, no commitment</span>
-            </button>
-          </>
-        )}
       </div>
 
       <p style={styles.footer}>

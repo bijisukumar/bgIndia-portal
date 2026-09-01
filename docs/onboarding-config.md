@@ -25,9 +25,12 @@ VILLA_ID              = dwarka
 ADDRESS               = Edappully Gandhinagar Rd, Palayoor, Guruvayur, Kerala 680101
 
 # ── CONTACT NUMBERS ──────────────────────────────────────────
-PHONE_1               = +91 99950 43283     # Villa landline / main
-PHONE_2               = +91 97287 65101     # Owner mobile (operations)
-GUEST_CONTACT_PHONE   = +91 97287 65101     # Number shown to guests for queries
+# Two countries, and they are easy to mix up: the Indian number begins 999,
+# the US number begins 972. PHONE_2 was stored for months as "+91 97287 65101"
+# - the US digits under an Indian country code - which reaches nobody.
+PHONE_1               = +91 99950 43283     # Villa landline / main (India)
+PHONE_2               = +1 972 876 5101     # Owner mobile (operations)
+GUEST_CONTACT_PHONE   = +1 972 876 5101     # Number shown to guests for queries
                                              # Change this if you have a dedicated
                                              # guest relations number
 

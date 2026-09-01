@@ -2477,55 +2477,6 @@ export async function onRequest(ctx) {
       // Document bytes are reported separately and deliberately: passport and
       // visa scans are base64 in the row, so they are the one thing that can
       // grow a tenant fast. Everything else is text measured in kilobytes.
-      // Sends the acknowledgement to one existing signup. Exists because the
-      // automatic version only fires on NEW submissions, and five real hosts
-      // signed up before it existed. Deliberately one lead per click rather
-      // than a bulk send: mail to real people should be a decision each time,
-      // and a loop over a list is how the wrong list gets emailed.
-      if (action === 'sendInviteAck' && method === 'POST') {
-        const platformTenant = env.PLATFORM_TENANT_ID || 'dwarka'
-        const isOperator = payload.role === 'master_owner' ||
-          (payload.role === 'owner' && payload.tenantId === platformTenant)
-        if (!isOperator) return err('Not available for this account', 403)
-
-        const requestId = String(body.requestId || '').trim()
-        if (!requestId) return err('requestId required', 400)
-
-        const row = await DB.prepare(
-          `SELECT name, email FROM platform_invite_requests WHERE request_id = ?`
-        ).bind(requestId).first()
-        if (!row) return err('Signup not found', 404)
-        if (!String(row.email || '').includes('@')) {
-          return err('That signup left no email address', 400)
-        }
-
-        // An edited body wins over the template. The operator is looking at
-        // the person's answers while they write, and a sentence that speaks to
-        // what THEY said beats anything a template can produce - so the
-        // template is a starting point, not a cage.
-        const custom = String(body.message || '').trim()
-        const lines = custom ? custom.split(String.fromCharCode(10)).map(x => x.split(String.fromCharCode(13)).join('')) : inviteAckLines(row.name)
-        const subject = String(body.subject || '').trim() ||
-          'Thanks for your interest in StayVibe360'
-
-        // Awaited, not waitUntil: the operator clicked send and deserves to be
-        // told whether it actually went.
-        await sendAlert(
-          env, subject, lines,
-          row.email, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM,
-          await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID)
-        )
-
-        const sent = await DB.prepare(
-          `SELECT success FROM infra_alert_log
-            WHERE category = 'platform_lead_ack' AND to_email = ?
-            ORDER BY created_at DESC LIMIT 1`
-        ).bind(row.email).first()
-        if (!sent?.success) return err('Send failed - check the platform error log', 502)
-
-        return json({ success: true, data: { requestId, email: row.email } })
-      }
-
       // ── PLATFORM SIGNUPS ──────────────────────────────────────────
       // The three public intake forms wrote to the database and emailed the
       // operator, and that was the whole story - there was no way to see who
@@ -7884,6 +7835,59 @@ export async function onRequest(ctx) {
         if (actorSlug === payload.actor && !body.active) return err("You can't lock your own account", 400)
         await DB.prepare(`UPDATE platform_auth_tokens SET active = ? WHERE tenant_id = ? AND actor = ?`).bind(body.active ? 1 : 0, tenantId, actorSlug).run()
         return json({ success: true, data: { actorSlug, active: !!body.active } })
+      }
+
+      // Lives in the POST section, not beside getPlatformSignups: it was
+      // first written next to the screen it serves, which sits under
+      // `if (method === 'GET')`. The POST never reached it and the API
+      // answered "Unknown POST action" for an action that plainly existed.
+      // Sends the acknowledgement to one existing signup. Exists because the
+      // automatic version only fires on NEW submissions, and five real hosts
+      // signed up before it existed. Deliberately one lead per click rather
+      // than a bulk send: mail to real people should be a decision each time,
+      // and a loop over a list is how the wrong list gets emailed.
+      if (action === 'sendInviteAck' && method === 'POST') {
+        const platformTenant = env.PLATFORM_TENANT_ID || 'dwarka'
+        const isOperator = payload.role === 'master_owner' ||
+          (payload.role === 'owner' && payload.tenantId === platformTenant)
+        if (!isOperator) return err('Not available for this account', 403)
+
+        const requestId = String(body.requestId || '').trim()
+        if (!requestId) return err('requestId required', 400)
+
+        const row = await DB.prepare(
+          `SELECT name, email FROM platform_invite_requests WHERE request_id = ?`
+        ).bind(requestId).first()
+        if (!row) return err('Signup not found', 404)
+        if (!String(row.email || '').includes('@')) {
+          return err('That signup left no email address', 400)
+        }
+
+        // An edited body wins over the template. The operator is looking at
+        // the person's answers while they write, and a sentence that speaks to
+        // what THEY said beats anything a template can produce - so the
+        // template is a starting point, not a cage.
+        const custom = String(body.message || '').trim()
+        const lines = custom ? custom.split(String.fromCharCode(10)).map(x => x.split(String.fromCharCode(13)).join('')) : inviteAckLines(row.name)
+        const subject = String(body.subject || '').trim() ||
+          'Thanks for your interest in StayVibe360'
+
+        // Awaited, not waitUntil: the operator clicked send and deserves to be
+        // told whether it actually went.
+        await sendAlert(
+          env, subject, lines,
+          row.email, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM,
+          await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID)
+        )
+
+        const sent = await DB.prepare(
+          `SELECT success FROM infra_alert_log
+            WHERE category = 'platform_lead_ack' AND to_email = ?
+            ORDER BY created_at DESC LIMIT 1`
+        ).bind(row.email).first()
+        if (!sent?.success) return err('Send failed - check the platform error log', 502)
+
+        return json({ success: true, data: { requestId, email: row.email } })
       }
 
       if (action === 'addStaffAccount') {

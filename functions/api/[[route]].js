@@ -2499,10 +2499,19 @@ export async function onRequest(ctx) {
           return err('That signup left no email address', 400)
         }
 
+        // An edited body wins over the template. The operator is looking at
+        // the person's answers while they write, and a sentence that speaks to
+        // what THEY said beats anything a template can produce - so the
+        // template is a starting point, not a cage.
+        const custom = String(body.message || '').trim()
+        const lines = custom ? custom.split(String.fromCharCode(10)).map(x => x.split(String.fromCharCode(13)).join('')) : inviteAckLines(row.name)
+        const subject = String(body.subject || '').trim() ||
+          'Thanks for your interest in StayVibe360'
+
         // Awaited, not waitUntil: the operator clicked send and deserves to be
         // told whether it actually went.
         await sendAlert(
-          env, 'Thanks for your interest in StayVibe360', inviteAckLines(row.name),
+          env, subject, lines,
           row.email, DB, DEFAULT_VILLA_ID, 'platform_lead_ack', PLATFORM_LEAD_FROM,
           await getOwnerAlertEmail(DB, env, DEFAULT_VILLA_ID)
         )
@@ -2598,7 +2607,12 @@ export async function onRequest(ctx) {
         // and a second source of truth would only drift from it.
         for (const r of invites) r.ackSent = acked.has((r.email || '').toLowerCase())
 
-        return json({ success: true, data: { days, invites, hosts, leads } })
+        // The screen prefills its editor from this rather than holding a second
+        // copy of the wording, which would drift from what the automatic send
+        // uses the first time either is edited.
+        const ackTemplate = inviteAckLines('{name}').join(String.fromCharCode(10))
+
+        return json({ success: true, data: { days, invites, hosts, leads, ackTemplate } })
       }
 
       if (action === 'getTenantUsage') {

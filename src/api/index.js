@@ -278,7 +278,7 @@ export const api = {
   syncTenantConfig:         (villaId) => post('syncTenantConfig', { villaId: villaId || DEFAULT_VILLA_ID }),
   getTenantUsage:           ()         => get('getTenantUsage'),
   getPlatformSignups:       (days, counts) => get('getPlatformSignups', counts ? { days, counts: 1 } : { days }),
-  sendInviteAck:            (requestId) => post('sendInviteAck', { requestId }),
+  sendInviteAck:            (requestId, message, subject) => post('sendInviteAck', { requestId, message, subject }),
   getPropertyPickerOptions: ()         => get('getPropertyPickerOptions'),
 
   // ── RAMAN ────────────────────────────────────────────────

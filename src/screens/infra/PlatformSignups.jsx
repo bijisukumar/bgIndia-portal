@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { whatsappDraft, waLink, fillTemplate } from './leadOutreach'
 
 const RANGES = [7, 30, 90, 365]
 
@@ -22,12 +23,6 @@ function fmtWhen(d) {
   } catch { return d }
 }
 
-// Digits only, and never assume +91 - a founding host could be anywhere.
-function waLink(num) {
-  const digits = String(num || '').replace(/[^0-9]/g, '')
-  return digits.length >= 10 ? 'https://wa.me/' + digits : null
-}
-
 export default function PlatformSignups() {
   const navigate = useNavigate()
   const [days, setDays] = useState(90)
@@ -37,11 +32,11 @@ export default function PlatformSignups() {
   // view; the server's ackSent is the durable record.
   const [acks, setAcks] = useState({})
 
-  const sendAck = async (r) => {
+  const sendAck = async (r, message) => {
     if (acks[r.id] === 'sending') return
     setAcks(a => ({ ...a, [r.id]: 'sending' }))
     try {
-      await api.sendInviteAck(r.id)
+      await api.sendInviteAck(r.id, message)
       setAcks(a => ({ ...a, [r.id]: 'sent' }))
     } catch (e) {
       setAcks(a => ({ ...a, [r.id]: e?.message || 'Failed' }))
@@ -102,7 +97,8 @@ export default function PlatformSignups() {
                 <Line label="Ready in 6-8 wks" value={r.onboard_3m} />
                 <Line label="Interested in" value={r.interests} />
                 <Line label="Notes" value={r.notes} />
-                <AckButton r={r} state={acks[r.id]} onSend={() => sendAck(r)} />
+                <Outreach r={r} ackTemplate={data.ackTemplate}
+                  state={acks[r.id]} onSendEmail={(text) => sendAck(r, text)} />
               </>
             )} />
 
@@ -134,29 +130,90 @@ export default function PlatformSignups() {
   )
 }
 
-// The confirmation email goes out automatically on new signups. This is for
-// the ones who arrived before that existed - and as a manual resend if one
-// ever fails.
-function AckButton({ r, state, onSend }) {
-  if (!r.email) return null
-  const done = state === 'sent' || (r.ackSent && !state)
+// Outreach for one signup. Both drafts open in a textarea first: the operator
+// is looking at this person's answers while they write, and one sentence that
+// responds to what they actually said is worth more than any template. Nothing
+// leaves without being seen.
+function Outreach({ r, ackTemplate, state, onSendEmail }) {
+  const [open, setOpen] = useState(null)          // 'wa' | 'email' | null
+  const [waText, setWaText] = useState('')
+  const [mailText, setMailText] = useState('')
+
+  const sent = state === 'sent' || (r.ackSent && !state)
   const failed = state && state !== 'sending' && state !== 'sent'
+
+  const openWa = () => {
+    if (!waText) setWaText(whatsappDraft(r))
+    setOpen(open === 'wa' ? null : 'wa')
+  }
+  const openMail = () => {
+    if (!mailText) setMailText(fillTemplate(ackTemplate, r))
+    setOpen(open === 'email' ? null : 'email')
+  }
+
+  const box = {
+    width: '100%', minHeight: 190, marginTop: 8, padding: '10px 12px',
+    borderRadius: 8, background: '#141820', color: '#EDF2F7',
+    border: '1px solid rgba(200,144,58,0.25)', fontSize: 14,
+    fontFamily: 'inherit', lineHeight: 1.5, boxSizing: 'border-box',
+  }
+  const btn = (tone) => ({
+    padding: '7px 12px', borderRadius: 8, fontSize: '0.76rem', fontWeight: 700,
+    cursor: 'pointer', border: '1px solid ' + tone + '66',
+    background: tone + '1f', color: tone,
+  })
+
   return (
-    <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
-      <button
-        onClick={onSend}
-        disabled={state === 'sending'}
-        style={{
-          padding: '7px 12px', borderRadius: 8, fontSize: '0.76rem', fontWeight: 700,
-          cursor: state === 'sending' ? 'default' : 'pointer',
-          border: '1px solid ' + (done ? 'rgba(95,208,174,0.4)' : 'rgba(200,144,58,0.4)'),
-          background: done ? 'rgba(95,208,174,0.10)' : 'rgba(200,144,58,0.12)',
-          color: done ? '#5FD0AE' : '#C8903A',
-        }}>
-        {state === 'sending' ? 'Sending...' : done ? 'Send again' : 'Send confirmation email'}
-      </button>
-      {done && <span style={{ fontSize: '0.72rem', color: '#5FD0AE' }}>confirmation sent</span>}
-      {failed && <span style={{ fontSize: '0.72rem', color: '#EF9A9A' }}>{state}</span>}
+    <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {r.whatsapp && (
+          <button style={btn('#25D366')} onClick={openWa}>
+            {open === 'wa' ? 'Hide message' : 'WhatsApp'}
+          </button>
+        )}
+        {r.email && (
+          <button style={btn(sent ? '#5FD0AE' : '#C8903A')} onClick={openMail}>
+            {open === 'email' ? 'Hide email' : sent ? 'Email again' : 'Email'}
+          </button>
+        )}
+        {sent && <span style={{ fontSize: '0.72rem', color: '#5FD0AE' }}>confirmation sent</span>}
+        {failed && <span style={{ fontSize: '0.72rem', color: '#EF9A9A' }}>{state}</span>}
+      </div>
+
+      {open === 'wa' && (
+        <div>
+          <textarea style={box} value={waText} onChange={e => setWaText(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+            {/* Opens WhatsApp with the text prefilled. It is still the operator
+                who presses send there, which is the right place for that
+                decision to sit. */}
+            <a href={waLink(r.whatsapp, waText) || '#'} target="_blank" rel="noreferrer"
+              style={{ ...btn('#25D366'), textDecoration: 'none', display: 'inline-block' }}>
+              Open in WhatsApp
+            </a>
+            <span style={{ fontSize: '0.7rem', color: '#5C7080' }}>
+              opens your WhatsApp with this text ready to send
+            </span>
+          </div>
+        </div>
+      )}
+
+      {open === 'email' && (
+        <div>
+          <textarea style={box} value={mailText} onChange={e => setMailText(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+            <button
+              style={{ ...btn('#C8903A'), opacity: state === 'sending' ? 0.6 : 1 }}
+              disabled={state === 'sending'}
+              onClick={() => onSendEmail(mailText)}>
+              {state === 'sending' ? 'Sending...' : 'Send email'}
+            </button>
+            <span style={{ fontSize: '0.7rem', color: '#5C7080' }}>
+              sends from invitation@stayvibe360.com, blind-copied to you
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

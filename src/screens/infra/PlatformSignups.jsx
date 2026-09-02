@@ -8,7 +8,7 @@
  * "how many came in, and who has not been called back" - which a mailbox
  * answers badly.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { whatsappDraft, waLink, fillTemplate } from './leadOutreach'
@@ -55,6 +55,24 @@ export default function PlatformSignups() {
   const leads   = data?.leads   || []
   const total   = invites.length + hosts.length + leads.length
 
+  // Tally of "Interested in" across invite requests, so a category with 5
+  // people behind it is visible at a glance instead of read one card at a
+  // time — this is what decides which pain point to lead the demo with.
+  const [interestFilter, setInterestFilter] = useState(null)
+  const interestCounts = useMemo(() => {
+    const counts = {}
+    for (const r of invites) {
+      for (const raw of (r.interests || '').split(',')) {
+        const cat = raw.trim()
+        if (cat) counts[cat] = (counts[cat] || 0) + 1
+      }
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])
+  }, [invites])
+  const filteredInvites = interestFilter
+    ? invites.filter(r => (r.interests || '').split(',').map(s => s.trim()).includes(interestFilter))
+    : invites
+
   return (
     <div style={s.page}>
       <button style={s.back} onClick={() => navigate('/owner/maintenance')}>&larr; Maintenance</button>
@@ -85,7 +103,25 @@ export default function PlatformSignups() {
             <p style={s.dim}>Nothing in this window. Widen the range, or the campaign has not landed yet.</p>
           )}
 
-          <Section title="Invite requests" rows={invites} empty="No invite requests yet."
+          {interestCounts.length > 0 && (
+            <div style={s.interestRow}>
+              {interestCounts.map(([cat, n]) => (
+                <button key={cat}
+                  onClick={() => setInterestFilter(f => f === cat ? null : cat)}
+                  style={{ ...s.interestChip, ...(interestFilter === cat ? s.interestChipOn : {}) }}>
+                  {cat} <span style={s.interestN}>{n}</span>
+                </button>
+              ))}
+              {interestFilter && (
+                <button onClick={() => setInterestFilter(null)} style={s.interestClear}>
+                  Show all
+                </button>
+              )}
+            </div>
+          )}
+
+          <Section title="Invite requests" rows={filteredInvites}
+            empty={interestFilter ? `No one asked about "${interestFilter}" in this window.` : "No invite requests yet."}
             render={r => (
               <>
                 <Line label="Contact" value={r.whatsapp} wa={waLink(r.whatsapp)} />
@@ -280,6 +316,18 @@ const s = {
   range: { padding: '7px 12px', borderRadius: 8, border: '1px solid rgba(200,144,58,0.25)', background: 'transparent', color: '#8A9BAE', fontSize: '0.76rem', cursor: 'pointer' },
   rangeOn: { background: 'rgba(200,144,58,0.15)', color: '#C8903A', fontWeight: 700 },
   tiles: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10, marginBottom: 22 },
+  interestRow: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  interestChip: {
+    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 20,
+    border: '1px solid rgba(133,183,235,0.3)', background: 'rgba(133,183,235,0.08)',
+    color: '#85B7EB', fontSize: '0.74rem', fontWeight: 600, cursor: 'pointer',
+  },
+  interestChipOn: { background: '#85B7EB', color: '#0D1420', borderColor: '#85B7EB' },
+  interestN: { fontSize: '0.68rem', opacity: 0.85 },
+  interestClear: {
+    padding: '6px 10px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.12)',
+    background: 'transparent', color: '#8A9BAE', fontSize: '0.74rem', cursor: 'pointer',
+  },
   tile: { background: '#1A1F2B', border: '1px solid', borderRadius: 12, padding: '14px 12px', textAlign: 'center' },
   tileN: { fontSize: '1.6rem', fontWeight: 800, lineHeight: 1 },
   tileL: { fontSize: '0.68rem', color: '#8A9BAE', marginTop: 6 },

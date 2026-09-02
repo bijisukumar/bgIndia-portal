@@ -2521,11 +2521,31 @@ export async function onRequest(ctx) {
               return { total: r?.total || 0, pending: r?.pending || 0 }
             } catch (e) { console.error('signup counts:', e?.message || e); return { total: 0, pending: 0 } }
           }
+          // Top interest categories only — one narrow column, not the full
+          // row, so the home tile stays a glance rather than growing into
+          // the detail screen it links to.
+          let topInterests = []
+          try {
+            const { results } = await DB.prepare(
+              `SELECT interests FROM platform_invite_requests
+                WHERE created_at >= datetime('now', ?) AND interests IS NOT NULL AND interests != ''`
+            ).bind(since).all()
+            const tally = {}
+            for (const row of results || []) {
+              for (const raw of String(row.interests).split(',')) {
+                const cat = raw.trim()
+                if (cat) tally[cat] = (tally[cat] || 0) + 1
+              }
+            }
+            topInterests = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 3)
+          } catch (e) { console.error('signup top interests:', e?.message || e) }
+
           return json({ success: true, data: {
             days,
             invites: await one('platform_invite_requests'),
             hosts:   await one('platform_host_registrations'),
             leads:   await one('platform_leads'),
+            topInterests,
           }})
         }
 

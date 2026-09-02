@@ -1178,6 +1178,13 @@ function SignupsBlock() {
       ? `${total} received, all followed up · last 30 days`
       : 'Nothing yet · last 30 days'
 
+  // Top 2 only, on their own line — enough to know what to lead with
+  // without turning a one-glance tile into the detail screen it links to.
+  const topInterests = (counts.topInterests || []).slice(0, 2)
+  const interestLine = topInterests.length
+    ? 'Top interest: ' + topInterests.map(([cat, n]) => `${cat} (${n})`).join(', ')
+    : null
+
   return (
     <div
       onClick={() => navigate('/owner/maintenance/signups')}
@@ -1196,6 +1203,7 @@ function SignupsBlock() {
             : 'No signups waiting'}
         </div>
         <div style={{ fontSize: '0.74rem', color: '#5C7080' }}>{subline}</div>
+        {interestLine && <div style={{ fontSize: '0.72rem', color: '#85B7EB', marginTop: '2px' }}>{interestLine}</div>}
       </div>
       <span style={{ color: waiting ? '#C8903A' : '#5C7080', fontSize: '1.1rem' }}>&rsaquo;</span>
     </div>

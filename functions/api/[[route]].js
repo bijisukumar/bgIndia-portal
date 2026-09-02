@@ -1811,22 +1811,36 @@ export async function onRequest(ctx) {
       const propertyType = list(b.propertyType)
       const interests    = list(b.interests)
 
+      // Listing links arrive as an array from the pilot form and as a single
+      // string from the invite form. Joined with newlines rather than commas,
+      // because a listing URL can contain a comma - MakeMyTrip and Agoda both
+      // emit them - and a comma join would split one into two dead links.
+      const listingLinks = (Array.isArray(b.listingLinks) ? b.listingLinks : [b.listingLinks])
+        .map(t).filter(Boolean).join('\n')
+
+      // Only two forms post here and only one of them may claim 'pilot'.
+      // Anything else is recorded as an invite rather than trusted, so a
+      // hand-made request cannot label itself further along than it is.
+      const intent = t(b.intent) === 'pilot' ? 'pilot' : 'invite'
+
       const requestId = genId('INV')
       await DB.prepare(
         `INSERT INTO platform_invite_requests
            (request_id, name, whatsapp, email, property_name, location,
             property_count, channels, foreign_guests, call_slot, notes,
-            property_type, airbnb_link, onboard_3m, interests)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+            property_type, airbnb_link, onboard_3m, interests,
+            listing_links, intent)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
       ).bind(
         requestId, name, phone, t(b.email) || null, t(b.propertyName) || null,
         t(b.location) || null, t(b.propertyCount) || null, channels || null,
         t(b.foreignGuests) || null, t(b.callSlot) || null, t(b.notes) || null,
         propertyType || null, t(b.airbnbLink) || null,
-        t(b.onboard3m) || null, interests || null
+        t(b.onboard3m) || null, interests || null,
+        listingLinks || null, intent
       ).run()
 
-      ctx.waitUntil(sendAlert(env, `\u2728 Invite request \u2014 ${name}${t(b.location) ? ' (' + t(b.location) + ')' : ''}`, [
+      ctx.waitUntil(sendAlert(env, `${intent === 'pilot' ? '\u2705 PILOT SIGNUP' : '\u2728 Invite request'} \u2014 ${name}${t(b.location) ? ' (' + t(b.location) + ')' : ''}`, [
         // Deliberately terse. Two things ruined the old version: a "Source:"
         // line that never varied (every invite comes from the same form), and
         // bare URLs - Outlook rewrites each one into a multi-line SafeLinks
@@ -1846,6 +1860,8 @@ export async function onRequest(ctx) {
         t(b.propertyCount)  ? `How many         ${t(b.propertyCount)}` : '',
         channels            ? `Hosting on       ${channels}` : '',
         t(b.airbnbLink)     ? `Airbnb link      ${t(b.airbnbLink)}` : '',
+        listingLinks        ? `Listed on` : '',
+        ...(listingLinks ? listingLinks.split('\n').map(u => `  ${u}`) : []),
         t(b.onboard3m)      ? `Ready in 6-8wk   ${t(b.onboard3m)}` : '',
         t(b.foreignGuests)  ? `Foreign guests   ${t(b.foreignGuests)}` : '',
         interests           ? `Wants help with  ${interests}` : '',
@@ -2564,7 +2580,8 @@ export async function onRequest(ctx) {
         const invites = await grab(
           `SELECT request_id AS id, name, whatsapp, email, location, property_name,
                   property_type, property_count, channels, foreign_guests, onboard_3m,
-                  interests, call_slot, notes, status, created_at
+                  interests, call_slot, notes, status, created_at,
+                  airbnb_link, listing_links, intent
              FROM platform_invite_requests
             WHERE created_at >= datetime('now', ?)
             ORDER BY created_at DESC LIMIT 500`, [since])

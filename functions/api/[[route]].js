@@ -3417,11 +3417,19 @@ export async function onRequest(ctx) {
         // Same migration as getRev360Dashboard: income from rent_transactions
         // (replaces rental_income's combined rent+car_parking), expense from
         // property_expenses (replaces rental_income's expense columns).
+        //
+        // tenant_pays_maintenance_direct properties (e.g. Tritvam) have the
+        // tenant paying the association directly -- that money never
+        // reaches the owner, so it must be excluded from income even
+        // though total_due (correctly) still includes it as a total
+        // monthly obligation on the rent ledger/receipt.
         const rentRows = await DB.prepare(`
-          SELECT prop_id, CAST(substr(period_month, 6, 2) AS INTEGER) as month, SUM(total_due) as income
-          FROM rev360_rent_transactions
-          WHERE substr(period_month, 1, 4) = ?
-          GROUP BY prop_id, month
+          SELECT rt.prop_id, CAST(substr(rt.period_month, 6, 2) AS INTEGER) as month,
+            SUM(CASE WHEN p.tenant_pays_maintenance_direct = 1 THEN rt.total_due - rt.maintenance ELSE rt.total_due END) as income
+          FROM rev360_rent_transactions rt
+          JOIN rev360_rental_props p ON p.prop_id = rt.prop_id
+          WHERE substr(rt.period_month, 1, 4) = ?
+          GROUP BY rt.prop_id, month
         `).bind(String(year)).all()
         const expenseRows = await DB.prepare(`
           SELECT prop_id, month, SUM(total_expense) as expense
@@ -4007,11 +4015,19 @@ export async function onRequest(ctx) {
         // late fee or an actual payment date, which is the whole reason this
         // table exists. rental_income itself is left untouched, just no longer
         // read here.
+        //
+        // tenant_pays_maintenance_direct properties: maintenance goes straight
+        // to the association, never through the owner, so it's excluded from
+        // income here even though total_due still (correctly) includes it as
+        // the tenant's total monthly obligation on the ledger/receipt.
         const rentIncome = await DB.prepare(`
-          SELECT prop_id, SUM(total_due) as income, COUNT(*) as months_entered
-          FROM rev360_rent_transactions
-          WHERE substr(period_month, 1, 4) = ?
-          GROUP BY prop_id
+          SELECT rt.prop_id,
+            SUM(CASE WHEN p.tenant_pays_maintenance_direct = 1 THEN rt.total_due - rt.maintenance ELSE rt.total_due END) as income,
+            COUNT(*) as months_entered
+          FROM rev360_rent_transactions rt
+          JOIN rev360_rental_props p ON p.prop_id = rt.prop_id
+          WHERE substr(rt.period_month, 1, 4) = ?
+          GROUP BY rt.prop_id
         `).bind(String(year)).all()
         // Expenses: property_expenses replaces rental_income's expense
         // columns (electricity/water/property_tax/land_tax/extra_maintenance).
@@ -5242,6 +5258,13 @@ export async function onRequest(ctx) {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
         const { results } = await DB.prepare(`SELECT * FROM rev360_rent_transactions WHERE prop_id = ? ORDER BY period_month DESC, unit_type ASC`).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      if (action === 'getAdvances') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(`SELECT * FROM rev360_advances WHERE prop_id = ? ORDER BY paid_date DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
@@ -8249,6 +8272,7 @@ export async function onRequest(ctx) {
               parking_fee = ?, parking_deposit = ?,
               parking_lease_start = ?, parking_lease_end = ?, parking_currency = ?,
               parking_paid_in_full = ?,
+              tenant_pays_maintenance_direct = ?,
               updated_by = ?, updated_at = ?
             WHERE prop_id = ?
           `).bind(
@@ -8267,6 +8291,7 @@ export async function onRequest(ctx) {
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
             d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
             d.parkingPaidInFull ? 1 : 0,
+            d.tenantPaysMaintenanceDirect ? 1 : 0,
             actor, now(), d.propId
           ).run()
         } else {
@@ -8282,9 +8307,9 @@ export async function onRequest(ctx) {
               move_out_doc_shared, move_out_docs_received, damage_charges_deducted, deposit_refunded,
               has_separate_parking, parking_tenant_name, parking_tenant_phone,
               parking_fee, parking_deposit, parking_lease_start, parking_lease_end, parking_currency,
-              parking_paid_in_full,
+              parking_paid_in_full, tenant_pays_maintenance_direct,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
@@ -8298,7 +8323,7 @@ export async function onRequest(ctx) {
             d.parkingTenantName || null, d.parkingTenantPhone || null,
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
             d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
-            d.parkingPaidInFull ? 1 : 0,
+            d.parkingPaidInFull ? 1 : 0, d.tenantPaysMaintenanceDirect ? 1 : 0,
             actor, actor, now(), now()
           ).run()
         }
@@ -8416,6 +8441,25 @@ export async function onRequest(ctx) {
         const { lossId } = body; if (!lossId) return err('lossId required')
         await DB.prepare(`DELETE FROM rev360_lease_losses WHERE loss_id = ?`).bind(lossId).run()
         return json({ success: true, data: { lossId, deleted: true } })
+      }
+
+      // Advance rent, paid ahead of the normal monthly cycle -- not tied to
+      // one period_month, so it doesn't belong in rev360_rent_transactions.
+      // Previously "Post Advance & Generate Receipt" only generated a
+      // document; nothing was ever saved, so a page refresh silently lost it.
+      if (action === 'postAdvance') {
+        const { propId, amount, currency, paidDate, paymentMode, notes } = body
+        if (!propId) return err('propId required')
+        const amt = parseFloat(amount) || 0
+        if (amt <= 0) return err('amount must be greater than 0')
+        const id = 'adv_' + Date.now() + '_' + Math.floor(Math.random()*1000)
+        await DB.prepare(`
+          INSERT INTO rev360_advances (advance_id, prop_id, amount, currency, paid_date, payment_mode, notes, created_by, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?)
+        `).bind(
+          id, propId, amt, currency || 'INR', paidDate || now().slice(0,10), paymentMode || 'Bank Transfer', notes || null, actor, now()
+        ).run()
+        return json({ success: true, data: { advanceId: id } })
       }
 
       // RENT LEDGER — "Paid on Time" / late-fee exception POST lands here.

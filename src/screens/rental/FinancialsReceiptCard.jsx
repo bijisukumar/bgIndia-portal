@@ -43,8 +43,9 @@ function TermsGrid({ agreement, currency }) {
   const rows = [
     ['Security Deposit', fmt(agreement?.deposit, currency)],
     ['Rent / Month', fmt(agreement?.agreed_rent, currency)],
-    ['Maintenance Fees', fmt(agreement?.maintenance_fee, currency)],
-    ['Total Monthly Due', fmt((parseFloat(agreement?.agreed_rent)||0) + (parseFloat(agreement?.maintenance_fee)||0), currency)],
+    ['Maintenance Fees', fmt(agreement?.maintenance_fee, currency) + (agreement?.tenant_pays_maintenance_direct ? ' (paid direct to association)' : '')],
+    [agreement?.tenant_pays_maintenance_direct ? 'Rent You Collect' : 'Total Monthly Due',
+      fmt((parseFloat(agreement?.agreed_rent)||0) + (agreement?.tenant_pays_maintenance_direct ? 0 : (parseFloat(agreement?.maintenance_fee)||0)), currency)],
     ['Lease Start', fmtDate(agreement?.lease_start)],
     ['Lease End', fmtDate(agreement?.lease_end)],
     ['Next Renewal Date', agreement?.next_renewal_date ? fmtDate(agreement.next_renewal_date) : '—'],
@@ -71,6 +72,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
 
   const [txns, setTxns] = useState([])
   const [loadingTxns, setLoadingTxns] = useState(true)
+  const [advances, setAdvances] = useState([])
   const [posting, setPosting] = useState(false)
   const [showException, setShowException] = useState(false)
   const [lateFee, setLateFee] = useState('')
@@ -89,7 +91,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
   const [advanceDate, setAdvanceDate] = useState(localTodayStr())
   const [advanceMode, setAdvanceMode] = useState('UPI')
 
-  useEffect(() => { if (saved) loadTxns() }, [propId, saved])
+  useEffect(() => { if (saved) { loadTxns(); loadAdvances() } }, [propId, saved])
 
   async function loadTxns() {
     setLoadingTxns(true)
@@ -98,6 +100,13 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
       setTxns(Array.isArray(data) ? data : [])
     } catch (e) { console.warn(e) }
     finally { setLoadingTxns(false) }
+  }
+
+  async function loadAdvances() {
+    try {
+      const data = await api.getAdvances(propId)
+      setAdvances(Array.isArray(data) ? data : [])
+    } catch (e) { console.warn(e) }
   }
 
   const alreadyPostedThisMonth = txns.some(t => t.period_month === period)
@@ -176,15 +185,11 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
   async function handlePostAdvance() {
     if (!saved) { showToast('Save the agreement first', 'error'); return }
     if (!advanceAmount || parseFloat(advanceAmount) <= 0) { showToast('Enter an advance amount', 'error'); return }
-    // Advance isn't a monthly rent posting, so it doesn't go through
-    // rent_transactions (which is keyed one-row-per-period). It's recorded
-    // as a deposit-style receipt instead — the same downloadDepositReceipt
-    // path, but with the live advance amount/date/mode rather than the
-    // agreement's stored deposit. This mirrors the spec's "Post Advance &
-    // Generate Receipt" as a receipt-generation action, since there's no
-    // separate advances ledger table to post into yet.
     setGeneratingReceipt('advance')
     try {
+      // Persist first — this used to only generate a document with nothing
+      // saved anywhere, so a refresh silently lost the amount/date typed in.
+      await api.postAdvance({ propId, amount: advanceAmount, currency, paidDate: advanceDate, paymentMode: advanceMode })
       const { generateDepositReceipt } = await import('../../utils/formatChoice')
       await generateDepositReceipt(!useDocxAdvance, {
         ...agreement,
@@ -192,7 +197,25 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
         _depositPaymentMode: advanceMode,
         _depositPaymentDate: advanceDate,
       }, property)
-      showToast('🧾 Advance receipt generated')
+      showToast('🧾 Advance posted and receipt generated')
+      setAdvanceAmount('')
+      await loadAdvances()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setGeneratingReceipt(null) }
+  }
+
+  async function handleAdvanceReceipt(adv) {
+    setGeneratingReceipt(adv.advance_id)
+    try {
+      const { generateDepositReceipt } = await import('../../utils/formatChoice')
+      await generateDepositReceipt(!useDocxAdvance, {
+        ...agreement,
+        deposit: adv.amount,
+        currency: adv.currency,
+        _depositPaymentMode: adv.payment_mode,
+        _depositPaymentDate: adv.paid_date,
+      }, property)
+      showToast('🧾 Receipt generated')
     } catch (e) { showToast(e.message, 'error') }
     finally { setGeneratingReceipt(null) }
   }
@@ -382,9 +405,37 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
               background:'#C8903A', color:'#fff', fontWeight:'700', fontSize:'0.85rem',
               cursor: (!saved) ? 'default' : 'pointer', opacity: (!saved || generatingReceipt === 'advance') ? 0.6 : 1,
             }}>
-            {generatingReceipt === 'advance' ? 'Generating…' : 'Post Advance & Generate Receipt'}
+            {generatingReceipt === 'advance' ? 'Posting…' : 'Post Advance & Generate Receipt'}
           </button>
           <FormatToggle useDocx={useDocxAdvance} onChange={setUseDocxAdvance} idSuffix="advance" />
+
+          {advances.length > 0 && (
+            <div style={{marginTop:'14px'}}>
+              <div style={{fontSize:'0.62rem', color:'var(--text-dim)', letterSpacing:'0.5px', textTransform:'uppercase', marginBottom:'6px'}}>
+                Recent Advances
+              </div>
+              {advances.slice(0, 6).map(a => (
+                <div key={a.advance_id} style={{
+                  display:'flex', alignItems:'center', justifyContent:'space-between',
+                  padding:'8px 10px', borderRadius:'8px', marginBottom:'4px',
+                  background:'var(--dark-input)', border:'1px solid var(--border-dim)',
+                }}>
+                  <div>
+                    <span style={{fontSize:'0.8rem', color:'var(--text)', fontWeight:'600'}}>{fmt(a.amount, a.currency)}</span>
+                    <div style={{fontSize:'0.68rem', color:'var(--text-dim)'}}>{fmtDate(a.paid_date)} · {a.payment_mode}</div>
+                  </div>
+                  <button onClick={() => handleAdvanceReceipt(a)} disabled={generatingReceipt === a.advance_id}
+                    style={{
+                      padding:'6px 10px', borderRadius:'6px', border:'1px solid rgba(200,144,58,0.4)',
+                      background:'rgba(200,144,58,0.1)', color:'#C8903A', fontSize:'0.7rem', fontWeight:'600', cursor:'pointer',
+                      opacity: generatingReceipt === a.advance_id ? 0.5 : 1,
+                    }}>
+                    {generatingReceipt === a.advance_id ? '…' : '🧾 Receipt'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

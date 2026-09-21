@@ -66,7 +66,7 @@ function dayAfter(dateStr) {
 const EMPTY_FORM = {
   tenantName:'', tenantEmail:'', tenantPhone:'', tenantAddress:'', tenantPan:'',
   deposit:'', agreedRent:'',
-  maintenance:'', leaseStart:'', leaseEnd:'', notes:'',
+  maintenance:'', tenantPaysMaintenanceDirect:false, leaseStart:'', leaseEnd:'', notes:'',
   country:'IN', currency:'INR', driveFolderUrl:'',
   stage:'Signed Up', isDelinquent:false, endReason:'',
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
@@ -158,6 +158,7 @@ export default function RentalAgreement() {
       deposit:       a.deposit        || '',
       agreedRent:    a.agreed_rent    || '',
       maintenance:   a.maintenance_fee|| '',
+      tenantPaysMaintenanceDirect: !!a.tenant_pays_maintenance_direct,
       leaseStart:    a.lease_start    || '',
       leaseEnd:      a.lease_end      || '',
       notes:         a.notes          || '',
@@ -358,6 +359,7 @@ export default function RentalAgreement() {
         deposit:      parseFloat(form.deposit) || 0,
         agreedRent:   parseFloat(form.agreedRent) || 0,
         maintenance:  parseFloat(form.maintenance) || 0,
+        tenantPaysMaintenanceDirect: form.tenantPaysMaintenanceDirect,
         leaseStart:   form.leaseStart,
         leaseEnd:     form.leaseEnd,
         notes:        form.notes.trim(),
@@ -781,14 +783,31 @@ export default function RentalAgreement() {
                     placeholder="0" style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                 </div>
                 <div>
-                  <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>TOTAL MONTHLY ({form.currency==='USD'?'$':'₹'})</label>
+                  <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>
+                    {form.tenantPaysMaintenanceDirect ? 'RENT YOU COLLECT' : 'TOTAL MONTHLY'} ({form.currency==='USD'?'$':'₹'})
+                  </label>
                   <div style={{padding:'9px 12px',borderRadius:'8px',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'#C8903A',fontWeight:'700',display:'flex',alignItems:'center',fontSize:'0.9rem'}}>
-                    {((parseFloat(form.agreedRent)||0)+(parseFloat(form.maintenance)||0)) > 0
-                      ? (form.currency==='USD' ? `$${((parseFloat(form.agreedRent)||0)+(parseFloat(form.maintenance)||0)).toLocaleString()}` : `₹${((parseFloat(form.agreedRent)||0)+(parseFloat(form.maintenance)||0)).toLocaleString('en-IN')}`)
-                      : '—'}
+                    {(() => {
+                      const total = (parseFloat(form.agreedRent)||0) + (form.tenantPaysMaintenanceDirect ? 0 : (parseFloat(form.maintenance)||0))
+                      if (total <= 0) return '—'
+                      return form.currency==='USD' ? `$${total.toLocaleString()}` : `₹${total.toLocaleString('en-IN')}`
+                    })()}
                   </div>
                 </div>
               </div>
+
+              <label style={{display:'flex',alignItems:'center',gap:'8px',marginTop:'10px',cursor:'pointer'}}>
+                <input type="checkbox" checked={form.tenantPaysMaintenanceDirect}
+                  onChange={e=>setField('tenantPaysMaintenanceDirect', e.target.checked)} style={{width:16,height:16}}/>
+                <span style={{fontSize:'0.82rem',color: form.tenantPaysMaintenanceDirect ? '#C8903A' : 'var(--text-dim)'}}>
+                  Tenant pays maintenance directly to the association (not collected by me)
+                </span>
+              </label>
+              {form.tenantPaysMaintenanceDirect && (
+                <div style={{fontSize:'0.68rem',color:'#5C7080',marginTop:'4px',marginLeft:'24px'}}>
+                  Maintenance stays on file for reference but is excluded from your income totals on the dashboards.
+                </div>
+              )}
 
               <div className="grid-2" style={{marginTop:'10px'}}>
                 <div>

@@ -56,6 +56,12 @@ function leaseDurationMonths(start, end) {
   const m = Math.round((e - s) / (1000*60*60*24*30.44))
   return m > 0 ? m : null
 }
+function dayAfter(dateStr) {
+  const d = parseLocalDate(dateStr)
+  if (!d) return ''
+  d.setDate(d.getDate() + 1)
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
 
 const EMPTY_FORM = {
   tenantName:'', tenantEmail:'', tenantPhone:'', tenantAddress:'', tenantPan:'',
@@ -201,6 +207,18 @@ export default function RentalAgreement() {
     const visible = properties.filter(p => matchesDayToDay(p, agreements, newCountry))
     if (visible[0]) handlePropChange(visible[0].id)
     else setSelectedProp(null)
+  }
+
+  // Keeps Next Renewal Date in sync with Lease End (1 day after) as long as
+  // the owner hasn't hand-edited it away from that auto-derived value —
+  // same "prefill but don't fight a manual override" pattern as the Drive
+  // folder URL below.
+  function handleLeaseEndChange(newLeaseEnd) {
+    setForm(f => {
+      const prevAuto = f.leaseEnd ? dayAfter(f.leaseEnd) : ''
+      const shouldAutoFill = !f.nextRenewalDate || f.nextRenewalDate === prevAuto
+      return { ...f, leaseEnd: newLeaseEnd, nextRenewalDate: shouldAutoFill ? dayAfter(newLeaseEnd) : f.nextRenewalDate }
+    })
   }
 
   function handleTenantNameChange(val) {
@@ -780,7 +798,7 @@ export default function RentalAgreement() {
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>LEASE END *</label>
-                  <input type="date" value={form.leaseEnd} onChange={e=>setField('leaseEnd',e.target.value)}
+                  <input type="date" value={form.leaseEnd} onChange={e=>handleLeaseEndChange(e.target.value)}
                     style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
                 </div>
               </div>
@@ -791,7 +809,7 @@ export default function RentalAgreement() {
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>NEXT RENEWAL DATE</label>
                   <input type="date" value={form.nextRenewalDate} onChange={e=>setField('nextRenewalDate',e.target.value)}
                     style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
-                  <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>Defaults to lease end if left blank.</div>
+                  <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>Auto-fills to 1 day after Lease End — edit to override.</div>
                 </div>
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>EARLY TERMINATION DATE</label>
@@ -1020,6 +1038,7 @@ export default function RentalAgreement() {
               saved={saved}
               readOnly={false}
               showToast={showToast}
+              onDepositPaidChange={(patch) => setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], ...patch}}))}
             />
 
             <MetaDiagnosticsCard form={form} setField={setField} propName={prop?.name} readOnly={false}/>

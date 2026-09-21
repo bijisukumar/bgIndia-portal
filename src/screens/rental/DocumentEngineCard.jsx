@@ -57,6 +57,7 @@ export default function DocumentEngineCard({ agreement, property, country, saved
   const [useDocxLease, setUseDocxLease] = useState(false)
   const [useDocxMoveIn, setUseDocxMoveIn] = useState(false)
   const [useDocxMoveOut, setUseDocxMoveOut] = useState(false)
+  const [useDocxDeposit, setUseDocxDeposit] = useState(false)
 
   async function run(key, fn, successMsg) {
     if (!saved) { showToast('Save the agreement first', 'error'); return }
@@ -125,6 +126,26 @@ export default function DocumentEngineCard({ agreement, property, country, saved
             }, `📦 Move-out report generated for ${agreement?.tenant_name}`)}
       />
       <FormatToggle useDocx={useDocxMoveOut} onChange={setUseDocxMoveOut} idSuffix="moveout" />
+
+      <GenButton
+        label={`🧾 Generate Deposit Receipt (${useDocxDeposit ? '.docx' : '.pdf'})`}
+        busyLabel="Generating…"
+        busy={busy === 'deposit'}
+        disabled={readOnly || !saved}
+        color="#C8903A"
+        onClick={() => run('deposit', async () => {
+              const { generateDepositReceipt } = await import('../../utils/formatChoice')
+              // agreement.deposit_paid_date/deposit_payment_mode are the real
+              // recorded fields -- mapped onto the underscore-prefixed keys
+              // downloadDepositReceipt reads, same fix as FinancialsReceiptCard.
+              return generateDepositReceipt(!useDocxDeposit, {
+                ...agreement,
+                _depositPaymentDate: agreement?.deposit_paid_date,
+                _depositPaymentMode: agreement?.deposit_payment_mode,
+              }, property)
+            }, `🧾 Deposit receipt generated for ${agreement?.tenant_name}`)}
+      />
+      <FormatToggle useDocx={useDocxDeposit} onChange={setUseDocxDeposit} idSuffix="deposit" />
 
       {!saved && (
         <div style={{fontSize:'0.68rem', color:'#5C7080', marginTop:'8px', textAlign:'center'}}>

@@ -8629,6 +8629,26 @@ export async function onRequest(ctx) {
       // un-paid, to correct a mistake) never depends on resubmitting the
       // whole tenant form, and editing other fields never silently
       // resets this flag.
+      // Mirrors markIncomingDepositPaid, but for a tenant already Active
+      // in rev360_rental_props — without this, Generate Deposit Receipt
+      // for an already-moved-in tenant has no real payment date to read.
+      if (action === 'markDepositPaid') {
+        const { propId, paid, paidDate, paymentMode } = body
+        if (!propId) return err('propId required')
+        await DB.prepare(`
+          UPDATE rev360_rental_props SET
+            deposit_paid = ?, deposit_paid_date = ?, deposit_payment_mode = ?,
+            updated_by = ?, updated_at = ?
+          WHERE prop_id = ?
+        `).bind(
+          paid ? 1 : 0,
+          paid ? (paidDate || now().slice(0,10)) : null,
+          paid ? (paymentMode || 'Bank Transfer') : null,
+          actor, now(), propId
+        ).run()
+        return json({ success: true, data: { propId, depositPaid: !!paid } })
+      }
+
       if (action === 'markIncomingDepositPaid') {
         const { propId, paid, paidDate, paymentMode } = body
         if (!propId) return err('propId required')
@@ -8713,6 +8733,7 @@ export async function onRequest(ctx) {
             early_terminated=0, early_termination_date=NULL,
             doc_contract_signed=?, doc_id_captured=?, doc_move_in=0, doc_move_out=0, doc_damage_report=0,
             move_out_doc_shared=0, move_out_docs_received=0, damage_charges_deducted=0, deposit_refunded=0,
+            deposit_paid=?, deposit_paid_date=?, deposit_payment_mode=?,
             next_renewal_date=?, updated_by=?, updated_at=?
           WHERE prop_id=?
         `).bind(
@@ -8721,6 +8742,7 @@ export async function onRequest(ctx) {
           incoming.lease_start, incoming.lease_end,
           incoming.country||'IN', incoming.currency||'INR', incoming.notes,
           incoming.doc_contract_signed||0, incoming.doc_id_captured||0,
+          incoming.deposit_paid||0, incoming.deposit_paid_date||null, incoming.deposit_payment_mode||null,
           incoming.lease_end, actor, now(), propId
         ))
 

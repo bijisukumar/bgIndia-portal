@@ -3437,6 +3437,15 @@ export async function onRequest(ctx) {
           WHERE year = ?
           GROUP BY prop_id, month
         `).bind(parseInt(year)).all()
+        // Move-in/move-out prep costs (deep cleaning, AC service, realty
+        // commission, etc) are genuine owner expenses too -- keyed by
+        // paid_date rather than a year/month column, unlike property_expenses.
+        const moveExpenseRows = await DB.prepare(`
+          SELECT prop_id, CAST(substr(paid_date, 6, 2) AS INTEGER) as month, SUM(amount) as expense
+          FROM rev360_move_expenses
+          WHERE substr(paid_date, 1, 4) = ?
+          GROUP BY prop_id, month
+        `).bind(String(year)).all()
         // Merge by (prop_id, month) into one row each, same as the
         // per-property merge in getRev360Dashboard.
         const byKey = {}
@@ -3446,7 +3455,12 @@ export async function onRequest(ctx) {
         expenseRows.results.forEach(r => {
           const k = `${r.prop_id}|${r.month}`
           if (!byKey[k]) byKey[k] = { prop_id: r.prop_id, month: r.month, income: 0, expense: 0 }
-          byKey[k].expense = r.expense || 0
+          byKey[k].expense += (r.expense || 0)
+        })
+        moveExpenseRows.results.forEach(r => {
+          const k = `${r.prop_id}|${r.month}`
+          if (!byKey[k]) byKey[k] = { prop_id: r.prop_id, month: r.month, income: 0, expense: 0 }
+          byKey[k].expense += (r.expense || 0)
         })
         const rows = Object.values(byKey).map(r => ({ ...r, net: r.income - r.expense })).sort((a,b) => a.prop_id===b.prop_id ? a.month-b.month : (a.prop_id<b.prop_id?-1:1))
         const totalIncome  = rows.reduce((s, r) => s + (r.income || 0), 0)
@@ -4037,17 +4051,29 @@ export async function onRequest(ctx) {
           WHERE year = ?
           GROUP BY prop_id
         `).bind(year).all()
-        // Merge the two by prop_id into the same {prop_id, income, expense, net,
+        // Move-in/move-out prep costs (deep cleaning, AC service, realty
+        // commission, etc) are genuine owner expenses too.
+        const moveExpense = await DB.prepare(`
+          SELECT prop_id, SUM(amount) as expense
+          FROM rev360_move_expenses
+          WHERE substr(paid_date, 1, 4) = ?
+          GROUP BY prop_id
+        `).bind(String(year)).all()
+        // Merge the three by prop_id into the same {prop_id, income, expense, net,
         // months_entered} shape the frontend already expects -- a property with
         // rent postings but no expense rows (or vice versa) still gets a single
-        // combined row rather than two partial ones.
+        // combined row rather than partial ones.
         const byProp = {}
         rentIncome.results.forEach(r => {
           byProp[r.prop_id] = { prop_id: r.prop_id, income: r.income || 0, expense: 0, months_entered: r.months_entered || 0 }
         })
         propExpense.results.forEach(r => {
           if (!byProp[r.prop_id]) byProp[r.prop_id] = { prop_id: r.prop_id, income: 0, expense: 0, months_entered: 0 }
-          byProp[r.prop_id].expense = r.expense || 0
+          byProp[r.prop_id].expense += (r.expense || 0)
+        })
+        moveExpense.results.forEach(r => {
+          if (!byProp[r.prop_id]) byProp[r.prop_id] = { prop_id: r.prop_id, income: 0, expense: 0, months_entered: 0 }
+          byProp[r.prop_id].expense += (r.expense || 0)
         })
         const income = Object.values(byProp).map(r => ({ ...r, net: r.income - r.expense }))
         const losses = await DB.prepare(`SELECT prop_id, SUM(amount) as total_claimed, SUM(CASE WHEN status='Unrecoverable' THEN amount ELSE 0 END) as total_written_off, SUM(CASE WHEN status='Recovered' THEN amount ELSE 0 END) as total_recovered, COUNT(*) as claim_count FROM rev360_lease_losses GROUP BY prop_id`).all()
@@ -5265,6 +5291,13 @@ export async function onRequest(ctx) {
         const propId = url.searchParams.get('propId') || ''
         if (!propId) return err('propId required')
         const { results } = await DB.prepare(`SELECT * FROM rev360_advances WHERE prop_id = ? ORDER BY paid_date DESC`).bind(propId).all()
+        return json({ success: true, data: results })
+      }
+
+      if (action === 'getMoveExpenses') {
+        const propId = url.searchParams.get('propId') || ''
+        if (!propId) return err('propId required')
+        const { results } = await DB.prepare(`SELECT * FROM rev360_move_expenses WHERE prop_id = ? ORDER BY event_type, paid_date DESC`).bind(propId).all()
         return json({ success: true, data: results })
       }
 
@@ -8273,6 +8306,7 @@ export async function onRequest(ctx) {
               parking_lease_start = ?, parking_lease_end = ?, parking_currency = ?,
               parking_paid_in_full = ?,
               tenant_pays_maintenance_direct = ?,
+              move_in_photos_url = ?, move_out_photos_url = ?,
               updated_by = ?, updated_at = ?
             WHERE prop_id = ?
           `).bind(
@@ -8292,6 +8326,7 @@ export async function onRequest(ctx) {
             d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
             d.parkingPaidInFull ? 1 : 0,
             d.tenantPaysMaintenanceDirect ? 1 : 0,
+            d.moveInPhotosUrl || null, d.moveOutPhotosUrl || null,
             actor, now(), d.propId
           ).run()
         } else {
@@ -8308,8 +8343,9 @@ export async function onRequest(ctx) {
               has_separate_parking, parking_tenant_name, parking_tenant_phone,
               parking_fee, parking_deposit, parking_lease_start, parking_lease_end, parking_currency,
               parking_paid_in_full, tenant_pays_maintenance_direct,
+              move_in_photos_url, move_out_photos_url,
               created_by, updated_by, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             d.propId, d.propName || d.propId, d.location || '', d.country || 'IN', d.currency || 'INR',
             d.tenantName || '', d.tenantEmail || null, d.tenantPhone || null, d.tenantAddress || null, d.tenantPan || null,
@@ -8324,6 +8360,7 @@ export async function onRequest(ctx) {
             parseFloat(d.parkingFee) || 0, parseFloat(d.parkingDeposit) || 0,
             d.parkingLeaseStart || null, d.parkingLeaseEnd || null, d.parkingCurrency || d.currency || 'INR',
             d.parkingPaidInFull ? 1 : 0, d.tenantPaysMaintenanceDirect ? 1 : 0,
+            d.moveInPhotosUrl || null, d.moveOutPhotosUrl || null,
             actor, actor, now(), now()
           ).run()
         }
@@ -8460,6 +8497,37 @@ export async function onRequest(ctx) {
           id, propId, amt, currency || 'INR', paidDate || now().slice(0,10), paymentMode || 'Bank Transfer', notes || null, actor, now()
         ).run()
         return json({ success: true, data: { advanceId: id } })
+      }
+
+      // Owner-side costs to prepare a property for a new tenant (move-in)
+      // or after one leaves (move-out) -- deep cleaning, AC service,
+      // electrician, plumbing, realty commission, etc. Genuine expenses,
+      // rolled into the income/expense dashboards (see getRentalDashboard
+      // / getRev360Dashboard below).
+      if (action === 'saveMoveExpense') {
+        const { expenseId, propId, eventType, tenantSnapshot, category, description, amount, currency, vendorName, paidDate, evidenceUrl } = body
+        if (!propId) return err('propId required')
+        if (!['move_in','move_out'].includes(eventType)) return err('eventType must be move_in or move_out')
+        if (!['Realty Commission','Deep Cleaning','AC Service','Electrician','Plumbing','Painting','Pest Control','Other'].includes(category)) return err('Invalid category')
+        const id = expenseId || ('mvexp_' + Date.now() + '_' + Math.floor(Math.random()*1000))
+        await DB.prepare(`
+          INSERT OR REPLACE INTO rev360_move_expenses (
+            expense_id, prop_id, event_type, tenant_snapshot, category, description,
+            amount, currency, vendor_name, paid_date, evidence_url, created_by, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM rev360_move_expenses WHERE expense_id=?),?),?)
+        `).bind(
+          id, propId, eventType, tenantSnapshot || null, category, description || null,
+          parseFloat(amount) || 0, currency || 'INR', vendorName || null, paidDate || now().slice(0,10), evidenceUrl || null,
+          actor, id, now(), now()
+        ).run()
+        return json({ success: true, data: { expenseId: id } })
+      }
+
+      if (action === 'deleteMoveExpense') {
+        const { expenseId } = body
+        if (!expenseId) return err('expenseId required')
+        await DB.prepare(`DELETE FROM rev360_move_expenses WHERE expense_id = ?`).bind(expenseId).run()
+        return json({ success: true, data: { expenseId, deleted: true } })
       }
 
       // RENT LEDGER — "Paid on Time" / late-fee exception POST lands here.
@@ -8746,8 +8814,9 @@ export async function onRequest(ctx) {
               notes, drive_folder_url,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
               move_out_doc_shared, move_out_docs_received, damage_charges_deducted, deposit_refunded,
+              move_in_photos_url, move_out_photos_url,
               created_by, created_at, updated_by, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             histId, propId, current.tenant_name, current.tenant_email, current.tenant_phone,
             current.tenant_address, current.tenant_pan,
@@ -8760,6 +8829,7 @@ export async function onRequest(ctx) {
             current.doc_move_out||0, current.doc_damage_report||0,
             current.move_out_doc_shared||0, current.move_out_docs_received||0,
             current.damage_charges_deducted||0, current.deposit_refunded||0,
+            current.move_in_photos_url||null, current.move_out_photos_url||null,
             actor, now(), actor, now()
           ))
         }
@@ -8767,7 +8837,9 @@ export async function onRequest(ctx) {
         // Step 2 — overwrite rental_props with the incoming tenant,
         // resetting per-tenancy fields (doc checklist, delinquent flag,
         // early-termination) that must not carry over from the outgoing
-        // tenant onto the new one.
+        // tenant onto the new one. move_in/move_out_photos_url reset to
+        // NULL too -- the new tenant's own move-in photos get linked
+        // fresh once they're actually in.
         batch.push(DB.prepare(`
           UPDATE rev360_rental_props SET
             tenant_name=?, tenant_email=?, tenant_phone=?, tenant_address=?, tenant_pan=?,
@@ -8778,6 +8850,7 @@ export async function onRequest(ctx) {
             doc_contract_signed=?, doc_id_captured=?, doc_move_in=0, doc_move_out=0, doc_damage_report=0,
             move_out_doc_shared=0, move_out_docs_received=0, damage_charges_deducted=0, deposit_refunded=0,
             deposit_paid=?, deposit_paid_date=?, deposit_payment_mode=?,
+            move_in_photos_url=NULL, move_out_photos_url=NULL,
             next_renewal_date=?, updated_by=?, updated_at=?
           WHERE prop_id=?
         `).bind(
@@ -8820,8 +8893,9 @@ export async function onRequest(ctx) {
               notes, drive_folder_url,
               doc_contract_signed, doc_id_captured, doc_move_in, doc_move_out, doc_damage_report,
               move_out_doc_shared, move_out_docs_received, damage_charges_deducted, deposit_refunded,
+              move_in_photos_url, move_out_photos_url,
               created_by, created_at, updated_by, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `).bind(
             histId, propId, current.tenant_name, current.tenant_email, current.tenant_phone,
             current.tenant_address, current.tenant_pan,
@@ -8834,6 +8908,7 @@ export async function onRequest(ctx) {
             current.doc_move_out||0, current.doc_damage_report||0,
             current.move_out_doc_shared||0, current.move_out_docs_received||0,
             current.damage_charges_deducted||0, current.deposit_refunded||0,
+            current.move_in_photos_url||null, current.move_out_photos_url||null,
             actor, now(), actor, now()
           ),
           DB.prepare(`
@@ -8846,6 +8921,7 @@ export async function onRequest(ctx) {
               is_month_to_month=0, month_to_month_since=NULL, next_renewal_date=NULL,
               doc_contract_signed=0, doc_id_captured=0, doc_move_in=0, doc_move_out=0, doc_damage_report=0,
               move_out_doc_shared=0, move_out_docs_received=0, damage_charges_deducted=0, deposit_refunded=0,
+              move_in_photos_url=NULL, move_out_photos_url=NULL,
               updated_by=?, updated_at=?
             WHERE prop_id=?
           `).bind(actor, now(), propId),

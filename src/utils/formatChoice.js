@@ -17,6 +17,8 @@ import { downloadMoveReport } from './generateMoveReport'
 import { downloadMoveReportPdf } from './generatePdfMoveReport'
 import { downloadLeaseDeed } from './generateLeaseDeed'
 import { downloadLeaseDeedPdf } from './generatePdfLeaseDeed'
+import { downloadPayoutVoucher } from './generatePayoutVoucher'
+import { downloadPayoutVoucherPdf } from './generatePdfPayoutVoucher'
 
 export async function generateDepositReceipt(isPdf, agreement, property) {
   return isPdf ? downloadDepositReceiptPdf(agreement, property) : downloadDepositReceipt(agreement, property)
@@ -32,4 +34,8 @@ export async function generateMoveReportAny(isPdf, kind, agreement, property, ev
 
 export async function generateLeaseDeedAny(isPdf, agreement, property) {
   return isPdf ? downloadLeaseDeedPdf(agreement, property) : downloadLeaseDeed(agreement, property)
+}
+
+export async function generatePayoutVoucherAny(isPdf, expense, property) {
+  return isPdf ? downloadPayoutVoucherPdf(expense, property) : downloadPayoutVoucher(expense, property)
 }

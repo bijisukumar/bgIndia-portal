@@ -132,7 +132,7 @@ async function drawSignatureBlockTwoCol(cursor) {
   cursor.drawTwoCol('Signature & Date', 'Signature & Date', { size: 8, spacingAfter: 4 })
 }
 
-async function buildMoveReportPdf({ kind, property, tenantName, eventDate, rooms }) {
+async function buildMoveReportPdf({ kind, property, tenantName, eventDate, rooms, photosUrl }) {
   const { doc, cursor } = await createPdfWithCursor()
   const title = kind === 'move-out' ? 'MOVE-OUT INSPECTION REPORT' : 'MOVE-IN INSPECTION REPORT'
   const propLabel = property?.fullAddress || (property?.building
@@ -145,6 +145,13 @@ async function buildMoveReportPdf({ kind, property, tenantName, eventDate, rooms
   cursor.drawRuns([{ text: `${kind === 'move-out' ? 'Move-Out' : 'Move-In'} Date: `, bold: true }, { text: fmtLongDate(eventDate) }], { size: 10, spacingAfter: 14 })
 
   cursor.drawRuns([{ text: `This report records the condition of the property and its fixtures at the time of ${kind === 'move-out' ? 'move-out' : 'move-in'}. Both parties should review and initial each section before signing below.` }], { size: 9, spacingAfter: 10 })
+
+  if (photosUrl) {
+    cursor.drawRuns([
+      { text: `Photos & Videos (${kind === 'move-out' ? 'Move-Out' : 'Move-In'}): `, bold: true },
+      { text: photosUrl },
+    ], { size: 9, spacingAfter: 10 })
+  }
 
   drawChecklistTable(cursor, rooms)
   drawMeterTable(cursor)
@@ -164,9 +171,10 @@ export async function downloadMoveReportPdf(kind, agreement, property, eventDate
   if (!agreement?.tenant_name) {
     throw new Error('Cannot generate move report — tenant name is required. Fill this in and save first.')
   }
+  const photosUrl = kind === 'move-out' ? agreement?.move_out_photos_url : agreement?.move_in_photos_url
   const doc = await buildMoveReportPdf({
     kind, property, tenantName: agreement.tenant_name,
-    eventDate: eventDate || localTodayStr(), rooms: DEFAULT_ROOMS,
+    eventDate: eventDate || localTodayStr(), rooms: DEFAULT_ROOMS, photosUrl,
   })
   const label = kind === 'move-out' ? 'Move-Out Report' : 'Move-In Report'
   await triggerPdfDownload(doc, `${label} - ${property.name} - ${agreement.tenant_name}.pdf`)

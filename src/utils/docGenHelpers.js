@@ -6,7 +6,7 @@
 //  generateLeaseDeed.js rather than edited into it, so the already
 //  tested deed generator stays untouched.
 // ============================================================
-import { Paragraph, TextRun, AlignmentType, TabStopType, TabStopPosition } from 'docx'
+import { Paragraph, TextRun, AlignmentType, TabStopType, TabStopPosition, ExternalHyperlink } from 'docx'
 import { parseLocalDate } from './dates'
 
 export function ordinal(n) {
@@ -88,6 +88,21 @@ export function centerLabel(text, opts = {}) {
     alignment: AlignmentType.CENTER,
     spacing: { after: 200, ...opts.spacing },
     children: [r(text, { bold: true, size: opts.size || 22 })],
+  })
+}
+
+// A "Label: clickable-link" paragraph — used to point at a OneDrive
+// folder of move-in/move-out photos from within a generated document.
+export function linkParagraph(label, url, opts = {}) {
+  return new Paragraph({
+    spacing: { after: 200, ...opts.spacing },
+    children: [
+      r(label, { bold: true }),
+      new ExternalHyperlink({
+        link: url,
+        children: [new TextRun({ text: url, font: FONT, size: 22, style: 'Hyperlink' })],
+      }),
+    ],
   })
 }
 

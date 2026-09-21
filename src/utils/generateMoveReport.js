@@ -16,7 +16,7 @@ import {
   AlignmentType, BorderStyle, WidthType, ShadingType,
 } from 'docx'
 import { localTodayStr } from './dates'
-import { fmtLongDate, p, r, centerLabel, twoColRow, FONT } from './docGenHelpers'
+import { fmtLongDate, p, r, centerLabel, twoColRow, linkParagraph, FONT } from './docGenHelpers'
 
 const DEFAULT_ROOMS = [
   'Living Room', 'Kitchen', 'Bedroom 1', 'Bedroom 2', 'Bathroom 1', 'Bathroom 2',
@@ -127,7 +127,7 @@ function termsAndConditionsSection() {
   ]
 }
 
-function buildMoveReportDocument({ kind, property, tenantName, eventDate, rooms }) {
+function buildMoveReportDocument({ kind, property, tenantName, eventDate, rooms, photosUrl }) {
   const title = kind === 'move-out' ? 'MOVE-OUT INSPECTION REPORT' : 'MOVE-IN INSPECTION REPORT'
   const propLabel = property?.fullAddress || (property?.building
     ? `${property.building}${property.unitNo ? ', Unit ' + property.unitNo : ''}, ${property.city || property.location || ''}`
@@ -149,6 +149,8 @@ function buildMoveReportDocument({ kind, property, tenantName, eventDate, rooms 
       (kind === 'move-out' ? 'move-out' : 'move-in') +
       '. Both parties should review and initial each section before signing below.', { size: 18 }),
       { spacing: { after: 300 } }),
+
+    ...(photosUrl ? [linkParagraph(`Photos & Videos (${kind === 'move-out' ? 'Move-Out' : 'Move-In'}): `, photosUrl, { spacing: { after: 300 } })] : []),
 
     checklistTable(rooms),
     p(r(' '), { spacing: { after: 100 } }),
@@ -197,12 +199,14 @@ export async function downloadMoveReport(kind, agreement, property, eventDate) {
   if (!agreement?.tenant_name) {
     throw new Error('Cannot generate move report — tenant name is required. Fill this in and save first.')
   }
+  const photosUrl = kind === 'move-out' ? agreement?.move_out_photos_url : agreement?.move_in_photos_url
   const doc = buildMoveReportDocument({
     kind,
     property,
     tenantName: agreement.tenant_name,
     eventDate: eventDate || localTodayStr(),
     rooms: DEFAULT_ROOMS,
+    photosUrl,
   })
   const label = kind === 'move-out' ? 'Move-Out Report' : 'Move-In Report'
   await triggerDownload(doc, `${label} - ${property.name} - ${agreement.tenant_name}.docx`)

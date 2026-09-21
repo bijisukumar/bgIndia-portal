@@ -7,9 +7,9 @@
 // ============================================================
 import { CONFIG } from '../config'
 import { localTodayStr } from './dates'
-import { createPdfWithCursor, triggerPdfDownload, fmtLongDate, fmtCurrency, fmtCurrencyWords } from './pdfGenHelpers'
+import { createPdfWithCursor, triggerPdfDownload, drawSingleSignatureBlock, fmtLongDate, fmtCurrency, fmtCurrencyWords } from './pdfGenHelpers'
 
-async function buildVoucherPdf({ property, vendorName, amount, currency, paidDate, category, description, executionCity, ownerName }) {
+async function buildVoucherPdf({ property, vendorName, amount, currency, paidDate, category, description, executionCity, ownerName, agreedRent }) {
   const { doc, cursor } = await createPdfWithCursor()
   const today = localTodayStr()
   const propLabel = property?.fullAddress || (property?.building
@@ -33,23 +33,23 @@ async function buildVoucherPdf({ property, vendorName, amount, currency, paidDat
 
   cursor.drawTwoCol('Payment Date:', fmtLongDate(paidDate), { spacingAfter: 6 })
   cursor.drawTwoCol('Category:', category, { spacingAfter: 6 })
+  // Realty Commission is conventionally a percentage of monthly rent
+  // (typically half a month's rent, i.e. 50%) — showing the basis makes
+  // the voucher self-explanatory rather than just a bare amount.
+  if (category === 'Realty Commission' && agreedRent > 0) {
+    const pct = Math.round((amount / agreedRent) * 100)
+    cursor.drawTwoCol('Rent Amount:', fmtCurrency(agreedRent, currency), { spacingAfter: 6 })
+    cursor.drawTwoCol('Commission Basis:', `${pct}% of Rent Amount`, { spacingAfter: 6 })
+  }
   cursor.drawTwoCol('Amount Paid:', fmtCurrency(amount, currency), { bold: true, spacingAfter: 16 })
 
   cursor.drawRuns([
     { text: 'This voucher confirms only that the above payment was made. It is an internal expense record and does not itself constitute a receipt from the vendor.' },
   ], { size: 9, spacingAfter: 16 })
 
-  cursor.drawLine(`Place: ${executionCity || '—'}`, { size: 10, spacingAfter: 20 })
+  cursor.drawLine(`Place: ${executionCity || '—'}`, { size: 10, spacingAfter: 10 })
 
-  cursor.moveDown(10)
-  cursor.ensureSpace(40)
-  cursor.page.drawLine({
-    start: { x: cursor.x, y: cursor.y }, end: { x: cursor.x + cursor.contentWidth / 2 - 20, y: cursor.y },
-    thickness: 0.75,
-  })
-  cursor.moveDown(12)
-  cursor.drawLine((ownerName || '[OWNER]').toUpperCase(), { size: 10, bold: true, spacingAfter: 2 })
-  cursor.drawLine('(Paid by / on behalf of Owner)', { size: 9, spacingAfter: 0 })
+  await drawSingleSignatureBlock(cursor, { signerName: ownerName, dateStr: paidDate, label: '(Paid by / on behalf of Owner)' })
 
   return doc
 }
@@ -73,6 +73,7 @@ export async function downloadPayoutVoucherPdf(expense, property) {
     description: expense.description || '',
     executionCity: property?.city || property?.location || lease?.executionCity || '',
     ownerName: lease?.lessorName || '[OWNER]',
+    agreedRent: parseFloat(expense.agreed_rent) || 0,
   })
   await triggerPdfDownload(doc, `Payout Voucher - ${property.name} - ${expense.vendor_name}.pdf`)
 }

@@ -100,7 +100,10 @@ export default function MoveExpensesCard({ propId, agreement, property, saved, r
     setGenerating(item.expense_id)
     try {
       const { generatePayoutVoucherAny } = await import('../../utils/formatChoice')
-      await generatePayoutVoucherAny(!useDocx, item, property)
+      // agreed_rent isn't a column on rev360_move_expenses -- it's the
+      // live agreement's monthly rent, needed only to show the "X% of
+      // Rent Amount" commission basis on Realty Commission vouchers.
+      await generatePayoutVoucherAny(!useDocx, { ...item, agreed_rent: agreement?.agreed_rent }, property)
       showToast('🧾 Payout voucher generated')
     } catch (e) { showToast(e.message, 'error') }
     finally { setGenerating(null) }

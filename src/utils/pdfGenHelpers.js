@@ -343,8 +343,51 @@ export async function drawSignatureBlock(cursor, { lessorName, dateStr, label })
   cursor.moveDown(14)
 }
 
+// ── Single-signer variant of drawSignatureBlock — full-width, one
+// signature line, no tenant counterpart. Used for internal/owner-only
+// documents like a payout voucher, where there's no second party to
+// leave a blank line for. ───────────────────────────────────────────
+export async function drawSingleSignatureBlock(cursor, { signerName, dateStr, label }) {
+  const hasRealSigner = signerName && signerName !== '[OWNER]' && signerName !== '[LANDLORD NAME]'
+  const sigBytes = hasRealSigner ? await fetchSignatureBytes() : null
+  const sigHeight = 32
+
+  cursor.moveDown(10)
+  cursor.ensureSpace(sigHeight + 60)
+  const imageBaseY = cursor.y
+
+  if (sigBytes) {
+    const img = await cursor.doc.embedPng(sigBytes)
+    const scale = sigHeight / img.height
+    cursor.page.drawImage(img, { x: cursor.x, y: imageBaseY - sigHeight, width: img.width * scale, height: sigHeight })
+  }
+  cursor.moveDown(sigHeight + 6)
+
+  const halfWidth = cursor.contentWidth / 2
+  cursor.page.drawLine({
+    start: { x: cursor.x, y: cursor.y }, end: { x: cursor.x + halfWidth - 20, y: cursor.y },
+    thickness: 0.75, color: rgb(0.4,0.4,0.4),
+  })
+  cursor.moveDown(12)
+
+  cursor.page.drawText((signerName || '[OWNER]').toUpperCase(), {
+    x: cursor.x, y: cursor.y, size: 10, font: cursor.fonts.bold, color: rgb(0,0,0),
+  })
+  cursor.moveDown(13)
+
+  cursor.page.drawText(label || '(Owner)', {
+    x: cursor.x, y: cursor.y, size: 8, font: cursor.fonts.regular, color: rgb(0.3,0.3,0.3),
+  })
+  cursor.moveDown(11)
+
+  cursor.page.drawText(`Signed: ${fmtLongDate(dateStr)}`, {
+    x: cursor.x, y: cursor.y, size: 8, font: cursor.fonts.regular, color: rgb(0.3,0.3,0.3),
+  })
+  cursor.moveDown(14)
+}
+
 let _cachedSignatureBytes = null
-async function fetchSignatureBytes() {
+export async function fetchSignatureBytes() {
   if (_cachedSignatureBytes) return _cachedSignatureBytes
   try {
     const res = await fetch('/icons/signature.png')

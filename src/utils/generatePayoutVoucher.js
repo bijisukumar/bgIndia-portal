@@ -12,7 +12,7 @@ import { CONFIG } from '../config'
 import { localTodayStr } from './dates'
 import { fmtLongDate, fmtCurrency, fmtCurrencyWords, p, r, centerLabel, twoColRow } from './docGenHelpers'
 
-function buildVoucherDocument({ property, vendorName, amount, currency, paidDate, category, description, executionCity, ownerName }) {
+function buildVoucherDocument({ property, vendorName, amount, currency, paidDate, category, description, executionCity, ownerName, agreedRent }) {
   const today = localTodayStr()
   const propLabel = property?.fullAddress || (property?.building
     ? `${property.building}, ${property.city || property.location || ''}`
@@ -36,6 +36,13 @@ function buildVoucherDocument({ property, vendorName, amount, currency, paidDate
 
     twoColRow('Payment Date:', fmtLongDate(paidDate), { before: 100, after: 80 }),
     twoColRow('Category:', category, { before: 0, after: 80 }),
+    // Realty Commission is conventionally a percentage of monthly rent
+    // (typically half a month's rent, i.e. 50%) — showing the basis makes
+    // the voucher self-explanatory rather than just a bare amount.
+    ...(category === 'Realty Commission' && agreedRent > 0 ? [
+      twoColRow('Rent Amount:', fmtCurrency(agreedRent, currency), { before: 0, after: 80 }),
+      twoColRow('Commission Basis:', `${Math.round((amount / agreedRent) * 100)}% of Rent Amount`, { before: 0, after: 80 }),
+    ] : []),
     twoColRow('Amount Paid:', fmtCurrency(amount, currency), { before: 0, after: 400 }),
 
     p(r('This voucher confirms only that the above payment was made. It is an internal expense record and does not itself constitute a receipt from the vendor.', { size: 18 }), { spacing: { after: 400 } }),
@@ -95,6 +102,7 @@ export async function downloadPayoutVoucher(expense, property) {
     description: expense.description || '',
     executionCity: property?.city || property?.location || lease?.executionCity || '',
     ownerName: lease?.lessorName || '[OWNER]',
+    agreedRent: parseFloat(expense.agreed_rent) || 0,
   })
   await triggerDownload(doc, `Payout Voucher - ${property.name} - ${expense.vendor_name}.docx`)
 }

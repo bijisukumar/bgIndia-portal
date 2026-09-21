@@ -29,6 +29,7 @@ import { parseLocalDate } from '../../utils/dates'
 import TenantProfileCard from './TenantProfileCard'
 import DocumentEngineCard from './DocumentEngineCard'
 import FinancialsReceiptCard from './FinancialsReceiptCard'
+import MoveExpensesCard from './MoveExpensesCard'
 import MetaDiagnosticsCard from './MetaDiagnosticsCard'
 import { usePropertyList } from './usePropertyList'
 import TenancyHistoryCard from './TenancyHistoryCard'
@@ -72,6 +73,7 @@ const EMPTY_FORM = {
   nextRenewalDate:'', earlyTerminated:false, earlyTerminationDate:'',
   isMonthToMonth:false, monthToMonthSince:'',
   docContractSigned:false, docIdCaptured:false, docMoveIn:false, docMoveOut:false, docDamageReport:false,
+  moveInPhotosUrl:'', moveOutPhotosUrl:'',
   moveOutDocShared:false, moveOutDocsReceived:false, damageChargesDeducted:'', depositRefunded:'',
   hasSeparateParking:false,
   parkingTenantName:'', parkingTenantPhone:'',
@@ -178,6 +180,8 @@ export default function RentalAgreement() {
       docMoveIn:         !!a.doc_move_in,
       docMoveOut:        !!a.doc_move_out,
       docDamageReport:   !!a.doc_damage_report,
+      moveInPhotosUrl:   a.move_in_photos_url  || '',
+      moveOutPhotosUrl:  a.move_out_photos_url || '',
       moveOutDocShared:    !!a.move_out_doc_shared,
       moveOutDocsReceived: !!a.move_out_docs_received,
       damageChargesDeducted: a.damage_charges_deducted || '',
@@ -374,6 +378,8 @@ export default function RentalAgreement() {
         docMoveIn:         form.docMoveIn,
         docMoveOut:        form.docMoveOut,
         docDamageReport:   form.docDamageReport,
+        moveInPhotosUrl:   form.moveInPhotosUrl.trim(),
+        moveOutPhotosUrl:  form.moveOutPhotosUrl.trim(),
         moveOutDocShared:      form.moveOutDocShared,
         moveOutDocsReceived:   form.moveOutDocsReceived,
         damageChargesDeducted: parseFloat(form.damageChargesDeducted) || 0,
@@ -884,6 +890,11 @@ export default function RentalAgreement() {
                 ))}
               </div>
 
+              <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px',marginTop:'14px'}}>MOVE-IN PHOTOS (ONEDRIVE LINK)</label>
+              <input value={form.moveInPhotosUrl} onChange={e=>setField('moveInPhotosUrl',e.target.value)}
+                placeholder="https://onedrive.live.com/..." style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}}/>
+              <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>Link to the shared OneDrive folder holding move-in photos/videos — included as a clickable link in the generated Move-In document.</div>
+
               {error && <div style={{color:'#EF9A9A',fontSize:'0.82rem',marginTop:'10px',background:'rgba(198,40,40,0.1)',padding:'8px 10px',borderRadius:'8px'}}>❌ {error}</div>}
             </div>
 
@@ -909,6 +920,11 @@ export default function RentalAgreement() {
                   </label>
                 ))}
               </div>
+
+              <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>MOVE-OUT PHOTOS (ONEDRIVE LINK)</label>
+              <input value={form.moveOutPhotosUrl} onChange={e=>setField('moveOutPhotosUrl',e.target.value)}
+                placeholder="https://onedrive.live.com/..." style={{width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem',marginBottom:'12px'}}/>
+
               <div className="grid-2">
                 <div>
                   <label style={{display:'block',fontSize:'0.7rem',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px'}}>
@@ -1058,6 +1074,15 @@ export default function RentalAgreement() {
               readOnly={false}
               showToast={showToast}
               onDepositPaidChange={(patch) => setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], ...patch}}))}
+            />
+
+            <MoveExpensesCard
+              propId={selectedProp}
+              agreement={agreements[selectedProp]}
+              property={prop}
+              saved={saved}
+              readOnly={false}
+              showToast={showToast}
             />
 
             <MetaDiagnosticsCard form={form} setField={setField} propName={prop?.name} readOnly={false}/>

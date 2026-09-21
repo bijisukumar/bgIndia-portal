@@ -509,7 +509,7 @@ CREATE TABLE IF NOT EXISTS rev360_rental_props (
   lease_start  TEXT,
   lease_end    TEXT,
   monthly_rent REAL DEFAULT 0
-, deposit         REAL DEFAULT 0, agreed_rent     REAL DEFAULT 0, maintenance_fee REAL DEFAULT 0, notes           TEXT, created_by      TEXT DEFAULT 'owner', created_at      TEXT, updated_by      TEXT DEFAULT 'owner', updated_at      TEXT, status TEXT DEFAULT 'Active', country TEXT DEFAULT 'IN', currency TEXT DEFAULT 'INR', tenant_email TEXT DEFAULT NULL, drive_folder_url TEXT DEFAULT NULL, next_renewal_date    TEXT, early_terminated      INTEGER DEFAULT 0, early_termination_date TEXT, doc_contract_signed INTEGER DEFAULT 0, doc_id_captured     INTEGER DEFAULT 0, doc_move_in         INTEGER DEFAULT 0, doc_move_out        INTEGER DEFAULT 0, doc_damage_report   INTEGER DEFAULT 0, tenant_address TEXT, tenant_pan     TEXT, stage         TEXT DEFAULT 'Signed Up', is_delinquent INTEGER DEFAULT 0, end_reason    TEXT, is_month_to_month     INTEGER DEFAULT 0, month_to_month_since  TEXT, parking_tenant_name  TEXT, parking_tenant_phone TEXT, parking_fee          REAL DEFAULT 0, parking_deposit      REAL DEFAULT 0, parking_lease_start  TEXT, parking_lease_end    TEXT, parking_currency     TEXT DEFAULT 'INR', has_separate_parking INTEGER DEFAULT 0, parking_paid_in_full INTEGER DEFAULT 0, move_out_doc_shared INTEGER DEFAULT 0, move_out_docs_received INTEGER DEFAULT 0, damage_charges_deducted REAL DEFAULT 0, deposit_refunded REAL DEFAULT 0, deposit_paid INTEGER DEFAULT 0, deposit_paid_date TEXT, deposit_payment_mode TEXT, tenant_pays_maintenance_direct INTEGER DEFAULT 0);
+, deposit         REAL DEFAULT 0, agreed_rent     REAL DEFAULT 0, maintenance_fee REAL DEFAULT 0, notes           TEXT, created_by      TEXT DEFAULT 'owner', created_at      TEXT, updated_by      TEXT DEFAULT 'owner', updated_at      TEXT, status TEXT DEFAULT 'Active', country TEXT DEFAULT 'IN', currency TEXT DEFAULT 'INR', tenant_email TEXT DEFAULT NULL, drive_folder_url TEXT DEFAULT NULL, next_renewal_date    TEXT, early_terminated      INTEGER DEFAULT 0, early_termination_date TEXT, doc_contract_signed INTEGER DEFAULT 0, doc_id_captured     INTEGER DEFAULT 0, doc_move_in         INTEGER DEFAULT 0, doc_move_out        INTEGER DEFAULT 0, doc_damage_report   INTEGER DEFAULT 0, tenant_address TEXT, tenant_pan     TEXT, stage         TEXT DEFAULT 'Signed Up', is_delinquent INTEGER DEFAULT 0, end_reason    TEXT, is_month_to_month     INTEGER DEFAULT 0, month_to_month_since  TEXT, parking_tenant_name  TEXT, parking_tenant_phone TEXT, parking_fee          REAL DEFAULT 0, parking_deposit      REAL DEFAULT 0, parking_lease_start  TEXT, parking_lease_end    TEXT, parking_currency     TEXT DEFAULT 'INR', has_separate_parking INTEGER DEFAULT 0, parking_paid_in_full INTEGER DEFAULT 0, move_out_doc_shared INTEGER DEFAULT 0, move_out_docs_received INTEGER DEFAULT 0, damage_charges_deducted REAL DEFAULT 0, deposit_refunded REAL DEFAULT 0, deposit_paid INTEGER DEFAULT 0, deposit_paid_date TEXT, deposit_payment_mode TEXT, tenant_pays_maintenance_direct INTEGER DEFAULT 0, move_in_photos_url TEXT, move_out_photos_url TEXT);
 
 CREATE TABLE IF NOT EXISTS rev360_rental_income (
   record_id    TEXT PRIMARY KEY,
@@ -562,6 +562,30 @@ CREATE TABLE IF NOT EXISTS rev360_advances (
 );
 CREATE INDEX IF NOT EXISTS rev360_idx_advances_prop ON rev360_advances(prop_id, paid_date DESC);
 
+-- Costs the OWNER incurs preparing a property for a new tenant (move-in)
+-- or after one leaves (move-out) -- deep cleaning, AC service, electrician,
+-- plumbing, realty/broker commission, etc. Distinct from
+-- rev360_property_expenses (periodic vacant-property costs by month) and
+-- rev360_lease_losses (damage/dues charged TO the tenant) -- these are
+-- genuine owner expenses, counted in the income/expense dashboards.
+CREATE TABLE IF NOT EXISTS rev360_move_expenses (
+  expense_id      TEXT PRIMARY KEY,
+  prop_id         TEXT NOT NULL REFERENCES rev360_rental_props(prop_id),
+  event_type      TEXT NOT NULL CHECK(event_type IN ('move_in','move_out')),
+  tenant_snapshot TEXT,
+  category        TEXT NOT NULL CHECK(category IN ('Realty Commission','Deep Cleaning','AC Service','Electrician','Plumbing','Painting','Pest Control','Other')),
+  description     TEXT,
+  amount          REAL NOT NULL DEFAULT 0,
+  currency        TEXT DEFAULT 'INR',
+  vendor_name     TEXT,
+  paid_date       TEXT,
+  evidence_url    TEXT,
+  created_by      TEXT DEFAULT 'owner',
+  created_at      TEXT DEFAULT (datetime('now')),
+  updated_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS rev360_idx_move_expenses_prop ON rev360_move_expenses(prop_id, event_type);
+
 CREATE TABLE IF NOT EXISTS rev360_tenancy_history (
   history_id      TEXT PRIMARY KEY,
   prop_id         TEXT NOT NULL,
@@ -592,6 +616,8 @@ CREATE TABLE IF NOT EXISTS rev360_tenancy_history (
   move_out_docs_received  INTEGER DEFAULT 0,
   damage_charges_deducted REAL DEFAULT 0,
   deposit_refunded        REAL DEFAULT 0,
+  move_in_photos_url  TEXT,
+  move_out_photos_url TEXT,
   created_by      TEXT DEFAULT 'owner',
   created_at      TEXT DEFAULT (datetime('now')),
   updated_by      TEXT DEFAULT 'owner',

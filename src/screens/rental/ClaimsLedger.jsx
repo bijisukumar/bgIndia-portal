@@ -7,10 +7,10 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { usePropertyList } from './usePropertyList'
 
-const CATEGORIES = ['Rent','Damage','Cleaning','Legal','Other']
+const CATEGORIES = ['Rent','Damage','Cleaning','Legal','Adjustment','Other']
 const STATUSES   = ['Estimated','Claimed','Recovered','Unrecoverable']
 const STATUS_COLOR = { 'Estimated':'#F59E0B','Claimed':'#185FA5','Recovered':'#34A853','Unrecoverable':'#EF4444' }
-const CAT_ICON = { 'Rent':'💸','Damage':'🔨','Cleaning':'🧹','Legal':'⚖️','Other':'📌' }
+const CAT_ICON = { 'Rent':'💸','Damage':'🔨','Cleaning':'🧹','Legal':'⚖️','Adjustment':'🧾','Other':'📌' }
 
 function fmtAmt(amount, currency='INR') {
   if (!amount && amount !== 0) return '—'
@@ -312,7 +312,7 @@ export default function ClaimsLedger() {
 
             <label style={F.label}>DESCRIPTION *</label>
             <input value={form.description} onChange={e=>setField('description',e.target.value)}
-              placeholder="e.g. Broken bathroom tiles, 3 months unpaid rent…" style={F.input}/>
+              placeholder="e.g. Broken bathroom tiles, pending electric bill, gas dues…" style={F.input}/>
 
             <div className="grid-2">
               <div>

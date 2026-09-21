@@ -8401,7 +8401,7 @@ export async function onRequest(ctx) {
 
       if (action === 'saveLeaseLoss') {
         const { lossId, propId, leaseSnapshot, itemCategory, description, amount, currency, evidenceFileName, evidenceDriveUrl, evidenceTimestamp, status: lossStatus } = body; if (!propId || !description || amount === undefined) return err('propId, description, amount required')
-        if (!['Rent','Damage','Cleaning','Legal','Other'].includes(itemCategory)) return err('Invalid itemCategory')
+        if (!['Rent','Damage','Cleaning','Legal','Adjustment','Other'].includes(itemCategory)) return err('Invalid itemCategory')
         const id = lossId || ('loss_' + Date.now()); await DB.prepare(`INSERT OR REPLACE INTO rev360_lease_losses (loss_id, prop_id, lease_snapshot, item_category, description, amount, currency, evidence_file_name, evidence_drive_url, evidence_timestamp, status, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE((SELECT created_at FROM rev360_lease_losses WHERE loss_id=?),?),?)`).bind(id, propId, leaseSnapshot||'', itemCategory||'Other', description, parseFloat(amount)||0, currency||'INR', evidenceFileName||null, evidenceDriveUrl||null, evidenceTimestamp||null, lossStatus||'Estimated', actor, id, now(), now()).run()
         return json({ success: true, data: { lossId: id } })
       }

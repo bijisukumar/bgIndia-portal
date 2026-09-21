@@ -674,7 +674,7 @@ CREATE TABLE IF NOT EXISTS rev360_lease_losses (
   loss_id            TEXT PRIMARY KEY,
   prop_id            TEXT REFERENCES rev360_rental_props(prop_id),
   lease_snapshot     TEXT,
-  item_category      TEXT NOT NULL CHECK(item_category IN ('Rent','Damage','Cleaning','Legal','Other')),
+  item_category      TEXT NOT NULL CHECK(item_category IN ('Rent','Damage','Cleaning','Legal','Adjustment','Other')),
   description        TEXT NOT NULL,
   amount             REAL NOT NULL DEFAULT 0,
   currency           TEXT DEFAULT 'INR',

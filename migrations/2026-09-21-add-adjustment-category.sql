@@ -4,10 +4,9 @@
 --
 -- SQLite can't ALTER a CHECK constraint in place, so this rebuilds the
 -- table: copy rows into a new table with the updated CHECK, drop the old
--- one, rename the new one back, recreate the index.
---
--- Run once against the live D1 database, e.g.:
---   wrangler d1 execute bgindia-db --remote --file=scripts/migration-2026-09-21-add-adjustment-category.sql
+-- one, rename the new one back, recreate the index. No FK references
+-- rev360_lease_losses, so unlike demovilla-parity.sql this needs no
+-- park-and-restore step for dependent rows.
 
 CREATE TABLE rev360_lease_losses_new (
   loss_id            TEXT PRIMARY KEY,

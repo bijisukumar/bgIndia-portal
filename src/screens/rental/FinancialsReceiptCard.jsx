@@ -156,6 +156,7 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
         ...agreement,
         deposit: parseFloat(advanceAmount),
         _depositPaymentMode: advanceMode,
+        _depositPaymentDate: advanceDate,
       }, property)
       showToast('🧾 Advance receipt generated')
     } catch (e) { showToast(e.message, 'error') }

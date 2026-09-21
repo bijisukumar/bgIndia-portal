@@ -49,6 +49,7 @@ function TermsGrid({ agreement, currency }) {
     ['Lease End', fmtDate(agreement?.lease_end)],
     ['Next Renewal Date', agreement?.next_renewal_date ? fmtDate(agreement.next_renewal_date) : '—'],
     ['Early Termination Date', agreement?.early_terminated ? fmtDate(agreement.early_termination_date) : '—'],
+    ['Deposit Paid', agreement?.deposit_paid ? `${fmtDate(agreement.deposit_paid_date)} · ${agreement.deposit_payment_mode}` : '—'],
   ]
   return (
     <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 16px', marginBottom:'4px'}}>
@@ -62,7 +63,7 @@ function TermsGrid({ agreement, currency }) {
   )
 }
 
-export default function FinancialsReceiptCard({ propId, agreement, property, saved, readOnly, showToast }) {
+export default function FinancialsReceiptCard({ propId, agreement, property, saved, readOnly, showToast, onDepositPaidChange }) {
   const currency = agreement?.currency || 'INR'
   const baseRent = parseFloat(agreement?.agreed_rent) || 0
   const maintenance = parseFloat(agreement?.maintenance_fee) || 0
@@ -78,6 +79,11 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
   const [useDocxDeposit, setUseDocxDeposit] = useState(false)
   const [useDocxAdvance, setUseDocxAdvance] = useState(false)
   const [useDocxRent, setUseDocxRent] = useState(false) // shared toggle for all rent-ledger rows -- per-row toggles would clutter a list that can have many postings
+
+  const [showDepositPaidForm, setShowDepositPaidForm] = useState(false)
+  const [depositPaidDate, setDepositPaidDate] = useState(localTodayStr())
+  const [depositPaidMode, setDepositPaidMode] = useState('Bank Transfer')
+  const [markingDepositPaid, setMarkingDepositPaid] = useState(false)
 
   const [advanceAmount, setAdvanceAmount] = useState('')
   const [advanceDate, setAdvanceDate] = useState(localTodayStr())
@@ -123,10 +129,38 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
     setGeneratingReceipt('deposit')
     try {
       const { generateDepositReceipt } = await import('../../utils/formatChoice')
-      await generateDepositReceipt(!useDocxDeposit, agreement, property)
+      // agreement.deposit_paid_date/deposit_payment_mode are the real recorded
+      // payment fields (rev360_rental_props) -- mapped onto the underscore-
+      // prefixed keys downloadDepositReceipt actually reads, so it stops
+      // silently falling back to today's date for an already-Active tenant.
+      await generateDepositReceipt(!useDocxDeposit, {
+        ...agreement,
+        _depositPaymentDate: agreement?.deposit_paid_date,
+        _depositPaymentMode: agreement?.deposit_payment_mode,
+      }, property)
       showToast('🧾 Deposit receipt generated')
     } catch (e) { showToast(e.message, 'error') }
     finally { setGeneratingReceipt(null) }
+  }
+
+  async function handleMarkDepositPaid() {
+    if (!depositPaidDate) { showToast('Payment date is required', 'error'); return }
+    setMarkingDepositPaid(true)
+    try {
+      await api.markDepositPaid({ propId, paid: true, paidDate: depositPaidDate, paymentMode: depositPaidMode })
+      onDepositPaidChange?.({ deposit_paid: 1, deposit_paid_date: depositPaidDate, deposit_payment_mode: depositPaidMode })
+      showToast('✅ Deposit marked paid')
+      setShowDepositPaidForm(false)
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setMarkingDepositPaid(false) }
+  }
+
+  async function handleUnmarkDepositPaid() {
+    try {
+      await api.markDepositPaid({ propId, paid: false })
+      onDepositPaidChange?.({ deposit_paid: 0, deposit_paid_date: null, deposit_payment_mode: null })
+      showToast('Deposit payment cleared')
+    } catch (e) { showToast(e.message, 'error') }
   }
 
   async function handleRentReceipt(txn) {
@@ -269,6 +303,51 @@ export default function FinancialsReceiptCard({ propId, agreement, property, sav
       )}
 
       <div className="card-section-label">Deposit & Advance Receipts</div>
+
+      {!readOnly && saved && (
+        agreement?.deposit_paid ? (
+          <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px'}}>
+            <span style={{color:'#34A853', fontWeight:'700', fontSize:'0.82rem'}}>✓ Deposit Paid</span>
+            <span style={{color:'var(--text-dim)', fontSize:'0.74rem'}}>
+              {fmtDate(agreement.deposit_paid_date)} · {agreement.deposit_payment_mode}
+            </span>
+            <button onClick={handleUnmarkDepositPaid} style={{
+              marginLeft:'auto', padding:'3px 8px', borderRadius:'6px', border:'1px solid var(--border-dim)',
+              background:'transparent', color:'#5C7080', fontSize:'0.66rem', cursor:'pointer',
+            }}>undo</button>
+          </div>
+        ) : !showDepositPaidForm ? (
+          <button onClick={()=>setShowDepositPaidForm(true)} style={{
+            width:'100%', marginBottom:'10px', padding:'10px', borderRadius:'8px', border:'1px solid rgba(52,168,83,0.4)',
+            background:'rgba(52,168,83,0.1)', color:'#34A853', fontWeight:'700', fontSize:'0.8rem', cursor:'pointer',
+          }}>
+            Mark Deposit Paid
+          </button>
+        ) : (
+          <div style={{marginBottom:'10px', padding:'12px', borderRadius:'10px', background:'var(--dark-input)', border:'1px solid var(--border-dim)'}}>
+            <label style={F.label}>PAYMENT DATE</label>
+            <input type="date" value={depositPaidDate} onChange={e=>setDepositPaidDate(e.target.value)} style={F.input}/>
+
+            <label style={F.label}>PAYMENT MODE</label>
+            <select value={depositPaidMode} onChange={e=>setDepositPaidMode(e.target.value)} style={F.input}>
+              <option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Cash</option>
+            </select>
+
+            <div style={{display:'flex', gap:'8px', marginTop:'10px'}}>
+              <button onClick={()=>setShowDepositPaidForm(false)} style={{flex:1, padding:'8px', borderRadius:'8px', border:'1px solid var(--border-dim)', background:'transparent', color:'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer'}}>
+                Cancel
+              </button>
+              <button onClick={handleMarkDepositPaid} disabled={markingDepositPaid} style={{
+                flex:2, padding:'8px', borderRadius:'8px', border:'none', background:'#34A853', color:'#fff',
+                fontWeight:'700', fontSize:'0.78rem', cursor: markingDepositPaid ? 'default' : 'pointer', opacity: markingDepositPaid ? 0.6 : 1,
+              }}>
+                {markingDepositPaid ? 'Saving…' : 'Confirm Paid'}
+              </button>
+            </div>
+          </div>
+        )
+      )}
+
       <button onClick={handleDepositReceipt} disabled={readOnly || !saved || generatingReceipt === 'deposit'}
         style={{
           width:'100%', padding:'11px', borderRadius:'10px', border:'1px solid rgba(24,95,165,0.4)',

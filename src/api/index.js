@@ -201,6 +201,7 @@ export const api = {
   deleteIncomingTenant: (propId) => post('deleteIncomingTenant', { propId }),
   moveInIncomingTenant: (data)   => post('moveInIncomingTenant', data),
   markIncomingDepositPaid: (data) => post('markIncomingDepositPaid', data),
+  markDepositPaid: (data) => post('markDepositPaid', data),
   closeOutTenant:       (data)   => post('closeOutTenant', data),
 
   // ── LEASE LOSSES / CLAIMS ────────────────────────────────

@@ -135,7 +135,14 @@ export default function DocumentEngineCard({ agreement, property, country, saved
         color="#C8903A"
         onClick={() => run('deposit', async () => {
               const { generateDepositReceipt } = await import('../../utils/formatChoice')
-              return generateDepositReceipt(!useDocxDeposit, agreement, property)
+              // agreement.deposit_paid_date/deposit_payment_mode are the real
+              // recorded fields -- mapped onto the underscore-prefixed keys
+              // downloadDepositReceipt reads, same fix as FinancialsReceiptCard.
+              return generateDepositReceipt(!useDocxDeposit, {
+                ...agreement,
+                _depositPaymentDate: agreement?.deposit_paid_date,
+                _depositPaymentMode: agreement?.deposit_payment_mode,
+              }, property)
             }, `🧾 Deposit receipt generated for ${agreement?.tenant_name}`)}
       />
       <FormatToggle useDocx={useDocxDeposit} onChange={setUseDocxDeposit} idSuffix="deposit" />

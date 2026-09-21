@@ -1038,6 +1038,7 @@ export default function RentalAgreement() {
               saved={saved}
               readOnly={false}
               showToast={showToast}
+              onDepositPaidChange={(patch) => setAgreements(prev => ({...prev, [selectedProp]: {...prev[selectedProp], ...patch}}))}
             />
 
             <MetaDiagnosticsCard form={form} setField={setField} propName={prop?.name} readOnly={false}/>

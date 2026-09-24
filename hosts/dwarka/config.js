@@ -251,7 +251,10 @@ export const CONFIG = {
       thanks: "Thank you — we'll come straight back to you with our direct rates.",
     },
     form: {
-      heading: 'Tell us what you need (for an existing booking)',
+      heading: 'Tell us what you need',
+      // The New Request tab — no reservation to look up yet, so this heading
+      // must not promise a lookup the way the default one does.
+      headingNew: 'Tell us about your upcoming stay',
       needTypes: [
         'Earlier check-in on arrival day',
         'Later check-out on departure day',
@@ -289,6 +292,11 @@ export const CONFIG = {
     ],
     channels: ['OTA — online partner (Airbnb, Booking.com, MMT…)', 'Direct with us', 'Travel agent'],
     directChannel: 'Direct with us',
+    // Page footer — deliberately not the full street address (that stays on
+    // Form C and the booking confirmation, where a guest needs the exact
+    // location, not here). A guest reading this page is deciding whether to
+    // ask for flexible timing, not looking for driving directions.
+    footerTagline: 'Guruvayur, Kerala · The closest luxury villa to Guruvayur Temple',
   },
 
   guestMessages: {

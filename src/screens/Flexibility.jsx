@@ -73,6 +73,10 @@ function Done({ text, waLink }) {
 }
 
 export default function Flexibility() {
+  // 'existing' looks a reservation up first, so real numbers can be quoted
+  // against it. 'new' skips straight to the request — there is no booking
+  // yet to look up, so no quote can be priced; the owner answers by hand.
+  const [tab, setTab] = useState('existing')
   const [channel,  setChannel]  = useState('')
   const [name,     setName]     = useState('')
   const [contact,  setContact]  = useState('')
@@ -91,6 +95,14 @@ export default function Flexibility() {
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
   const [sent,     setSent]     = useState(null)   // 'direct' | 'ota'
+
+  // Each tab is its own flow with its own half-finished state — carrying a
+  // found lookup or a validation error across to the other tab would read as
+  // a bug, not a feature.
+  function switchTab(next) {
+    if (next === tab) return
+    setTab(next); setLookup(null); setManual(false); setError('')
+  }
 
   // The need type decides which times we ask for — asking a guest who only
   // wants a late check-out what time they'll arrive is noise.
@@ -178,6 +190,7 @@ export default function Flexibility() {
     const found = lookup && lookup.found
     const L = []
     L.push('*Flexibility request \u2014 ' + villa.name + '*')
+    if (tab === 'new') L.push('_New / prospective guest \u2014 no existing reservation_')
     L.push('')
     L.push('*Guest*')
     L.push('Name: ' + name.trim())
@@ -259,7 +272,10 @@ export default function Flexibility() {
           wantsDirect,
           requestedCheckinTime:  kind === 'direct' && wantsEarlyIn ? (inTime  || null) : null,
           requestedCheckoutTime: kind === 'direct' && wantsLateOut ? (outTime || null) : null,
-          details: details || null,
+          // Carried into the stored notes, not just the WhatsApp text — the
+          // FlexRequests admin screen reads the saved row, and "new guest,
+          // nothing booked yet" changes how the owner should answer it.
+          details: (tab === 'new' ? '[New / prospective booking — no reservation yet] ' : '') + (details || ''),
         }),
       })
       const data = await res.json()
@@ -349,12 +365,35 @@ export default function Flexibility() {
           ))}
         </div>
       </Field>
-      <Field label="Anything that helps us plan"
-        hint="Who's travelling, how you're getting here, anything else we should know">
+      <Field label="Tell us about your visit"
+        hint="Purpose of your visit, who's travelling, how you're getting here — anything that helps us plan">
         <textarea rows={3} style={{ ...input, resize: 'vertical' }} value={details}
           onChange={e => setDetails(e.target.value)}
-          placeholder="e.g. driving from Bengaluru overnight with two small children" />
+          placeholder="e.g. visiting for a wedding, driving from Bengaluru overnight with two small children" />
       </Field>
+    </>
+  )
+
+  // No booking to price against here, so no quote block — just the channel,
+  // the ask, and a submit. Used both by the "New request" tab and by the
+  // existing-booking tab's own fallback, when a lookup can't find one.
+  const directRequestForm = (
+    <>
+      <Field label="Booking channel" required>
+        <select value={channel} onChange={e => { setChannel(e.target.value); setError('') }}
+          style={{ ...input, background: '#1A2332', color: channel ? c.text : c.faint }}>
+          <option value="">Select...</option>
+          {F.channels.map(ch => <option key={ch} value={ch}>{ch}</option>)}
+        </select>
+      </Field>
+      {stayFields}
+      {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>{error}</div>}
+      <button onClick={() => submit('direct')} disabled={busy} style={{
+        width: '100%', padding: 14, borderRadius: 11, border: 'none',
+        background: busy ? 'rgba(200,144,58,0.4)' : c.gold, color: '#111',
+        fontWeight: 800, fontSize: '0.92rem', cursor: busy ? 'not-allowed' : 'pointer' }}>
+        {busy ? 'Sending...' : F.form.submitLabel}
+      </button>
     </>
   )
 
@@ -432,12 +471,39 @@ export default function Flexibility() {
             <Done text={sent === 'direct' ? F.form.thanks : F.ota.thanks} waLink={waLink} />
           ) : (
             <div style={{ background: c.card, border: `1px solid ${c.line}`, borderRadius: 14, padding: '24px 22px' }}>
-              <h2 style={{ fontSize: '1.1rem', color: c.gold, margin: '0 0 16px' }}>{F.form.heading}</h2>
+
+              {/* Two different starting points, not two different offers —
+                  everything below still ends at the same owner and the same
+                  request. A guest with a booking gets it looked up and
+                  priced; a guest without one skips straight to asking. */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                {[['existing', 'Existing booking'], ['new', 'New request']].map(([id, label]) => (
+                  <button key={id} onClick={() => switchTab(id)} style={{
+                    flex: 1, padding: '11px 10px', borderRadius: 10, cursor: 'pointer',
+                    border: `1px solid ${tab === id ? c.goldLine : c.line}`,
+                    background: tab === id ? c.goldSoft : 'transparent',
+                    color: tab === id ? c.gold : c.dim, fontWeight: 700, fontSize: '0.84rem' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <h2 style={{ fontSize: '1.1rem', color: c.gold, margin: '0 0 16px' }}>
+                {tab === 'existing' ? F.form.heading : F.form.headingNew}
+              </h2>
+
+              {tab === 'new' && (
+                <>
+                  {contactFields}
+                  {dateFields}
+                  <div style={{ marginTop: 4 }}>{directRequestForm}</div>
+                </>
+              )}
 
               {/* PHASE 1 - who they are and which dates. Nothing else is
                   asked yet: we can answer far better once we know which
                   booking this is, so find it first. */}
-              {!(lookup && lookup.found) && (
+              {tab === 'existing' && !(lookup && lookup.found) && (
                 <>
                   {contactFields}
                   {dateFields}
@@ -471,28 +537,14 @@ export default function Flexibility() {
 
                   {manual && (
                     <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid ' + c.line }}>
-                      <Field label="How did you book?" required>
-                        <select value={channel} onChange={e => { setChannel(e.target.value); setError('') }}
-                          style={{ ...input, background: '#1A2332', color: channel ? c.text : c.faint }}>
-                          <option value="">Select...</option>
-                          {F.channels.map(ch => <option key={ch} value={ch}>{ch}</option>)}
-                        </select>
-                      </Field>
-                      {stayFields}
-                      {error && <div style={{ color: '#EF4444', fontSize: '0.82rem', marginBottom: 10 }}>{error}</div>}
-                      <button onClick={() => submit('direct')} disabled={busy} style={{
-                        width: '100%', padding: 14, borderRadius: 11, border: 'none',
-                        background: busy ? 'rgba(200,144,58,0.4)' : c.gold, color: '#111',
-                        fontWeight: 800, fontSize: '0.92rem', cursor: busy ? 'not-allowed' : 'pointer' }}>
-                        {busy ? 'Sending...' : F.form.submitLabel}
-                      </button>
+                      {directRequestForm}
                     </div>
                   )}
                 </>
               )}
 
               {/* PHASE 2 - found. Now we can quote real numbers. */}
-              {lookup && lookup.found && (
+              {tab === 'existing' && lookup && lookup.found && (
                 <>
                   <div style={{ padding: '13px 15px', borderRadius: 11, marginBottom: 16,
                     background: 'rgba(52,168,83,0.08)', border: '1px solid rgba(52,168,83,0.35)' }}>
@@ -558,7 +610,7 @@ export default function Flexibility() {
         </div>
 
         <div style={{ textAlign: 'center', color: c.faint, fontSize: '0.75rem', marginTop: 28, lineHeight: 1.6 }}>
-          {villa.arrivalFullName}<br />{villa.address}
+          {villa.arrivalFullName}<br />{F.footerTagline}
         </div>
       </div>
     </div>

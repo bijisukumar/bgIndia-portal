@@ -60,8 +60,21 @@ export default function FlexRequests() {
   const [toast, setToast]     = useState(null)
   const [busyId, setBusyId]   = useState(null)
   const [draft, setDraft]     = useState({})   // requestId -> { pct, note }
+  const [copied, setCopied]   = useState(false)
+  // Same public URL as the guest-facing page, and the same-origin trick used
+  // for check-in and agent links — one deployment serves every tenant's own
+  // domain, so the link is always correct without being hardcoded per host.
+  const flexLink = `${window.location.origin}/flexibility`
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+
+  async function copyFlexLink() {
+    try {
+      await navigator.clipboard.writeText(flexLink)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { showToast('Could not copy — long-press the link instead', 'error') }
+  }
 
   useEffect(() => { load() }, [])
 
@@ -106,6 +119,25 @@ export default function FlexRequests() {
       </div>
 
       <div className="screen-body">
+        {/* Always visible, not just when the list is empty — for handing the
+            link to a guest who asked directly, on the phone or in person,
+            not only for reading where requests come from. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--dark-card)',
+          border: '1px solid rgba(200,144,58,0.2)', borderRadius: '12px', padding: '10px 12px', marginBottom: '14px' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: '0.62rem', color: 'var(--text-dim)', letterSpacing: '0.5px', marginBottom: '2px' }}>PUBLIC REQUEST FORM</div>
+            <div style={{ fontSize: '0.78rem', color: '#85B7EB', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {flexLink}
+            </div>
+          </div>
+          <button onClick={copyFlexLink} style={{
+            padding: '7px 12px', borderRadius: '8px', border: '1px solid rgba(200,144,58,0.35)', flexShrink: 0,
+            background: copied ? 'rgba(52,168,83,0.15)' : 'rgba(200,144,58,0.1)',
+            color: copied ? '#34A853' : 'var(--gold)', fontSize: '0.78rem', cursor: 'pointer', fontWeight: '600' }}>
+            {copied ? '✅ Copied' : '📋 Copy link'}
+          </button>
+        </div>
+
         {loading && <div className="loading"><div className="spinner" />Loading requests…</div>}
 
         {!loading && rows.length === 0 && (
@@ -113,8 +145,7 @@ export default function FlexRequests() {
             <div style={{ fontSize: '2rem', marginBottom: 12 }}>🕐</div>
             <div style={{ color: 'var(--gold)', fontWeight: 600, marginBottom: 6 }}>No requests yet</div>
             <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem', lineHeight: 1.6 }}>
-              Requests from the public flexibility page land here.<br />
-              <span style={{ color: '#85B7EB' }}>dwarka.stayvibe360.com/flexibility</span>
+              Requests from the public flexibility page land here.
             </div>
           </div>
         )}

@@ -355,6 +355,7 @@ At Guruvayur Villa, we open our home to your family and strive to create a comfo
 • Check-in: {checkinDateFull} — after {checkinTime}
 • Check-out: {checkoutDateFull} — by {checkoutTime}
 • Guests: {guestCount}
+• Bedrooms: {bedroomLine}
 • Duration: {nights} Nights
 
 Happy to connect for a call or message if you have any questions.
@@ -378,6 +379,10 @@ Biji | Guruvayur Villa (Dwarka)`,
 If you haven't completed your online check-in registration yet, please take a moment to do so at your earliest convenience — it's a mandatory requirement that helps us ensure a smooth, hassle-free arrival:
 {checkinUrl}
 `,
+      // Bed type is the one part of the {bedroomLine} a host actually needs
+      // to edit — the count itself is worked out from the guest number, not
+      // typed here. Left blank, the line reads as just the count ("4").
+      bedType: 'Indian Queen Size beds',
     },
     // Standalone nudge — just the check-in link, no full welcome message,
     // for a guest who's already been introduced and just needs the

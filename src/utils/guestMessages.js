@@ -89,6 +89,18 @@ export function buildHostIntroMessage(stay = {}) {
   let nights = parseInt(stay.nights, 10) || 0
   if (!nights && ci && co) nights = Math.max(1, Math.round((co - ci) / 86400000))
 
+  // Which of the villa's bedrooms this party actually needs, not how many
+  // the villa has — two guests to a room, rounded up, capped at what's
+  // actually there. 3 guests -> 2 rooms, 5 or 6 -> 3, anything past what
+  // fills every room just shows the villa's full count. Unknown guest count
+  // (total 0) shows the villa's full count too, same as "how big is this
+  // place" rather than a wrong small number.
+  const totalBedrooms = villa.bedrooms || 0
+  const bedroomsNeeded = total > 0 ? Math.min(Math.ceil(total / 2), totalBedrooms || 1) : totalBedrooms
+  const bedroomLine = totalBedrooms
+    ? (cfg.bedType ? `${bedroomsNeeded} [${cfg.bedType}]` : `${bedroomsNeeded}`)
+    : '—'
+
   // Never ask a guest who has already registered. Also omitted entirely if
   // this host has no check-in link configured, so the message can't ship a
   // dangling "please complete it here:" with nothing after it.
@@ -107,6 +119,7 @@ export function buildHostIntroMessage(stay = {}) {
     checkinDateFull:  fmtFull(ci),
     checkoutDateFull: fmtFull(co),
     guestCount,
+    bedroomLine,
     nights: nights || '—',
     checkinTime:  stay.early_checkin_time ? formatTime12h(stay.early_checkin_time) : villa.checkinTime,
     checkoutTime: stay.late_checkout_time ? formatTime12h(stay.late_checkout_time) : villa.checkoutTime,

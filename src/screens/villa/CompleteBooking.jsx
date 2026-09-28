@@ -57,7 +57,18 @@ function fmt(n) { return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('
 // Guest Info's check-in/check-out — the one pair of dates actually read out
 // loud to a guest on a call, so the day of week earns its place here even
 // though fmtDate's own default leaves it out everywhere else.
-const DATE_WITH_WEEKDAY = { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }
+//
+// Deliberately NOT fmtDate(date, {weekday:'long',...}) — confirmed live
+// 2026-09-28 that this build produced a minified fmtDate() with the opts
+// PARAMETER ITSELF eliminated (default inlined straight into the function
+// body, second argument silently dropped at every call site in the bundle,
+// not only this one). A standalone function never touches that path.
+function fmtDateWithWeekday(d) {
+  const parsed = parseLocalDate(d)
+  if (!parsed) return '—'
+  try { return parsed.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }) }
+  catch { return '—' }
+}
 
 // Confirmed 2026-09-28: this deploy's own bundle hashed identically to the
 // PREVIOUS deploy's — twice, independently, for two genuinely different
@@ -65,7 +76,7 @@ const DATE_WITH_WEEKDAY = { weekday: 'long', day: '2-digit', month: 'short', yea
 // fetch and stayed on old code with no error and no signal anything was
 // wrong. window.__stayvibeBuild also gives anyone a quick way to check
 // exactly which build a device is actually running, from the console.
-if (typeof window !== 'undefined') window.__stayvibeBuild = '2026-09-28-01'
+if (typeof window !== 'undefined') window.__stayvibeBuild = '2026-09-28-02'
 function fmtDate(d) {
   if (!d) return '—'
   try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
@@ -1191,13 +1202,13 @@ export default function CompleteBooking() {
                           <div style={infoLabel}>Check-in</div>
                           {/* Day of week spelled out — this is the pair of dates Raman/the
                               owner actually reads out loud to a guest on a call. */}
-                          <div style={infoVal}>{fmtDate(s.checkin_date, DATE_WITH_WEEKDAY)}</div>
+                          <div style={infoVal}>{fmtDateWithWeekday(s.checkin_date)}</div>
                         </div>
                         <div>
                           <div style={infoLabel}>Check-out</div>
                           <div style={infoVal}>
                             {coDate
-                              ? <>{fmtDate(coDate, DATE_WITH_WEEKDAY)}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
+                              ? <>{fmtDateWithWeekday(coDate)}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
                               : <span style={{color:'var(--text-dim)'}}>TBD</span>}
                           </div>
                         </div>

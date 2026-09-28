@@ -1176,13 +1176,15 @@ export default function CompleteBooking() {
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 16px'}}>
                         <div>
                           <div style={infoLabel}>Check-in</div>
-                          <div style={infoVal}>{fmtDate(s.checkin_date)}</div>
+                          {/* Day of week spelled out — this is the pair of dates Raman/the
+                              owner actually reads out loud to a guest on a call. */}
+                          <div style={infoVal}>{fmtDate(s.checkin_date, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}</div>
                         </div>
                         <div>
                           <div style={infoLabel}>Check-out</div>
                           <div style={infoVal}>
                             {coDate
-                              ? <>{fmtDate(coDate)}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
+                              ? <>{fmtDate(coDate, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
                               : <span style={{color:'var(--text-dim)'}}>TBD</span>}
                           </div>
                         </div>

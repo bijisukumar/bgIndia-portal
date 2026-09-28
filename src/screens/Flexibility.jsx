@@ -465,6 +465,18 @@ export default function Flexibility() {
           </p>
         </div>
 
+        {/* ── ROOMS (optional per host: /flexibility#rooms) ── */}
+        {F.rooms && (
+          <div id="rooms" style={{ scrollMarginTop: 20, background: c.card, border: `1px solid ${c.line}`,
+            borderRadius: 14, padding: '24px 22px', marginBottom: 22 }}>
+            <h2 style={{ fontSize: '1.1rem', color: c.gold, margin: '0 0 14px' }}>{F.rooms.heading}</h2>
+            {F.rooms.body.map((p, i) => (
+              <p key={i} style={{ color: c.dim, fontSize: '0.92rem', lineHeight: 1.7,
+                margin: i === F.rooms.body.length - 1 ? 0 : '0 0 12px' }}>{p}</p>
+            ))}
+          </div>
+        )}
+
         {/* ── REQUEST ── */}
         <div id="request" style={{ scrollMarginTop: 20 }}>
           {sent ? (

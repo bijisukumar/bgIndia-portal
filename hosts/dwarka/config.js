@@ -231,6 +231,17 @@ export const CONFIG = {
       directNote: "This is something we're able to offer only to guests who book with us directly. Booking direct means the calendar is ours to hold, so we can set a night aside for your family and price it as a courtesy rather than a full night's stay. It's one of the ways we try to keep your costs down.",
       advanceNote: 'Please ask ahead of time. Timing changes need to be agreed and settled before you arrive so we can plan the turnaround around your family — our on-site team is not able to approve changes on the day.',
     },
+    // Flexibility in space, not just time: pricing by bedrooms taken rather
+    // than one flat rate for the whole estate. Optional — the page skips
+    // the section when a host leaves this out. The one rupee figure on the
+    // page is the flat whole-estate rate this replaces, not a quote.
+    rooms: {
+      heading: 'Pay only for the bedrooms you need',
+      body: [
+        "We believe luxury and space shouldn't come with a rigid, one-size-fits-all price tag. Instead of charging a flat ₹25,000/night for the entire estate, we've broken down our rates based on bedroom counts, guest numbers, breakfast inclusions, and kitchen access. This allows smaller families and couples to enjoy our property affordably by selecting only the amenities and rooms they actually need.",
+        'Planning a family gathering or traveling with a larger group? You can easily book the full 4-bedroom setup. When you request all 4 bedrooms, our system accommodates up to 7 guests and prices your stay accordingly—giving you complete privacy and ample space without paying for unused capacity. Mix, match, and tailor your stay precisely to your itinerary.',
+      ],
+    },
     ota: {
       heading: 'Booked through a partner?',
       body: [

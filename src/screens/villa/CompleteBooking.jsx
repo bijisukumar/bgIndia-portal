@@ -53,6 +53,19 @@ const STATUS_META = {
 }
 
 function fmt(n) { return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}` }
+
+// Guest Info's check-in/check-out — the one pair of dates actually read out
+// loud to a guest on a call, so the day of week earns its place here even
+// though fmtDate's own default leaves it out everywhere else.
+const DATE_WITH_WEEKDAY = { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }
+
+// Confirmed 2026-09-28: this deploy's own bundle hashed identically to the
+// PREVIOUS deploy's — twice, independently, for two genuinely different
+// versions of this file — so an already-installed PWA never saw an update to
+// fetch and stayed on old code with no error and no signal anything was
+// wrong. window.__stayvibeBuild also gives anyone a quick way to check
+// exactly which build a device is actually running, from the console.
+if (typeof window !== 'undefined') window.__stayvibeBuild = '2026-09-28-01'
 function fmtDate(d) {
   if (!d) return '—'
   try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
@@ -1178,13 +1191,13 @@ export default function CompleteBooking() {
                           <div style={infoLabel}>Check-in</div>
                           {/* Day of week spelled out — this is the pair of dates Raman/the
                               owner actually reads out loud to a guest on a call. */}
-                          <div style={infoVal}>{fmtDate(s.checkin_date, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                          <div style={infoVal}>{fmtDate(s.checkin_date, DATE_WITH_WEEKDAY)}</div>
                         </div>
                         <div>
                           <div style={infoLabel}>Check-out</div>
                           <div style={infoVal}>
                             {coDate
-                              ? <>{fmtDate(coDate, { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
+                              ? <>{fmtDate(coDate, DATE_WITH_WEEKDAY)}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
                               : <span style={{color:'var(--text-dim)'}}>TBD</span>}
                           </div>
                         </div>

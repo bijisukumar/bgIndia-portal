@@ -1,0 +1,23 @@
+# Cloudflare Pages custom response headers.
+# https://developers.cloudflare.com/pages/configuration/headers/
+#
+# The service worker file is what a browser checks to decide whether a new
+# build exists at all. Cloudflare Pages' default caching let it sit at
+# Cache-Control: public, max-age=14400 (4 hours) — a browser (and Cloudflare's
+# own edge) could serve a 4-hour-old sw.js straight from cache with no network
+# request at all, so an update could exist on the server and be invisible for
+# up to 4 hours regardless of how many times someone reloaded the page.
+# Confirmed live 2026-09-28: a deploy that was genuinely correct on the origin
+# took two separate fixes and an unknown wait before an already-open install
+# picked it up, entirely because of this.
+#
+# workbox-*.js is fetched by sw.js itself during that same check, so it needs
+# the same treatment even though its own filename is content-hashed.
+/sw.js
+  Cache-Control: no-cache
+
+/workbox-*.js
+  Cache-Control: no-cache
+
+/registerSW.js
+  Cache-Control: no-cache

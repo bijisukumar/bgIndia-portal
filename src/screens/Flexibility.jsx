@@ -403,8 +403,16 @@ export default function Flexibility() {
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '36px 20px 72px' }}>
 
         {/* Hero */}
-        <div style={{ fontSize: '0.68rem', letterSpacing: '2px', color: c.gold,
-          fontWeight: 700, marginBottom: 12 }}>{F.hero.eyebrow}</div>
+        {/* A badge, not a plain eyebrow — this page is a perk of booking
+            direct, and should read as one before a word of the copy does. */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '7px 14px', borderRadius: 9999, marginBottom: 16,
+          background: 'linear-gradient(135deg, rgba(200,144,58,0.22), rgba(200,144,58,0.06))',
+          border: `1px solid ${c.goldLine}`, boxShadow: '0 0 18px rgba(200,144,58,0.15)',
+          fontSize: '0.7rem', letterSpacing: '2px', color: c.gold, fontWeight: 700 }}>
+          <span aria-hidden="true" style={{ fontSize: '0.85rem', letterSpacing: 0 }}>♛</span>
+          {F.hero.eyebrow}
+        </div>
         <h1 style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', lineHeight: 1.25, margin: '0 0 14px',
           textWrap: 'balance' }}>{F.hero.title}</h1>
         <p style={{ color: c.dim, fontSize: '1rem', lineHeight: 1.7, margin: '0 0 32px' }}>

@@ -185,7 +185,7 @@ export const CONFIG = {
   // decided the rate for themselves.
   flexibility: {
     hero: {
-      eyebrow: 'DIRECT GUESTS · DWARKA VILLA',
+      eyebrow: 'DIRECT GUEST PRIVILEGE',
       title: 'We go further for families than the clock allows.',
       intro: "Check-in after 4:00 PM and check-out by 11:00 AM is the standard, here and everywhere. But a family travelling together rarely fits a booking window — so where we can, we stretch it. Here is what those hours are actually for, and how far we are able to go for yours.",
     },

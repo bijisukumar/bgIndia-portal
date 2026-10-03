@@ -1,6 +1,6 @@
 // ============================================================
 // Flexibility.jsx — public "need flexibility" page
-// Route: /flexibility   (anchors: #why, #request)
+// Route: /flexibility   (anchors: #why, #rooms, #request)
 // No login required — linked from the marketing site.
 //
 // Two jobs:
@@ -16,7 +16,7 @@
 // Every string a guest reads comes from CONFIG.flexibility.
 // ============================================================
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CONFIG } from '../config'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
@@ -95,6 +95,34 @@ export default function Flexibility() {
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
   const [sent,     setSent]     = useState(null)   // 'direct' | 'ota'
+
+  // A shared link like /flexibility#rooms has to land on that section. The
+  // browser makes its own attempt, but this page only exists once the app has
+  // booted, and whether that happens before the browser gives up on the
+  // fragment is a race — it lost on a plain Chrome load (reproduced: cold load
+  // opened at the top, the next one landed correctly), leaving the guest at the
+  // top of a long page. So scroll to it here, once the section is on screen.
+  //
+  // The id is deliberately not decoded: a malformed %-sequence would throw in
+  // an effect, and the app has no error boundary — one bad link would blank
+  // the whole page.
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (!id) return
+    // Never fight the guest: once they scroll, tap or type, leave them be.
+    let touched = false
+    const stop = () => { touched = true }
+    const events = ['wheel', 'touchstart', 'keydown', 'mousedown']
+    events.forEach(e => window.addEventListener(e, stop, { passive: true }))
+    const go = () => { if (!touched) document.getElementById(id)?.scrollIntoView() }
+    go()
+    // Web fonts land after first paint and reflow the text above the target,
+    // nudging it off the top — settle again once they are in, and once more
+    // shortly after in case the browser restores its own scroll position.
+    document.fonts?.ready.then(go)
+    const late = setTimeout(go, 400)
+    return () => { clearTimeout(late); events.forEach(e => window.removeEventListener(e, stop)) }
+  }, [])
 
   // Each tab is its own flow with its own half-finished state — carrying a
   // found lookup or a validation error across to the other tab would read as

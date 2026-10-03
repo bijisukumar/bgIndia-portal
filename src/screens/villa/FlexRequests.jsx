@@ -17,6 +17,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { fmtDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -60,20 +61,40 @@ export default function FlexRequests() {
   const [toast, setToast]     = useState(null)
   const [busyId, setBusyId]   = useState(null)
   const [draft, setDraft]     = useState({})   // requestId -> { pct, note }
-  const [copied, setCopied]   = useState(false)
-  // Same public URL as the guest-facing page, and the same-origin trick used
-  // for check-in and agent links — one deployment serves every tenant's own
-  // domain, so the link is always correct without being hardcoded per host.
-  const flexLink = `${window.location.origin}/flexibility`
+  const [copied, setCopied]   = useState(null)   // key of the link just copied
+  // Built on the tenant's canonical public domain (the one check-in links use),
+  // not on whatever host this screen is open on: this screen is also routed in
+  // the manage console, which has no /flexibility page, and an older address
+  // would take its links down with it. Falls back to the current origin for a
+  // host that hasn't set one.
+  const flexBase = `${(CONFIG.checkinBaseUrl || window.location.origin).replace(/\/+$/, '')}/flexibility`
+  // One link per place the owner might send a guest. The #ids are the section
+  // ids in screens/Flexibility.jsx — rename one there and its link must follow.
+  // The bedrooms section is optional per tenant (demovilla has none), and a
+  // link to a section the page doesn't render just opens at the top, so that
+  // row is only listed where this tenant's config actually has the section.
+  const guestLinks = [
+    { key: 'top',     label: 'Flexible check-in / check-out', hash: '' },
+    CONFIG.flexibility?.rooms && { key: 'rooms', label: 'Bedroom access', hash: '#rooms' },
+    { key: 'request', label: 'Request form',      hash: '#request' },
+    { key: 'why',     label: 'Timings explained', hash: '#why' },
+  ].filter(Boolean)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
-  async function copyFlexLink() {
+  async function copyGuestLink(l) {
+    const url = flexBase + l.hash
     try {
-      await navigator.clipboard.writeText(flexLink)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch { showToast('Could not copy — long-press the link instead', 'error') }
+      await navigator.clipboard.writeText(url)
+      setCopied(l.key)
+      // Only clear our own tick — tapping a second row inside the 2s window
+      // must not have the first row's timer wipe the second row's "Copied".
+      setTimeout(() => setCopied(c => (c === l.key ? null : c)), 2000)
+    } catch {
+      // Clipboard refused. The rows show only the path, so hand over the full
+      // link in a box that can be copied by hand.
+      window.prompt('Copy this link', url)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -119,23 +140,34 @@ export default function FlexRequests() {
       </div>
 
       <div className="screen-body">
-        {/* Always visible, not just when the list is empty — for handing the
+        {/* Always visible, not just when the list is empty — for handing a
             link to a guest who asked directly, on the phone or in person,
             not only for reading where requests come from. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--dark-card)',
-          border: '1px solid rgba(200,144,58,0.2)', borderRadius: '12px', padding: '10px 12px', marginBottom: '14px' }}>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: '0.62rem', color: 'var(--text-dim)', letterSpacing: '0.5px', marginBottom: '2px' }}>PUBLIC REQUEST FORM</div>
-            <div style={{ fontSize: '0.78rem', color: '#85B7EB', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {flexLink}
-            </div>
+        <div style={{ background: 'var(--dark-card)', border: '1px solid rgba(200,144,58,0.2)',
+          borderRadius: '12px', padding: '10px 12px 4px', marginBottom: '14px' }}>
+          <div style={{ fontSize: '0.62rem', color: 'var(--text-dim)', letterSpacing: '0.5px' }}>LINKS TO SHARE WITH GUESTS</div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', margin: '2px 0 6px' }}>
+            Each opens the same guest page, at a different section.
           </div>
-          <button onClick={copyFlexLink} style={{
-            padding: '7px 12px', borderRadius: '8px', border: '1px solid rgba(200,144,58,0.35)', flexShrink: 0,
-            background: copied ? 'rgba(52,168,83,0.15)' : 'rgba(200,144,58,0.1)',
-            color: copied ? '#34A853' : 'var(--gold)', fontSize: '0.78rem', cursor: 'pointer', fontWeight: '600' }}>
-            {copied ? '✅ Copied' : '📋 Copy link'}
-          </button>
+          {guestLinks.map(l => (
+            <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0',
+              borderTop: '1px solid var(--border-dim)' }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text)' }}>{l.label}</div>
+                <div style={{ fontSize: '0.72rem', color: '#85B7EB', fontFamily: 'monospace', marginTop: 1,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  /flexibility{l.hash}
+                </div>
+              </div>
+              <button onClick={() => copyGuestLink(l)} style={{
+                padding: '7px 12px', borderRadius: '8px', border: '1px solid rgba(200,144,58,0.35)', flexShrink: 0,
+                background: copied === l.key ? 'rgba(52,168,83,0.15)' : 'rgba(200,144,58,0.1)',
+                color: copied === l.key ? '#34A853' : 'var(--gold)', fontSize: '0.78rem', cursor: 'pointer', fontWeight: '600',
+                whiteSpace: 'nowrap' }}>
+                {copied === l.key ? '✅ Copied' : '📋 Copy'}
+              </button>
+            </div>
+          ))}
         </div>
 
         {loading && <div className="loading"><div className="spinner" />Loading requests…</div>}

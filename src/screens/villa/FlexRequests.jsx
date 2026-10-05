@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { fmtDate } from '../../utils/dates'
+import { guestBaseUrl } from '../../utils/guestMessages'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 const fmt = n => `₹${Number(n || 0).toLocaleString('en-IN')}`
@@ -62,12 +63,8 @@ export default function FlexRequests() {
   const [busyId, setBusyId]   = useState(null)
   const [draft, setDraft]     = useState({})   // requestId -> { pct, note }
   const [copied, setCopied]   = useState(null)   // key of the link just copied
-  // Built on the tenant's canonical public domain (the one check-in links use),
-  // not on whatever host this screen is open on: this screen is also routed in
-  // the manage console, which has no /flexibility page, and an older address
-  // would take its links down with it. Falls back to the current origin for a
-  // host that hasn't set one.
-  const flexBase = `${(CONFIG.checkinBaseUrl || window.location.origin).replace(/\/+$/, '')}/flexibility`
+  // Read at render, not module load, so a runtime config refresh is honoured.
+  const flexBase = `${guestBaseUrl()}/flexibility`
   // One link per place the owner might send a guest. The #ids are the section
   // ids in screens/Flexibility.jsx — rename one there and its link must follow.
   // The bedrooms section is optional per tenant (demovilla has none), and a

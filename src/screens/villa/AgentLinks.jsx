@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
+import { guestBaseUrl } from '../../utils/guestMessages'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 export default function AgentLinks() {
@@ -17,7 +18,6 @@ export default function AgentLinks() {
   const [creating, setCreating] = useState(false)
   const [toast, setToast] = useState(null)
   const [copied, setCopied] = useState(null)
-  const BASE = window.location.origin
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
 
@@ -57,7 +57,7 @@ export default function AgentLinks() {
   }
 
   async function copyLink(token) {
-    const url = `${BASE}/quote/${token}`
+    const url = `${guestBaseUrl()}/quote/${token}`
     try {
       await navigator.clipboard.writeText(url)
       setCopied(token)

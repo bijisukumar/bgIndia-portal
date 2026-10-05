@@ -4,7 +4,7 @@ import { CONFIG } from '../config'
 import { useState, useEffect } from 'react'
 import { api } from '../api'
 import { parseLocalDate, fmtDate } from '../utils/dates'
-import { waNumber, buildReviewRequestWaLink } from '../utils/guestMessages'
+import { waNumber, buildReviewRequestWaLink, guestBaseUrl } from '../utils/guestMessages'
 import { channelLabel, channelPillStyle } from '../utils/channel'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
@@ -529,7 +529,6 @@ function CheckinLinksBlock() {
   const [form, setForm]         = useState({ partner: '', label: '' })
   const [creating, setCreating] = useState(false)
   const [createErr, setCreateErr] = useState(null)
-  const BASE = window.location.origin
 
   const load = () => {
     api.getCheckinLinks().then(data => {
@@ -556,7 +555,7 @@ function CheckinLinksBlock() {
   }
 
   async function copyLink(lnk) {
-    const url = `${BASE}/checkin/${lnk.token}`
+    const url = `${guestBaseUrl()}/checkin/${lnk.token}`
     try {
       await navigator.clipboard.writeText(url)
       setCopied(lnk.token)

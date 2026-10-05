@@ -54,6 +54,17 @@ function waLink(phone, text) {
   return `https://wa.me/${num}?text=${encodeURIComponent(text)}`
 }
 
+// The base every link the owner copies to hand a guest is built on — check-in,
+// agent quote, flexibility. It is the tenant's canonical public domain (the one
+// the WhatsApp check-in links above already use), not whatever address the
+// owner's screen happens to be open on: several owner screens are also routed
+// in the manage console, which serves none of the guest pages, and an older
+// address would take every link already sent down with it. Falls back to the
+// current origin for a host that has not set one.
+export function guestBaseUrl() {
+  return (CONFIG.checkinBaseUrl || window.location.origin).replace(/\/+$/, '')
+}
+
 // stays.source → the guest's own check-in link. Falls back to the default
 // token for channels with no link of their own (website, whatsapp, agoda…).
 function checkinUrlFor(stay) {

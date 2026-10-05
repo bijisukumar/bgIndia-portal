@@ -111,7 +111,9 @@ function pricingLines(c, iconPrefix, rateLabel) {
 // rich=true (Generate & copy): full colorful emoji — safe for copy/paste,
 // which doesn't go through the URI-decode path that corrupts them on
 // WhatsApp Desktop/Windows. rich=false (Send quote in WhatsApp button):
-// only BMP-safe symbols (❓ ✨ ✅ ☎), confirmed not to corrupt.
+// only the BMP symbols ✨ ✅ ☎. ❓ was in that set, but a sent quote showed it
+// as "�" in front of "FAQs:" (2026-10-05), so it is rich-only now — if a "�"
+// ever shows next to one of the others, drop that one the same way.
 function icons(rich) {
   return {
     pray:      rich ? '🙏 ' : '',
@@ -127,7 +129,7 @@ function icons(rich) {
     phone:     rich ? '📞 ' : '☎ ',
     sparkle:   '✨ ',
     check:     '✅ ',
-    question:  '❓ ',
+    question:  rich ? '❓ ' : '',
   }
 }
 
@@ -151,10 +153,19 @@ function familiesBlock(ic) {
   ]
 }
 
+// Up front, before the dates, so the guest sees what they would be getting
+// before they read what it costs. WhatsApp builds its link-preview card from
+// the FIRST link in a message, so this is also what the card shows. Per
+// tenant: left out (along with its spacer line) when the tenant has no villa
+// page, so another host's guests are never sent to this villa's website.
+function villaPicturesBlock(ic) {
+  return CONFIG.marketing?.villaDetailsUrl
+    ? [`${ic.camera}Villa pictures and details: ${CONFIG.marketing.villaDetailsUrl}`, ``]
+    : []
+}
+
 function linksBlock(ic) {
   return [
-    ...(CONFIG.marketing?.villaDetailsUrl
-      ? [`${ic.camera}Villa details: ${CONFIG.marketing.villaDetailsUrl}`] : []),
     ...(CONFIG.marketing?.faqUrl
       ? [`${ic.question}FAQs: ${CONFIG.marketing.faqUrl}`] : []),
   ]
@@ -180,8 +191,11 @@ function buildQuoteDefault(e, rich) {
   return [
     `Namaskaram ${c.firstName},`,
     ``,
-    `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out — we would be truly happy to host your family during your visit to Guruvayur.`,
+    `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out.`,
     ``,
+    `Your family friendly villa closest to the Guruvayur Temple in an Upscale neighborhood with ample parking - A Private Villa`,
+    ``,
+    ...villaPicturesBlock(ic),
     `We have checked your dates and the villa is available:`,
     `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
     `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
@@ -214,6 +228,7 @@ function buildQuoteRepeatDiscount(e, rich) {
     ``,
     `This is Biji from Luxury Villas of Guruvayur. Wonderful to hear from you again — it's always a pleasure to welcome back our guests!`,
     ``,
+    ...villaPicturesBlock(ic),
     `We have checked your dates and the villa is available:`,
     `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
     `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
@@ -247,6 +262,7 @@ function buildQuoteB2B(e, rich) {
     ``,
     `This is Biji from Luxury Villas of Guruvayur. Thank you for checking availability with us for your guest's stay in Guruvayur.`,
     ``,
+    ...villaPicturesBlock(ic),
     `We have checked the dates and the villa is available:`,
     `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
     `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,

@@ -41,6 +41,7 @@ import ChannelCalendar from '../../screens/villa/ChannelCalendar'
 import AgentQuote     from '../../screens/villa/AgentQuote'
 import GuestCheckIn   from '../../screens/GuestCheckIn'
 import Flexibility    from '../../screens/Flexibility'
+import TrainingManual from '../../screens/TrainingManual'
 import RDashboard     from '../../screens/RDashboard'
 import D1Explorer     from '../../screens/infra/D1Explorer'
 import Maintenance    from '../../screens/infra/Maintenance'
@@ -149,6 +150,9 @@ export default function App() {
           <Route path="/quote/:token" element={<AgentQuote />} />
           <Route path="/checkin/:linkToken" element={<GuestCheckIn />} />
           <Route path="/flexibility"  element={<Flexibility />} />
+          {/* Public, like /flexibility: new owners and prospects read it before
+              they have a login. Describes screens only; holds no tenant data. */}
+          <Route path="/Training-Manual" element={<TrainingManual />} />
           <Route path="/*"            element={<ProtectedRoutes />} />
         </Routes>
       </BrowserRouter>

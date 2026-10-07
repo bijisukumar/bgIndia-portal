@@ -92,7 +92,11 @@ CREATE TABLE IF NOT EXISTS stayvibe_stay_prefs (
   request_cab INTEGER DEFAULT 0,
   request_extra_beds INTEGER DEFAULT 0, extra_beds_count INTEGER DEFAULT 0,
   special_requests TEXT,
-  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+  -- The guest's expected check-out time from the check-in form ('HH:MM'): the
+  -- counterpart of stayvibe_stays.eta. Added by
+  -- migrations/2026-10-07-guest-departure-time.sql.
+  expected_departure_time TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_stay_prefs_villa ON stayvibe_stay_prefs(villa_id);
 

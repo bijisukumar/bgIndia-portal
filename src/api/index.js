@@ -153,6 +153,8 @@ export const api = {
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),
   updateStayGuestPhone: (data)   => post('updateStayGuestPhone', data),
   updateStayGuestInfo: (data)    => post('updateStayGuestInfo', data),
+  // Owner approves the arrival / departure time a guest asked for on the check-in form.
+  approveGuestTimes:   (data)    => post('approveGuestTimes', data),
   updateStayCheckinTimes: (data) => post('updateStayCheckinTimes', data),
   sendCheckoutEmailNow: (data) => post('sendCheckoutEmailNow', data),
   getFlexRequests:   (villaId) => get('getFlexRequests', { villaId }),

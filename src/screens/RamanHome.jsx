@@ -4,6 +4,7 @@ import { api } from '../api'
 import { CONFIG } from '../config'
 import TopBar from '../components/TopBar'
 import { parseLocalDate } from '../utils/dates'
+import { stayTimes as sharedStayTimes } from '../utils/stayTimes'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 import { useAuth } from '../hooks/useAuth'
 
@@ -31,19 +32,19 @@ function fmtTime(t) {
   return `${h}:${m[2]} ${suffix}`
 }
 
-// When the guest is due in and out, and whether either was negotiated.
+// When the guest is due in and out, whether either was negotiated, and what the
+// guest typed on the check-in form. Worked out by the shared helper, so Raman's
+// screens, the owner's and the WhatsApp messages cannot disagree.
 function stayTimes(s) {
-  const inTime  = fmtTime(s.earlyCheckinTime) || VILLA_DEFAULTS.checkinTime  || '4:00 PM'
-  const outTime = fmtTime(s.lateCheckoutTime) || VILLA_DEFAULTS.checkoutTime || '11:00 AM'
+  const t = sharedStayTimes(s, { checkin: VILLA_DEFAULTS.checkinTime, checkout: VILLA_DEFAULTS.checkoutTime })
   return {
-    inTime, outTime,
-    inEarly:  !!s.earlyCheckinTime,
-    outLate:  !!s.lateCheckoutTime,
+    inTime: t.inTime, outTime: t.outTime,
+    inEarly: t.inEarly, outLate: t.outLate,
     // A request with no agreed time still matters — it means a conversation
     // is open, and Raman should not be surprised at the door.
-    inPending:  !s.earlyCheckinTime && !!s.requestEarlyCheckin,
-    outPending: !s.lateCheckoutTime && !!s.requestLateCheckout,
-    eta: fmtTime(s.eta),
+    inPending: t.inPending, outPending: t.outPending,
+    eta: t.eta || null, etd: t.etd || null,
+    etaBefore: t.etaBeforeCheckin, etdAfter: t.etdAfterCheckout,
   }
 }
 
@@ -196,7 +197,10 @@ function UpcomingBlock({ upcoming, turnaroundHours }) {
                   🧳 Out {t.outTime}{t.outLate ? ' (late)' : ''}
                 </span>
                 {t.eta && (
-                  <span style={{ color: '#85B7EB' }}>🚗 ETA {t.eta}</span>
+                  <span style={{ color: t.etaBefore ? '#F59E0B' : '#85B7EB' }}>🚗 ETA {t.eta}{t.etaBefore ? ' (before check-in)' : ''}</span>
+                )}
+                {t.etd && (
+                  <span style={{ color: t.etdAfter ? '#F59E0B' : '#85B7EB' }}>↗ leaving ~{t.etd}{t.etdAfter ? ' (after check-out)' : ''}</span>
                 )}
               </div>
 

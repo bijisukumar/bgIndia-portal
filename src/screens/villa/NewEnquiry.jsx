@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
 import { parseLocalDate, fmtDate } from '../../utils/dates'
+import { fmtTime } from '../../utils/stayTimes'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
@@ -136,6 +137,12 @@ export default function NewEnquiry() {
 
   const fmtShort = d => { try { return fmtDate(d, { day: 'numeric', month: 'short' }) } catch (_) { return d } }
   const turnoverTag = r => (r.checkout_date === form.checkInDate || r.checkin_date === form.checkOutDate) ? ' (same-day turnover)' : ''
+  // A night nobody has booked but that is not for sale: the guest before has an
+  // agreed late check-out (or the one after an early check-in), so there is no time
+  // to reset the villa. The server names the night; the words are ours.
+  const heldWhy = c => c.reason === 'early_checkin_turnaround'
+    ? `${c.guest_name} has an agreed early check-in at ${fmtTime(c.early_checkin_time)}`
+    : `${c.guest_name} has an agreed late check-out until ${fmtTime(c.late_checkout_time)}`
   const adultsNum = parseInt(form.adults, 10) || 0
   const childrenNum = parseInt(form.children, 10) || 0
   const infantsNum = parseInt(form.infants, 10) || 0
@@ -314,10 +321,19 @@ export default function NewEnquiry() {
                   ✓ Villa available {fmtShort(form.checkInDate)} → {fmtShort(form.checkOutDate)}
                 </div>
               ) : (
-                <div style={{ color: '#E06C5A', fontSize: '0.76rem', fontWeight: 600 }}>
-                  ✕ Not available — {avail.conflicts.map(c =>
-                    `${c.guest_name} ${fmtShort(c.checkin_date)}→${fmtShort(c.checkout_date)}`).join(' · ')}
-                </div>
+                <>
+                  <div style={{ color: '#E06C5A', fontSize: '0.76rem', fontWeight: 600 }}>
+                    ✕ Not available — {avail.conflicts.map(c => c.heldNight
+                      ? `${fmtShort(c.heldNight)} night is held`
+                      : `${c.guest_name} ${fmtShort(c.checkin_date)}→${fmtShort(c.checkout_date)}`).join(' · ')}
+                  </div>
+                  {avail.conflicts.some(c => c.heldNight) && (
+                    <div style={{ color: '#E06C5A', fontSize: '0.7rem', marginTop: '3px', lineHeight: 1.5 }}>
+                      {avail.conflicts.filter(c => c.heldNight).map(c => heldWhy(c)).join(' · ')}
+                      {' '}— not enough time to reset the villa before the next guest.
+                    </div>
+                  )}
+                </>
               )}
               {avail.nearby && avail.nearby.length > 0 && (
                 <div style={{ color: '#5C7080', fontSize: '0.7rem', marginTop: '3px', lineHeight: 1.5 }}>

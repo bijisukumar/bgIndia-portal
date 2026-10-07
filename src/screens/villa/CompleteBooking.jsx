@@ -17,6 +17,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
+import { stayTimes, PRE_ARRIVAL_STATUSES } from '../../utils/stayTimes'
+import { dayMonth, heldSummary } from '../../utils/stayHolds'
+import { villaTimeDefaults } from '../../utils/villaTimes'
+import GuestTimesReview from '../../components/GuestTimesReview'
+import StayTimesLine from '../../components/StayTimesLine'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
@@ -355,6 +360,7 @@ export default function CompleteBooking() {
       adults:       selected.adults   != null ? String(selected.adults)   : '',
       children:     selected.children != null ? String(selected.children) : '',
       eta:          selected.eta || '',
+      etd:          selected.etd || '',
     })
     setEditInfo(true)
   }
@@ -377,6 +383,19 @@ export default function CompleteBooking() {
 
   async function handleStatusChange(newStatus) {
     if (!selected) return
+    // The guest may have asked, on the check-in form, to arrive before check-in or
+    // leave after check-out. Marking them ready without deciding is allowed, but
+    // not silently.
+    if (newStatus === 'ready_for_checkin') {
+      const t = stayTimes(selected, villaTimeDefaults())
+      if (t.needsReview) {
+        const asks = [
+          t.arrivalFlag && `arrive at ${t.eta} (check-in is from ${t.inTime})`,
+          t.departureFlag && `leave at ${t.etd} (check-out is by ${t.outTime})`,
+        ].filter(Boolean).join(' and ')
+        if (!window.confirm(`${selected.guest_name} asked to ${asks}, and you have not approved it.\n\nMark ready for check-in anyway?`)) return
+      }
+    }
     setTransitioning(true)
     try {
       await api.updateStayStatus({ stayId: selected.stay_id, status: newStatus })
@@ -529,8 +548,8 @@ export default function CompleteBooking() {
     try {
       const earlyCheckinTime = which === 'early' ? earlyTimeDraft : (selected.early_checkin_time || null)
       const lateCheckoutTime = which === 'late'  ? lateTimeDraft  : (selected.late_checkout_time || null)
-      await api.updateStayCheckinTimes({ stayId: selected.stay_id, earlyCheckinTime, lateCheckoutTime })
-      showToast('Time saved ✓')
+      const saved = await api.updateStayCheckinTimes({ stayId: selected.stay_id, earlyCheckinTime, lateCheckoutTime })
+      showToast('Time saved ✓' + heldSummary(saved && saved.holds))
       if (which === 'early') setEditingEarlyTime(false)
       if (which === 'late')  setEditingLateTime(false)
       await loadStays()
@@ -862,10 +881,8 @@ export default function CompleteBooking() {
                               {d<0?`${Math.abs(d)}d ago`:`in ${d}d`}
                             </span>
                           )}
-                          {stay.eta && !stay.request_early_checkin && (
-                            <span style={{marginLeft:'8px'}}>· ETA {formatTime12h(stay.eta)}</span>
-                          )}
                         </div>
+                        <StayTimesLine stay={stay} />
                         {requestSummary(stay) && (
                           <div style={{fontSize:'0.68rem',color:'#C8903A',marginTop:'2px',
                             overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -1112,6 +1129,13 @@ export default function CompleteBooking() {
                   )}
                 </div>
                 <div className="card" style={{marginBottom:'14px'}}>
+                  {/* Times the guest asked for on the check-in form that go beyond what
+                      the villa gives: decide before marking ready for check-in. */}
+                  {!editInfo && (
+                    <GuestTimesReview stay={s}
+                      onDone={async (_which, res) => { showToast('Time approved ✓' + heldSummary(res && res.holds)); await loadStays() }}
+                      onError={m => showToast('Failed: ' + m, 'error')} />
+                  )}
                   {(() => {
                     // Derive checkout from checkin + nights if checkout_date is null
                     const coDate = s.checkout_date || (() => {
@@ -1131,6 +1155,15 @@ export default function CompleteBooking() {
                       borderRadius:'7px', color:'var(--text)', fontSize:'16px',
                       boxSizing:'border-box' }
                     const setD = (k, v) => setInfoDraft(p => ({ ...p, [k]: v }))
+                    // When this guest is due in and out: the standard times, an agreed
+                    // early/late time, and what the guest typed on the check-in form.
+                    const tm = stayTimes(s, villaTimeDefaults())
+                    const beforeArrival = PRE_ARRIVAL_STATUSES.includes(s.status)
+                    const small = {fontSize:'0.72rem',marginTop:'3px',lineHeight:1.45}
+                    // The nights an agreed early/late time keeps out of sale (the server
+                    // works them out: src/utils/stayHolds.js), so it is plain to see.
+                    const heldIn  = (s.holds || []).find(h => h.kind === 'early_checkin')
+                    const heldOut = (s.holds || []).find(h => h.kind === 'late_checkout')
                     if (editInfo) return (
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 12px'}}>
                         <div style={{gridColumn:'1 / -1'}}>
@@ -1172,10 +1205,15 @@ export default function CompleteBooking() {
                           <input type="number" min="0" style={dfield} value={infoDraft.children}
                             onChange={e=>setD('children', e.target.value)} />
                         </div>
-                        <div style={{gridColumn:'1 / -1'}}>
-                          <div style={infoLabel}>Requested ETA</div>
+                        <div>
+                          <div style={infoLabel}>Arrival ETA</div>
                           <input type="time" style={dfield} value={infoDraft.eta}
                             onChange={e=>setD('eta', e.target.value)} />
+                        </div>
+                        <div>
+                          <div style={infoLabel}>Check-out ETA</div>
+                          <input type="time" style={dfield} value={infoDraft.etd}
+                            onChange={e=>setD('etd', e.target.value)} />
                         </div>
                         <div style={{gridColumn:'1 / -1',display:'flex',gap:'8px',marginTop:'4px'}}>
                           <button onClick={handleSaveInfo} disabled={infoBusy}
@@ -1203,6 +1241,17 @@ export default function CompleteBooking() {
                           {/* Day of week spelled out — this is the pair of dates Raman/the
                               owner actually reads out loud to a guest on a call. */}
                           <div style={infoVal}>{fmtDateWithWeekday(s.checkin_date)}</div>
+                          <div style={small}>
+                            <div style={{color: tm.inEarly ? '#F59E0B' : 'var(--text-dim)'}}>
+                              🔑 {tm.inEarly ? 'Early check-in from ' : 'Check-in from '}{tm.inTime}{tm.inEarly ? ' (agreed)' : ''}
+                            </div>
+                            {beforeArrival && (tm.eta
+                              ? <div style={{color: tm.etaBeforeCheckin ? '#F59E0B' : '#85B7EB'}}>
+                                  🚗 Arrival ETA {tm.eta}{tm.etaBeforeCheckin ? ' — before check-in' : ''}
+                                </div>
+                              : <div style={{color:'var(--text-dim)',opacity:0.8}}>🚗 Arrival ETA — not given yet</div>)}
+                            {heldIn && <div style={{color:'#F59E0B'}}>🔒 Holds the night of {dayMonth(heldIn.night)} — closed to new bookings</div>}
+                          </div>
                         </div>
                         <div>
                           <div style={infoLabel}>Check-out</div>
@@ -1210,6 +1259,17 @@ export default function CompleteBooking() {
                             {coDate
                               ? <>{fmtDateWithWeekday(coDate)}{!s.checkout_date && <span style={{fontSize:'0.68rem',color:'var(--text-dim)',marginLeft:'5px'}}>(est.)</span>}</>
                               : <span style={{color:'var(--text-dim)'}}>TBD</span>}
+                          </div>
+                          <div style={small}>
+                            <div style={{color: tm.outLate ? '#F59E0B' : 'var(--text-dim)'}}>
+                              🧳 {tm.outLate ? 'Late check-out until ' : 'Check-out by '}{tm.outTime}{tm.outLate ? ' (agreed)' : ''}
+                            </div>
+                            {beforeArrival && (tm.etd
+                              ? <div style={{color: tm.etdAfterCheckout ? '#F59E0B' : '#85B7EB'}}>
+                                  ↗ Check-out ETA {tm.etd}{tm.etdAfterCheckout ? ' — after check-out time' : ''}
+                                </div>
+                              : <div style={{color:'var(--text-dim)',opacity:0.8}}>↗ Check-out ETA — not given yet</div>)}
+                            {heldOut && <div style={{color:'#F59E0B'}}>🔒 Holds the night of {dayMonth(heldOut.night)} — closed to new bookings</div>}
                           </div>
                         </div>
                         <div ref={phoneFieldRef}>
@@ -1344,12 +1404,6 @@ export default function CompleteBooking() {
                           <div style={infoLabel}>Nights</div>
                           <div style={infoVal}>{nights} night{nights!==1?'s':''}</div>
                         </div>
-                        {s.eta && (
-                          <div>
-                            <div style={infoLabel}>Requested ETA</div>
-                            <div style={infoVal}>{s.eta}</div>
-                          </div>
-                        )}
                       </div>
                     )
                   })()}

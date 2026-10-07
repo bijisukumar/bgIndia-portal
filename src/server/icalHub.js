@@ -5,7 +5,7 @@
 // Server-side only (the Worker imports it). Kept free of any database or
 // request code so it can be tested on its own.
 //
-// Two rules do all the work:
+// Three rules do all the work:
 //  1. A platform's link never contains that platform's own bookings. It already
 //     knows them, and handing them back would make them look like foreign
 //     blocks: cancel one on the platform and our copy would keep the dates shut
@@ -13,6 +13,8 @@
 //  2. Everything else is included, whatever its source. A booking entered by
 //     hand with no calendar behind it (WhatsApp, phone, the website) is exactly
 //     the kind a platform cannot learn about any other way.
+//  3. A night kept back by an agreed late check-out or early check-in is sent to
+//     every platform, even the guest's own: it is not a booking any platform has.
 
 // ── channel names ─────────────────────────────────────────────────────────
 // Stays store whatever the booking form sent ('Booking.com', 'booking_com',
@@ -54,8 +56,10 @@ export function todayIst(now = new Date()) {
 // ── what goes in the calendar ─────────────────────────────────────────────
 // stays:  [{ id, source, start, end, stamp }]      real bookings
 // blocks: [{ id, channel, start, end, stamp }]     dates pulled from other platforms' calendars
+// holds:  [{ id, kind, start, end, stamp }]        nights kept back by an agreed late check-out
+//                                                  / early check-in (src/utils/stayHolds.js)
 // Returns the events for `targetChannel`'s link, oldest first.
-export function buildHubEvents({ stays = [], blocks = [], targetChannel, today, horizonDays = 800 }) {
+export function buildHubEvents({ stays = [], blocks = [], holds = [], targetChannel, today, horizonDays = 800 }) {
   const latest = addDays(today, horizonDays)
   const taken = new Set()
   const events = []
@@ -83,6 +87,15 @@ export function buildHubEvents({ stays = [], blocks = [], targetChannel, today, 
   for (const b of blocks) {
     if (channelsMatch(b.channel, targetChannel)) continue
     add({ key: `block:${b.id}`, start: b.start, end: b.end, label: sourceLabel(b.channel), stamp: b.stamp })
+  }
+  // A held night goes to EVERY platform, the one the guest booked through
+  // included. That platform knows the booking, but not that the villa is still
+  // occupied on the last afternoon, so its calendar would offer the night to the
+  // next family, who would then want to arrive at 4 PM. (Rule 1 above does not
+  // apply: a hold is not a booking the platform has, so it cannot turn into a
+  // phantom block; it lives only while the agreed time does.)
+  for (const h of holds) {
+    add({ key: `hold:${h.id}`, start: h.start, end: h.end, label: h.kind === 'early_checkin' ? 'Early check-in' : 'Late check-out', stamp: h.stamp })
   }
 
   return events.sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end) || a.key.localeCompare(b.key))

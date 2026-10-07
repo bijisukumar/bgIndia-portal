@@ -11,7 +11,8 @@
 // ============================================================
 
 import { CONFIG } from '../config'
-import { parseLocalDate, formatTime12h } from './dates'
+import { parseLocalDate } from './dates'
+import { guestFacingTimes } from './stayTimes'
 
 const villa = CONFIG.villas[0]
 
@@ -123,7 +124,13 @@ export function buildHostIntroMessage(stay = {}) {
   // An approved early-checkin/late-checkout time overrides the house
   // default — this is exactly what Complete Booking already shows Raman,
   // so the guest's own intro message shouldn't quote a stale 4pm/11am when
-  // an 11am arrival (say) was already agreed and captured.
+  // an 11am arrival (say) was already agreed and captured. The guest's own
+  // expected arrival / departure from the check-in form is added beside it, but
+  // only when it fits what the villa gives (see guestFacingTimes): a time the
+  // owner has not agreed to is never quoted back as if it had been. It goes into
+  // the existing {checkinTime} / {checkoutTime} slots, so no template (and no
+  // re-seeded config) is needed.
+  const gt = guestFacingTimes(stay, { checkin: villa.checkinTime, checkout: villa.checkoutTime })
   return renderTemplate(cfg.template, {
     firstName: ((stay.guest_name || '').trim().split(/\s+/)[0]) || 'there',
     checkinDateShort: fmtShort(ci),
@@ -132,8 +139,8 @@ export function buildHostIntroMessage(stay = {}) {
     guestCount,
     bedroomLine,
     nights: nights || '—',
-    checkinTime:  stay.early_checkin_time ? formatTime12h(stay.early_checkin_time) : villa.checkinTime,
-    checkoutTime: stay.late_checkout_time ? formatTime12h(stay.late_checkout_time) : villa.checkoutTime,
+    checkinTime:  gt.arrivalNote   ? `${gt.inTime} (${gt.arrivalNote})`    : gt.inTime,
+    checkoutTime: gt.departureNote ? `${gt.outTime} (${gt.departureNote})` : gt.outTime,
     checkinPrompt,
   })
 }

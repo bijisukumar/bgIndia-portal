@@ -13,6 +13,7 @@
 
 import { CONFIG } from '../config'
 import { parseLocalDate } from './dates'
+import { guestFacingTimes } from './stayTimes'
 
 // Villa facts for the booking-info block, sourced from the per-host config
 // (hosts/<hostId>/config.js). Constant lookup here is fine while Dwarka is
@@ -70,10 +71,19 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
     if (a && b) nights = Math.max(1, Math.round((b - a) / 86400000))
   }
 
-  // If an early check-in / late check-out was requested, the fixed times are
-  // shown as "as agreed" so the critical-timing note stays truthful.
-  const ciTime = stay.request_early_checkin ? 'early check-in as agreed \u23F0' : CHECKIN_TIME
-  const coTime = stay.request_late_checkout ? 'late check-out as agreed \uD83C\uDF19' : CHECKOUT_TIME
+  // If an early check-in / late check-out was agreed, the agreed TIME is stated
+  // ("from 2:00 PM"), not just "as agreed", so the critical-timing note stays
+  // truthful and Raman and the guest read the same hour. A request with no time
+  // agreed yet keeps the old wording. The guest's own expected arrival / departure
+  // from the check-in form is added when it fits what the villa gives (a time the
+  // owner has not agreed to is never quoted back as if it had been).
+  const gt = guestFacingTimes(stay, { checkin: '4:00 PM', checkout: '11:00 AM' })
+  let ciTime = stay.request_early_checkin ? 'early check-in as agreed \u23F0' : CHECKIN_TIME
+  let coTime = stay.request_late_checkout ? 'late check-out as agreed \uD83C\uDF19' : CHECKOUT_TIME
+  if (gt.inAgreed)  ciTime = `from ${gt.inTime} \u2014 early check-in as agreed \u23F0`
+  if (gt.outAgreed) coTime = `until ${gt.outTime} \u2014 late check-out as agreed \uD83C\uDF19`
+  if (gt.arrivalNote)   ciTime += ` (${gt.arrivalNote})`
+  if (gt.departureNote) coTime += ` (${gt.departureNote})`
 
   const intro = senderRole === 'owner'
     ? `Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`

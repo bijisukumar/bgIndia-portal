@@ -26,7 +26,11 @@ const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 
 // The calendar published back to each booking platform: what goes in a
 // platform's link and how it is written (see src/server/icalHub.js).
-import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, todayIst } from '../../src/server/icalHub.js'
+import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, todayIst, addDays } from '../../src/server/icalHub.js'
+// Nights an agreed late check-out / early check-in takes out of sale - one rule
+// shared by the calendar, the enquiry check, the gap alerts and the platform links.
+import { stayHolds, holdPhrase } from '../../src/utils/stayHolds.js'
+import { fmtTime as fmt12 } from '../../src/utils/stayTimes.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -935,6 +939,56 @@ async function writeStaySideBlocks(DB, stayId, villaId, f) {
   })
 }
 
+// Clock times arrive from <input type="time"> as 'HH:MM' (some browsers add
+// seconds). Anything else - empty, or free text - counts as "not given".
+function cleanTime(v) {
+  const m = String(v == null ? '' : v).trim().match(/^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/)
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null
+}
+
+// A guest's expected departure is a form answer, so it sits with their other
+// form answers in stayvibe_stay_prefs (stayvibe_stays is kept slim). It is a
+// bare time, like stayvibe_stays.eta, assumed to fall on the check-out date.
+// It is deliberately NOT written to expected_departure_at: that is a full
+// timestamp which the turnaround logic and the manager's commission both read
+// (a date earlier than the booked check-out reads as a held night), and a guest's
+// statement nobody has agreed to must not steer either of them.
+// No row is made just to hold a null; one that exists is cleared.
+async function recordGuestDeparture(DB, stayId, villaId, expectedDeparture) {
+  if (!stayId) return
+  const etd = cleanTime(expectedDeparture)
+  if (etd) {
+    await DB.prepare(
+      `INSERT INTO stayvibe_stay_prefs (stay_id, villa_id, expected_departure_time) VALUES (?, ?, ?)
+         ON CONFLICT(stay_id) DO UPDATE SET expected_departure_time = excluded.expected_departure_time,
+           updated_at = datetime('now')`
+    ).bind(stayId, villaId || null, etd).run()
+  } else {
+    await DB.prepare(
+      `UPDATE stayvibe_stay_prefs SET expected_departure_time = NULL, updated_at = datetime('now') WHERE stay_id = ?`
+    ).bind(stayId).run()
+  }
+}
+
+// Lists that read stayvibe_stays whole get the guest's expected departure
+// attached here, as etd (getUpcomingStays joins the same table directly).
+async function attachGuestTimes(DB, rows) {
+  const ids = [...new Set((rows || []).map(r => r.stay_id).filter(Boolean))]
+  if (!ids.length) return rows
+  const byId = {}
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90)
+    // tenant-scope-exempt: only ever given ids of stays the caller has just
+    // read under villaScope, so it cannot reach another tenant's rows.
+    const { results } = await DB.prepare(
+      `SELECT stay_id, expected_departure_time FROM stayvibe_stay_prefs WHERE stay_id IN (${part.map(() => '?').join(',')})`
+    ).bind(...part).all()
+    for (const p of (results || [])) byId[p.stay_id] = p.expected_departure_time
+  }
+  for (const r of rows) r.etd = byId[r.stay_id] || null
+  return rows
+}
+
 async function syncStayLedger(DB, stayId) {
   try {
     if (!stayId) return
@@ -1041,6 +1095,45 @@ async function getTurnaroundHours(DB, villaId) {
     const n = row && row.value != null ? parseFloat(row.value) : null
     return (n != null && !isNaN(n) && n > 0) ? n : 6
   } catch (e) { return 6 }
+}
+
+// ── NIGHTS HELD BY AGREED EARLY / LATE TIMES ─────────────────────────────────
+// A guest with an agreed late check-out is still in the villa when the next
+// family would arrive, so that night cannot be sold; likewise the night before an
+// agreed early check-in. The rule itself lives in src/utils/stayHolds.js so the
+// calendar, the enquiry check, the gap alerts and the links handed to the booking
+// platforms all agree. These two helpers only supply the villa's own numbers.
+//
+// The live 'turnaround_hours' setting wins over the host file, as it does for
+// Raman's and Complete booking's turnaround flags; the host file is the fallback.
+async function holdRules(DB, villaId) {
+  const host = getHostConfig(villaId)
+  const t = host.turnaround || {}
+  const villa = (host.villas || [])[0] || {}
+  let hours = null
+  try {
+    const row = await DB.prepare(`SELECT value FROM stayvibe_villa_settings WHERE villa_id = ? AND key = 'turnaround_hours'`).bind(villaId).first()
+    const n = row && row.value != null ? parseFloat(row.value) : NaN
+    if (n > 0) hours = n
+  } catch (e) { /* no settings table yet: the host file's number stands */ }
+  return {
+    stdIn:  t.defaultCheckinTime  || villa.checkinTime  || '16:00',
+    stdOut: t.defaultCheckoutTime || villa.checkoutTime || '11:00',
+    turnaroundHours: hours || t.turnaroundHours || 6,
+  }
+}
+
+// The held nights for a list of stay rows (stay_id, checkin_date, checkout_date,
+// early_checkin_time, late_checkout_time). Nights before `from` ('YYYY-MM-DD') are
+// left out: a night that has gone cannot be sold anyway.
+function heldNights(rows, rules, from) {
+  const out = []
+  for (const r of rows || []) {
+    for (const h of stayHolds(r, rules)) {
+      if (!from || h.night >= from) out.push({ ...h, guest: r.guest_name || null })
+    }
+  }
+  return out
 }
 
 // Two independent directions — a stay can have an early-checkin ask, a
@@ -1560,7 +1653,7 @@ export async function onRequest(ctx) {
         homeCountryAddress, homeCountry,
         checkInDate, checkOutDate, nights,
         adults = 1, children = 0, guestList,
-        purposeOfVisit, modeOfTransport, vehicleNumber, eta,
+        purposeOfVisit, modeOfTransport, vehicleNumber, eta, expectedDepartureTime,
         govtIdType, govtIdNum,
         passportNumber, passportIssueDate, passportIssuePlace, passportExpiry,
         visaNumber, visaType, visaIssueDate, visaIssuePlace,
@@ -1684,6 +1777,10 @@ export async function onRequest(ctx) {
           reqBreakfast, bfChoice, reqCab, reqBeds, bedsCount,
         })
       }
+
+      // The guest's expected departure (their arrival time is stayvibe_stays.eta,
+      // written above).
+      await recordGuestDeparture(DB, stayId, villaId, expectedDepartureTime)
 
       // Form C: the person filling the form is guest 1; anyone they added in
       // the "other foreign guests" blocks follows as 2..N. Domestic parties
@@ -2587,11 +2684,13 @@ export async function onRequest(ctx) {
       const today = todayIst()
       const [{ results: stayRows }, { results: blockRows }] = await Promise.all([
         // The same notion of "a real booking" as getVillaCalendar: anything not
-        // cancelled or voided, whatever its source.
+        // cancelled or voided, whatever its source. (>=: a stay that leaves today
+        // is still read, because its late check-out can hold tonight.)
         DB.prepare(`
-          SELECT stay_id, source, checkin_date, checkout_date, created_at FROM stayvibe_stays
+          SELECT stay_id, source, checkin_date, checkout_date, created_at,
+                 early_checkin_time, late_checkout_time FROM stayvibe_stays
           WHERE villa_id = ? AND status NOT IN ('cancelled', 'void')
-            AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date > ?
+            AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date >= ?
         `).bind(link.villa_id, today).all(),
         // Blocks only from calendars still switched on: pausing a feed means
         // "stop treating that platform as a source".
@@ -2601,8 +2700,16 @@ export async function onRequest(ctx) {
           WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1 AND b.checkout_date > ?
         `).bind(link.villa_id, today).all(),
       ])
+      // Nights held by an agreed late check-out / early check-in go to EVERY
+      // platform, the one the guest booked through included: it knows the booking
+      // but not that the villa is still occupied on the last afternoon (see
+      // src/utils/stayHolds.js).
+      const createdAt = {}
+      for (const s of (stayRows || [])) createdAt[s.stay_id] = s.created_at
+      const holds = heldNights(stayRows, await holdRules(DB, link.villa_id), today)
+        .map(h => ({ id: `${h.stayId}:${h.kind}`, kind: h.kind, start: h.night, end: addDays(h.night, 1), stamp: createdAt[h.stayId] }))
       const events = buildHubEvents({
-        targetChannel: link.channel, today,
+        targetChannel: link.channel, today, holds,
         stays:  (stayRows  || []).map(s => ({ id: s.stay_id,  source:  s.source,  start: s.checkin_date, end: s.checkout_date, stamp: s.created_at })),
         blocks: (blockRows || []).map(b => ({ id: b.block_id, channel: b.channel, start: b.checkin_date, end: b.checkout_date, stamp: b.first_seen_at })),
       })
@@ -3187,6 +3294,7 @@ export async function onRequest(ctx) {
              ORDER BY checkin_date ASC`
           ).bind(...sc.binds)
         })().all()
+        await attachGuestTimes(DB, results)
         return json({ success: true, data: results })
       }
 
@@ -3527,14 +3635,17 @@ export async function onRequest(ctx) {
         assertPropertyAccess(payload, villaId)
         const windowDays = 60
         const { results: stays } = await DB.prepare(
-          `SELECT checkin_date, checkout_date FROM stayvibe_stays
+          `SELECT stay_id, checkin_date, checkout_date, early_checkin_time, late_checkout_time FROM stayvibe_stays
             WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
-              AND checkin_date < date('now', '+' || ? || ' days') AND checkout_date > date('now')`
+              AND checkin_date < date('now', '+' || ? || ' days') AND checkout_date >= date('now')`
         ).bind(villaId, windowDays).all()
 
         const today = new Date(); today.setHours(0, 0, 0, 0)
         const fmt = d => d.toISOString().slice(0, 10)
-        const isOccupied = dateStr => stays.some(s => s.checkin_date <= dateStr && dateStr < s.checkout_date)
+        // A night held by an agreed late check-out / early check-in is not for sale
+        // either (src/utils/stayHolds.js), so it ends a gap the way a booking does.
+        const held = new Set(heldNights(stays, await holdRules(DB, villaId)).map(h => h.night))
+        const isOccupied = dateStr => held.has(dateStr) || stays.some(s => s.checkin_date <= dateStr && dateStr < s.checkout_date)
 
         const gaps = []
         let gapStart = null
@@ -4054,6 +4165,8 @@ export async function onRequest(ctx) {
         // Next N arrivals rather than a 7-day window: on a quiet week Raman
         // saw an empty card and had no idea who was coming next.
         const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= date('now') ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
+        await attachGuestTimes(DB, overdueRows)
+        await attachGuestTimes(DB, upcomingRows)
         const mapRow = r => ({
           stayId: r.stay_id, guestName: r.guest_name,
           checkInDate: r.checkin_date, checkOutDate: r.checkout_date,
@@ -4063,6 +4176,7 @@ export async function onRequest(ctx) {
           requestEarlyCheckin: !!r.request_early_checkin,
           requestLateCheckout: !!r.request_late_checkout,
           eta: r.eta || null,
+          etd: r.etd || null,
           expectedArrivalAt: r.expected_arrival_at || null,
         })
         // Same-day turnaround: someone checks out on the very day the next
@@ -4113,7 +4227,7 @@ export async function onRequest(ctx) {
         const checkOut = url.searchParams.get('checkOut')
         if (!checkIn || !checkOut || checkOut <= checkIn) return err('checkIn and checkOut (after checkIn) required')
         const { results } = await DB.prepare(`
-          SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, late_checkout_time
+          SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, early_checkin_time, late_checkout_time
           FROM stayvibe_stays
           WHERE villa_id = ?
             AND status NOT IN ('cancelled','void')
@@ -4124,35 +4238,24 @@ export async function onRequest(ctx) {
 
         // Same-day turnover is normally fine — one guest out in the morning,
         // the next in that afternoon. It stops being fine when the departing
-        // guest has an approved late check-out: the villa is still occupied
-        // into the afternoon or night, and the hours needed to reset it no
-        // longer exist. Dates alone can't see that, so a booking that should
-        // have been refused looked available.
-        const turnCfg  = getHostConfig(villaId).turnaround || {}
-        const TURN_MIN = (turnCfg.turnaroundHours != null ? turnCfg.turnaroundHours : 4) * 60
-        const mins = v => {
-          if (!v) return null
-          const m = String(v).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
-          if (!m) return null
-          let h = parseInt(m[1], 10)
-          const ap = (m[3] || '').toUpperCase()
-          if (ap === 'PM' && h !== 12) h += 12
-          if (ap === 'AM' && h === 12) h = 0
-          return h * 60 + parseInt(m[2], 10)
-        }
-        const ARRIVE_MIN = mins(turnCfg.defaultCheckinTime || '16:00')
+        // guest has an agreed late check-out (or, the other way round, the
+        // arriving one an agreed early check-in): the villa is still occupied
+        // into the afternoon, and the hours needed to reset it no longer exist.
+        // Dates alone can't see that, so a booking that should have been refused
+        // looked available. The same rule closes the night on the calendar and in
+        // the links handed to the booking platforms (src/utils/stayHolds.js).
+        const rules = await holdRules(DB, villaId)
 
         const conflicts = [], nearby = []
         for (const r of (results || [])) {
           if (r.checkin_date < checkOut && r.checkout_date > checkIn) { conflicts.push(r); continue }
-          if (r.checkout_date === checkIn && r.late_checkout_time) {
-            const leaveMin = mins(r.late_checkout_time)
-            const gap = leaveMin == null || ARRIVE_MIN == null ? null : ARRIVE_MIN - leaveMin
-            if (gap != null && gap < TURN_MIN) {
-              conflicts.push({ ...r, reason: 'late_checkout_turnaround',
-                note: `Departing guest has an approved late check-out at ${r.late_checkout_time} — only ${Math.max(0, Math.round(gap))} min before a ${turnCfg.defaultCheckinTime || '16:00'} arrival, and the villa needs ${TURN_MIN} min to reset.` })
-              continue
-            }
+          const hold = stayHolds(r, rules).find(h => h.night >= checkIn && h.night < checkOut)
+          if (hold) {
+            conflicts.push({ ...r,
+              reason: hold.kind === 'late_checkout' ? 'late_checkout_turnaround' : 'early_checkin_turnaround',
+              heldNight: hold.night,
+              note: `${r.guest_name} has an agreed ${holdPhrase(hold)}, so the night of ${hold.night} is held — the villa needs ${rules.turnaroundHours} h to reset before the next arrival.` })
+            continue
           }
           nearby.push(r)
         }
@@ -4235,6 +4338,7 @@ export async function onRequest(ctx) {
                   COALESCE(p.request_cab,0)        AS request_cab,
                   COALESCE(p.request_extra_beds,0) AS request_extra_beds,
                   COALESCE(p.extra_beds_count,0)   AS extra_beds_count,
+                  p.expected_departure_time        AS etd,
                   se.refund_amount AS refund_amount, se.refund_reason AS refund_reason
            FROM stayvibe_stays
            LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id
@@ -4255,6 +4359,13 @@ export async function onRequest(ctx) {
               excludeStayId: r.stay_id,
             })
           }
+        }
+        // The nights an agreed late check-out / early check-in keeps back
+        // (src/utils/stayHolds.js), so the screen can say so.
+        const withTimes = (results || []).filter(r => r.early_checkin_time || r.late_checkout_time)
+        if (withTimes.length) {
+          const rules = await holdRules(DB, villaId)
+          for (const r of withTimes) r.holds = stayHolds(r, rules)
         }
         return json({ success: true, data: results })
       }
@@ -5269,7 +5380,8 @@ export async function onRequest(ctx) {
         // just as much as upcoming, so only cancelled/void (never occupied
         // the villa at all) are excluded.
         const { results: stays } = await DB.prepare(`
-          SELECT stay_id, guest_name, source, checkin_date, checkout_date
+          SELECT stay_id, guest_name, source, checkin_date, checkout_date,
+                 early_checkin_time, late_checkout_time
           FROM stayvibe_stays
           WHERE villa_id = ? AND status NOT IN ('cancelled', 'void')
             AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
@@ -5292,9 +5404,23 @@ export async function onRequest(ctx) {
             })
           }
         }
+        // Nights held by an agreed late check-out / early check-in (see
+        // src/utils/stayHolds.js). Not a booking, but not for sale either: they
+        // show in the grid, and a booking that lands on one is flagged like any
+        // other double booking (the next family arriving at 4 PM on the day a guest
+        // leaves at 6 PM). Two holds on the same night are not a clash with each other.
+        const rules = await holdRules(DB, villaId)
+        for (const h of heldNights(stays, rules, todayIst())) {
+          items.push({
+            id: `hold:${h.stayId}:${h.kind}`, kind: 'hold', source: h.kind,
+            label: `${h.guest || 'Guest'} · ${holdPhrase(h)}`,
+            checkinDate: h.night, checkoutDate: addDays(h.night, 1), holdFor: h.stayId, time: h.time,
+          })
+        }
         for (const item of items) {
           item.conflict = items.some(o =>
-            o !== item && (o.source || '').toLowerCase() !== (item.source || '').toLowerCase() &&
+            o !== item && !(item.kind === 'hold' && o.kind === 'hold') &&
+            (o.source || '').toLowerCase() !== (item.source || '').toLowerCase() &&
             overlaps(item.checkinDate, item.checkoutDate, o.checkinDate, o.checkoutDate))
         }
         items.sort((a, b) => a.checkinDate.localeCompare(b.checkinDate))
@@ -5323,12 +5449,15 @@ export async function onRequest(ctx) {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, created_at,
-                  folder_created, folder_created_at, booked_by_name
+                  folder_created, folder_created_at, booked_by_name,
+                  eta, early_checkin_time, late_checkout_time,
+                  request_early_checkin, request_late_checkout
            FROM stayvibe_stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))${pr1.sql}
            ORDER BY checkin_date ASC`
         ).bind(...pr1.binds).all()
+        await attachGuestTimes(DB, results)
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
           guestName:       r.guest_name,
@@ -5342,6 +5471,13 @@ export async function onRequest(ctx) {
           folderCreated:   r.folder_created || 0,
           folderCreatedAt: r.folder_created_at || null,
           bookedByName:    r.booked_by_name || null,
+          status:               'pending_review',
+          eta:                  r.eta || null,
+          etd:                  r.etd || null,
+          earlyCheckinTime:     r.early_checkin_time || null,
+          lateCheckoutTime:     r.late_checkout_time || null,
+          requestEarlyCheckin:  !!r.request_early_checkin,
+          requestLateCheckout:  !!r.request_late_checkout,
         })) })
       }
 
@@ -7481,13 +7617,13 @@ export async function onRequest(ctx) {
       // quietly distort occupancy and the manager's commission band.
       if (action === 'updateStayGuestInfo') {
         const { stayId, guestName, guestPhone, guestEmail,
-                checkinDate, checkoutDate, adults, children, eta } = body
+                checkinDate, checkoutDate, adults, children, eta, etd } = body
         if (!stayId) return err('stayId required')
         // The id came from the caller — confirm the record is theirs before
         // acting on it. No-op for one tenant; blocks cross-tenant writes once
         // there are two.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
-        const cur = await DB.prepare(`SELECT checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const cur = await DB.prepare(`SELECT villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!cur) return err('Stay not found', 404)
 
         const sets = [], vals = []
@@ -7513,10 +7649,14 @@ export async function onRequest(ctx) {
           put('nights', Math.max(1, Math.round(
             (new Date(`${co}T00:00:00Z`) - new Date(`${ci}T00:00:00Z`)) / 86400000)))
         }
-        if (!sets.length) return err('nothing to update')
+        if (!sets.length && etd === undefined) return err('nothing to update')
 
-        put('updated_by', actor); put('updated_at', now())
-        await DB.prepare(`UPDATE stayvibe_stays SET ${sets.join(', ')} WHERE stay_id = ?`).bind(...vals, stayId).run()
+        if (sets.length) {
+          put('updated_by', actor); put('updated_at', now())
+          await DB.prepare(`UPDATE stayvibe_stays SET ${sets.join(', ')} WHERE stay_id = ?`).bind(...vals, stayId).run()
+        }
+        // The guest's expected departure sits with their form answers.
+        if (etd !== undefined) await recordGuestDeparture(DB, stayId, cur.villa_id, scrub(etd))
         const row = await DB.prepare(`SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, eta FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         return json({ success: true, data: row })
       }
@@ -7541,6 +7681,75 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { stayId, phone: cleanPhone } })
       }
 
+      // ── APPROVING THE TIMES A GUEST ASKED FOR ────────────────────────────
+      // The check-in form lets a guest give an arrival time and an expected
+      // departure. One that asks for more than the villa gives (arriving before
+      // check-in, leaving after check-out) waits for the owner, who approves it
+      // here: the guest's time becomes the agreed early check-in / late
+      // check-out time (the same fields Complete booking edits, and the ones
+      // Raman and the WhatsApp messages read). Declining is simply not
+      // approving; the flag lasts until the stay is marked ready for check-in.
+      //
+      // Approving also takes the neighbouring night out of sale (see
+      // src/utils/stayHolds.js). When someone is already booked into the hours
+      // that would no longer be free - the next family arriving that afternoon -
+      // nothing is written until the owner has been told and sends `confirmed`.
+      if (action === 'approveGuestTimes') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        if (!body.arrival && !body.departure) return err('Choose which time to approve')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(
+          `SELECT stay_id, villa_id, eta, checkin_date, checkout_date, early_checkin_time, late_checkout_time FROM stayvibe_stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        const writes = []
+        let early = stay.early_checkin_time, late = stay.late_checkout_time
+        if (body.arrival) {
+          const t = cleanTime(stay.eta)
+          if (!t) return err("The guest's arrival time is not a clock time. Set the early check-in time by hand instead.")
+          early = t
+          writes.push(DB.prepare(
+            `UPDATE stayvibe_stays SET early_checkin_time = ?, request_early_checkin = 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          ).bind(t, actor, now(), stayId))
+        }
+        if (body.departure) {
+          const prefs = await DB.prepare(`SELECT expected_departure_time FROM stayvibe_stay_prefs WHERE stay_id = ?`).bind(stayId).first()
+          const t = cleanTime(prefs?.expected_departure_time)
+          if (!t) return err("The guest's departure time is not a clock time. Set the late check-out time by hand instead.")
+          late = t
+          writes.push(DB.prepare(
+            `UPDATE stayvibe_stays SET late_checkout_time = ?, request_late_checkout = 1, updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          ).bind(t, actor, now(), stayId))
+        }
+        if (!body.confirmed) {
+          const gap = await checkTurnaroundGap(DB, stay.villa_id, {
+            checkinDate: stay.checkin_date, checkoutDate: stay.checkout_date,
+            earlyCheckinTime: body.arrival ? early : null, lateCheckoutTime: body.departure ? late : null,
+            excludeStayId: stayId,
+          })
+          const warnings = []
+          if (gap.early?.tooClose) {
+            const who = gap.early.adjacentGuest, at = fmt12(gap.early.departTime)
+            warnings.push(gap.early.gapMinutes <= 0
+              ? `${who} does not check out until ${at}, which is after this arrival.`
+              : `${who} checks out at ${at}, only ${Math.round(gap.early.gapMinutes)} min before this arrival - the villa needs ${gap.turnaroundHours} h to reset.`)
+          }
+          if (gap.late?.tooClose) {
+            const who = gap.late.adjacentGuest, at = fmt12(gap.late.arriveTime)
+            warnings.push(gap.late.gapMinutes <= 0
+              ? `${who} is due to arrive at ${at}, before this guest would leave.`
+              : `${who} is due to arrive at ${at}, only ${Math.round(gap.late.gapMinutes)} min after this guest would leave - the villa needs ${gap.turnaroundHours} h to reset.`)
+          }
+          if (warnings.length) return json({ success: true, data: { needsConfirm: true, warnings } })
+        }
+        await DB.batch(writes)
+        const holds = stayHolds({ ...stay, early_checkin_time: early, late_checkout_time: late }, await holdRules(DB, stay.villa_id))
+        return json({ success: true, data: { stayId, arrival: !!body.arrival, departure: !!body.departure, holds } })
+      }
+
       // Actual approved times for early check-in / late check-out — the boolean
       // request_early_checkin/request_late_checkout flags only say a request
       // exists, not what time was actually agreed. Both fields are sent every
@@ -7555,7 +7764,11 @@ export async function onRequest(ctx) {
         if (!stayId) return err('stayId required')
         await DB.prepare(`UPDATE stayvibe_stays SET early_checkin_time = ?, late_checkout_time = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
           .bind(earlyCheckinTime || null, lateCheckoutTime || null, actor, now(), stayId).run()
-        return json({ success: true, data: { stayId, earlyCheckinTime: earlyCheckinTime || null, lateCheckoutTime: lateCheckoutTime || null } })
+        // An agreed time off the standard one can take the neighbouring night out of
+        // sale (src/utils/stayHolds.js); say which, so the screen can tell the owner.
+        const st = await DB.prepare(`SELECT stay_id, villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const holds = st ? stayHolds({ ...st, early_checkin_time: earlyCheckinTime, late_checkout_time: lateCheckoutTime }, await holdRules(DB, st.villa_id)) : []
+        return json({ success: true, data: { stayId, earlyCheckinTime: earlyCheckinTime || null, lateCheckoutTime: lateCheckoutTime || null, holds } })
       }
 
       // Manual backup for the checkout-day email — the automated 6am send

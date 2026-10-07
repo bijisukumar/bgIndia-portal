@@ -6,6 +6,11 @@ import { api } from '../api'
 import { parseLocalDate, fmtDate } from '../utils/dates'
 import { waNumber, buildReviewRequestWaLink, guestBaseUrl } from '../utils/guestMessages'
 import { channelLabel, channelPillStyle } from '../utils/channel'
+import { stayTimes } from '../utils/stayTimes'
+import { villaTimeDefaults } from '../utils/villaTimes'
+import { heldSummary } from '../utils/stayHolds'
+import GuestTimesReview from '../components/GuestTimesReview'
+import StayTimesLine from '../components/StayTimesLine'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 
 // Manager name shown on the "Staff Perks" tile and elsewhere — configurable
@@ -242,12 +247,14 @@ function NeedsAttentionBlock() {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000)
   }
 
-  useEffect(() => {
-    api.getPendingReviewStays().then(data => {
-      const list = Array.isArray(data) ? data : []
-      setPending(list); setSelected(list[0] || null)
-    }).catch(() => setPending([]))
-  }, [])
+  // keepId: stay on this guest after a reload (approving a time must not jump the selection).
+  const load = keepId => api.getPendingReviewStays().then(data => {
+    const list = Array.isArray(data) ? data : []
+    setPending(list)
+    setSelected(prev => list.find(p => p.stayId === (keepId || prev?.stayId)) || list[0] || null)
+  }).catch(() => setPending(prev => prev || []))
+
+  useEffect(() => { load() }, [])
 
   if (pending === null) return null
   // Nothing left to show — but stay mounted while a confirmation toast is up,
@@ -263,6 +270,16 @@ function NeedsAttentionBlock() {
 
   async function handleApprove() {
     if (!selected) return
+    // The guest may have asked to arrive before check-in or leave after check-out.
+    // Onboarding without deciding is allowed, but not silently.
+    const t = stayTimes(selected, villaTimeDefaults())
+    if (t.needsReview) {
+      const asks = [
+        t.arrivalFlag && `arrive at ${t.eta} (check-in is from ${t.inTime})`,
+        t.departureFlag && `leave at ${t.etd} (check-out is by ${t.outTime})`,
+      ].filter(Boolean).join(' and ')
+      if (!window.confirm(`${selected.guestName} asked to ${asks}, and you have not approved it.\n\nOnboard anyway?`)) return
+    }
     setSaving(true)
     try {
       await api.setReadyForCheckIn({ stayId: selected.stayId })
@@ -352,6 +369,7 @@ function NeedsAttentionBlock() {
                     🔗 Booked by {p.bookedByName}
                   </div>
                 )}
+                <StayTimesLine stay={p} dim="#9AA5B4" />
               </div>
               <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px',
                 flexShrink: 0, whiteSpace: 'nowrap', background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>
@@ -363,6 +381,9 @@ function NeedsAttentionBlock() {
       </div>
       {selected && (
         <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <GuestTimesReview stay={selected} compact
+            onDone={async (_which, res) => { showToast('Time approved ✓' + heldSummary(res && res.holds)); await load(selected.stayId) }}
+            onError={m => showToast('Failed: ' + m, 'error')} />
           <button onClick={handleApprove} disabled={saving}
             style={{ padding: '12px', borderRadius: '10px', cursor: 'pointer',
               border: '1px solid rgba(52,168,83,0.4)', background: 'rgba(52,168,83,0.12)',

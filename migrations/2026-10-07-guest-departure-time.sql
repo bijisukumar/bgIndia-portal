@@ -1,0 +1,21 @@
+-- A guest's expected departure time, from the online check-in form.
+--
+-- The form already asked for an expected ARRIVAL time, which is stored in
+-- stayvibe_stays.eta. It never asked when the guest expects to LEAVE, so there
+-- was nothing to show the owner or Raman. This adds the matching bare time.
+--
+-- Why not reuse what is already there:
+--   * stayvibe_stays.expected_departure_at is a full timestamp that the
+--     flexibility/turnaround logic and the manager's commission both read (a date
+--     earlier than the booked check-out reads as a held night). A guest's
+--     statement that nobody has agreed to must not steer either, so it is kept
+--     apart, exactly as eta is kept apart from expected_arrival_at.
+--   * early_checkin_time / late_checkout_time are the AGREED times; they are
+--     written only when the owner approves what the guest asked for.
+--
+-- It lives in stayvibe_stay_prefs with the guest's other form answers (breakfast,
+-- cab, extra beds), not in stayvibe_stays, which was moved off the column cap by
+-- giving those answers their own 1:1 table. 'HH:MM', assumed to fall on the
+-- check-out date. Applied once to bgindia-db, which serves every host.
+
+ALTER TABLE stayvibe_stay_prefs ADD COLUMN expected_departure_time TEXT;

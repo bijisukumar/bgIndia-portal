@@ -106,10 +106,11 @@ export const BLOCKS = [
     tldr: 'Guests who have filled in their check-in form and are waiting for your yes — approve them right here.',
     shows: 'Only when a guest has filled in their check-in form and is waiting for you.',
     what: [
-      `A red list at the very top of your home screen. Each row is a guest who has submitted the online check-in form: their name, check-in date, nights and contact, a **Pending review** tag and, if an agent or partner made the booking, **Booked by …**.`,
+      `A red list at the very top of your home screen. Each row is a guest who has submitted the online check-in form: their name, check-in date, nights and contact, a **Pending review** tag and, if an agent or partner made the booking, **Booked by …**. Beneath the name you also see when they are due: the check-in and check-out times you give, and the arrival and departure times the guest typed on the form.`,
       `Tap a guest to select them, then choose what to do from the buttons underneath:`,
     ],
     bullets: [
+      `[[Approve 6:00 PM]] (or whichever time the guest gave) — shown in an amber note when the guest asked for something you do not normally give: arriving before check-in, or leaving after check-out. Approving makes it the **agreed** time, which your manager and the WhatsApp message then use, and it also closes the neighbouring night to new bookings (see {{channel-calendar|Channel calendar}}). If somebody is already booked into that night you are asked first. To decline, leave it and tell the guest; any extra charge is agreed with the guest as you always do.`,
       `[[✅ Onboard Guest]] — approve. The guest moves to **Ready for check-in** and your manager is told they can check them in.`,
       `[[📂 Open booking]] — opens that booking in {{complete-booking|Complete booking}}, to look over the details and documents first.`,
       `[[📁 View folder]] — opens the guest's uploaded documents, when there are any.`,
@@ -279,7 +280,7 @@ export const TILES = [
           ] },
           { name: 'Possible matches — same guest?', text: `When an enquiry has the same dates as an existing stay under a slightly different name, you are asked to link them ([[✓ Same guest — link]]) or dismiss it ([[Not a match]]), so enquiries do not sit open after the guest has already booked.` },
           { name: 'Archive', text: `Enquiries whose dates have passed, or that are Lost or Cancelled, fold away into a collapsed Archive so the main list only shows what is still live.` },
-          { name: '+ New (New enquiry)', text: `Guest details (typing a name searches your past guests, so a returning guest is recognised), the stay request with an availability check, party size, purpose (Vacation, Wedding, Temple Visit, Family Function, Dance, Other) and source, then pricing from your rate card with discount type or repeat-guest percentage, quote and final offer.` },
+          { name: '+ New (New enquiry)', text: `Guest details (typing a name searches your past guests, so a returning guest is recognised), the stay request with an availability check (a night also shows as not available when it is **held** — see {{channel-calendar|Channel calendar}}), party size, purpose (Vacation, Wedding, Temple Visit, Family Function, Dance, Other) and source, then pricing from your rate card with discount type or repeat-guest percentage, quote and final offer.` },
           { name: 'Enquiry detail (tap a card)', text: `Everything for one enquiry:`, bullets: [
             `**Pricing** — adjust dates or guests and tap **Adjust & get pricing**; pick a discount type; add extra charges.`,
             `**The quote** — [[📋 Generate & copy WhatsApp quote]] or [[💬 Send quote in WhatsApp]] (it opens the guest's chat with the quote ready; you tap send). It opens with a link to your villa's pictures and details, then dates, timings, rate and answers to common questions. There are three versions: first contact, returning guest (leads with their discount) and travel partner (shows the commission).`,
@@ -304,8 +305,13 @@ export const TILES = [
         insideLabel: 'On the screen',
         inside: [
           { name: 'Checked-in guests', text: `For guests currently staying: [[💬 Send comfort check]] (a WhatsApp "hope you have settled in"), [[📧 Send checkout email now]] (a manual backup — the checkout-day email normally goes out by itself around 6:00 AM) and [[🙏 Send farewell message]].` },
-          { name: 'Select guest', text: `Your upcoming stays with their status and days to check-in. [[🔗 Merge bookings]] links two records when the person who booked is not the person who stayed, so the money sits with the right guest.` },
-          { name: 'Guest info', text: `Name, phone (a leading 0 is removed and +91 added when you save, because WhatsApp rejects both otherwise), adults and children, requested arrival time, **Booked by**, and the check-in and check-out dates with the **day of the week** spelled out, which is easier to read aloud to a guest.` },
+          { name: 'Select guest', text: `Your upcoming stays with their status and days to check-in, and when each guest is due in and out: the check-in and check-out times you give, any early or late time you have agreed (in amber), and the arrival and departure times the guest typed on the form. **⚠ review times** marks a guest who asked for more than you give. [[🔗 Merge bookings]] links two records when the person who booked is not the person who stayed, so the money sits with the right guest.` },
+          { name: 'Guest info', text: `Name, phone (a leading 0 is removed and +91 added when you save, because WhatsApp rejects both otherwise), adults and children, **Booked by**, and the check-in and check-out dates with the **day of the week** spelled out, which is easier to read aloud to a guest. Under each date: the time you give (**Check-in from**, **Check-out by**, shown in amber and marked **agreed** when you have agreed an early or late time), then the guest's own **Arrival ETA** and **Check-out ETA** from the form (**not given yet** if they left it blank). [[edit]] changes both, in case the guest told you something different on a call.` },
+          { name: 'When a guest asks for other times', text: `When a guest's arrival is before check-in, or their departure after check-out, an amber note at the top of Guest info offers [[Approve …]] for each. Decide before you press [[🔑 Mark ready for check-in]]; if you press it with one still waiting, you are asked to confirm.`, bullets: [
+            `**Approving** records it as the agreed early check-in or late check-out. Your manager sees it, and the WhatsApp messages state it. You can also set or change a time yourself with **+ set time** under a guest's early or late request.`,
+            `**It holds a night.** A guest who leaves at 6:00 PM is still in the villa when the next family would arrive at 4:00 PM, so that night is closed to new bookings — and likewise the night before an early check-in. The note tells you which night before you approve, and Guest info shows **🔒 Holds the night of …** afterwards. If somebody is already booked into that night you are asked first, and nothing is saved until you say yes.`,
+            `**Declining** is simply not approving. The guest's wish stays visible as a plain note, and nothing is closed.`,
+          ] },
           { name: 'Channel & tariff', text: `The platform, the nightly rate, and itemised **extra charges** chosen from a list (for example Additional Guest or Floor Bed). For Airbnb there is a fee breakdown with occupancy tax shown separately.` },
           { name: 'Extended stay reference', text: `25% and 50% of what the guest actually paid per night, as a quick guide for pricing early check-in, late check-out or a half-day.` },
           { name: 'Save financial details', text: `Saves the figures. This is what the Dashboard, Channel mix and Staff Perks later add up.` },
@@ -360,8 +366,9 @@ export const TILES = [
         inside: [
           { name: '+ Feed', text: `Add a platform: its name, an optional label, and its calendar link (on Airbnb: calendar settings → "Export Calendar").` },
           { name: 'Connected feeds', text: `Each platform with its last-synced time or a clear "sync failed" message. [[Pause]] / [[Resume]] or [[Remove]] a feed (a paused platform stops being passed on to the others). [[🔄 Sync now]] refreshes immediately. The app also refreshes a calendar whenever you open this screen, and whenever a platform reads its link below.` },
-          { name: 'Share your calendar back', text: `One row per platform, each with [[Create link]]. Tap [[📋 Copy link]] and paste it into that platform's calendar import (look for "Import calendar" in its calendar settings). The link holds every night taken anywhere else — never that platform's own bookings — and dates only: no guest names, contacts or booking numbers. Each row shows when the platform last read its link, and warns if it has not for over a day. [[New link]] replaces a link (the old one stops working at once); [[Remove]] withdraws it.` },
-          { name: 'Calendar', text: `A month grid with each platform in its own colour and a ⚠️ outline wherever two platforms overlap. Use the arrows or **Today** to move around.` },
+          { name: 'Share your calendar back', text: `One row per platform, each with [[Create link]]. Tap [[📋 Copy link]] and paste it into that platform's calendar import (look for "Import calendar" in its calendar settings). The link holds every night taken anywhere else — never that platform's own bookings — plus any **held night** (below), and dates only: no guest names, contacts or booking numbers. Each row shows when the platform last read its link, and warns if it has not for over a day. [[New link]] replaces a link (the old one stops working at once); [[Remove]] withdraws it.` },
+          { name: 'Calendar', text: `A month grid with each platform in its own colour and a ⚠️ outline wherever two platforms overlap. Use the arrows or **Today** to move around. A **🔒 hatched amber bar** is a **held night**: nobody is booked, but it is not for sale because a guest's agreed late check-out (or the next guest's early check-in, for the night before) leaves no time to reset the villa. The monthly count shows them separately (**🔒 2 held**), never as booked nights.` },
+          { name: 'Held nights', text: `Once you have agreed a late check-out or an early check-in, that night is closed everywhere at once: it shows here, the availability check in {{guest-enquiries|Guest enquiries}} says **not available**, {{upcoming-gaps|Upcoming gaps}} stops counting it as free, and every platform's link carries it — even the platform the guest booked through, which knows the booking but not the late departure. Take the agreed time away (or cancel the stay) and the night is released again. A guest only typing a time on the form closes nothing: it needs your approval. How many hours the villa needs to reset is its turnaround setting; at 6 hours, any agreed time beyond the standard check-in and check-out holds the night.` },
         ],
         note: `Platforms read a link on their own schedule — Airbnb about every 3 hours, Vrbo about every 30 minutes — so a booking can take a few hours to show up on the others. That delay is theirs, not the app's. Booking.com and Agoda only offer calendar links when the villa is listed as a single unit, and Booking.com not at all while a channel manager is connected. This screen is the other half of the {{duplicate-bookings|Duplicate bookings}} banner on your home screen.`,
       },
@@ -508,7 +515,7 @@ export const GUEST_PAGES = [
     id: 'checkin-form', icon: '📝', name: 'Check-in form', path: '/checkin/…',
     who: 'Guests, with a link you send',
     text: [
-      `A public form — no login — where each guest enters their personal details, stay details and ID. Foreign nationals complete a Form C block for each person. It opens already showing which platform the guest booked through.`,
+      `A public form — no login — where each guest enters their personal details, stay details and ID. Foreign nationals complete a Form C block for each person. It opens already showing which platform the guest booked through. It also asks when they expect to arrive and to leave; a time beyond what you give waits for your approval in {{needs-attention|Needs attention}}.`,
       `When it is submitted the stay moves to **Pending review**, which is what puts the guest in {{needs-attention|Needs attention}}. You make the links in {{checkin-links|Check-in links}}.`,
     ],
   },
@@ -536,7 +543,7 @@ export const MANAGER = {
   ],
   screens: [
     { icon: '🏠', name: 'Home', text: `Today's arrivals and who is in the house. Guests appear only after **you** mark them ready for check-in. A red **Overdue — still open** list asks them to close stays so you can settle their commission.` },
-    { icon: '🔑', name: 'Check-in', text: `Two tabs, **Check-in** and **In-house**. Pick a guest, review the booking summary, requested arrival time and extra services, photograph the car and number plate (the plate is read for them), confirm the check-in, then **Ready for check-out** and **Complete check-out** at the end. They can also ask a guest for a review on WhatsApp while they are still at the gate.` },
+    { icon: '🔑', name: 'Check-in', text: `Two tabs, **Check-in** and **In-house**. Pick a guest, review the booking summary, when they are due in and out (the times you give, any you agreed, and what the guest told you) and the extra services, photograph the car and number plate (the plate is read for them), confirm the check-in, then **Ready for check-out** and **Complete check-out** at the end. They can also ask a guest for a review on WhatsApp while they are still at the gate.` },
     { icon: '🍽️', name: 'Kitchen incidentals', text: `Charges for items a guest used, priced from your Inventory or entered ad hoc, with an itemised message the guest can be sent on WhatsApp. You are emailed when it is saved.` },
     { icon: '🥞', name: 'Breakfast', text: `Rate per person times number of guests.` },
     { icon: '🚗', name: 'Car rental', text: `Destination, trip amount, your commission on it and the net to the villa.` },
@@ -702,6 +709,7 @@ export const GLOSSARY = [
   { term: 'Lifecycle', def: `The path a stay follows from Booked to Closed.` },
   { term: 'Provisional / Pending review', def: `A booking whose guest has submitted the check-in form but which you have not yet approved.` },
   { term: 'Turnaround', def: `The hours needed to clean and reset the villa between one guest leaving and the next arriving.` },
+  { term: 'Held night', def: `A night nobody has booked but that is not for sale, because a guest's agreed late check-out (or early check-in, for the night before) leaves no time to reset the villa.` },
   { term: 'iCal feed', def: `A calendar link a platform provides, which lets another system read its booked dates.` },
   { term: 'Form C', def: `The registration of foreign nationals that Indian law requires for each foreign guest.` },
   { term: 'Segment', def: `A group of guests that share something — for example VIPs with five or more stays.` },
@@ -731,6 +739,10 @@ export const FAQ = [
   {
     q: `Is it safe to paste a calendar link into a platform?`,
     a: `A link holds dates only — no names, contacts or booking numbers — and its address is long and random, so it cannot be guessed. If you ever think one has been shared by mistake, tap [[New link]] and the old one stops working at once.`,
+  },
+  {
+    q: `A guest wants to leave at 6 PM. What happens to that night?`,
+    a: `Once you agree it — by approving what they typed on the form in {{needs-attention|Needs attention}}, or with **+ set time** in {{complete-booking|Complete booking}} — the night they leave on is held: it cannot be booked here or on any platform, because the next family would want to arrive at 4 PM and there would be no time to reset the villa. You are asked first if somebody is already booked into it. If you would rather keep the night for sale, do not agree the time. See **Held nights** in {{channel-calendar|Channel calendar}}.`,
   },
   {
     q: `Can I undo a check-out?`,

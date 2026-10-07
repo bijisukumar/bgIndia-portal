@@ -29,6 +29,8 @@ const CHANNEL_COLORS = {
   agoda: '#5A2D8C',
   goibibo: '#D6006C',
   cleartrip: '#00A19C',
+  // Not platforms: nights kept back by an agreed late check-out / early check-in.
+  late_checkout: '#F59E0B', early_checkin: '#F59E0B',
 }
 const FALLBACK_PALETTE = ['#8B5CF6', '#0EA5E9', '#F97316', '#14B8A6', '#EC4899']
 function channelColor(source) {
@@ -90,9 +92,11 @@ function monthNightsTally(items, year, month) {
   const startISO = toISO(new Date(year, month, 1))
   const endISO = toISO(new Date(year, month + 1, 1))
   const byChannel = {}
-  let total = 0
+  let total = 0, held = 0
   for (const item of items) {
     if (item.checkoutDate <= startISO || item.checkinDate >= endISO) continue
+    // A held night is kept back, not booked: counted on its own, never as a channel's.
+    if (item.kind === 'hold') { held += 1; continue }
     const clipStart = item.checkinDate > startISO ? item.checkinDate : startISO
     const clipEnd = item.checkoutDate < endISO ? item.checkoutDate : endISO
     const nights = Math.round((new Date(clipEnd) - new Date(clipStart)) / 86400000)
@@ -101,7 +105,7 @@ function monthNightsTally(items, year, month) {
     byChannel[key] = (byChannel[key] || 0) + nights
     total += nights
   }
-  return { byChannel, total }
+  return { byChannel, total, held }
 }
 
 function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
@@ -133,6 +137,7 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
             </span>
           ))}
           <span style={{ color: 'var(--text)', fontWeight: '700' }}>  =  {tally.total} nights</span>
+          {tally.held > 0 && <span style={{ color: '#F59E0B' }}>  ·  🔒 {tally.held} held</span>}
         </div>
       )}
 
@@ -165,12 +170,17 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginTop: '2px' }}>
                 {segs.map((seg, si) => {
                   const color = channelColor(seg.item.source)
+                  // A held night (an agreed late check-out / early check-in) is not a booking:
+                  // hatched, so it reads as "kept back" rather than as another platform.
+                  const isHold = seg.item.kind === 'hold'
                   return (
-                    <div key={si} title={`${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
+                    <div key={si} title={isHold ? 'Held night · ' + (seg.item.label || '') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
                       style={{
                         gridColumn: `${seg.startCol} / ${seg.endCol}`,
-                        background: color,
-                        color: '#fff',
+                        background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)' : color,
+                        color: isHold ? '#F59E0B' : '#fff',
+                        border: isHold ? '1px dashed rgba(245,158,11,0.7)' : 'none',
+                        boxSizing: 'border-box',
                         borderRadius: '5px',
                         padding: '3px 6px',
                         fontSize: '0.64rem',
@@ -181,7 +191,7 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
                         outline: seg.item.conflict ? '2px solid #EF4444' : 'none',
                         outlineOffset: '1px',
                       }}>
-                      {seg.item.conflict && '⚠️ '}{channelLabel(seg.item.source)}{seg.item.label ? ` · ${seg.item.label}` : ''}
+                      {seg.item.conflict && '⚠️ '}{isHold ? '🔒 ' + (seg.item.label || 'Held night') : channelLabel(seg.item.source) + (seg.item.label ? ' · ' + seg.item.label : '')}
                     </div>
                   )
                 })}
@@ -287,9 +297,10 @@ export default function ChannelCalendar() {
 
   const activeChannels = useMemo(() => {
     const set = new Map()
-    for (const it of calItems) set.set((it.source || '').toLowerCase(), it.source)
+    for (const it of calItems) if (it.kind !== 'hold') set.set((it.source || '').toLowerCase(), it.source)
     return [...set.values()]
   }, [calItems])
+  const hasHolds = calItems.some(it => it.kind === 'hold')
 
   return (
     <div className="screen">
@@ -399,7 +410,7 @@ export default function ChannelCalendar() {
 
         <div className="card-section-label" style={{ marginTop: '18px', marginBottom: '10px' }}>CALENDAR</div>
 
-        {activeChannels.length > 0 && (
+        {(activeChannels.length > 0 || hasHolds) && (
           <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '12px' }}>
             {activeChannels.map(src => {
               const feed = feeds.find(f => (f.channel || '').toLowerCase() === (src || '').toLowerCase())
@@ -417,6 +428,13 @@ export default function ChannelCalendar() {
                 </div>
               )
             })}
+            {hasHolds && (
+              <div title="A guest with an agreed late check-out is still in the villa when the next family would arrive (likewise an early check-in the night before), so that night is not for sale: it is closed here, in enquiries and on every platform's calendar."
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: '#F59E0B' }}>
+                <span style={{ width: '9px', height: '9px', borderRadius: '3px', border: '1px dashed #F59E0B', background: 'rgba(245,158,11,0.3)', display: 'inline-block', boxSizing: 'border-box' }} />
+                Held night (late check-out / early check-in)
+              </div>
+            )}
           </div>
         )}
 

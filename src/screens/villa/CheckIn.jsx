@@ -20,6 +20,9 @@ import { buildReviewRequestWaLink } from '../../utils/guestMessages'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { stayTimes } from '../../utils/stayTimes'
+import { villaTimeDefaults } from '../../utils/villaTimes'
+import StayTimesLine from '../../components/StayTimesLine'
 
 function formatDate(d) {
   if (!d) return '—'
@@ -508,6 +511,7 @@ export default function CheckIn() {
                             <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                               {formatDate(stay.checkin_date)} · {calcNights(stay.checkin_date,stay.checkout_date)}N
                             </div>
+                            <StayTimesLine stay={stay} />
                           </div>
                           <span style={{fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',
                             borderRadius:'10px',background:'rgba(52,168,83,0.15)',color:'#34A853'}}>
@@ -586,12 +590,38 @@ export default function CheckIn() {
                           <div className="field-input auto-filled">{selected.guest_phone}</div>
                         </div>
                       )}
-                      {!selected.request_early_checkin && !selected.request_late_checkout && selected.eta && (
-                        <div className="field" style={{marginBottom:0,marginTop:'4px'}}>
-                          <div className="field-label">Requested ETA</div>
-                          <div className="field-input auto-filled">{selected.eta}</div>
-                        </div>
-                      )}
+                      {(() => {
+                        // When this guest is due in and out, and what they told us on the check-in form.
+                        const t = stayTimes(selected, villaTimeDefaults())
+                        return (
+                          <div className="grid-2" style={{marginTop:'4px'}}>
+                            <div className="field">
+                              <div className="field-label">Check-in from</div>
+                              <div className="field-input gold">{t.inTime}{t.inEarly ? ' (early)' : ''}</div>
+                            </div>
+                            <div className="field">
+                              <div className="field-label">Check-out by</div>
+                              <div className="field-input gold">{t.outTime}{t.outLate ? ' (late)' : ''}</div>
+                            </div>
+                            {t.eta && (
+                              <div className="field">
+                                <div className="field-label">Arrival ETA</div>
+                                <div className="field-input auto-filled" style={t.etaBeforeCheckin ? {color:'#F59E0B'} : undefined}>
+                                  {t.eta}{t.etaBeforeCheckin ? ' — before check-in' : ''}
+                                </div>
+                              </div>
+                            )}
+                            {t.etd && (
+                              <div className="field">
+                                <div className="field-label">Check-out ETA</div>
+                                <div className="field-input auto-filled" style={t.etdAfterCheckout ? {color:'#F59E0B'} : undefined}>
+                                  {t.etd}{t.etdAfterCheckout ? ' — after check-out time' : ''}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </div>
 
                     {/* Directions & arrival steps — send a day or two before arrival */}
@@ -740,6 +770,7 @@ export default function CheckIn() {
                             {formatDate(stay.checkin_date)}
                             {d !== null && d > 0 && <span> · in {d} day{d!==1?'s':''}</span>}
                           </div>
+                          <StayTimesLine stay={stay} />
                           {/* Early check-in / late check-out flagged here too,
                               not just once the guest is Ready for Check-in —
                               so Raman can plan ahead of time, not find out the
@@ -796,6 +827,7 @@ export default function CheckIn() {
                               <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                                 Out: {formatDate(stay.checkout_date)}
                               </div>
+                              <StayTimesLine stay={stay} />
                             </div>
                             <span style={{fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',
                               borderRadius:'10px',background:m.color+'22',color:m.color}}>

@@ -202,6 +202,8 @@ export default function GuestCheckIn() {
   const [linkError,   setLinkError]   = useState('')
 
   const villaName   = VILLA_NAMES[villaId]      || 'Guruvayur Villa'
+  // The villa's standard times, quoted beside the arrival and check-out fields.
+  const villaTimes  = CONFIG.villas.find(v => v.id === villaId) || {}
   const villaAddr   = CONFIG.checkinAddress || VILLA_ADDRESSES[villaId] || {}
   const partnerName = PARTNER_NAMES[partner]    || partner
 
@@ -277,6 +279,7 @@ export default function GuestCheckIn() {
   const [transport, setTransport] = useState('')
   const [vehicle,   setVehicle]   = useState('')
   const [eta,       setEta]       = useState('')
+  const [etd,       setEtd]       = useState('')
 
   // ── Indian ID ─────────────────────────────────────────────
   const [idType,    setIdType]   = useState('')
@@ -512,7 +515,7 @@ export default function GuestCheckIn() {
         checkInDate: checkIn, checkOutDate: checkOut, nights,
         adults: parseInt(adults)||1, children: parseInt(children)||0,
         guestList: guestList||null, purposeOfVisit: purpose,
-        modeOfTransport: transport||null, vehicleNumber: vehicle||null, eta: eta||null,
+        modeOfTransport: transport||null, vehicleNumber: vehicle||null, eta: eta||null, expectedDepartureTime: etd||null,
         govtIdType: !isForeign ? idType : null,
         govtIdNum:  !isForeign ? idNumber : null,
         passportNumber: isForeign ? passportNo : null,
@@ -859,8 +862,18 @@ export default function GuestCheckIn() {
           </Field>
         )}
 
-        <Field label="Estimated arrival time (ETA)" hint="So we can be ready for you">
+        <Field label="Estimated arrival time (ETA)"
+          hint={villaTimes.checkinTime
+            ? `So we can be ready for you. Check-in is from ${villaTimes.checkinTime}; for an earlier arrival, tick "Request early check-in" below.`
+            : 'So we can be ready for you'}>
           <Input type="time" value={eta} onChange={setEta} />
+        </Field>
+
+        <Field label="Expected check-out time"
+          hint={villaTimes.checkoutTime
+            ? `So we can plan the turnaround. Check-out is by ${villaTimes.checkoutTime}; for a later departure, tick "Request late check-out" below.`
+            : 'So we can plan the turnaround'}>
+          <Input type="time" value={etd} onChange={setEtd} />
         </Field>
 
         {/* ── SECTION 4A: INDIAN ID ── */}

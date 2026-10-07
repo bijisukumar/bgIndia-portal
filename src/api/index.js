@@ -176,6 +176,15 @@ export const api = {
   getStoreCarPhotosSetting: ()     => get('getStoreCarPhotosSetting'),
   setStoreCarPhotosSetting: (data) => post('setStoreCarPhotosSetting', data),
 
+  // ── MAINTENANCE > TRAINING MANUAL ACCESS ─────────────────────
+  // (Reading the manual itself is a public, passcode-aware call made by
+  // screens/TrainingManual.jsx directly — it must not log anyone out on a 401.)
+  getManualAccess:         (vId)  => get('getManualAccess', { villaId: vId }),
+  createManualPasscode:    (data) => post('createManualPasscode', data),
+  revokeManualPasscode:    (data) => post('revokeManualPasscode', data),
+  setManualPasscodeExpiry: (data) => post('setManualPasscodeExpiry', data),
+  setManualAccessMode:     (data) => post('setManualAccessMode', data),
+
   // ── RENTAL PROPERTIES ────────────────────────────────────
   saveRentalIncome:     (data)   => post('saveRentalIncome', data),
   getRentalIncome:      (m, y)   => get('getRentalIncome', { month: m, year: y }),

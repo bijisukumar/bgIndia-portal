@@ -353,6 +353,32 @@ CREATE TABLE IF NOT EXISTS stayvibe_agent_links (
   updated_at   TEXT DEFAULT (datetime('now'))
 );
 
+-- Public Training Manual access (/Training-Manual): per-outsider passcodes with a
+-- time limit, plus the open/passcode switch. Full notes in
+-- migrations/2026-10-07-manual-access.sql.
+
+CREATE TABLE IF NOT EXISTS stayvibe_manual_passcodes (
+  passcode_id  TEXT PRIMARY KEY,
+  villa_id     TEXT NOT NULL DEFAULT 'dwarka',
+  label        TEXT NOT NULL,             -- who it was made for, e.g. "Raj - Acme Travels"
+  code_hash    TEXT NOT NULL,             -- HMAC-SHA256 of the passcode, hex
+  expires_at   TEXT,                      -- UTC 'YYYY-MM-DD HH:MM:SS'; NULL = no time limit
+  revoked_at   TEXT,                      -- UTC; once set the passcode no longer works
+  created_by   TEXT DEFAULT 'owner',
+  created_at   TEXT DEFAULT (datetime('now')),
+  last_used_at TEXT,
+  use_count    INTEGER DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_pc_hash  ON stayvibe_manual_passcodes(villa_id, code_hash);
+CREATE INDEX        IF NOT EXISTS idx_manual_pc_villa ON stayvibe_manual_passcodes(villa_id, created_at);
+
+CREATE TABLE IF NOT EXISTS stayvibe_manual_settings (
+  villa_id   TEXT PRIMARY KEY,
+  mode       TEXT NOT NULL DEFAULT 'open',   -- 'open' | 'passcode'
+  updated_by TEXT,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS stayvibe_duplicate_bookings (
   dup_id              TEXT PRIMARY KEY,
   villa_id            TEXT NOT NULL DEFAULT 'dwarka',

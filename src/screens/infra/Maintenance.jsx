@@ -19,6 +19,14 @@ const ITEMS = [
     path: '/owner/maintenance/staff',
   },
   {
+    icon: '📘',
+    bg: 'rgba(133,183,235,0.08)',
+    arrow: '#85B7EB',
+    title: 'Training manual access',
+    sub: 'Share the owner manual · passcodes for outsiders · time limits',
+    path: '/owner/maintenance/manual-access',
+  },
+  {
     icon: '✅',
     bg: 'rgba(52,168,83,0.08)',
     arrow: '#34A853',

@@ -16,6 +16,14 @@ function getHostConfig(villaId) {
   return HOST_CONFIGS[villaId] || HOST_CONFIGS.dwarka
 }
 
+// The owner Training Manual's words. They are served from here, and only to a
+// visitor the access rules in getTrainingManual let in — not compiled into the
+// public JavaScript, where no passcode could protect them. Nothing in src/
+// imports this file on the client side; if one ever does, the text is public
+// again, so keep it that way.
+import * as MANUAL from '../../src/content/trainingManual.js'
+const MANUAL_JSON = JSON.stringify({ ...MANUAL })
+
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
 // villa branding the way a genuine tenant security alert does. Domain
@@ -225,6 +233,74 @@ async function hashPin(pin) {
   const enc  = new TextEncoder()
   const buf  = await crypto.subtle.digest('SHA-256', enc.encode(String(pin)))
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// ── TRAINING MANUAL PASSCODES ─────────────────────────────────
+// A passcode is read off a phone and typed, so the alphabet leaves out the
+// look-alikes (no 0/O, no 1/I/L). 31 symbols x 8 places is about 39 bits —
+// ample for something that is also rate-limited and expires.
+const MANUAL_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+function genManualCode() {
+  let out = ''
+  const buf = new Uint8Array(32)
+  while (out.length < 8) {
+    crypto.getRandomValues(buf)
+    for (const b of buf) {
+      // 248 = 31 x 8: anything above would make the first symbols likelier.
+      if (b >= 248) continue
+      out += MANUAL_CODE_ALPHABET[b % 31]
+      if (out.length === 8) break
+    }
+  }
+  return out
+}
+const formatManualCode = c => `${c.slice(0, 4)}-${c.slice(4)}`
+// Whatever a person types: any case, spaces or hyphens or none.
+const normalizeManualCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+// Stored value: HMAC-SHA256 keyed by JWT_SECRET, per villa. Keyed rather than a
+// bare SHA-256 (as hashPin does for 4-digit PINs) because a leaked copy of the
+// table could otherwise be brute-forced offline: 39 bits is minutes on a GPU.
+async function manualCodeHash(env, villaId, code) {
+  if (!env.JWT_SECRET) throw new Error('Server secret not configured')
+  const enc = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(env.JWT_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(`manual-passcode:${villaId}:${code}`))
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Hours from now, or null for "no time limit". Anything else is refused rather
+// than guessed at: this is what decides how long a stranger can read the manual.
+function manualExpiry(v) {
+  if (v === null || v === 'never') return { ok: true, at: null }
+  const h = Number(v)
+  if (!Number.isFinite(h) || h < 1 || h > 24 * 366) return { ok: false }
+  return { ok: true, at: new Date(Date.now() + h * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ') }
+}
+// D1 stores UTC without a zone marker ('YYYY-MM-DD HH:MM:SS'); the browser
+// would read that as LOCAL time. Hand it out with the Z it should have had.
+const manualIso = d => (d ? String(d).replace(' ', 'T') + 'Z' : null)
+
+// WRONG passcodes only — someone holding a good one reloads freely. Per
+// isolate, like the login limiter; the size of the code space is what really
+// protects it.
+const manualFailures = new Map()
+const MANUAL_FAIL_WINDOW = 15 * 60 * 1000
+const MANUAL_FAIL_MAX = 8
+function manualRateLimited(ip) {
+  const e = manualFailures.get(ip)
+  if (!e || Date.now() - e.firstAt > MANUAL_FAIL_WINDOW || e.count < MANUAL_FAIL_MAX) return { limited: false }
+  return { limited: true, retryAfter: Math.max(1, Math.ceil((MANUAL_FAIL_WINDOW - (Date.now() - e.firstAt)) / 60000)) }
+}
+function manualNoteFailure(ip) {
+  const now = Date.now()
+  if (manualFailures.size > 2000) {
+    for (const [k, v] of manualFailures) if (now - v.firstAt > MANUAL_FAIL_WINDOW) manualFailures.delete(k)
+  }
+  const e = manualFailures.get(ip)
+  if (!e || now - e.firstAt > MANUAL_FAIL_WINDOW) manualFailures.set(ip, { count: 1, firstAt: now })
+  else e.count++
 }
 
 // ── EMAIL ALERT via Resend ───────────────────────────────────
@@ -2307,6 +2383,80 @@ export async function onRequest(ctx) {
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
     const results = await syncIcalFeedsForVillas(DB, null)
     return json({ success: true, data: { feeds: results.length, results } })
+  }
+
+  // ── TRAINING MANUAL (public, passcode-gated) ────────────────────────────
+  // POST on purpose: a service worker or CDN can never cache the text under a
+  // URL, and a passcode never lands in an address bar or a log's query string.
+  // Who gets in:
+  //   - a signed-in owner of THIS host, always;
+  //   - anyone, while the villa's mode is 'open' (the default — no row at all);
+  //   - otherwise only a visitor holding an unexpired, unrevoked passcode.
+  // The tenant is the HOST's, never anything the browser sends, so one host's
+  // passcodes cannot open another host's manual.
+  if (action === 'getTrainingManual' && method === 'POST') {
+    const manualVilla = DEFAULT_VILLA_ID
+    const reply = (status, data) => new Response(JSON.stringify(data), {
+      status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS } })
+    const lock = (reason, error, extra = {}) => reply(403, { success: false, error, reason, ...extra })
+    try {
+      const mBody = await request.json().catch(() => ({}))
+
+      // No row means the default, open. A database that has not had the
+      // migration yet has no lock to honour, so it stays open; any OTHER
+      // failure must not quietly unlock a manual its owner has locked.
+      let mode = 'open'
+      try {
+        const m = await DB.prepare(`SELECT mode FROM stayvibe_manual_settings WHERE villa_id = ?`).bind(manualVilla).first()
+        if (m?.mode === 'passcode') mode = 'passcode'
+      } catch (e) {
+        if (!/no such table/i.test(e?.message || '')) throw e
+      }
+
+      // The manual's text is spliced in as the string it was already
+      // serialised to at start-up; it never changes between requests.
+      const letIn = (kind, expiresAt) => new Response(
+        `{"success":true,"data":{"content":${MANUAL_JSON},"access":${JSON.stringify({ kind, mode, expiresAt })}}}`,
+        { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS } })
+
+      // A signed-in owner of this host is always let in, or locking the manual
+      // would lock its owner out of reading it.
+      const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer /, '')
+      const who = bearer && env.JWT_SECRET ? await verifyJwt(bearer, env.JWT_SECRET) : null
+      if (who && (who.role === 'owner' || who.role === 'master_owner') &&
+          !(who.tenantId && who.tenantId !== manualVilla)) {
+        return letIn('owner', null)
+      }
+      if (mode === 'open') return letIn('open', null)
+
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const rl = manualRateLimited(ip)
+      if (rl.limited) {
+        return reply(429, { success: false, error: 'Too many attempts', reason: 'rate_limited', retryAfter: rl.retryAfter })
+      }
+
+      const code = normalizeManualCode(mBody.code)
+      // Arriving at the gate with nothing typed yet is not a wrong guess.
+      if (!code) return lock('passcode_required', 'A passcode is needed to read this manual')
+
+      const hash = await manualCodeHash(env, manualVilla, code)
+      const row = await DB.prepare(
+        `SELECT passcode_id, expires_at, revoked_at FROM stayvibe_manual_passcodes WHERE villa_id = ? AND code_hash = ?`
+      ).bind(manualVilla, hash).first()
+      if (!row) { manualNoteFailure(ip); return lock('passcode_invalid', 'That passcode was not recognised') }
+      if (row.revoked_at) return lock('passcode_revoked', 'That passcode is no longer active')
+      if (row.expires_at && new Date(manualIso(row.expires_at)) <= new Date()) {
+        return lock('passcode_expired', 'That passcode has expired', { expiresAt: manualIso(row.expires_at) })
+      }
+      await DB.prepare(
+        `UPDATE stayvibe_manual_passcodes SET last_used_at = datetime('now'), use_count = use_count + 1
+          WHERE passcode_id = ? AND villa_id = ?`
+      ).bind(row.passcode_id, manualVilla).run()
+      return letIn('passcode', manualIso(row.expires_at))
+    } catch (e) {
+      console.error('getTrainingManual:', e?.message || e)
+      return reply(503, { success: false, error: 'Please try again in a moment', reason: 'unavailable' })
+    }
   }
 
   // ── AUTH GUARD — verify JWT on every other request ─────
@@ -4870,6 +5020,33 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // ── TRAINING MANUAL ACCESS (owner) ───────────────────────────────
+      // Who may read the public manual: the open/passcode switch, and every
+      // passcode made for an outsider. The passcodes themselves are never
+      // here — only a keyed hash is stored, so they cannot be shown again.
+      if (action === 'getManualAccess') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const vId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const m = await DB.prepare(`SELECT mode FROM stayvibe_manual_settings WHERE villa_id = ?`).bind(vId).first()
+        const { results } = await DB.prepare(
+          `SELECT passcode_id, label, expires_at, revoked_at, created_by, created_at, last_used_at, use_count
+             FROM stayvibe_manual_passcodes WHERE villa_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200`
+        ).bind(vId).all()
+        const nowMs = Date.now()
+        return json({ success: true, data: {
+          mode: m?.mode === 'passcode' ? 'passcode' : 'open',
+          passcodes: (results || []).map(r => ({
+            id: r.passcode_id, label: r.label,
+            status: r.revoked_at ? 'revoked'
+              : (r.expires_at && new Date(manualIso(r.expires_at)).getTime() <= nowMs ? 'expired' : 'active'),
+            expiresAt: manualIso(r.expires_at), revokedAt: manualIso(r.revoked_at),
+            createdAt: manualIso(r.created_at), createdBy: r.created_by,
+            lastUsedAt: manualIso(r.last_used_at), useCount: r.use_count || 0,
+          })),
+        } })
+      }
+
       // ── CHANNEL CALENDAR (iCal sync) ─────────────────────────────────
       if (action === 'getIcalFeeds') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
@@ -4937,45 +5114,13 @@ export async function onRequest(ctx) {
         return json({ success: true, data: items })
       }
 
-      // Frontend has called these two since OwnerHome's CheckinLinksBlock was
-      // built, but no matching action ever existed server-side — the
-      // Activate/Deactivate button silently failed, and there was no way to
-      // create a new check-in link except by hand-inserting SQL. Token
-      // follows the same deterministic 'gvr-{partner-slug}' convention as the
-      // existing seeded rows (gvr-direct, gvr-airbnb, ...) rather than a
-      // random suffix, so it stays short and readable in a check-in URL.
-      if (action === 'createCheckinLink') {
-        const { partner, label, villaId } = body
-        if (!partner?.trim()) return err('partner required')
-        const vId = villaId || DEFAULT_VILLA_ID
-        assertPropertyAccess(payload, vId)
-        const slug = partner.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
-        if (!slug) return err('partner must contain at least one letter or number')
-        const checkinToken = `gvr-${slug}`
-        const existing = await DB.prepare(`SELECT token FROM stayvibe_checkin_links WHERE token = ?`).bind(checkinToken).first()
-        if (existing) return err(`A check-in link for "${partner.trim()}" already exists`)
-        const linkLabel = label?.trim() || partner.trim()
-        await DB.prepare(
-          `INSERT INTO stayvibe_checkin_links (token, villa_id, partner, label, created_by) VALUES (?, ?, ?, ?, ?)`
-        ).bind(checkinToken, vId, partner.trim().toLowerCase(), linkLabel, actor).run()
-        return json({ success: true, data: { token: checkinToken, partner: partner.trim(), label: linkLabel } })
-      }
-
-      if (action === 'toggleCheckinLink') {
-        const { token: checkinToken } = body
-        if (!checkinToken) return err('token required')
-        const link = await DB.prepare(`SELECT villa_id FROM stayvibe_checkin_links WHERE token = ?`).bind(checkinToken).first()
-        if (!link) return err('Link not found', 404)
-        assertPropertyAccess(payload, link.villa_id)
-        await DB.prepare(`UPDATE stayvibe_checkin_links SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_at = ? WHERE token = ?`).bind(now(), checkinToken).run()
-        return json({ success: true })
-      }
-
       // ── AGENT QUOTE LINKS (stayvibe only) ─────────────────────────────
       // Each approved travel agent / sales partner gets their own token —
       // same shape as the guest check-in links above — that opens a
       // self-serve quote calculator (see the public getAgentQuote action)
-      // without needing a real account. Owner-managed: create, list, toggle.
+      // without needing a real account. Owner-managed: create, list, toggle —
+      // listing is here; create and toggle read a body, so they live in the POST
+      // section.
       if (action === 'getAgentLinks') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
@@ -4984,31 +5129,6 @@ export async function onRequest(ctx) {
         ).bind(villaId).all()
         return json({ success: true, data: results })
       }
-
-      if (action === 'createAgentLink') {
-        const { agentName, discountPct, villaId } = body
-        if (!agentName?.trim()) return err('agentName required')
-        const vId = villaId || DEFAULT_VILLA_ID
-        assertPropertyAccess(payload, vId)
-        const slug = agentName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20)
-        const agentToken = `${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
-        const pct = Math.max(0, Math.min(100, parseInt(discountPct) || 0))
-        await DB.prepare(
-          `INSERT INTO stayvibe_agent_links (token, villa_id, agent_name, discount_pct, created_by) VALUES (?, ?, ?, ?, ?)`
-        ).bind(agentToken, vId, agentName.trim(), pct, actor).run()
-        return json({ success: true, data: { token: agentToken, agentName: agentName.trim(), discountPct: pct } })
-      }
-
-      if (action === 'toggleAgentLink') {
-        const { token: agentToken } = body
-        if (!agentToken) return err('token required')
-        const link = await DB.prepare(`SELECT villa_id FROM stayvibe_agent_links WHERE token = ?`).bind(agentToken).first()
-        if (!link) return err('Link not found', 404)
-        assertPropertyAccess(payload, link.villa_id)
-        await DB.prepare(`UPDATE stayvibe_agent_links SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_at = ? WHERE token = ?`).bind(now(), agentToken).run()
-        return json({ success: true })
-      }
-
 
       // PENDING REVIEW STAYS — GET version (also available as POST)
       if (action === 'getPendingReviewStays') {
@@ -5471,6 +5591,149 @@ export async function onRequest(ctx) {
       // nothing. Five handlers previously took body.villaId and wrote with
       // it unchecked; this makes forgetting impossible rather than unlikely.
       if (body && body.villaId) assertPropertyAccess(payload, body.villaId)
+
+      // ════════════ LINKS & MANUAL ACCESS (owner) — POST ════════════
+      // These sit HERE, in the POST section, on purpose. They read `body`, which
+      // only exists below this point. Written under `if (method === 'GET')` a POST
+      // never reaches them: the API answers "Unknown POST action" for an action
+      // that plainly exists. The check-in link and agent link create/toggle
+      // handlers below were found that way (tested against the real Worker) and
+      // moved here from the GET section; it is the same mistake the note at
+      // sendInviteAck describes. Anything that reads `body` belongs down here.
+
+      // Frontend has called these two since OwnerHome's CheckinLinksBlock was
+      // built, but no matching action ever existed server-side — the
+      // Activate/Deactivate button silently failed, and there was no way to
+      // create a new check-in link except by hand-inserting SQL. Token
+      // follows the same deterministic 'gvr-{partner-slug}' convention as the
+      // existing seeded rows (gvr-direct, gvr-airbnb, ...) rather than a
+      // random suffix, so it stays short and readable in a check-in URL.
+      if (action === 'createCheckinLink') {
+        const { partner, label, villaId } = body
+        if (!partner?.trim()) return err('partner required')
+        const vId = villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const slug = partner.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+        if (!slug) return err('partner must contain at least one letter or number')
+        const checkinToken = `gvr-${slug}`
+        const existing = await DB.prepare(`SELECT token FROM stayvibe_checkin_links WHERE token = ?`).bind(checkinToken).first()
+        if (existing) return err(`A check-in link for "${partner.trim()}" already exists`)
+        const linkLabel = label?.trim() || partner.trim()
+        await DB.prepare(
+          `INSERT INTO stayvibe_checkin_links (token, villa_id, partner, label, created_by) VALUES (?, ?, ?, ?, ?)`
+        ).bind(checkinToken, vId, partner.trim().toLowerCase(), linkLabel, actor).run()
+        return json({ success: true, data: { token: checkinToken, partner: partner.trim(), label: linkLabel } })
+      }
+
+      if (action === 'toggleCheckinLink') {
+        const { token: checkinToken } = body
+        if (!checkinToken) return err('token required')
+        const link = await DB.prepare(`SELECT villa_id FROM stayvibe_checkin_links WHERE token = ?`).bind(checkinToken).first()
+        if (!link) return err('Link not found', 404)
+        assertPropertyAccess(payload, link.villa_id)
+        await DB.prepare(`UPDATE stayvibe_checkin_links SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_at = ? WHERE token = ?`).bind(now(), checkinToken).run()
+        return json({ success: true })
+      }
+
+      // ── TRAINING MANUAL ACCESS (owner) ───────────────────────────────
+      // The passcode is generated here and handed back exactly once; only its
+      // keyed hash is stored, so a lost one cannot be recovered — make another.
+      // Every write is owner-only and pinned to a villa the caller may touch.
+      if (action === 'createManualPasscode') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const vId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const label = String(body.label || '').trim().slice(0, 80)
+        if (!label) return err('Say who this passcode is for')
+        const exp = manualExpiry(body.validForHours === undefined ? 24 * 7 : body.validForHours)
+        if (!exp.ok) return err('Choose how long it should last')
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const code = genManualCode()
+          const passcodeId = genId('MPC')
+          try {
+            await DB.prepare(
+              `INSERT INTO stayvibe_manual_passcodes (passcode_id, villa_id, label, code_hash, expires_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?)`
+            ).bind(passcodeId, vId, label, await manualCodeHash(env, vId, code), exp.at, actor).run()
+            return json({ success: true, data: {
+              passcodeId, label, code: formatManualCode(code), expiresAt: manualIso(exp.at),
+            } })
+          } catch (e) {
+            // Two passcodes landing on the same value is a 1-in-10^11 event,
+            // but a UNIQUE clash is cheap to retry and anything else is real.
+            if (!/UNIQUE/i.test(e?.message || '')) throw e
+          }
+        }
+        return err('Could not make a passcode just now — please try again', 500)
+      }
+
+      if (action === 'revokeManualPasscode') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        if (!body.passcodeId) return err('passcodeId required')
+        const row = await DB.prepare(`SELECT villa_id FROM stayvibe_manual_passcodes WHERE passcode_id = ?`).bind(body.passcodeId).first()
+        if (!row) return err('Passcode not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        await DB.prepare(
+          `UPDATE stayvibe_manual_passcodes SET revoked_at = datetime('now')
+            WHERE passcode_id = ? AND villa_id = ? AND revoked_at IS NULL`
+        ).bind(body.passcodeId, row.villa_id).run()
+        return json({ success: true })
+      }
+
+      // Sets a fresh time limit counted from NOW — "valid for another 7 days" —
+      // which also brings an expired passcode back to life. A revoked one stays
+      // revoked: revoking is a decision, expiring is just time passing.
+      if (action === 'setManualPasscodeExpiry') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        if (!body.passcodeId) return err('passcodeId required')
+        const row = await DB.prepare(`SELECT villa_id, revoked_at FROM stayvibe_manual_passcodes WHERE passcode_id = ?`).bind(body.passcodeId).first()
+        if (!row) return err('Passcode not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        if (row.revoked_at) return err('That passcode was revoked — make a new one instead')
+        const exp = manualExpiry(body.validForHours)
+        if (!exp.ok) return err('Choose how long it should last')
+        await DB.prepare(
+          `UPDATE stayvibe_manual_passcodes SET expires_at = ? WHERE passcode_id = ? AND villa_id = ?`
+        ).bind(exp.at, body.passcodeId, row.villa_id).run()
+        return json({ success: true, data: { expiresAt: manualIso(exp.at) } })
+      }
+
+      if (action === 'setManualAccessMode') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const vId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        if (body.mode !== 'open' && body.mode !== 'passcode') return err('mode must be "open" or "passcode"')
+        await DB.prepare(
+          `INSERT INTO stayvibe_manual_settings (villa_id, mode, updated_by, updated_at) VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(villa_id) DO UPDATE SET mode = excluded.mode, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+        ).bind(vId, body.mode, actor).run()
+        return json({ success: true, data: { mode: body.mode } })
+      }
+
+      if (action === 'createAgentLink') {
+        const { agentName, discountPct, villaId } = body
+        if (!agentName?.trim()) return err('agentName required')
+        const vId = villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const slug = agentName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20)
+        const agentToken = `${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+        const pct = Math.max(0, Math.min(100, parseInt(discountPct) || 0))
+        await DB.prepare(
+          `INSERT INTO stayvibe_agent_links (token, villa_id, agent_name, discount_pct, created_by) VALUES (?, ?, ?, ?, ?)`
+        ).bind(agentToken, vId, agentName.trim(), pct, actor).run()
+        return json({ success: true, data: { token: agentToken, agentName: agentName.trim(), discountPct: pct } })
+      }
+
+      if (action === 'toggleAgentLink') {
+        const { token: agentToken } = body
+        if (!agentToken) return err('token required')
+        const link = await DB.prepare(`SELECT villa_id FROM stayvibe_agent_links WHERE token = ?`).bind(agentToken).first()
+        if (!link) return err('Link not found', 404)
+        assertPropertyAccess(payload, link.villa_id)
+        await DB.prepare(`UPDATE stayvibe_agent_links SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END, updated_at = ? WHERE token = ?`).bind(now(), agentToken).run()
+        return json({ success: true })
+      }
+
 
       // ════════════════ CHANNEL CALENDAR (iCal sync) — POST ════════════════
       if (action === 'addIcalFeed') {

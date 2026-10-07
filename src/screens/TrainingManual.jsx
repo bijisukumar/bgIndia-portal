@@ -1,31 +1,27 @@
-// Route: /Training-Manual   (public, no login — like /flexibility)
-// The owner training manual. All wording lives in content/trainingManual.js;
-// this file only lays it out. Deep links work on every section:
+// Route: /Training-Manual   (no app login — like /flexibility)
+// The owner training manual.
+//
+// Its words are NOT in this file or anywhere in the browser bundle. They live
+// in content/trainingManual.js, which only the API imports, and are sent after
+// an access check (getTrainingManual in functions/api/[[route]].js): open to
+// anyone with the link, or — when the owner has locked it — only to someone
+// holding a passcode, or the signed-in owner. Importing that file here would
+// put the text back in public JavaScript and make every passcode decorative.
+//
+// This file only lays the text out. Deep links work on every section:
 //   /Training-Manual#channel-mix   /Training-Manual#dashboard   …
 
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CONFIG } from '../config'
+import { useAuth } from '../hooks/useAuth'
 import { guestBaseUrl } from '../utils/guestMessages'
-import {
-  UPDATED, TITLE, TAGLINE, INTRO, IDEAS, KINDS, HOME_ORDER, TILE_GROUPS,
-  BLOCKS, TILES, GUEST_PAGES, MANAGER, FIRST_WEEK, ROUTINES, BY_GOAL, GLOSSARY, FAQ,
-} from '../content/trainingManual'
+import { whenLong } from '../utils/localWhen'
 
-const BLOCK_BY_ID = Object.fromEntries(BLOCKS.map(b => [b.id, b]))
-const TILE_BY_ID  = Object.fromEntries(TILES.map(t => [t.id, t]))
-// Which kinds are shown, in this order, under "Home blocks".
-const KIND_ORDER = [
-  ['act',      'Needs you',          'These appear only when something is waiting for you.'],
-  ['health',   'Health check',       'This one is always on screen, so you can see that it was checked.'],
-  ['insight',  'How you are doing',  'Read-only: nothing to tap, just something to learn from.'],
-  ['shortcut', 'Shortcut',           'A quick way into a tool you use often.'],
-]
-const NAV = [
-  ['map', 'Home map'], ['home-blocks', 'Home blocks'], ['screens', 'Screens'],
-  ['guest-pages', 'Guest pages'], ['manager', 'Your manager'], ['routines', 'Routines'],
-  ['by-goal', 'Find by goal'], ['faq', 'FAQ'],
-]
+const FALLBACK_TITLE = 'Owner Training Manual'
+const CODE_KEY = 'tm_passcode'
+// The manual's content, once the server has let this visitor in.
+const ManualCtx = createContext(null)
 
 // ── Inline markup: **bold**, [[on-screen label]], {{section-id|link text}} ──
 const TOKEN = /(\*\*[^*]+\*\*|\[\[[^\]]+\]\]|\{\{[^}|]+\|[^}]+\}\})/g
@@ -131,6 +127,7 @@ function Inside({ label, items }) {
 
 // ── A home-screen block ──────────────────────────────────────────────────
 function BlockCard({ b, copied, onCopy }) {
+  const { KINDS } = useContext(ManualCtx)
   const k = KINDS[b.kind]
   return (
     <article id={b.id} className={`tm-card tm-block tm-kind-${b.kind}${b.featured ? ' tm-featured' : ''}`}>
@@ -209,7 +206,7 @@ function TileCard({ t, copied, onCopy }) {
 }
 
 // ── "Your home screen at a glance" ───────────────────────────────────────
-function HomeMap() {
+function HomeMap({ KINDS, HOME_ORDER, TILE_GROUPS, BLOCK_BY_ID, TILE_BY_ID }) {
   return (
     <div className="tm-phone" role="group" aria-label="Your home screen, top to bottom">
       <div className="tm-phone-head">
@@ -251,14 +248,16 @@ function HomeMap() {
   )
 }
 
-export default function TrainingManual() {
+// The manual proper. Mounted only once the server has handed over the content,
+// so everything it needs is already here and a deep link's target exists.
+function ManualBody({ content, access, isOwner }) {
+  const {
+    UPDATED, TITLE, TAGLINE, INTRO, IDEAS, KINDS, HOME_ORDER, TILE_GROUPS, LAYOUT,
+    BLOCKS, TILES, GUEST_PAGES, MANAGER, FIRST_WEEK, ROUTINES, BY_GOAL, GLOSSARY, FAQ,
+  } = content
+  const BLOCK_BY_ID = useMemo(() => Object.fromEntries(BLOCKS.map(b => [b.id, b])), [BLOCKS])
+  const TILE_BY_ID  = useMemo(() => Object.fromEntries(TILES.map(t => [t.id, t])), [TILES])
   const [copied, onCopy] = useCopyLink()
-
-  useEffect(() => {
-    const prev = document.title
-    document.title = `${TITLE} · StayVibe360`
-    return () => { document.title = prev }
-  }, [])
 
   // Land on a deep link (/Training-Manual#channel-mix). This page scrolls inside
   // #root, not the window, so the browser's own jump to the fragment is a race
@@ -282,18 +281,30 @@ export default function TrainingManual() {
   const blocksByKind = kind => BLOCKS.filter(b => b.kind === kind)
 
   return (
-    <div className="tm-page">
-      <style>{CSS}</style>
-
+    <ManualCtx.Provider value={content}>
       <nav className="tm-nav" aria-label="Sections">
         <div className="tm-nav-in">
-          {NAV.map(([id, label]) => (
+          {LAYOUT.nav.map(([id, label]) => (
             <a key={id} href={`#${id}`} onClick={e => jump(e, id)}>{label}</a>
           ))}
         </div>
       </nav>
 
       <div className="tm-wrap">
+        {/* Who this visitor is, when it matters: someone invited with a
+            passcode sees when it runs out; the owner sees that outsiders are
+            being kept out. Neither is shown when the manual is simply open. */}
+        {access.kind === 'passcode' && (
+          <div className="tm-banner" role="status">
+            🔐 Shared with you by invitation{access.expiresAt ? <> · your access ends <b>{whenLong(access.expiresAt)}</b></> : null}
+          </div>
+        )}
+        {access.kind === 'owner' && access.mode === 'passcode' && (
+          <div className="tm-banner" role="status">
+            🔐 This manual is locked to people with a passcode. You can always read it while you are signed in.
+          </div>
+        )}
+
         {/* ── Hero ───────────────────────────────────────────── */}
         <header id="start" className="tm-hero">
           <div className="tm-brand">
@@ -306,13 +317,14 @@ export default function TrainingManual() {
           <div className="tm-actions">
             <button type="button" className="tm-btn" onClick={() => window.print()}>🖨 Print / save as PDF</button>
             <Link to="/" className="tm-btn tm-btn-ghost">Open your home screen →</Link>
+            {isOwner && <Link to="/owner/maintenance/manual-access" className="tm-btn tm-btn-ghost">🔐 Who can read this</Link>}
           </div>
           <div className="tm-updated">Describes the app as it works on {UPDATED}.</div>
         </header>
 
         {/* ── Ideas ──────────────────────────────────────────── */}
         <section id="ideas" aria-labelledby="ideas-h">
-          <h2 id="ideas-h" className="tm-h2">Three ideas that make everything easier</h2>
+          <h2 id="ideas-h" className="tm-h2">{LAYOUT.ideas.h}</h2>
           <div className="tm-ideas">
             {IDEAS.map((d, i) => (
               <div key={i} className="tm-idea">
@@ -326,12 +338,12 @@ export default function TrainingManual() {
 
         {/* ── Home map ───────────────────────────────────────── */}
         <section id="map" aria-labelledby="map-h">
-          <h2 id="map-h" className="tm-h2">Your home screen at a glance</h2>
-          <p className="tm-sub">Top to bottom, in the order they appear. Tap any row to jump to its explanation. Blocks with nothing to say are not shown, so your own screen will often be shorter.</p>
+          <h2 id="map-h" className="tm-h2">{LAYOUT.map.h}</h2>
+          <p className="tm-sub">{LAYOUT.map.sub}</p>
           <div className="tm-mapwrap">
-            <HomeMap />
+            <HomeMap KINDS={KINDS} HOME_ORDER={HOME_ORDER} TILE_GROUPS={TILE_GROUPS} BLOCK_BY_ID={BLOCK_BY_ID} TILE_BY_ID={TILE_BY_ID} />
             <aside className="tm-legend" aria-label="How to read the map">
-              <div className="tm-label">How to read it</div>
+              <div className="tm-label">{LAYOUT.map.legendTitle}</div>
               {Object.entries(KINDS).map(([k, v]) => (
                 <div key={k} className={`tm-legend-row tm-kind-${k}`}>
                   <span className="tm-chip tm-chip-kind">{v.label}</span>
@@ -340,17 +352,17 @@ export default function TrainingManual() {
               ))}
               <div className={`tm-legend-row tm-kind-tile`}>
                 <span className="tm-chip tm-chip-kind">Tile</span>
-                <span>Opens a tool, sometimes with tabs inside.</span>
+                <span>{LAYOUT.map.legendTile}</span>
               </div>
-              <p className="tm-legend-tip">The coloured bar on the left of each row matches the label, so you can tell at a glance what kind of block you are looking at.</p>
+              <p className="tm-legend-tip">{LAYOUT.map.legendTip}</p>
             </aside>
           </div>
         </section>
 
         {/* ── Home blocks ────────────────────────────────────── */}
         <section id="home-blocks" aria-labelledby="blocks-h">
-          <h2 id="blocks-h" className="tm-h2">The blocks on your home screen</h2>
-          {KIND_ORDER.map(([kind, label, blurb]) => (
+          <h2 id="blocks-h" className="tm-h2">{LAYOUT.blocks.h}</h2>
+          {LAYOUT.kindGroups.map(([kind, label, blurb]) => (
             <div key={kind} className="tm-group">
               <h3 className="tm-h3">{label}</h3>
               <p className="tm-sub">{blurb}</p>
@@ -361,8 +373,8 @@ export default function TrainingManual() {
 
         {/* ── Tiles and screens ──────────────────────────────── */}
         <section id="screens" aria-labelledby="screens-h">
-          <h2 id="screens-h" className="tm-h2">The tiles, and the screens inside them</h2>
-          <p className="tm-sub">Below the blocks are your menu tiles. Each opens a tool; some have tabs or further screens, listed under the tile.</p>
+          <h2 id="screens-h" className="tm-h2">{LAYOUT.screens.h}</h2>
+          <p className="tm-sub">{LAYOUT.screens.sub}</p>
           {TILE_GROUPS.map(g => (
             <div key={g.label} className="tm-group">
               <h3 className="tm-h3">{g.label}</h3>
@@ -373,8 +385,8 @@ export default function TrainingManual() {
 
         {/* ── Pages guests and partners see ─────────────────── */}
         <section id="guest-pages" aria-labelledby="gp-h">
-          <h2 id="gp-h" className="tm-h2">Pages your guests and partners see</h2>
-          <p className="tm-sub">Three public pages need no login. You send the link; what people do there flows back into your screens.</p>
+          <h2 id="gp-h" className="tm-h2">{LAYOUT.guestPages.h}</h2>
+          <p className="tm-sub">{LAYOUT.guestPages.sub}</p>
           {GUEST_PAGES.map(p => (
             <article key={p.id} id={p.id} className="tm-card tm-block tm-kind-tile">
               <Title id={p.id} icon={p.icon} copied={copied} onCopy={onCopy}>{p.name}</Title>
@@ -389,7 +401,7 @@ export default function TrainingManual() {
 
         {/* ── On-site manager ────────────────────────────────── */}
         <section id="manager" aria-labelledby="mgr-h">
-          <h2 id="mgr-h" className="tm-h2">What your on-site manager sees</h2>
+          <h2 id="mgr-h" className="tm-h2">{LAYOUT.manager.h}</h2>
           <Paras items={MANAGER.intro} />
           <div className="tm-card">
             <dl className="tm-inside">
@@ -406,13 +418,13 @@ export default function TrainingManual() {
 
         {/* ── First week + routines ──────────────────────────── */}
         <section id="first-week" aria-labelledby="fw-h">
-          <h2 id="fw-h" className="tm-h2">Your first week</h2>
-          <p className="tm-sub">Seven set-up steps. After these, the home screen runs itself.</p>
+          <h2 id="fw-h" className="tm-h2">{LAYOUT.firstWeek.h}</h2>
+          <p className="tm-sub">{LAYOUT.firstWeek.sub}</p>
           <div className="tm-card"><Steps items={FIRST_WEEK} /></div>
         </section>
 
         <section id="routines" aria-labelledby="rt-h">
-          <h2 id="rt-h" className="tm-h2">Routines that keep it working</h2>
+          <h2 id="rt-h" className="tm-h2">{LAYOUT.routines.h}</h2>
           <div className="tm-routines">
             {ROUTINES.map((r, i) => (
               <div key={i} className="tm-card tm-routine">
@@ -425,8 +437,8 @@ export default function TrainingManual() {
 
         {/* ── Find it by goal ────────────────────────────────── */}
         <section id="by-goal" aria-labelledby="goal-h">
-          <h2 id="goal-h" className="tm-h2">Find it by what you want to do</h2>
-          <p className="tm-sub">The nine things owners most often say would help them, listed most-requested first, and where in the app each one lives.</p>
+          <h2 id="goal-h" className="tm-h2">{LAYOUT.byGoal.h}</h2>
+          <p className="tm-sub">{LAYOUT.byGoal.sub}</p>
           {BY_GOAL.map((g, i) => (
             <article key={i} className={`tm-card tm-goal${g.notYet ? ' tm-notyet' : ''}`}>
               <h3 className="tm-title"><span className="tm-ico" aria-hidden="true">{g.icon}</span><span>{g.goal}</span>
@@ -440,7 +452,7 @@ export default function TrainingManual() {
 
         {/* ── Glossary ───────────────────────────────────────── */}
         <section id="glossary" aria-labelledby="gl-h">
-          <h2 id="gl-h" className="tm-h2">Words used in the app</h2>
+          <h2 id="gl-h" className="tm-h2">{LAYOUT.glossary.h}</h2>
           <dl className="tm-glossary">
             {GLOSSARY.map((g, i) => (
               <div key={i}><dt>{g.term}</dt><dd><Rich text={g.def} /></dd></div>
@@ -450,7 +462,7 @@ export default function TrainingManual() {
 
         {/* ── FAQ ────────────────────────────────────────────── */}
         <section id="faq" aria-labelledby="faq-h">
-          <h2 id="faq-h" className="tm-h2">Common questions</h2>
+          <h2 id="faq-h" className="tm-h2">{LAYOUT.faq.h}</h2>
           {FAQ.map((f, i) => (
             <div key={i} className="tm-card tm-qa">
               <div className="tm-q">{f.q}</div>
@@ -464,6 +476,159 @@ export default function TrainingManual() {
           <div>{TITLE} · StayVibe360 · describes the app as it works on {UPDATED}.</div>
         </footer>
       </div>
+    </ManualCtx.Provider>
+  )
+}
+
+// ── Asking the server ────────────────────────────────────────────────────
+// A plain fetch, not api/index.js: that layer logs the user out on a 401, and
+// this is a public page whose visitors are not logged in. POST, so the text can
+// never be cached by a service worker or CDN under a URL.
+async function fetchManual(code) {
+  let token = ''
+  try { token = sessionStorage.getItem('ge_token') || '' } catch { /* no storage */ }
+  try {
+    const res = await fetch('/api/getTrainingManual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ code: code || '' }),
+    })
+    const data = await res.json().catch(() => null)
+    if (res.ok && data?.success) return { ok: true, content: data.data.content, access: data.data.access }
+    return { ok: false, reason: data?.reason || 'unavailable', retryAfter: data?.retryAfter, expiresAt: data?.expiresAt }
+  } catch {
+    return { ok: false, reason: 'offline' }
+  }
+}
+
+// The passcode a visitor typed stays on their own device so they are not asked
+// again on every visit. The server still checks it, and its time limit, each time.
+const readCode = () => { try { return localStorage.getItem(CODE_KEY) || '' } catch { return '' } }
+const saveCode = c => { try { c ? localStorage.setItem(CODE_KEY, c) : localStorage.removeItem(CODE_KEY) } catch { /* private mode */ } }
+const normalizeCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+// ── The passcode screen ──────────────────────────────────────────────────
+function Gate({ reason, expiresAt, retryAfter, busy, onSubmit }) {
+  const [value, setValue] = useState('')
+  const message = {
+    passcode_invalid: 'That passcode was not recognised. Check it and try again.',
+    passcode_expired: `This passcode expired${expiresAt ? ' on ' + whenLong(expiresAt) : ''}. Ask the person who invited you for a new one.`,
+    passcode_revoked: 'This passcode is no longer active. Ask the person who invited you for a new one.',
+    rate_limited: `Too many attempts. Please wait ${retryAfter || 15} minutes and try again.`,
+    unavailable: 'The manual could not be loaded just now. Please try again in a moment.',
+    offline: 'Could not reach the server. Check your connection and try again.',
+  }[reason]
+  return (
+    <div className="tm-gate">
+      <form className="tm-gate-card" onSubmit={e => { e.preventDefault(); onSubmit(value) }}>
+        <div className="tm-gate-ico" aria-hidden="true">🔐</div>
+        <h1>{FALLBACK_TITLE}</h1>
+        <p>This manual is shared by invitation. Enter the passcode you were given.</p>
+        <input className="tm-gate-input" value={value} onChange={e => setValue(e.target.value.toUpperCase())}
+          placeholder="XXXX-XXXX" autoFocus autoCapitalize="characters" autoComplete="off" autoCorrect="off"
+          spellCheck={false} maxLength={24} aria-label="Passcode" />
+        {message && <div className="tm-gate-err" role="alert">{message}</div>}
+        <button className="tm-btn" type="submit" disabled={busy || !normalizeCode(value)}>
+          {busy ? 'Checking…' : 'Open the manual'}
+        </button>
+        <div className="tm-gate-foot">
+          Are you the owner? <Link to="/login" className="tm-link">Sign in</Link> and you can read it without a passcode.
+        </div>
+      </form>
+    </div>
+  )
+}
+
+export default function TrainingManual() {
+  const { user } = useAuth()
+  const isOwner = user?.role === 'owner' || user?.role === 'master_owner'
+  const [view, setView] = useState({ phase: 'loading' })   // loading | ready | locked
+  const [busy, setBusy] = useState(false)
+
+  // quiet = the person did not just type this (a stored code, or a first visit
+  // to a locked manual), so "passcode needed" is not an error worth shouting.
+  async function attempt(code, quiet) {
+    const r = await fetchManual(code)
+    if (r.ok) {
+      if (code) saveCode(code)
+      setView({ phase: 'ready', content: r.content, access: r.access })
+      return
+    }
+    // A stored passcode that no longer works is only noise next time.
+    if (['passcode_invalid', 'passcode_expired', 'passcode_revoked'].includes(r.reason)) saveCode('')
+    setView({
+      phase: 'locked',
+      reason: quiet && r.reason === 'passcode_required' ? null : r.reason,
+      expiresAt: r.expiresAt, retryAfter: r.retryAfter,
+    })
+  }
+
+  // First load: a passcode in the address (?code=…, the one-tap link the owner
+  // can send) wins, then one remembered on this device. Either way the address
+  // is tidied straight away so a passcode does not linger in history or get
+  // forwarded along with the link.
+  useEffect(() => {
+    let code = ''
+    try {
+      const u = new URL(window.location.href)
+      const q = u.searchParams.get('code')
+      if (q) {
+        code = normalizeCode(q)
+        u.searchParams.delete('code')
+        window.history.replaceState(null, '', u.pathname + u.search + u.hash)
+      }
+    } catch { /* odd URL — fall through to a stored code */ }
+    attempt(code || readCode(), true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function submit(typed) {
+    const code = normalizeCode(typed)
+    if (!code) return
+    setBusy(true)
+    await attempt(code, false)
+    setBusy(false)
+  }
+
+  // A page that is already open must not outlive its passcode. The server
+  // refuses the next load; this closes the one in front of the reader, and drops
+  // the text from memory with it.
+  useEffect(() => {
+    if (view.phase !== 'ready' || view.access?.kind !== 'passcode' || !view.access.expiresAt) return
+    const end = new Date(view.access.expiresAt).getTime()
+    let t
+    const tick = () => {
+      const left = end - Date.now()
+      if (left <= 0) {
+        saveCode('')
+        setView({ phase: 'locked', reason: 'passcode_expired', expiresAt: view.access.expiresAt })
+        return
+      }
+      t = setTimeout(tick, Math.min(left, 2000000000))   // a timer cannot hold more than ~24.8 days
+    }
+    tick()
+    return () => clearTimeout(t)
+  }, [view])
+
+  // Tab title, and a note to search engines: this is for people who were given
+  // the link, not for the open web.
+  useEffect(() => {
+    const prev = document.title
+    document.title = `${view.content?.TITLE || FALLBACK_TITLE} · StayVibe360`
+    const meta = document.createElement('meta')
+    meta.name = 'robots'; meta.content = 'noindex'
+    document.head.appendChild(meta)
+    return () => { document.title = prev; meta.remove() }
+  }, [view.content])
+
+  return (
+    <div className="tm-page">
+      <style>{CSS}</style>
+      {view.phase === 'loading' && <div className="tm-loading" role="status">Loading the manual…</div>}
+      {view.phase === 'locked' && (
+        <Gate reason={view.reason} expiresAt={view.expiresAt} retryAfter={view.retryAfter} busy={busy} onSubmit={submit} />
+      )}
+      {view.phase === 'ready' && <ManualBody content={view.content} access={view.access} isOwner={isOwner} />}
     </div>
   )
 }
@@ -588,6 +753,20 @@ h4.tm-title{font-size:1.15rem}
 .tm-q{font-weight:700;margin-bottom:4px}
 .tm-foot{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--faint);font-size:.76rem;display:flex;flex-direction:column;gap:6px}
 
+.tm-loading{min-height:60vh;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:.95rem}
+.tm-banner{margin:0 0 6px;padding:10px 14px;border-radius:10px;background:var(--goldsoft);border:1px solid var(--goldline);font-size:.84rem;color:var(--text)}
+.tm-gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.tm-gate-card{width:100%;max-width:420px;background:var(--card);border:1px solid var(--goldline);border-radius:18px;padding:30px 24px 22px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+.tm-gate-ico{font-size:2.2rem;margin-bottom:6px}
+.tm-gate-card h1{font-size:1.7rem;margin:0 0 8px;line-height:1.2}
+.tm-gate-card p{color:var(--dim);font-size:.92rem;margin:0 0 18px}
+.tm-gate-input{width:100%;padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:var(--text);font-size:1.25rem;letter-spacing:4px;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace;outline:none;margin-bottom:12px}
+.tm-gate-input:focus{border-color:var(--gold)}
+.tm-gate-err{color:#F59E0B;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:9px 12px;font-size:.84rem;margin-bottom:12px;text-align:left}
+.tm-gate .tm-btn{width:100%;justify-content:center;padding:13px 16px;font-size:.95rem}
+.tm-gate .tm-btn:disabled{opacity:.5;cursor:not-allowed}
+.tm-gate-foot{margin-top:16px;color:var(--faint);font-size:.78rem}
+
 @media (max-width:720px){
   /* minmax(0,1fr), not 1fr: a bare 1fr track will not shrink below its widest
      unwrapped content (the map rows are nowrap), which made the page scroll sideways. */
@@ -600,7 +779,7 @@ h4.tm-title{font-size:1.15rem}
 @media print{
   html,body,#root{height:auto!important;overflow:visible!important;background:#fff!important}
   .tm-page{--bg:#fff;--text:#111;--dim:#333;--faint:#555;--card:#fff;--card2:#fff;--line:#ccc;--gold:#7a4f0d;--goldsoft:#f6efe3;--goldline:#c9a46a;min-height:0}
-  .tm-nav,.tm-actions,.tm-copy{display:none!important}
+  .tm-nav,.tm-actions,.tm-copy,.tm-banner{display:none!important}
   .tm-wrap{max-width:none;padding:0}
   .tm-card,.tm-phone{box-shadow:none!important}
   .tm-block,.tm-screen,.tm-callout,.tm-qa,.tm-goal,.tm-idea,.tm-routine{break-inside:avoid}

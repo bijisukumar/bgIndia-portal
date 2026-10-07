@@ -20,6 +20,41 @@ export const INTRO = [
   `This manual walks through every one: **what it is, why it is there, and what to do with it.** Tap any name in the contents to jump straight to it, or use the 🔗 beside a heading to copy a link you can send to someone.`,
 ]
 
+// ── Headings and short intros the page puts around the content ───────────
+// They are wording like any other, so they are served with it rather than
+// hardcoded in the page — nothing of the manual's text belongs in public JS.
+export const LAYOUT = {
+  nav: [
+    ['map', 'Home map'], ['home-blocks', 'Home blocks'], ['screens', 'Screens'],
+    ['guest-pages', 'Guest pages'], ['manager', 'Your manager'], ['routines', 'Routines'],
+    ['by-goal', 'Find by goal'], ['faq', 'FAQ'],
+  ],
+  // Which block kinds are shown, in this order, under "Home blocks".
+  kindGroups: [
+    ['act',      'Needs you',          'These appear only when something is waiting for you.'],
+    ['health',   'Health check',       'This one is always on screen, so you can see that it was checked.'],
+    ['insight',  'How you are doing',  'Read-only: nothing to tap, just something to learn from.'],
+    ['shortcut', 'Shortcut',           'A quick way into a tool you use often.'],
+  ],
+  ideas:      { h: 'Three ideas that make everything easier' },
+  map:        {
+    h: 'Your home screen at a glance',
+    sub: 'Top to bottom, in the order they appear. Tap any row to jump to its explanation. Blocks with nothing to say are not shown, so your own screen will often be shorter.',
+    legendTitle: 'How to read it',
+    legendTile: 'Opens a tool, sometimes with tabs inside.',
+    legendTip: 'The coloured bar on the left of each row matches the label, so you can tell at a glance what kind of block you are looking at.',
+  },
+  blocks:     { h: 'The blocks on your home screen' },
+  screens:    { h: 'The tiles, and the screens inside them', sub: 'Below the blocks are your menu tiles. Each opens a tool; some have tabs or further screens, listed under the tile.' },
+  guestPages: { h: 'Pages your guests and partners see', sub: 'Three public pages need no login. You send the link; what people do there flows back into your screens.' },
+  manager:    { h: 'What your on-site manager sees' },
+  firstWeek:  { h: 'Your first week', sub: 'Seven set-up steps. After these, the home screen runs itself.' },
+  routines:   { h: 'Routines that keep it working' },
+  byGoal:     { h: 'Find it by what you want to do', sub: 'The nine things owners most often say would help them, listed most-requested first, and where in the app each one lives.' },
+  glossary:   { h: 'Words used in the app' },
+  faq:        { h: 'Common questions' },
+}
+
 // ── Three ideas that make everything else easier ─────────────────────────
 export const IDEAS = [
   {
@@ -453,10 +488,11 @@ export const TILES = [
     id: 'maintenance', icon: '🛠️', name: 'Maintenance', opens: 'Home tile · also inside Serviced Villas',
     tagline: 'Staff logins and a few settings.',
     what: [
-      `The back-office room. For most owners it holds two things you will actually use.`,
+      `The back-office room. For most owners it holds three things you will actually use.`,
     ],
     inside: [
       { name: 'Staff & Access', text: `Everyone who has a login for your villa. **Reset a PIN** (the new PIN is shown once, so share it straight away — only a scrambled version is stored), **lock or unlock** an account (it takes effect at their next login), or **add a new staff login** with a pay type: **Commission only**, **Salaried** or **Salary + commission**, and the commission for a one-night and a two-night-or-longer stay.` },
+      { name: 'Training manual access', text: `Decide who can read this manual. Either **anyone with the link**, or **only people with a passcode** that you make for each person, each with its own time limit — from two hours to no limit. A passcode is shown once when you make it, can be given more time or revoked whenever you like, and you can see whether and when it has been opened. You are never locked out of your own manual while you are signed in.` },
       { name: 'Keep car and plate photos in Drive', text: `A switch. Off by default: the plate number is saved as text either way, and the photos expire after 5 days. Turn it on to keep the photos permanently, at an ongoing storage cost.` },
     ],
     why: `Staff change. This lets you add, reset or lock a login yourself, in seconds, without waiting for anyone.`,
@@ -716,6 +752,10 @@ export const FAQ = [
   {
     q: `Why does my number plate / receipt scan sometimes come back empty?`,
     a: `Reading a photo is best effort. When it cannot read it, the form is left for you to fill in by hand, and nothing is lost. A clear, well-lit photo helps.`,
+  },
+  {
+    q: `Can I share this manual with someone outside my business?`,
+    a: `Yes. Send them the address — or lock it first. In {{maintenance|Maintenance}} → Training manual access you can require a passcode and make one for each person, with a time limit you choose. They enter it on a passcode screen, and when it runs out so does their access.`,
   },
   {
     q: `Can my manager see my money?`,

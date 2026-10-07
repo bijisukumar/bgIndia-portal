@@ -140,3 +140,28 @@ export function guestFacingTimes(stay, defaults) {
   const departure = t.etd && !t.etdAfterCheckout ? `your planned departure: ${t.etd}` : ''
   return { ...t, arrivalNote: arrival, departureNote: departure }
 }
+
+// '4:00 PM' or '16:00:00' -> '16:00', the shape <input type="time"> wants. '' when
+// the value is not a clock time (a guest typed "around 3"), so a screen never shows
+// a time it cannot read.
+export function toClock(t) {
+  const m = toMinutes(t)
+  return m === null ? '' : String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+}
+
+// Extra-charge lines are free-form { label, amount }, so an early check-in and/or a
+// late check-out charge is recognised by its label ("Early Check-in", "Late
+// Check-out", "Early Check-in + Late Check-out").
+export function feeLineKind(label) {
+  const s = String(label || '')
+  return { early: /early\s*check[\s-]*in/i.test(s), late: /late\s*check[\s-]*out/i.test(s) }
+}
+
+// What the checkout-day email says about check-out: the standard time and, for a guest
+// with an agreed later one, theirs too: "11:00 AM (yours is 6:00 PM, as agreed)". It
+// slots into the template's "Standard check-out time is {checkoutTime}".
+export function checkoutTimeNote(standard, agreed) {
+  const std = toMinutes(standard), late = toMinutes(agreed)
+  if (std === null || late === null || late <= std) return standard
+  return `${standard} (yours is ${fmtTime(agreed)}, as agreed)`
+}

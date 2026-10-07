@@ -17,9 +17,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
-import { stayTimes, PRE_ARRIVAL_STATUSES } from '../../utils/stayTimes'
-import { dayMonth, heldSummary } from '../../utils/stayHolds'
-import { villaTimeDefaults } from '../../utils/villaTimes'
+import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '../../utils/stayTimes'
+import { stayHolds, dayMonth, heldSummary } from '../../utils/stayHolds'
+import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
 import GuestTimesReview from '../../components/GuestTimesReview'
 import StayTimesLine from '../../components/StayTimesLine'
 import { CONFIG } from '../../config'
@@ -152,6 +152,8 @@ export default function CompleteBooking() {
   const [phoneDraft,  setPhoneDraft]  = useState('')
   const [phoneBusy,   setPhoneBusy]   = useState(false)
   const phoneFieldRef = useRef(null)
+  const guestInfoRef  = useRef(null)
+  const selectedIdRef = useRef(null)   // the open guest's stay id, so a reload keeps it open
 
   // ── Early check-in / late check-out actual approved time — the boolean
   // request flags only say the guest asked, not what time was agreed. Both
@@ -194,7 +196,10 @@ export default function CompleteBooking() {
         // instead of always defaulting to the soonest one.
         const wantedId = searchParams.get('stayId')
         const wanted = wantedId ? list.find(s => s.stay_id === wantedId) : null
-        selectStay(wanted || list[0])
+        // Stay on the guest that is open: every save here reloads the list, and jumping back
+        // to the first guest hid the very booking that had just been edited.
+        const kept = selectedIdRef.current ? list.find(s => s.stay_id === selectedIdRef.current) : null
+        selectStay(kept || wanted || list[0])
       }
     } catch(e) {
       showToast('Could not load bookings: ' + e.message, 'error')
@@ -202,7 +207,11 @@ export default function CompleteBooking() {
   }
 
   function selectStay(stay) {
+    selectedIdRef.current = stay.stay_id
     setSelected(stay)
+    // A Guest info edit that was open belongs to the guest it was opened for: carrying it
+    // over would let "Save changes" write that guest's draft onto the one just picked.
+    setEditInfo(false)
     setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
     setAddingPhone(false); setPhoneDraft('')
     setEditingEarlyTime(false); setEditingLateTime(false); setEarlyTimeDraft(''); setLateTimeDraft('')
@@ -272,6 +281,28 @@ export default function CompleteBooking() {
     : 0
   const tariff     = parseFloat(form.tariffPerNight)||0
   const extraTotal = extraLines.reduce((s,l) => s + (parseFloat(l.amount)||0), 0)
+  // The agreed check-in / check-out time, shown beside the early / late check-out charge it
+  // is for, so the charge and the time are read together. With no time recorded the line
+  // says so and takes the owner to the place that sets it (Guest info).
+  const feeNote = label => {
+    const k = feeLineKind(label)
+    if (!selected || (!k.early && !k.late)) return null
+    const parts = []
+    let missing = false
+    if (k.early) { if (selected.early_checkin_time) parts.push('from ' + fmtTime(selected.early_checkin_time)); else missing = true }
+    if (k.late)  { if (selected.late_checkout_time) parts.push('until ' + fmtTime(selected.late_checkout_time)); else missing = true }
+    return (
+      <>
+        {parts.length > 0 && <span style={{color:'var(--text-dim)',fontWeight:'400'}}> · {parts.join(' · ')}</span>}
+        {missing && (
+          <button onClick={() => { openInfoEdit(k.late ? 'out' : 'in'); guestInfoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+            style={{background:'none',border:'none',padding:0,marginLeft:'6px',cursor:'pointer',color:'#F59E0B',fontSize:'0.72rem',textDecoration:'underline'}}>
+            no time recorded — set it
+          </button>
+        )}
+      </>
+    )
+  }
   const commPct    = COMMISSION[form.channel]||0
   // Airbnb: gross = nightFee + cleaningFee, commAmt = hostServiceFee, net = youEarn
   // Other:  gross = tariff * nights + extras, commAmt = gross * commPct%, net = gross - commAmt
@@ -347,11 +378,16 @@ export default function CompleteBooking() {
   // amended over WhatsApp, phones arrive with a trunk 0, guest counts change.
   const [editInfo,  setEditInfo]  = useState(false)
   const [infoDraft, setInfoDraft] = useState({})
+  const [infoOrig,  setInfoOrig]  = useState({})   // the draft as it was opened, so only changes are sent
+  const [infoFocus, setInfoFocus] = useState('')   // the time that opened the editor: 'in' | 'eta' | 'out' | 'etd'
   const [infoBusy,  setInfoBusy]  = useState(false)
 
-  function openInfoEdit() {
+  // The four times are edited here: what the villa gives (Check-in from / Check-out by,
+  // stored as the agreed early check-in / late check-out time) and what the guest said
+  // (Arrival ETA, Check-out ETA). `focus` puts the cursor in the one that was tapped.
+  function openInfoEdit(focus) {
     if (!selected) return
-    setInfoDraft({
+    const draft = {
       guestName:    selected.guest_name    || '',
       guestPhone:   selected.guest_phone   || '',
       guestEmail:   selected.guest_email   || '',
@@ -359,9 +395,14 @@ export default function CompleteBooking() {
       checkoutDate: selected.checkout_date || '',
       adults:       selected.adults   != null ? String(selected.adults)   : '',
       children:     selected.children != null ? String(selected.children) : '',
-      eta:          selected.eta || '',
-      etd:          selected.etd || '',
-    })
+      // toClock: a time input only shows 'HH:MM'; anything it cannot show comes back blank
+      eta:              toClock(selected.eta),
+      etd:              toClock(selected.etd),
+      earlyCheckinTime: toClock(selected.early_checkin_time),
+      lateCheckoutTime: toClock(selected.late_checkout_time),
+    }
+    setInfoDraft(draft); setInfoOrig(draft)
+    setInfoFocus(typeof focus === 'string' ? focus : '')
     setEditInfo(true)
   }
 
@@ -373,8 +414,15 @@ export default function CompleteBooking() {
     }
     setInfoBusy(true)
     try {
-      await api.updateStayGuestInfo({ stayId: selected.stay_id, ...d })
-      showToast('Guest info updated ✓')
+      // Only the times that were changed go to the server: one the field cannot show
+      // (a guest typed "around 3") would otherwise be saved back as blank.
+      const body = { ...d }
+      for (const k of ['eta', 'etd', 'earlyCheckinTime', 'lateCheckoutTime']) if (d[k] === infoOrig[k]) delete body[k]
+      const saved = await api.updateStayGuestInfo({ stayId: selected.stay_id, ...body })
+      // Say which nights are now held when the agreed times or the dates moved them.
+      const moved = d.earlyCheckinTime !== infoOrig.earlyCheckinTime || d.lateCheckoutTime !== infoOrig.lateCheckoutTime
+        || d.checkinDate !== infoOrig.checkinDate || d.checkoutDate !== infoOrig.checkoutDate
+      showToast('Guest info updated ✓' + (moved ? heldSummary(saved && saved.holds) : ''))
       setEditInfo(false)
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
@@ -1117,7 +1165,7 @@ export default function CompleteBooking() {
                 })()}
 
                 {/* Guest Info */}
-                <div className="card-section-label"
+                <div className="card-section-label" ref={guestInfoRef}
                   style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px'}}>
                   <span>GUEST INFO</span>
                   {!editInfo && (
@@ -1164,6 +1212,29 @@ export default function CompleteBooking() {
                     // works them out: src/utils/stayHolds.js), so it is plain to see.
                     const heldIn  = (s.holds || []).find(h => h.kind === 'early_checkin')
                     const heldOut = (s.holds || []).find(h => h.kind === 'late_checkout')
+                    // A charge for an early check-in / late check-out with no time recorded is
+                    // an inconsistency: the guest paid for a time nobody wrote down, so Raman,
+                    // the WhatsApp message and the calendar all still say the standard one.
+                    const feeIn   = extraLines.some(l => feeLineKind(l.label).early)
+                    const feeOut  = extraLines.some(l => feeLineKind(l.label).late)
+                    const lateFee = extraLines.filter(l => { const k = feeLineKind(l.label); return k.late && !k.early })
+                      .reduce((a, l) => a + (parseFloat(l.amount) || 0), 0)
+                    const pencil = key => (
+                      <button onClick={() => openInfoEdit(key)} title="Edit" aria-label="Edit"
+                        style={{background:'none',border:'none',padding:'0 0 0 6px',cursor:'pointer',color:'#85B7EB',fontSize:'0.74rem'}}>✎</button>
+                    )
+                    const nudge = (key, text) => (
+                      <button onClick={() => openInfoEdit(key)}
+                        style={{display:'block',textAlign:'left',background:'none',border:'none',padding:0,margin:'2px 0 0',
+                          cursor:'pointer',color:'#F59E0B',fontSize:'0.72rem',lineHeight:1.45}}>
+                        💰 {text} — <u>set it</u>
+                      </button>
+                    )
+                    // The nights the edited times would close, worked out as the server will.
+                    const holdsNow = editInfo
+                      ? stayHolds({ checkin_date: infoDraft.checkinDate, checkout_date: infoDraft.checkoutDate,
+                          early_checkin_time: infoDraft.earlyCheckinTime, late_checkout_time: infoDraft.lateCheckoutTime }, villaHoldRules())
+                      : []
                     if (editInfo) return (
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 12px'}}>
                         <div style={{gridColumn:'1 / -1'}}>
@@ -1205,16 +1276,34 @@ export default function CompleteBooking() {
                           <input type="number" min="0" style={dfield} value={infoDraft.children}
                             onChange={e=>setD('children', e.target.value)} />
                         </div>
-                        <div>
-                          <div style={infoLabel}>Arrival ETA</div>
-                          <input type="time" style={dfield} value={infoDraft.eta}
-                            onChange={e=>setD('eta', e.target.value)} />
-                        </div>
-                        <div>
-                          <div style={infoLabel}>Check-out ETA</div>
-                          <input type="time" style={dfield} value={infoDraft.etd}
-                            onChange={e=>setD('etd', e.target.value)} />
-                        </div>
+                        <div style={{gridColumn:'1 / -1',fontSize:'0.66rem',color:'var(--text-dim)',fontWeight:'600',
+                          letterSpacing:'0.05em',marginTop:'4px'}}>TIMES</div>
+                        {[
+                          { k:'earlyCheckinTime', key:'in',  label:'Check-in from', who:`what you give · blank = ${tm.stdIn}` },
+                          { k:'eta',              key:'eta', label:'Arrival ETA',   who:"the guest's estimate" },
+                          { k:'lateCheckoutTime', key:'out', label:'Check-out by',  who:`what you give · blank = ${tm.stdOut}` },
+                          { k:'etd',              key:'etd', label:'Check-out ETA', who:"the guest's estimate" },
+                        ].map(f => (
+                          <div key={f.k}>
+                            <div style={infoLabel}>{f.label}</div>
+                            <input type="time" style={dfield} value={infoDraft[f.k] || ''} autoFocus={infoFocus === f.key}
+                              onChange={e=>setD(f.k, e.target.value)} />
+                            <div style={{fontSize:'0.64rem',color:'var(--text-dim)',marginTop:'3px',display:'flex',justifyContent:'space-between',gap:'6px'}}>
+                              <span>{f.who}</span>
+                              {infoDraft[f.k] && (
+                                <button onClick={()=>setD(f.k, '')}
+                                  style={{background:'none',border:'none',padding:0,cursor:'pointer',color:'#85B7EB',fontSize:'0.64rem',textDecoration:'underline'}}>
+                                  clear
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {holdsNow.map(h => (
+                          <div key={h.kind} style={{gridColumn:'1 / -1',fontSize:'0.7rem',color:'#F59E0B'}}>
+                            🔒 {h.kind === 'late_checkout' ? 'This late check-out' : 'This early check-in'} closes the night of {dayMonth(h.night)} to new bookings.
+                          </div>
+                        ))}
                         <div style={{gridColumn:'1 / -1',display:'flex',gap:'8px',marginTop:'4px'}}>
                           <button onClick={handleSaveInfo} disabled={infoBusy}
                             style={{flex:1,padding:'11px',borderRadius:'9px',border:'none',
@@ -1243,13 +1332,14 @@ export default function CompleteBooking() {
                           <div style={infoVal}>{fmtDateWithWeekday(s.checkin_date)}</div>
                           <div style={small}>
                             <div style={{color: tm.inEarly ? '#F59E0B' : 'var(--text-dim)'}}>
-                              🔑 {tm.inEarly ? 'Early check-in from ' : 'Check-in from '}{tm.inTime}{tm.inEarly ? ' (agreed)' : ''}
+                              🔑 {tm.inEarly ? 'Early check-in from ' : 'Check-in from '}{tm.inTime}{tm.inEarly ? ' (agreed)' : ''}{pencil('in')}
                             </div>
                             {beforeArrival && (tm.eta
                               ? <div style={{color: tm.etaBeforeCheckin ? '#F59E0B' : '#85B7EB'}}>
-                                  🚗 Arrival ETA {tm.eta}{tm.etaBeforeCheckin ? ' — before check-in' : ''}
+                                  🚗 Arrival ETA {tm.eta}{tm.etaBeforeCheckin ? ' — before check-in' : ''}{pencil('eta')}
                                 </div>
-                              : <div style={{color:'var(--text-dim)',opacity:0.8}}>🚗 Arrival ETA — not given yet</div>)}
+                              : <div style={{color:'var(--text-dim)',opacity:0.8}}>🚗 Arrival ETA — not given yet{pencil('eta')}</div>)}
+                            {feeIn && !s.early_checkin_time && nudge('in', 'Early check-in is charged, but no check-in time is recorded')}
                             {heldIn && <div style={{color:'#F59E0B'}}>🔒 Holds the night of {dayMonth(heldIn.night)} — closed to new bookings</div>}
                           </div>
                         </div>
@@ -1262,13 +1352,14 @@ export default function CompleteBooking() {
                           </div>
                           <div style={small}>
                             <div style={{color: tm.outLate ? '#F59E0B' : 'var(--text-dim)'}}>
-                              🧳 {tm.outLate ? 'Late check-out until ' : 'Check-out by '}{tm.outTime}{tm.outLate ? ' (agreed)' : ''}
+                              🧳 {tm.outLate ? 'Late check-out until ' : 'Check-out by '}{tm.outTime}{tm.outLate ? ' (agreed)' : ''}{pencil('out')}
                             </div>
                             {beforeArrival && (tm.etd
                               ? <div style={{color: tm.etdAfterCheckout ? '#F59E0B' : '#85B7EB'}}>
-                                  ↗ Check-out ETA {tm.etd}{tm.etdAfterCheckout ? ' — after check-out time' : ''}
+                                  ↗ Check-out ETA {tm.etd}{tm.etdAfterCheckout ? ' — after check-out time' : ''}{pencil('etd')}
                                 </div>
-                              : <div style={{color:'var(--text-dim)',opacity:0.8}}>↗ Check-out ETA — not given yet</div>)}
+                              : <div style={{color:'var(--text-dim)',opacity:0.8}}>↗ Check-out ETA — not given yet{pencil('etd')}</div>)}
+                            {feeOut && !s.late_checkout_time && nudge('out', `Late check-out is charged${lateFee > 0 ? ' (' + fmt(lateFee) + ')' : ''}, but no check-out time is recorded`)}
                             {heldOut && <div style={{color:'#F59E0B'}}>🔒 Holds the night of {dayMonth(heldOut.night)} — closed to new bookings</div>}
                           </div>
                         </div>
@@ -1525,7 +1616,7 @@ export default function CompleteBooking() {
                     <div className="card-section-label" style={{marginBottom:'8px'}}>EXTRA CHARGES</div>
                     {extraLines.map((line, i) => (
                       <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
-                        <span style={{flex:1,fontSize:'0.85rem',color:'var(--text)'}}>{line.label}</span>
+                        <span style={{flex:1,fontSize:'0.85rem',color:'var(--text)'}}>{line.label}{feeNote(line.label)}</span>
                         <input type="number" value={line.amount} placeholder="0"
                           onChange={e => setExtraLines(prev => prev.map((l,j) => j===i ? {...l, amount: e.target.value} : l))}
                           style={{width:'90px',padding:'5px 8px',borderRadius:'6px',
@@ -1641,7 +1732,7 @@ export default function CompleteBooking() {
                       </div>}
                       {extraLines.map((line,i) => (
                         <div key={i} className="net-row">
-                          <span className="net-label">{line.label}</span>
+                          <span className="net-label">{line.label}{feeNote(line.label)}</span>
                           <span className="net-val pos">{fmt(parseFloat(line.amount)||0)}</span>
                         </div>
                       ))}
@@ -1654,7 +1745,7 @@ export default function CompleteBooking() {
                       </div>
                       {extraLines.map((line,i) => (
                         <div key={i} className="net-row">
-                          <span className="net-label">{line.label}</span>
+                          <span className="net-label">{line.label}{feeNote(line.label)}</span>
                           <span className="net-val pos">{fmt(parseFloat(line.amount)||0)}</span>
                         </div>
                       ))}
@@ -1678,43 +1769,35 @@ export default function CompleteBooking() {
                 {/* Extended check-in numbers — a per-night reference, not the
                     multi-night total, so the figure stays correct regardless of
                     how many nights the stay is.
-                    On Airbnb the base is what the GUEST PAID, not the night fee
-                    we receive. The guest is being asked for a share of their own
-                    booking, and their booking includes Airbnb's service fee — a
-                    quote off our net reads as arbitrary to them and undercharges
-                    us. Falls back to the night fee on older rows where the
-                    guest-paid total was never captured. */}
+                    The base is the rate the villa itself earns per night, the one
+                    the fee summary above shows: the NIGHT FEE on Airbnb ("Night
+                    fee (2N × ₹11,836)") and the ROOM rate on every other channel
+                    ("Room (1N × ₹17,451)"). On Airbnb it used to be the guest-paid
+                    rate, which came out lower than the night fee and so did not
+                    match what is actually charged (50% of the night fee) — changed
+                    2026-10-07 at the owner's request. Occupancy tax, cleaning fee
+                    and extras (an early-check-in charge would make the number
+                    circular) are never part of it. An older Airbnb row whose night
+                    fee was never captured falls back to the stay's tariff per night. */}
                 {(() => {
-                  // What the guest paid for the STAY, per night, on both
-                  // channels. Occupancy tax is excluded on purpose: it is
-                  // government money, not the value of the room, so charging
-                  // a share of it is neither explicable nor ours to keep.
-                  // One-time extras (Early Check-in etc.) are excluded too —
-                  // gross/guestPaidAmt fold those in, but a reference meant to
-                  // price "25%/50% of a night" off a total that already
-                  // contains an early-check-in charge is circular and
-                  // inflates the very number it's supposed to help set.
-                  const paidForStay = guestPaidAmt > 0
-                    ? (guestPaidAmt - occupancyTax - extraTotal)
-                    : nightFeeAmt + cleanFeeAmt
-                  const base = isAirbnb
-                    ? paidForStay / (nights || 1)
-                    : tariff
+                  const onNightFee = isAirbnb && nightFeeAmt > 0
+                  const base = onNightFee ? nightFeeAmt / (nights || 1) : tariff
+                  const basis = onNightFee ? 'night fee' : 'room rate'
                   if (base <= 0) return null
                   return (
                     <div className="card" style={{marginBottom:'8px'}}>
                       <div className="card-section-label" style={{marginBottom:'10px'}}>EXTENDED STAY REFERENCE</div>
                       <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginBottom:'10px'}}>
-                        Based on what the guest paid per night ({fmt(base)}){isAirbnb && occupancyTax > 0 ? ' — occupancy tax excluded' : ''}
+                        Based on the {basis} per night ({fmt(base)})
                       </div>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
                         <div style={extBox}>
-                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of guest-paid rate</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>25% of {basis}</div>
                           <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.25))}</div>
                           <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Early check-in / late check-out ref</div>
                         </div>
                         <div style={extBox}>
-                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of guest-paid rate</div>
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.04em',marginBottom:'4px'}}>50% of {basis}</div>
                           <div style={{fontSize:'1.05rem',color:'#E8B86D',fontWeight:'700'}}>{fmt(Math.round(base * 0.5))}</div>
                           <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginTop:'2px'}}>Half-day / extra night ref</div>
                         </div>

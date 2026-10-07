@@ -30,7 +30,7 @@ import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, t
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
 import { stayHolds, holdPhrase } from '../../src/utils/stayHolds.js'
-import { fmtTime as fmt12 } from '../../src/utils/stayTimes.js'
+import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -2539,7 +2539,8 @@ export async function onRequest(ctx) {
       const vars = {
         guestName: stay.guest_name, villaName: villa.full,
         managerName: villa.managerName, managerPhone: villa.managerPhone,
-        checkoutTime: villa.checkoutTime, brandName: host.brandName,
+        // A guest with an agreed late check-out is told theirs, not only the standard one.
+        checkoutTime: checkoutTimeNote(villa.checkoutTime, stay.late_checkout_time), brandName: host.brandName,
       }
       const result = await sendGuestEmail(env, DB, {
         to: stay.guest_email, subject: renderTemplate(msg.subject, vars),
@@ -7617,13 +7618,19 @@ export async function onRequest(ctx) {
       // quietly distort occupancy and the manager's commission band.
       if (action === 'updateStayGuestInfo') {
         const { stayId, guestName, guestPhone, guestEmail,
-                checkinDate, checkoutDate, adults, children, eta, etd } = body
+                checkinDate, checkoutDate, adults, children, eta, etd,
+                earlyCheckinTime, lateCheckoutTime } = body
         if (!stayId) return err('stayId required')
+        // An agreed check-in / check-out time closes a night on every calendar
+        // (src/utils/stayHolds.js), so only the owner sets one, here as in
+        // approveGuestTimes. The rest of the card stays open to whoever could edit it.
+        if ((earlyCheckinTime !== undefined || lateCheckoutTime !== undefined) &&
+            payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         // The id came from the caller — confirm the record is theirs before
         // acting on it. No-op for one tenant; blocks cross-tenant writes once
         // there are two.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
-        const cur = await DB.prepare(`SELECT villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const cur = await DB.prepare(`SELECT villa_id, checkin_date, checkout_date, early_checkin_time, late_checkout_time FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!cur) return err('Stay not found', 404)
 
         const sets = [], vals = []
@@ -7649,6 +7656,28 @@ export async function onRequest(ctx) {
           put('nights', Math.max(1, Math.round(
             (new Date(`${co}T00:00:00Z`) - new Date(`${ci}T00:00:00Z`)) / 86400000)))
         }
+        // The times the villa agrees with this guest (early check-in / late check-out).
+        // undefined leaves the saved time alone; blank, or the standard time itself,
+        // puts it back to the standard; any other clock time becomes the agreed one.
+        // Agreeing one beyond the standard also marks the request, as approving what a
+        // guest asked for does, so Complete booking's Guest requests block shows it.
+        const rules = await holdRules(DB, cur.villa_id)
+        const stdIn = clockMinutes(rules.stdIn), stdOut = clockMinutes(rules.stdOut)
+        let early = cur.early_checkin_time, late = cur.late_checkout_time
+        if (earlyCheckinTime !== undefined) {
+          const v = scrub(earlyCheckinTime), t = v ? cleanTime(v) : null
+          if (v && !t) return err('Check-in time must be a clock time, like 14:00')
+          early = t && clockMinutes(t) !== stdIn ? t : null
+          put('early_checkin_time', early)
+          if (early && clockMinutes(early) < stdIn) put('request_early_checkin', 1)
+        }
+        if (lateCheckoutTime !== undefined) {
+          const v = scrub(lateCheckoutTime), t = v ? cleanTime(v) : null
+          if (v && !t) return err('Check-out time must be a clock time, like 18:00')
+          late = t && clockMinutes(t) !== stdOut ? t : null
+          put('late_checkout_time', late)
+          if (late && clockMinutes(late) > stdOut) put('request_late_checkout', 1)
+        }
         if (!sets.length && etd === undefined) return err('nothing to update')
 
         if (sets.length) {
@@ -7658,7 +7687,9 @@ export async function onRequest(ctx) {
         // The guest's expected departure sits with their form answers.
         if (etd !== undefined) await recordGuestDeparture(DB, stayId, cur.villa_id, scrub(etd))
         const row = await DB.prepare(`SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, eta FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
-        return json({ success: true, data: row })
+        // Which nights the agreed times now keep out of sale, so the screen can say so.
+        const holds = stayHolds({ stay_id: stayId, checkin_date: ci, checkout_date: co, early_checkin_time: early, late_checkout_time: late }, rules)
+        return json({ success: true, data: { ...row, holds } })
       }
 
       if (action === 'updateStayGuestPhone') {
@@ -7756,6 +7787,9 @@ export async function onRequest(ctx) {
       // call (nullable) so either one can be updated without disturbing the
       // other's already-saved value.
       if (action === 'updateStayCheckinTimes') {
+        // An agreed time closes a night on every calendar (src/utils/stayHolds.js),
+        // so it is the owner's to set; Complete booking is the only screen that calls this.
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const { stayId, earlyCheckinTime, lateCheckoutTime } = body
         // Confirm the stay belongs to this tenant before touching it. A no-op
         // when the id is newly generated — assertRecordAccess ignores a record
@@ -7792,7 +7826,8 @@ export async function onRequest(ctx) {
         const vars = {
           guestName: stay.guest_name, villaName: villa.full,
           managerName: villa.managerName, managerPhone: villa.managerPhone,
-          checkoutTime: villa.checkoutTime, brandName: host.brandName,
+          // A guest with an agreed late check-out is told theirs, not only the standard one.
+          checkoutTime: checkoutTimeNote(villa.checkoutTime, stay.late_checkout_time), brandName: host.brandName,
         }
         const result = await sendGuestEmail(env, DB, {
           to: stay.guest_email, subject: renderTemplate(msg.subject, vars),

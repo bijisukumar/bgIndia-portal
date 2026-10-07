@@ -2,6 +2,10 @@
  * Maintenance.jsx
  * Owner-only hub for system health, schema validation, and alert settings.
  * Route: /owner/maintenance
+ *
+ * Shared by the tenant app (stayvibe / demo) and the manage console, which
+ * register DIFFERENT routes. Each app passes `rows` — the ids it can actually
+ * open — so no row is a dead end. No `rows` prop means show every row.
  */
 
 import { useState, useEffect } from 'react'
@@ -11,6 +15,7 @@ import { useAuth } from '../../hooks/useAuth'
 
 const ITEMS = [
   {
+    id: 'staff',
     icon: '🔑',
     bg: 'rgba(95,208,174,0.08)',
     arrow: '#5FD0AE',
@@ -19,6 +24,7 @@ const ITEMS = [
     path: '/owner/maintenance/staff',
   },
   {
+    id: 'manual-access',
     icon: '📘',
     bg: 'rgba(133,183,235,0.08)',
     arrow: '#85B7EB',
@@ -27,6 +33,7 @@ const ITEMS = [
     path: '/owner/maintenance/manual-access',
   },
   {
+    id: 'schema',
     icon: '✅',
     bg: 'rgba(52,168,83,0.08)',
     arrow: '#34A853',
@@ -35,6 +42,7 @@ const ITEMS = [
     path: '/owner/maintenance/schema',
   },
   {
+    id: 'signups',
     icon: '📥',
     bg: 'rgba(200,144,58,0.08)',
     arrow: '#C8903A',
@@ -44,6 +52,7 @@ const ITEMS = [
     masterOwnerOnly: true,
   },
   {
+    id: 'usage',
     icon: '📊',
     bg: 'rgba(133,183,235,0.08)',
     arrow: '#85B7EB',
@@ -52,6 +61,7 @@ const ITEMS = [
     path: '/owner/maintenance/usage',
   },
   {
+    id: 'error-log',
     icon: '🔔',
     bg: 'rgba(200,144,58,0.08)',
     arrow: '#C8903A',
@@ -61,14 +71,7 @@ const ITEMS = [
     masterOwnerOnly: true,
   },
   {
-    icon: '🗄️',
-    bg: 'rgba(24,95,165,0.08)',
-    arrow: '#185FA5',
-    title: 'DB Explorer',
-    sub: 'Run SQL queries · inspect tables · preset queries for common checks',
-    path: '/infra/d1',
-  },
-  {
+    id: 'test',
     icon: '🧪',
     bg: 'rgba(139,92,246,0.08)',
     arrow: '#8B5CF6',
@@ -77,6 +80,7 @@ const ITEMS = [
     path: '/test',
   },
   {
+    id: 'debug',
     icon: '🐛',
     bg: 'rgba(92,112,128,0.08)',
     arrow: '#5C7080',
@@ -86,10 +90,12 @@ const ITEMS = [
   },
 ]
 
-export default function Maintenance() {
+export default function Maintenance({ rows }) {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const visibleItems = ITEMS.filter(item => !item.masterOwnerOnly || user?.role === 'master_owner')
+  const visibleItems = ITEMS.filter(item =>
+    (!rows || rows.includes(item.id)) &&
+    (!item.masterOwnerOnly || user?.role === 'master_owner'))
   const [storeCarPhotos, setStoreCarPhotos] = useState(null) // null = loading
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -196,19 +202,21 @@ export default function Maintenance() {
         </div>
         {error && <div style={{ color: '#EF9A9A', fontSize: '0.75rem', marginTop: '-8px', marginBottom: '14px' }}>{error}</div>}
 
-        <div style={{
-          background: 'rgba(52,168,83,0.06)', border: '1px solid rgba(52,168,83,0.15)',
-          borderRadius: '10px', padding: '10px 14px',
-        }}>
-          <div style={{ color: '#34A853', fontSize: '0.75rem', fontWeight: '600' }}>
-            💡 Schema validation runs on every load
+        {visibleItems.some(item => item.id === 'schema') && (
+          <div style={{
+            background: 'rgba(52,168,83,0.06)', border: '1px solid rgba(52,168,83,0.15)',
+            borderRadius: '10px', padding: '10px 14px',
+          }}>
+            <div style={{ color: '#34A853', fontSize: '0.75rem', fontWeight: '600' }}>
+              💡 Schema validation runs on every load
+            </div>
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
+              The validation screen fetches the live DB schema via lightweight PRAGMA queries
+              (no data rows read) and cross-checks all query contracts automatically.
+              Zero cost, catches column mismatches before they reach guests.
+            </div>
           </div>
-          <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
-            The validation screen fetches the live DB schema via lightweight PRAGMA queries
-            (no data rows read) and cross-checks all query contracts automatically.
-            Zero cost, catches column mismatches before they reach guests.
-          </div>
-        </div>
+        )}
 
       </div>
     </div>

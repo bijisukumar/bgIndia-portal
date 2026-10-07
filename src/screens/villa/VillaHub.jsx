@@ -93,7 +93,6 @@ export default function VillaHub() {
             { icon: '📦', bg: 'rgba(15,110,86,0.08)',    arrow: '#0F6E56', title: 'Inventory',          sub: 'Stock levels · sell prices · restock log',               path: `/owner/villa/inventory` },
                 { icon: '🧾', bg: 'rgba(239,68,68,0.08)',    arrow: '#EF4444', title: 'Expenses',      sub: 'Electricity · maintenance · repairs · recurring costs', path: `/owner/villa/expenses` },
                 { icon: '🔔', bg: 'rgba(139,92,246,0.08)',   arrow: '#8B5CF6', title: 'Notification settings', sub: 'Owner alert email · per-villa config',                path: `/owner/villa/notifications` },
-                { icon: '🔧', bg: 'rgba(92,112,128,0.08)', arrow: '#5C7080', title: 'Maintenance',         sub: 'Schema validation · alert settings · system health',       path: `/owner/maintenance` },
               ].map((row, i, arr) => (
                 <div key={row.title}
                   className="menu-row"
@@ -142,7 +141,7 @@ export default function VillaHub() {
               return (
                 <div key={s.stay_id}
                   style={{ ...styles.guestRow, borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.05)' }}
-                  onClick={() => navigate('/owner/villa/income')}
+                  onClick={() => navigate(`/owner/villa/income?stayId=${encodeURIComponent(s.stay_id)}`)}
                 >
                   <div style={styles.dateBadge}>
                     <div style={styles.dateDay}>{fmtDate(s.checkin_date).split(' ')[0]}</div>
@@ -168,21 +167,6 @@ export default function VillaHub() {
           )}
         </div>
 
-        {/* Add another villa */}
-        <div className="card-dashed" onClick={() => {}}>
-          <div className="card-dashed-icon">+</div>
-          <div className="card-dashed-text">
-            <strong>Add another villa / property</strong>
-            <span>Onboard a new property — gets its own Stay IDs, logo & tracking</span>
-          </div>
-        </div>
-
-        <div style={{ background: 'rgba(24,95,165,0.06)', border: '1px solid rgba(24,95,165,0.15)', borderRadius: '10px', padding: '10px 14px', marginTop: '4px' }}>
-          <div style={{ color: '#85B7EB', fontSize: '0.75rem', fontWeight: '600' }}>💡 SaaS ready</div>
-          <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
-            Each property gets its own logo, branding, and Stay ID sequence. Operators can manage their own villas under their profile.
-          </div>
-        </div>
       </div>
     </div>
   )

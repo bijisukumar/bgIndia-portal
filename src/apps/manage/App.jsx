@@ -15,6 +15,7 @@ import RDashboard         from '../../screens/RDashboard'
 import VillaHub          from '../../screens/villa/VillaHub'
 import CompleteBooking    from '../../screens/villa/CompleteBooking'
 import VillaDashboard    from '../../screens/villa/VillaDashboard'
+import ChannelCalendar   from '../../screens/villa/ChannelCalendar'
 import NewBooking        from '../../screens/villa/NewBooking'
 import GuestRepository      from '../../screens/villa/GuestRepository'
 import MarketingCampaigns   from '../../screens/villa/MarketingCampaigns'
@@ -94,6 +95,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/booking"    element={<NewBooking />} />
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
+        <Route path="/owner/villa/channel-calendar" element={<ChannelCalendar />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/raman/inventory"        element={<Inventory />} />
         <Route path="/owner/villa/expenses"   element={<VillaExpenses />} />
@@ -124,7 +126,9 @@ function ProtectedRoutes() {
         {/* Infra */}
         <Route path="/debug"                  element={<DebugPanel />} />
         <Route path="/test"                   element={<TestRunner />} />
-        <Route path="/owner/maintenance"      element={<Maintenance />} />
+        {/* Only the rows this console can open: staff logins and training-manual
+            access are per-tenant screens, routed on each tenant's own site. */}
+        <Route path="/owner/maintenance"      element={<Maintenance rows={['schema', 'signups', 'usage', 'error-log', 'test', 'debug']} />} />
         <Route path="/owner/maintenance/schema" element={<SchemaValidation />} />
         <Route path="/owner/maintenance/usage"  element={<TenantUsage />} />
         <Route path="/owner/maintenance/signups" element={<PlatformSignups />} />

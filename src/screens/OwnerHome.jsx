@@ -69,7 +69,7 @@ const PEOPLE = {
     {
       id: 'maintenance', icon: '🛠️', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Maintenance',
-      sub: 'Staff logins · reset PIN · lock account · schema tools',
+      sub: 'Staff logins · reset PIN · lock account · training manual access',
       path: '/owner/maintenance',
     },
     {
@@ -225,9 +225,15 @@ function Last48Block() {
   )
 }
 
-// ── PENDING REVIEW BLOCK ─────────────────────────────────────────────────
-function PendingReviewBlock({ onApproved }) {
-  const [pending, setPending] = useState([])
+// ── NEEDS ATTENTION BLOCK ────────────────────────────────────────────────
+// Guests whose check-in details are in but who still need the owner's approval
+// (stay status 'pending_review'). This used to be TWO blocks fed by the same API
+// call — a red "Needs attention" list that only linked out and an amber "Pending
+// review" list that held the buttons — so every guest appeared twice. One list
+// now: pick a guest, then act on them right here.
+function NeedsAttentionBlock() {
+  const navigate = useNavigate()
+  const [pending, setPending] = useState(null)      // null = still loading
   const [selected, setSelected] = useState(null)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
@@ -238,22 +244,30 @@ function PendingReviewBlock({ onApproved }) {
 
   useEffect(() => {
     api.getPendingReviewStays().then(data => {
-      if (Array.isArray(data)) { setPending(data); if (data.length > 0) setSelected(data[0]) }
-    }).catch(() => {})
+      const list = Array.isArray(data) ? data : []
+      setPending(list); setSelected(list[0] || null)
+    }).catch(() => setPending([]))
   }, [])
 
-  if (pending.length === 0) return null
+  if (pending === null) return null
+  // Nothing left to show — but stay mounted while a confirmation toast is up,
+  // otherwise dealing with the LAST guest would remove the block and its
+  // "Approved" message in the same instant.
+  if (pending.length === 0) return toast ? <div className={`toast ${toast.type}`}>{toast.msg}</div> : null
+
+  // Drops the guest just dealt with and moves the selection to the next one.
+  function clearSelected() {
+    const updated = pending.filter(p => p.stayId !== selected.stayId)
+    setPending(updated); setSelected(updated[0] || null)
+  }
 
   async function handleApprove() {
     if (!selected) return
     setSaving(true)
     try {
       await api.setReadyForCheckIn({ stayId: selected.stayId })
-      showToast('✅ Approved — Raman can now check in ' + selected.guestName)
-      const updated = pending.filter(p => p.stayId !== selected.stayId)
-      setPending(updated)
-      setSelected(updated[0] || null)
-      onApproved?.()
+      showToast(`✅ Approved — ${MANAGER_NAME} can now check in ${selected.guestName}`)
+      clearSelected()
     } catch (e) {
       showToast('Failed: ' + e.message, 'error')
     } finally { setSaving(false) }
@@ -267,8 +281,7 @@ function PendingReviewBlock({ onApproved }) {
     try {
       await api.resolveStay({ stayId: selected.stayId, reason: reason || 'voided' })
       showToast(`Voided ${selected.guestName} — kept on record`)
-      const updated = pending.filter(p => p.stayId !== selected.stayId)
-      setPending(updated); setSelected(updated[0] || null); onApproved?.()
+      clearSelected()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
     finally { setSaving(false) }
   }
@@ -281,8 +294,7 @@ function PendingReviewBlock({ onApproved }) {
     try {
       await api.deleteStay({ stayId: selected.stayId, confirm: true, reason })
       showToast(`Deleted ${selected.guestName}`)
-      const updated = pending.filter(p => p.stayId !== selected.stayId)
-      setPending(updated); setSelected(updated[0] || null); onApproved?.()
+      clearSelected()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
     finally { setSaving(false) }
   }
@@ -293,72 +305,89 @@ function PendingReviewBlock({ onApproved }) {
     catch { return d }
   }
 
+  // Outlined secondary button, in the colour of the action it stands for.
+  const ghostBtn = (rgb, size = '0.8rem') => ({
+    flex: 1, padding: '10px', borderRadius: '10px', textAlign: 'center', cursor: 'pointer',
+    border: `1px solid rgba(${rgb},0.3)`, background: 'transparent',
+    color: `rgb(${rgb})`, fontSize: size, textDecoration: 'none', opacity: saving ? 0.6 : 1,
+  })
+
   return (
     <div style={{ marginBottom: '16px' }}>
-      <div className="card-section-label" style={{ color: '#F59E0B' }}>
-        🔶 PENDING REVIEW ({pending.length})
-      </div>
-      <div style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.25)',
-        borderRadius: '12px', overflow: 'hidden', marginBottom: '10px' }}>
-        {pending.map((p, i) => (
-          <div key={p.stayId} onClick={() => setSelected(p)}
-            style={{ padding: '12px 16px', cursor: 'pointer',
-              borderBottom: i < pending.length - 1 ? '1px solid rgba(245,158,11,0.12)' : 'none',
-              background: selected?.stayId === p.stayId ? 'rgba(245,158,11,0.1)' : 'transparent',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontWeight: '600', fontSize: '0.88rem' }}>
-                {selected?.stayId === p.stayId && <span style={{ color: '#F59E0B', marginRight: '6px' }}>✓</span>}
-                {p.guestName}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-                {fmt(p.checkIn)} · {p.nights || 1}N · {p.phone || p.email || ''}
-              </div>
-              {p.bookedByName && (
-                <div style={{ fontSize: '0.68rem', color: '#8B5CF6', marginTop: '2px' }}>
-                  🔗 Booked by {p.bookedByName}
-                </div>
-              )}
-            </div>
-            <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px',
-              borderRadius: '10px', background: 'rgba(245,158,11,0.15)', color: '#F59E0B' }}>
-              Provisional
+      <div style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)',
+        borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(239,68,68,0.15)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🚨</span>
+            <span style={{ fontSize: '0.68rem', fontWeight: '700', color: '#EF4444', letterSpacing: '1.5px' }}>
+              NEEDS ATTENTION
+            </span>
+            <span style={{ marginLeft: 'auto', background: 'rgba(239,68,68,0.2)', color: '#EF4444',
+              fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
+              {pending.length}
             </span>
           </div>
-        ))}
+          <div style={{ fontSize: '0.72rem', color: '#9AA5B4', marginTop: '4px' }}>
+            Guests who have sent their check-in details and are waiting for your approval
+          </div>
+        </div>
+        {pending.map((p, i) => {
+          const isSelected = selected?.stayId === p.stayId
+          return (
+            <div key={p.stayId} onClick={() => setSelected(p)}
+              style={{ padding: '11px 14px', cursor: 'pointer', display: 'flex',
+                justifyContent: 'space-between', alignItems: 'center', gap: '10px',
+                background: isSelected ? 'rgba(239,68,68,0.1)' : 'transparent',
+                borderBottom: i < pending.length - 1 ? '1px solid rgba(239,68,68,0.1)' : 'none' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0' }}>
+                  {isSelected && <span style={{ color: '#EF4444', marginRight: '6px' }}>✓</span>}
+                  {p.guestName}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#9AA5B4', marginTop: '2px' }}>
+                  Check-in {fmt(p.checkIn)} · {p.nights || 1}N{(p.phone || p.email) ? ` · ${p.phone || p.email}` : ''}
+                </div>
+                {p.bookedByName && (
+                  <div style={{ fontSize: '0.68rem', color: '#8B5CF6', marginTop: '2px' }}>
+                    🔗 Booked by {p.bookedByName}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px',
+                flexShrink: 0, whiteSpace: 'nowrap', background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>
+                Pending review
+              </span>
+            </div>
+          )
+        })}
       </div>
       {selected && (
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {selected.driveFolderUrl && (
-            <a href={selected.driveFolderUrl} target="_blank" rel="noreferrer"
-              style={{ flex: 1, padding: '11px', borderRadius: '10px', textAlign: 'center',
-                border: '1px solid rgba(245,158,11,0.3)', background: 'transparent',
-                color: '#F59E0B', fontSize: '0.8rem', textDecoration: 'none' }}>
-              📁 View folder
-            </a>
-          )}
+        <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <button onClick={handleApprove} disabled={saving}
-            style={{ flex: 2, padding: '11px', borderRadius: '10px',
+            style={{ padding: '12px', borderRadius: '10px', cursor: 'pointer',
               border: '1px solid rgba(52,168,83,0.4)', background: 'rgba(52,168,83,0.12)',
-              color: '#34A853', fontWeight: '700', fontSize: '0.85rem', cursor: 'pointer' }}>
+              color: '#34A853', fontWeight: '700', fontSize: '0.88rem' }}>
             {saving ? '…' : '✅ Onboard Guest'}
           </button>
-        </div>
-      )}
-      {selected && (
-        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-          <button onClick={handleVoid} disabled={saving}
-            style={{ flex: 1, padding: '9px', borderRadius: '10px',
-              border: '1px solid rgba(245,158,11,0.3)', background: 'transparent',
-              color: '#F59E0B', fontSize: '0.75rem', cursor: 'pointer' }}>
-            Void (keep record)
-          </button>
-          <button onClick={handleDelete} disabled={saving}
-            style={{ flex: 1, padding: '9px', borderRadius: '10px',
-              border: '1px solid rgba(239,68,68,0.3)', background: 'transparent',
-              color: '#EF4444', fontSize: '0.75rem', cursor: 'pointer' }}>
-            Delete
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => navigate(`/owner/villa/income?stayId=${encodeURIComponent(selected.stayId)}`)}
+              style={ghostBtn('154,165,180')}>
+              📂 Open booking
+            </button>
+            {selected.driveFolderUrl && (
+              <a href={selected.driveFolderUrl} target="_blank" rel="noreferrer" style={ghostBtn('245,158,11')}>
+                📁 View folder
+              </a>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={handleVoid} disabled={saving} style={ghostBtn('245,158,11', '0.75rem')}>
+              Void (keep record)
+            </button>
+            <button onClick={handleDelete} disabled={saving} style={ghostBtn('239,68,68', '0.75rem')}>
+              Delete
+            </button>
+          </div>
         </div>
       )}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
@@ -679,7 +708,6 @@ function CheckinLinksBlock() {
 }
 
 
-// ── NEEDS ATTENTION BLOCK ────────────────────────────────────────────────
 // ── REVIEW CHASE BLOCK ───────────────────────────────────────────────────
 // Stays past checkout with no review yet
 // - WhatsApp nudge button per guest
@@ -880,56 +908,6 @@ function ReviewChaseBlock() {
     </div>
   )
 }
-
-function NeedsAttentionBlock({ refreshKey }) {
-  const [items, setItems] = useState([])
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    api.getPendingReviewStays().then(data => {
-      setItems(Array.isArray(data) ? data : [])
-    }).catch(() => {})
-  }, [refreshKey])
-
-  if (items.length === 0) return null
-
-  return (
-    <div style={{ marginBottom:'16px', background:'rgba(239,68,68,0.06)',
-      border:'1px solid rgba(239,68,68,0.25)', borderRadius:'12px', overflow:'hidden' }}>
-      <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(239,68,68,0.15)',
-        display:'flex', alignItems:'center', gap:'8px' }}>
-        <span>🚨</span>
-        <span style={{ fontSize:'0.68rem', fontWeight:'700', color:'#EF4444', letterSpacing:'1.5px' }}>
-          NEEDS ATTENTION
-        </span>
-        <span style={{ marginLeft:'auto', background:'rgba(239,68,68,0.2)', color:'#EF4444',
-          fontSize:'0.65rem', fontWeight:'700', padding:'2px 8px', borderRadius:'10px' }}>
-          {items.length}
-        </span>
-      </div>
-      {items.map((item, i) => (
-        <div key={i} onClick={() => navigate(`/owner/villa/income?stayId=${item.stayId}`)}
-          style={{ padding:'11px 14px', cursor:'pointer', display:'flex', alignItems:'center', gap:'10px',
-            borderBottom: i < items.length-1 ? '1px solid rgba(239,68,68,0.1)' : 'none' }}>
-          <span style={{ fontSize:'1.1rem' }}>🔶</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:'0.85rem', fontWeight:'600', color:'#F0F0F0' }}>{item.guestName}</div>
-            <div style={{ fontSize:'0.72rem', color:'#9AA5B4', marginTop:'2px' }}>
-              Check-in: {item.checkIn} · Pending your review
-            </div>
-            {item.bookedByName && (
-              <div style={{ fontSize:'0.68rem', color:'#8B5CF6', marginTop:'2px' }}>
-                🔗 Booked by {item.bookedByName}
-              </div>
-            )}
-          </div>
-          <span style={{ color:'#EF4444' }}>›</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 
 // ── DUPLICATE BOOKINGS BLOCK ─────────────────────────────────────────────
 // Shows last 2 months of double-booking attempts grouped by channel
@@ -1212,11 +1190,6 @@ function SignupsBlock() {
 export default function OwnerHome({ sections }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  // Bumped whenever PendingReviewBlock approves a guest, so
-  // NeedsAttentionBlock (a separate component hitting the same
-  // getPendingReviewStays endpoint) re-fetches instead of staying stale
-  // until a manual page reload.
-  const [pendingRefreshKey, setPendingRefreshKey] = useState(0)
 
   const hospitality = filterSection(HOSPITALITY, sections)
   const people       = filterSection(PEOPLE, sections)
@@ -1227,10 +1200,18 @@ export default function OwnerHome({ sections }) {
   // so the tile itself needs to say so rather than promise editor access
   // it won't grant.
   const isMaster = user?.role === 'master_owner'
-  const peopleRows = people.rows.map(row => row.id !== 'dbadmin' ? row : {
-    ...row,
-    title: isMaster ? 'DB Admin' : 'Quick Reports',
-    sub: isMaster ? 'Saved queries · SQL editor · Live D1' : 'Canned reports · read-only',
+  const peopleRows = people.rows.map(row => {
+    if (row.id === 'dbadmin') return {
+      ...row,
+      title: isMaster ? 'DB Admin' : 'Quick Reports',
+      sub: isMaster ? 'Saved queries · SQL editor · Live D1' : 'Canned reports · read-only',
+    }
+    // Staff logins live on each tenant's own site; the manage console's
+    // Maintenance holds the platform tools.
+    if (row.id === 'maintenance' && !sections) return {
+      ...row, sub: 'Schema checks · tenant usage · signups · tests & debug',
+    }
+    return row
   })
 
   // The alert blocks below (duplicate bookings, review chase, check-in
@@ -1241,6 +1222,17 @@ export default function OwnerHome({ sections }) {
   // saw these unconditionally since only the menu tiles below were ever
   // scoped by `sections`.
   const showVillaBlocks = !sections || sections.includes('villa')
+  // The signups block links into Maintenance → Signups, so only apps that have
+  // the Maintenance tile render it.
+  const hasMaintenance = !sections || sections.includes('maintenance')
+  // Bottom-row shortcuts only exist where the screen they open does, and are
+  // left out where this home already has a tile for the same screen:
+  //  - DB Explorer: a tile ('dbadmin') wherever it is allowed, so the shortcut
+  //    is only for apps without that tile (estate360 — its only way in).
+  //  - Debug panel and Test runner: routed in the manage console only. The
+  //    manage home is the one rendered with no `sections` allow-list.
+  const showDbShortcut = !!sections && !sections.includes('dbadmin')
+  const showDevShortcuts = !sections
   const activeVilla = CONFIG.villas.find(v => v.id === DEFAULT_VILLA_ID)
   const whiteLabelLogo = activeVilla?.logoUrl || null
 
@@ -1261,17 +1253,14 @@ export default function OwnerHome({ sections }) {
 
       <div className="screen-body">
         {/* Only renders for the platform operator; the API decides. */}
-        <SignupsBlock />
+        {hasMaintenance && <SignupsBlock />}
 
         {showVillaBlocks && <>
-          {/* Needs Attention — urgent items at top of page */}
-          <NeedsAttentionBlock refreshKey={pendingRefreshKey} />
+          {/* Needs Attention — guests awaiting approval, urgent items at top of page */}
+          <NeedsAttentionBlock />
 
           {/* Duplicate Bookings — channel sync health check */}
           <DuplicateBookingsBlock />
-
-          {/* Pending Review — provisional bookings awaiting approval */}
-          <PendingReviewBlock onApproved={() => setPendingRefreshKey(k => k + 1)} />
 
           {/* Review Chase — past-checkout stays with no review yet */}
           <ReviewChaseBlock />
@@ -1306,11 +1295,15 @@ export default function OwnerHome({ sections }) {
 
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
           <button className="logout-btn" style={{ flex: 1 }} onClick={logout}>Log out</button>
-          <button onClick={() => navigate('/infra/d1')} style={{padding:'12px 16px',borderRadius:'12px',border:'1px solid rgba(24,95,165,0.3)',background:'rgba(24,95,165,0.08)',color:'#85B7EB',fontSize:'0.8rem',cursor:'pointer'}}>🗄</button>
-          <button onClick={() => navigate('/debug')}
-            style={{ padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', background: 'transparent', color: 'var(--text-dim)', fontSize: '0.8rem', cursor: 'pointer' }}>🔧</button>
-          <button onClick={() => navigate('/test')}
-            style={{ padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(52,168,83,0.3)', background: 'rgba(52,168,83,0.08)', color: 'var(--green)', fontSize: '0.8rem', cursor: 'pointer' }}>🧪</button>
+          {showDbShortcut && (
+            <button onClick={() => navigate('/infra/d1')} style={{padding:'12px 16px',borderRadius:'12px',border:'1px solid rgba(24,95,165,0.3)',background:'rgba(24,95,165,0.08)',color:'#85B7EB',fontSize:'0.8rem',cursor:'pointer'}}>🗄</button>
+          )}
+          {showDevShortcuts && <>
+            <button onClick={() => navigate('/debug')}
+              style={{ padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', background: 'transparent', color: 'var(--text-dim)', fontSize: '0.8rem', cursor: 'pointer' }}>🔧</button>
+            <button onClick={() => navigate('/test')}
+              style={{ padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(52,168,83,0.3)', background: 'rgba(52,168,83,0.08)', color: 'var(--green)', fontSize: '0.8rem', cursor: 'pointer' }}>🧪</button>
+          </>}
         </div>
       </div>
     </div>

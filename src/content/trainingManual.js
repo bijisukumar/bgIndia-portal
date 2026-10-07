@@ -11,7 +11,7 @@
 // Deliberately generic: no villa, manager or town names, because the same
 // manual is served on every host (dwarka, demo, and each customer's own).
 
-export const UPDATED = '6 October 2026'
+export const UPDATED = '7 October 2026'
 
 export const TITLE = 'Owner Training Manual'
 export const TAGLINE = 'Run your villa from one screen.'
@@ -60,7 +60,7 @@ export const IDEAS = [
   {
     icon: '🔕',
     title: 'Quiet is good news',
-    body: `Alert blocks only appear when something needs you. If **Needs attention**, **Pending review**, **Review chase** and **Your last 48 hrs** are missing, you are caught up. Two blocks stay on screen as green "all clear" banners — **Duplicate bookings** and **Upcoming gaps** — so you can see at a glance that they were checked.`,
+    body: `Alert blocks only appear when something needs you. If **Needs attention**, **Review chase** and **Your last 48 hrs** are missing, you are caught up. Two blocks stay on screen as green "all clear" banners — **Duplicate bookings** and **Upcoming gaps** — so you can see at a glance that they were checked.`,
   },
   {
     icon: '🧭',
@@ -86,7 +86,6 @@ export const KINDS = {
 export const HOME_ORDER = [
   'needs-attention',
   'duplicate-bookings',
-  'pending-review',
   'review-chase',
   'checkin-links',
   'last-48',
@@ -104,18 +103,22 @@ export const TILE_GROUPS = [
 export const BLOCKS = [
   {
     id: 'needs-attention', icon: '🚨', name: 'Needs attention', kind: 'act', when: 'when a guest is waiting',
-    tldr: 'Guests who have filled in their check-in form and are waiting for your yes.',
+    tldr: 'Guests who have filled in their check-in form and are waiting for your yes — approve them right here.',
     shows: 'Only when a guest has filled in their check-in form and is waiting for you.',
     what: [
-      `A red list at the very top of your home screen. Each row is a guest who has submitted the online check-in form: their name, their check-in date and, if an agent or partner made the booking, **Booked by …**.`,
+      `A red list at the very top of your home screen. Each row is a guest who has submitted the online check-in form: their name, check-in date, nights and contact, a **Pending review** tag and, if an agent or partner made the booking, **Booked by …**.`,
+      `Tap a guest to select them, then choose what to do from the buttons underneath:`,
     ],
-    why: `Your manager cannot check a guest in until you have seen their details and said yes. This block sits above everything else so a waiting guest can never be overlooked.`,
-    gain: `No guest is left waiting at the gate because a form went unnoticed.`,
-    steps: [
-      `Tap a guest's name. It opens that booking in {{complete-booking|Complete booking}}.`,
-      `Check the details and documents, then tap [[Mark ready for check-in]] — or approve straight from {{pending-review|Pending review}}, just below.`,
+    bullets: [
+      `[[✅ Onboard Guest]] — approve. The guest moves to **Ready for check-in** and your manager is told they can check them in.`,
+      `[[📂 Open booking]] — opens that booking in {{complete-booking|Complete booking}}, to look over the details and documents first.`,
+      `[[📁 View folder]] — opens the guest's uploaded documents, when there are any.`,
+      `[[Void (keep record)]] — for a booking made in error. It stays on record for reference but is no longer active.`,
+      `[[Delete]] — removes the booking permanently. It is blocked automatically if staff commission has already been paid on it; void it instead.`,
     ],
-    note: `You may see the same guest here **and** in Pending review. That is expected: both read the same waiting list. This block opens the full booking; the amber one lets you approve in a single tap.`,
+    why: `Your manager cannot check a guest in until you have seen their details and said yes. This block sits above everything else so a waiting guest can never be overlooked — and most of the time the answer is simply "yes, welcome", which takes one tap.`,
+    gain: `No guest is left waiting at the gate because a form went unnoticed, and approving takes one tap.`,
+    note: `When unsure, **void rather than delete**. A voided booking can still be looked up later; a deleted one cannot.`,
   },
   {
     id: 'duplicate-bookings', icon: '✅', name: 'Duplicate bookings — calendar health', kind: 'health', when: 'always',
@@ -133,23 +136,6 @@ export const BLOCKS = [
       `Open {{channel-calendar|Channel calendar}} and look for "sync failed" beside that platform.`,
       `Sort it out with the guest or the platform, then tap [[Mark resolved]]. The incident stays on record.`,
     ],
-  },
-  {
-    id: 'pending-review', icon: '🔶', name: 'Pending review', kind: 'act', when: 'when a guest is waiting',
-    tldr: 'The same waiting guests, with one-tap Approve, Void and Delete.',
-    shows: 'Whenever guests are waiting for your approval — the same trigger as Needs attention.',
-    what: [
-      `An amber list of the same waiting guests, with the buttons to deal with them without leaving the home screen. Tap a guest to select them, then choose:`,
-    ],
-    bullets: [
-      `[[✅ Onboard Guest]] — approve. The guest moves to **Ready for check-in** and your manager is told they can check them in.`,
-      `[[Void (keep record)]] — for a booking made in error. It stays on record for reference but is no longer active.`,
-      `[[Delete]] — removes the booking permanently. It is blocked automatically if staff commission has already been paid on it; void it instead.`,
-      `[[📁 View folder]] — opens the guest's uploaded documents, when there are any.`,
-    ],
-    why: `Most of the time the answer is simply "yes, welcome". Approving from the home screen takes one tap instead of opening the booking and changing its status.`,
-    gain: `Approve a guest in one tap.`,
-    note: `When unsure, **void rather than delete**. A voided booking can still be looked up later; a deleted one cannot.`,
   },
   {
     id: 'review-chase', icon: '⭐', name: 'Review chase', kind: 'act', when: 'after check-outs',
@@ -253,14 +239,14 @@ export const TILES = [
     id: 'serviced-villas', icon: '🏡', name: 'Serviced Villas', opens: 'Home tile',
     tagline: 'The control room for the villa itself.',
     what: [
-      `Where a booking is created, completed, tracked and reported on. Inside you will find a card for each property with nine shortcuts, and below it a live **Upcoming Guests** list.`,
+      `Where a booking is created, completed, tracked and reported on. Inside you will find a card for each property with eight shortcuts, and below it a live **Upcoming Guests** list.`,
     ],
     why: `Everything that happens to a stay — from the first enquiry to the final report — starts or ends here.`,
     gain: `One place for the whole life of a booking.`,
     screens: [
       {
         id: 'upcoming-guests', icon: '🗓️', name: 'Upcoming Guests', opens: 'Serviced Villas · bottom card',
-        does: [`Your arrivals, soonest first. Each row shows the date, the guest, nights, party size and home city, a status pill (**Confirmed**, **Pending**, **Docs in**, **Ready**, **In-house**, **Checkout**) and "in N days". Filter with the **30d · 60d · 90d · 120d · All** buttons. Tap a guest to open {{complete-booking|Complete booking}}.`],
+        does: [`Your arrivals, soonest first. Each row shows the date, the guest, nights, party size and home city, a status pill (**Confirmed**, **Pending**, **Docs in**, **Ready**, **In-house**, **Checkout**) and "in N days". Filter with the **30d · 60d · 90d · 120d · All** buttons. Tap a guest to open that booking in {{complete-booking|Complete booking}}.`],
         gain: `A glance at who is coming, and how ready each stay is.`,
       },
       {
@@ -475,7 +461,7 @@ export const TILES = [
     ],
   },
   {
-    id: 'quick-reports', icon: '🗄️', name: 'Quick Reports (DB Admin)', opens: 'Home tile · also the 🗄 button at the bottom',
+    id: 'quick-reports', icon: '🗄️', name: 'Quick Reports (DB Admin)', opens: 'Home tile',
     tagline: 'Ready-made answers for questions the Dashboard does not cover.',
     what: [
       `A set of read-only reports — total stays, revenue by booking channel, bookings and revenue by year, your five most recent bookings, repeat guests, average tariff and nights by year, **direct against platform split**, unpaid and paid staff commission, full inventory stock and low-stock items. Pick one and run it.`,
@@ -485,7 +471,7 @@ export const TILES = [
     gain: `Answers on demand, with no spreadsheet and no waiting.`,
   },
   {
-    id: 'maintenance', icon: '🛠️', name: 'Maintenance', opens: 'Home tile · also inside Serviced Villas',
+    id: 'maintenance', icon: '🛠️', name: 'Maintenance', opens: 'Home tile',
     tagline: 'Staff logins and a few settings.',
     what: [
       `The back-office room. For most owners it holds three things you will actually use.`,
@@ -669,7 +655,7 @@ export const BY_GOAL = [
     goal: 'Alerts & notifications', icon: '🔔',
     means: `Hearing about the things that matter, once, in one place.`,
     where: [
-      `Home alert blocks — {{needs-attention|Needs attention}}, {{pending-review|Pending review}}, {{review-chase|Review chase}} and {{last-48|Your last 48 hrs}}.`,
+      `Home alert blocks — {{needs-attention|Needs attention}}, {{review-chase|Review chase}} and {{last-48|Your last 48 hrs}}.`,
       `{{duplicate-bookings|Duplicate bookings}} — an early warning for calendar problems.`,
       `{{notification-settings|Notification settings}} — where email alerts are sent.`,
     ],
@@ -725,10 +711,6 @@ export const GLOSSARY = [
 
 // ── Common questions ─────────────────────────────────────────────────────
 export const FAQ = [
-  {
-    q: `Why is the same guest in two blocks at the top?`,
-    a: `{{needs-attention|Needs attention}} and {{pending-review|Pending review}} read the same waiting list. One opens the full booking and the other lets you approve in a tap. Once you approve the guest, both disappear.`,
-  },
   {
     q: `A block I expected is missing. Is something broken?`,
     a: `Almost certainly not. Most blocks only appear when there is something to show — see "Quiet is good news" at the top. {{channel-mix|Channel mix}}, for instance, needs at least one platform booking checking in this month.`,

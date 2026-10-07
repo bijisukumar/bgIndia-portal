@@ -105,7 +105,9 @@ function ProtectedRoutes() {
         <Route path="/owner/r-dashboard"      element={<RDashboard />} />
         <Route path="/infra/d1"               element={<D1Explorer />} />
         <Route path="/infra/error-log"        element={<PlatformErrorLog />} />
-        <Route path="/owner/maintenance"        element={<Maintenance />} />
+        {/* Only the rows this app can open: schema validation, tenant usage, the
+            test runner and the debug panel are routed in the manage console only. */}
+        <Route path="/owner/maintenance"        element={<Maintenance rows={['staff', 'manual-access', 'signups', 'error-log']} />} />
         <Route path="/owner/maintenance/staff"  element={<StaffAccess />} />
         <Route path="/owner/maintenance/manual-access" element={<ManualAccess />} />
         {/* The endpoint refuses anyone who is not the platform operator, so a

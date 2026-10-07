@@ -24,6 +24,10 @@ function getHostConfig(villaId) {
 import * as MANUAL from '../../src/content/trainingManual.js'
 const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 
+// The calendar published back to each booking platform: what goes in a
+// platform's link and how it is written (see src/server/icalHub.js).
+import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, todayIst } from '../../src/server/icalHub.js'
+
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
 // villa branding the way a genuine tenant security alert does. Domain
@@ -641,12 +645,67 @@ function parseIcsEvents(text) {
   return events.filter(e => e.uid && e.checkin && e.checkout)
 }
 
+// One feed: fetch it, parse it, upsert its blocks, soft-delete the ones that
+// vanished, and record how it went. Shared by the cron-triggered sync and the
+// owner's manual "Sync now" (syncIcalFeedsForVillas below) and by the refresh
+// that runs when a platform reads its hub link (refreshFeedsBeforeExport).
+// Upserts by (feed_id, uid) so a re-fetched feed updates dates in place instead
+// of duplicating; a UID that vanished from the feed (the OTA cancelled or
+// unblocked it) is soft-deleted via removed_at rather than hard-deleted.
+async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
+  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  try {
+    const res = await fetch(feed.ics_url, {
+      headers: { 'User-Agent': 'StayVibe-Calendar-Sync/1.0' },
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const text = await res.text()
+    // A failed fetch above leaves the blocks alone, and so must a 200 that is
+    // not a calendar at all (an HTML error or sign-in page). Parsed, that reads
+    // as "no events" - every booking cancelled - and since the hub link now
+    // passes these blocks on to the other platforms, those nights would be put
+    // up for sale there.
+    if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('The link did not return an iCal calendar')
+    const events = parseIcsEvents(text)
+    const statements = events.map(ev => DB.prepare(`
+      INSERT INTO stayvibe_ical_blocks
+        (block_id, feed_id, villa_id, channel, uid, checkin_date, checkout_date, summary, first_seen_at, last_seen_at, removed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(feed_id, uid) DO UPDATE SET
+        checkin_date = excluded.checkin_date, checkout_date = excluded.checkout_date,
+        summary = excluded.summary, last_seen_at = excluded.last_seen_at, removed_at = NULL
+    `).bind(genId('ICB'), feed.feed_id, feed.villa_id, feed.channel, ev.uid, ev.checkin, ev.checkout, ev.summary || null, nowStr, nowStr))
+    // A live block whose UID the feed no longer lists has vanished from it (the
+    // platform cancelled or unblocked it). Worked out here and removed in chunks:
+    // a single NOT IN over every UID would break at D1's limit of 100 bound
+    // values, and a busy villa's calendar is longer than that.
+    const { results: liveBlocks } = await DB.prepare(
+      `SELECT uid FROM stayvibe_ical_blocks WHERE feed_id = ? AND removed_at IS NULL`
+    ).bind(feed.feed_id).all()
+    const seenUids = new Set(events.map(ev => ev.uid))
+    const vanished = (liveBlocks || []).map(r => r.uid).filter(uid => !seenUids.has(uid))
+    for (let i = 0; i < vanished.length; i += 90) {
+      const part = vanished.slice(i, i + 90)
+      statements.push(DB.prepare(
+        `UPDATE stayvibe_ical_blocks SET removed_at = ? WHERE feed_id = ? AND removed_at IS NULL AND uid IN (${part.map(() => '?').join(',')})`
+      ).bind(nowStr, feed.feed_id, ...part))
+    }
+    statements.push(DB.prepare(
+      `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'ok', last_sync_error = NULL, last_sync_count = ? WHERE feed_id = ?`
+    ).bind(nowStr, events.length, feed.feed_id))
+    for (let i = 0; i < statements.length; i += 50) await DB.batch(statements.slice(i, i + 50))
+    return { feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length }
+  } catch (e) {
+    await DB.prepare(
+      `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'error', last_sync_error = ? WHERE feed_id = ?`
+    ).bind(nowStr, String(e?.message || e).slice(0, 300), feed.feed_id).run().catch(() => {})
+    return { feedId: feed.feed_id, channel: feed.channel, ok: false, error: String(e?.message || e) }
+  }
+}
+
 // Shared by the cron-triggered sync and the owner's manual "Sync now" button
-// — one code path, two callers. Upserts by (feed_id, uid) so a re-fetched
-// feed updates dates in place instead of duplicating; a UID that vanished
-// from the feed (the OTA cancelled or unblocked it) is soft-deleted via
-// removed_at rather than hard-deleted, so a transient fetch glitch can never
-// look like a mass-cancellation.
+// - one code path, two callers.
 async function syncIcalFeedsForVillas(DB, villaIdFilter) {
   const { results: feeds } = await (villaIdFilter
     ? DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1 AND villa_id = ?`).bind(villaIdFilter)
@@ -654,44 +713,73 @@ async function syncIcalFeedsForVillas(DB, villaIdFilter) {
     // syncs every tenant's feeds, and each row carries its own villa_id.
     : DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1`)
   ).all()
-  const nowStr = new Date().toISOString().slice(0, 19).replace('T', ' ')
   const summary = []
-  for (const feed of (feeds || [])) {
-    try {
-      const res = await fetch(feed.ics_url, { headers: { 'User-Agent': 'StayVibe-Calendar-Sync/1.0' } })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const events = parseIcsEvents(await res.text())
-      for (const ev of events) {
-        await DB.prepare(`
-          INSERT INTO stayvibe_ical_blocks
-            (block_id, feed_id, villa_id, channel, uid, checkin_date, checkout_date, summary, first_seen_at, last_seen_at, removed_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-          ON CONFLICT(feed_id, uid) DO UPDATE SET
-            checkin_date = excluded.checkin_date, checkout_date = excluded.checkout_date,
-            summary = excluded.summary, last_seen_at = excluded.last_seen_at, removed_at = NULL
-        `).bind(genId('ICB'), feed.feed_id, feed.villa_id, feed.channel, ev.uid, ev.checkin, ev.checkout, ev.summary || null, nowStr, nowStr).run()
-      }
-      const seenUids = events.map(e => e.uid)
-      if (seenUids.length > 0) {
-        await DB.prepare(
-          `UPDATE stayvibe_ical_blocks SET removed_at = ? WHERE feed_id = ? AND removed_at IS NULL AND uid NOT IN (${seenUids.map(() => '?').join(',')})`
-        ).bind(nowStr, feed.feed_id, ...seenUids).run()
-      } else {
-        await DB.prepare(`UPDATE stayvibe_ical_blocks SET removed_at = ? WHERE feed_id = ? AND removed_at IS NULL`).bind(nowStr, feed.feed_id).run()
-      }
-      await DB.prepare(
-        `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'ok', last_sync_error = NULL, last_sync_count = ? WHERE feed_id = ?`
-      ).bind(nowStr, events.length, feed.feed_id).run()
-      summary.push({ feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length })
-    } catch (e) {
-      await DB.prepare(
-        `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'error', last_sync_error = ? WHERE feed_id = ?`
-      ).bind(nowStr, String(e?.message || e).slice(0, 300), feed.feed_id).run()
-      summary.push({ feedId: feed.feed_id, channel: feed.channel, ok: false, error: String(e?.message || e) })
-    }
-  }
+  for (const feed of (feeds || [])) summary.push(await syncOneIcalFeed(DB, feed))
   return summary
 }
+
+// ── CALENDAR LINKS PUBLISHED TO THE BOOKING PLATFORMS ─────────────────────
+// A platform reads its link on ITS schedule (Airbnb about every 3 hours), and
+// the link is made of the OTHER platforms' calendars as we last saw them. The
+// scheduled sync that keeps those current runs on GitHub, which in practice
+// fires every four to eight hours rather than the two it asks for, so waiting
+// for it could hand a platform a calendar most of a working day old. Instead,
+// when a platform asks, any source calendar more than a few minutes stale is
+// refreshed first. Only the request that wins the claim below refreshes a given
+// feed, outbound fetches are time-boxed, and whatever has not come back in time
+// is served as last seen (and the refresh finishes in the background).
+async function refreshFeedsBeforeExport(DB, ctx, villaId, targetChannel, { maxAgeSec = 300, perFeedTimeoutMs = 4000, budgetMs = 5000 } = {}) {
+  const { results: feeds } = await DB.prepare(
+    `SELECT * FROM stayvibe_ical_feeds WHERE villa_id = ? AND is_active = 1`
+  ).bind(villaId).all()
+  const jobs = []
+  for (const feed of (feeds || [])) {
+    // A platform's own calendar is not part of its own link.
+    if (channelsMatch(feed.channel, targetChannel)) continue
+    const claim = await DB.prepare(
+      `UPDATE stayvibe_ical_feeds SET last_synced_at = datetime('now')
+        WHERE feed_id = ? AND (last_synced_at IS NULL OR last_synced_at <= datetime('now', ?))`
+    ).bind(feed.feed_id, `-${maxAgeSec} seconds`).run()
+    if (claim.meta?.changes === 1) jobs.push(syncOneIcalFeed(DB, feed, { timeoutMs: perFeedTimeoutMs }))
+  }
+  if (!jobs.length) return
+  const settled = Promise.allSettled(jobs)
+  ctx?.waitUntil?.(settled)
+  await Promise.race([settled, new Promise(resolve => setTimeout(resolve, budgetMs))])
+}
+
+// 256 random bits, URL-safe: the whole secret in a platform's calendar link.
+function genIcalToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+// How a link row is handed to the owner's screen.
+const icalExportShape = r => ({
+  exportId: r.export_id, villaId: r.villa_id, channel: r.channel, token: r.token,
+  lastFetchedAt: manualIso(r.last_fetched_at), lastFetchAgent: r.last_fetch_agent || null,
+  fetchCount: r.fetch_count || 0, createdAt: manualIso(r.created_at), rotatedAt: manualIso(r.rotated_at),
+})
+
+// Failed lookups only, per IP and per isolate, like the login and manual
+// limiters: someone holding a good link fetches as often as they like.
+function makeFailureLimiter(windowMs, max) {
+  const hits = new Map()
+  return {
+    limited(ip) {
+      const e = hits.get(ip)
+      return !!e && Date.now() - e.firstAt <= windowMs && e.count >= max
+    },
+    note(ip) {
+      const t = Date.now()
+      if (hits.size > 2000) for (const [k, v] of hits) if (t - v.firstAt > windowMs) hits.delete(k)
+      const e = hits.get(ip)
+      if (!e || t - e.firstAt > windowMs) hits.set(ip, { count: 1, firstAt: t })
+      else e.count++
+    },
+  }
+}
+const icalLinkFailures = makeFailureLimiter(15 * 60 * 1000, 20)
 
 // ── LEDGER ADAPTER (Step C — docs/DB-Ledger-Refactor-Spec.md) ─────────────
 // One mapping, called after every financial write to `stays`, with just the
@@ -2456,6 +2544,89 @@ export async function onRequest(ctx) {
     } catch (e) {
       console.error('getTrainingManual:', e?.message || e)
       return reply(503, { success: false, error: 'Please try again in a moment', reason: 'unavailable' })
+    }
+  }
+
+  // ── CALENDAR LINK FOR A BOOKING PLATFORM (public, secret link) ───────────
+  // GET /api/ical/<token>.ics is what Airbnb, Booking.com, Agoda, Expedia ...
+  // import so they block every night taken anywhere else. There is no login:
+  // an importer cannot sign in, so the token in the address is the credential
+  // (see stayvibe_ical_exports). Anything it does not recognise - a wrong token,
+  // a withdrawn link, another villa's host - gets the same plain 404, and only
+  // the villa's own host answers for it. The content is dates and nothing else:
+  // no guest names, contacts or booking ids.
+  if (action.startsWith('ical/')) {
+    if (method !== 'GET' && method !== 'HEAD') {
+      return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } })
+    }
+    const plain = (status, text, extra = {}) => new Response(method === 'HEAD' ? null : text, {
+      status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', ...extra } })
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+    if (icalLinkFailures.limited(ip)) return plain(429, 'Too many attempts', { 'Retry-After': '900' })
+    try {
+      const tokenMatch = action.match(/^ical\/([A-Za-z0-9_-]{20,80})\.ics$/)
+      let link = null
+      if (tokenMatch) {
+        try {
+          link = await DB.prepare(
+            `SELECT export_id, villa_id, channel FROM stayvibe_ical_exports WHERE token = ?`
+          ).bind(tokenMatch[1]).first()
+        } catch (e) {
+          // A database that has not had the migration yet has no links.
+          if (!/no such table/i.test(e?.message || '')) throw e
+        }
+      }
+      if (!link || (hostVillaId && link.villa_id !== hostVillaId)) {
+        icalLinkFailures.note(ip)
+        return plain(404, 'Not found')
+      }
+
+      try { await refreshFeedsBeforeExport(DB, ctx, link.villa_id, link.channel) }
+      catch (e) { console.warn('ical hub refresh:', e?.message || e) }   // serve what we have
+
+      const today = todayIst()
+      const [{ results: stayRows }, { results: blockRows }] = await Promise.all([
+        // The same notion of "a real booking" as getVillaCalendar: anything not
+        // cancelled or voided, whatever its source.
+        DB.prepare(`
+          SELECT stay_id, source, checkin_date, checkout_date, created_at FROM stayvibe_stays
+          WHERE villa_id = ? AND status NOT IN ('cancelled', 'void')
+            AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date > ?
+        `).bind(link.villa_id, today).all(),
+        // Blocks only from calendars still switched on: pausing a feed means
+        // "stop treating that platform as a source".
+        DB.prepare(`
+          SELECT b.block_id, b.channel, b.checkin_date, b.checkout_date, b.first_seen_at
+          FROM stayvibe_ical_blocks b JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
+          WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1 AND b.checkout_date > ?
+        `).bind(link.villa_id, today).all(),
+      ])
+      const events = buildHubEvents({
+        targetChannel: link.channel, today,
+        stays:  (stayRows  || []).map(s => ({ id: s.stay_id,  source:  s.source,  start: s.checkin_date, end: s.checkout_date, stamp: s.created_at })),
+        blocks: (blockRows || []).map(b => ({ id: b.block_id, channel: b.channel, start: b.checkin_date, end: b.checkout_date, stamp: b.first_seen_at })),
+      })
+      const calendar = await renderHubIcs({ events, calendarName: `StayVibe360 availability (for ${sourceLabel(link.channel)})` })
+
+      // Record that the platform is reading it - the owner's only way to tell.
+      // After the reply, so it never slows an importer that is waiting.
+      ctx.waitUntil(DB.prepare(
+        `UPDATE stayvibe_ical_exports SET last_fetched_at = datetime('now'), last_fetch_agent = ?, fetch_count = fetch_count + 1
+          WHERE export_id = ? AND villa_id = ?`
+      ).bind((request.headers.get('User-Agent') || '').slice(0, 120), link.export_id, link.villa_id).run().catch(() => {}))
+
+      return new Response(method === 'HEAD' ? null : calendar, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/calendar; charset=utf-8',
+          'Content-Disposition': 'inline; filename="availability.ics"',
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex',
+        },
+      })
+    } catch (e) {
+      console.error('ical hub:', e?.message || e)
+      return plain(503, 'Temporarily unavailable', { 'Retry-After': '120' })
     }
   }
 
@@ -5059,6 +5230,22 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      // The links published to the booking platforms (see the public /api/ical
+      // route). Owner only: a link is a secret, and staff have no use for it.
+      if (action === 'getIcalExports') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        let rows = []
+        try {
+          const found = await DB.prepare(`SELECT * FROM stayvibe_ical_exports WHERE villa_id = ? ORDER BY channel`).bind(villaId).all()
+          rows = found.results || []
+        } catch (e) {
+          if (!/no such table/i.test(e?.message || '')) throw e
+        }
+        return json({ success: true, data: rows.map(icalExportShape) })
+      }
+
       // Merges every active feed's blocks for the villa and flags a block as
       // a conflict when its dates overlap a live stay booked through a
       // DIFFERENT channel — a block with no matching stay at all is either a
@@ -5770,6 +5957,55 @@ export async function onRequest(ctx) {
         assertPropertyAccess(payload, feed.villa_id)
         await DB.prepare(`DELETE FROM stayvibe_ical_blocks WHERE feed_id = ?`).bind(feedId).run()
         await DB.prepare(`DELETE FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).run()
+        return json({ success: true })
+      }
+
+      // ── CALENDAR LINKS PUBLISHED TO THE PLATFORMS (owner) ────────────────
+      // One link per platform per villa. Making one is idempotent; replacing the
+      // token kills the old link at once; removing it stops the platform's feed.
+      if (action === 'createIcalExport') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const vId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const channel = String(body.channel || '').trim().toLowerCase().slice(0, 40)
+        const key = channelKey(channel)
+        if (!key) return err('Say which platform this link is for')
+        const find = () => DB.prepare(`SELECT * FROM stayvibe_ical_exports WHERE villa_id = ? AND channel_key = ?`).bind(vId, key).first()
+        const had = await find()
+        if (had) return json({ success: true, data: { ...icalExportShape(had), existing: true } })
+        try {
+          await DB.prepare(
+            `INSERT INTO stayvibe_ical_exports (export_id, villa_id, channel, channel_key, token, created_by) VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(genId('ICX'), vId, channel, key, genIcalToken(), actor).run()
+        } catch (e) {
+          // Two taps at once: the other one made it. Anything else is real.
+          if (!/UNIQUE/i.test(e?.message || '')) throw e
+        }
+        return json({ success: true, data: icalExportShape(await find()) })
+      }
+
+      if (action === 'regenerateIcalExport') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        if (!body.exportId) return err('exportId required')
+        const row = await DB.prepare(`SELECT villa_id FROM stayvibe_ical_exports WHERE export_id = ?`).bind(body.exportId).first()
+        if (!row) return err('Link not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        await DB.prepare(
+          `UPDATE stayvibe_ical_exports
+              SET token = ?, rotated_at = datetime('now'), last_fetched_at = NULL, last_fetch_agent = NULL, fetch_count = 0
+            WHERE export_id = ? AND villa_id = ?`
+        ).bind(genIcalToken(), body.exportId, row.villa_id).run()
+        const fresh = await DB.prepare(`SELECT * FROM stayvibe_ical_exports WHERE export_id = ? AND villa_id = ?`).bind(body.exportId, row.villa_id).first()
+        return json({ success: true, data: icalExportShape(fresh) })
+      }
+
+      if (action === 'deleteIcalExport') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        if (!body.exportId) return err('exportId required')
+        const row = await DB.prepare(`SELECT villa_id FROM stayvibe_ical_exports WHERE export_id = ?`).bind(body.exportId).first()
+        if (!row) return err('Link not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        await DB.prepare(`DELETE FROM stayvibe_ical_exports WHERE export_id = ? AND villa_id = ?`).bind(body.exportId, row.villa_id).run()
         return json({ success: true })
       }
 

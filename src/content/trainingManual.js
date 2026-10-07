@@ -352,17 +352,18 @@ export const TILES = [
       {
         id: 'channel-calendar', icon: '🗓️', name: 'Channel calendar', opens: 'Serviced Villas',
         does: [
-          `One calendar for every platform. You paste each platform's calendar link once; the app then pulls in the dates it has blocked and shows them together with your own bookings.`,
+          `One calendar for every platform, working in both directions. You paste each platform's calendar link once; the app pulls in the dates it has blocked and shows them together with your own bookings. It then gives each platform a private link of its own to import back, so every platform blocks the nights taken on the others — your direct bookings included.`,
         ],
-        why: `If Airbnb and Booking.com each think a night is free, you can be double-booked. Here they all appear on one calendar, and a ⚠️ outline marks any date two platforms both claim.`,
+        why: `If Airbnb and Booking.com each think a night is free, you can be double-booked. Reading the platforms puts them all on one calendar and outlines any clash; giving each one its own link is what stops the clash happening. A booking you take by WhatsApp or phone is something no platform can learn about any other way.`,
         gain: `Platforms stay in step without you updating each one by hand.`,
         insideLabel: 'On the screen',
         inside: [
           { name: '+ Feed', text: `Add a platform: its name, an optional label, and its calendar link (on Airbnb: calendar settings → "Export Calendar").` },
-          { name: 'Connected feeds', text: `Each platform with its last-synced time or a clear "sync failed" message. [[Pause]] / [[Resume]] or [[Remove]] a feed. [[🔄 Sync now]] refreshes immediately; otherwise the app syncs by itself about every 2 hours.` },
+          { name: 'Connected feeds', text: `Each platform with its last-synced time or a clear "sync failed" message. [[Pause]] / [[Resume]] or [[Remove]] a feed (a paused platform stops being passed on to the others). [[🔄 Sync now]] refreshes immediately. The app also refreshes a calendar whenever you open this screen, and whenever a platform reads its link below.` },
+          { name: 'Share your calendar back', text: `One row per platform, each with [[Create link]]. Tap [[📋 Copy link]] and paste it into that platform's calendar import (look for "Import calendar" in its calendar settings). The link holds every night taken anywhere else — never that platform's own bookings — and dates only: no guest names, contacts or booking numbers. Each row shows when the platform last read its link, and warns if it has not for over a day. [[New link]] replaces a link (the old one stops working at once); [[Remove]] withdraws it.` },
           { name: 'Calendar', text: `A month grid with each platform in its own colour and a ⚠️ outline wherever two platforms overlap. Use the arrows or **Today** to move around.` },
         ],
-        note: `This is the other half of the {{duplicate-bookings|Duplicate bookings}} banner on your home screen.`,
+        note: `Platforms read a link on their own schedule — Airbnb about every 3 hours, Vrbo about every 30 minutes — so a booking can take a few hours to show up on the others. That delay is theirs, not the app's. Booking.com and Agoda only offer calendar links when the villa is listed as a single unit, and Booking.com not at all while a channel manager is connected. This screen is the other half of the {{duplicate-bookings|Duplicate bookings}} banner on your home screen.`,
       },
       {
         id: 'inventory', icon: '📦', name: 'Inventory', opens: 'Serviced Villas',
@@ -547,7 +548,7 @@ export const MANAGER = {
 
 // ── Routines ─────────────────────────────────────────────────────────────
 export const FIRST_WEEK = [
-  `Connect your platform calendars in {{channel-calendar|Channel calendar}} → [[+ Feed]], so your calendar fills itself.`,
+  `Connect your platform calendars in {{channel-calendar|Channel calendar}} → [[+ Feed]], then give each platform its own link under **Share your calendar back**, so they block each other's nights.`,
   `Set where alerts go in {{notification-settings|Notification settings}}.`,
   `Create a check-in link for each platform you use in {{checkin-links|Check-in links}}.`,
   `Check your item prices and target levels in {{inventory|Inventory}}.`,
@@ -613,7 +614,7 @@ export const BY_GOAL = [
     goal: 'Automation', icon: '⚙️',
     means: `Things that happen without you remembering to do them.`,
     where: [
-      `Platform calendars sync by themselves about every 2 hours ({{channel-calendar|Channel calendar}}), and a clash is flagged in {{duplicate-bookings|Duplicate bookings}}.`,
+      `Platform calendars refresh by themselves — in the background, whenever a platform reads its link, and whenever you open {{channel-calendar|Channel calendar}} — each platform gets a link that blocks the nights taken on the others, and a clash is flagged in {{duplicate-bookings|Duplicate bookings}}.`,
       `The checkout-day email goes to a guest around 6:00 AM on the day they leave, when they are checked in and you have their email address.`,
       `A check-out creates your manager's commission automatically ({{staff-perks|Staff Perks}}).`,
       `Alert emails reach you for check-ins, check-outs, kitchen charges and expenses.`,
@@ -721,7 +722,15 @@ export const FAQ = [
   },
   {
     q: `How often does the calendar sync?`,
-    a: `About every 2 hours, automatically. Use [[🔄 Sync now]] in {{channel-calendar|Channel calendar}} to refresh at once.`,
+    a: `The app refreshes each platform's calendar in the background a few times a day, whenever a platform reads the link you gave it, and whenever you open {{channel-calendar|Channel calendar}}; use [[🔄 Sync now]] there to refresh at once. How soon a booking shows up on another platform then depends on how often that platform reads its link — Airbnb about every 3 hours.`,
+  },
+  {
+    q: `A night is still open on one platform after it was booked on another. Why?`,
+    a: `Each platform only reads its link every few hours, so for a while the night still looks free there. Most platforms let you require some advance notice for a booking, which keeps same-day and next-day bookings from slipping through that gap. Under **Share your calendar back** in {{channel-calendar|Channel calendar}} you can see when each platform last read its link.`,
+  },
+  {
+    q: `Is it safe to paste a calendar link into a platform?`,
+    a: `A link holds dates only — no names, contacts or booking numbers — and its address is long and random, so it cannot be guessed. If you ever think one has been shared by mistake, tap [[New link]] and the old one stops working at once.`,
   },
   {
     q: `Can I undo a check-out?`,

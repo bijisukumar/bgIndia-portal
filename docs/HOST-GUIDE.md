@@ -33,7 +33,7 @@ Your staff see, per booking, which guests still have no passport on file.
 | What you get | Why it matters |
 |---|---|
 | **Enquiry pipeline** | Every enquiry logged, quoted, chased and marked won or lost. A conversion dashboard shows where they die. |
-| **Channel calendar** | Pulls the iCal feeds from your OTA listings into one month grid, so an Airbnb booking and a Booking.com booking on the same night are visible before they collide. |
+| **Channel calendar** | Pulls the iCal feeds from your OTA listings into one month grid, so an Airbnb booking and a Booking.com booking on the same night are visible before they collide. It also gives each platform a private calendar link to import back, holding every night taken anywhere else (your direct bookings included) but never that platform's own bookings, so the platforms block each other's nights instead of waiting for you to notice. |
 | **Double-booking detection** | If a check-in form arrives that overlaps an existing stay, the booking is flagged for review and you are alerted — rather than discovered on arrival day. |
 | **Travel agent quote links** | Send an agent a link with your rates. Their quote comes back into the same pipeline. |
 | **Campaign tracking links** | Create a named link per campaign or channel, then see clicks → enquiries → bookings against it. You learn which WhatsApp group or listing actually produces business. |

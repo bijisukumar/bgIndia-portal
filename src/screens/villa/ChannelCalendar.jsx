@@ -6,11 +6,12 @@
 //  dates in one place.
 //  Route: /owner/villa/channel-calendar
 // ============================================================
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
+import CalendarExports from './CalendarExports'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -257,17 +258,29 @@ export default function ChannelCalendar() {
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
   }
 
-  async function handleSyncNow() {
+  async function handleSyncNow({ quiet = false } = {}) {
     setSyncing(true)
     try {
       const res = await api.runIcalSyncNow({ villaId: DEFAULT_VILLA_ID })
       const failed = (res.results || []).filter(r => !r.ok)
       if (failed.length > 0) showToast(`Synced with ${failed.length} error(s) — see feed status below`, 'error')
-      else showToast(`✅ Synced ${res.feeds} feed${res.feeds !== 1 ? 's' : ''}`)
+      else if (!quiet) showToast(`✅ Synced ${res.feeds} feed${res.feeds !== 1 ? 's' : ''}`)
       load()
     } catch (e) { showToast('Sync failed: ' + e.message, 'error') }
     finally { setSyncing(false) }
   }
+
+  // The scheduled sync runs only a few times a day at best, so what is on screen
+  // can be hours old. Opening the screen refreshes any calendar that has not
+  // been read for half an hour — once per visit, and silently unless it fails.
+  const autoSynced = useRef(false)
+  useEffect(() => {
+    if (loading || autoSynced.current || feeds.length === 0) return
+    autoSynced.current = true
+    const stale = feeds.some(f => f.is_active && (!f.last_synced_at ||
+      Date.now() - new Date(f.last_synced_at.replace(' ', 'T') + 'Z').getTime() > 30 * 60 * 1000))
+    if (stale) handleSyncNow({ quiet: true })
+  }, [loading, feeds])
 
   const INP = { width: '100%', padding: '9px 12px', borderRadius: '8px', boxSizing: 'border-box', background: 'var(--dark-input)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.9rem' }
   const LBL = { display: 'block', fontSize: '0.68rem', color: 'var(--text-dim)', letterSpacing: '1px', marginBottom: '4px' }
@@ -295,9 +308,10 @@ export default function ChannelCalendar() {
       <div className="screen-body">
         <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '14px', lineHeight: 1.5 }}>
           Add each channel's iCal export URL (Airbnb calendar settings → "Export Calendar") to pull
-          in blocked dates automatically. A background sync runs periodically; use "Sync now" for
-          an immediate refresh. A ⚠️ outline on the calendar below means two different channels
-          claim the same date — a real double-booking to resolve.
+          in blocked dates automatically. They refresh in the background, whenever a platform reads
+          its link below, and when you open this screen or tap "Sync now". A ⚠️ outline on the
+          calendar below means two different channels claim the same date — a real double-booking
+          to resolve.
         </div>
 
         {showAdd && (
@@ -380,6 +394,8 @@ export default function ChannelCalendar() {
             </div>
           </div>
         ))}
+
+        <CalendarExports feeds={feeds} showToast={showToast} />
 
         <div className="card-section-label" style={{ marginTop: '18px', marginBottom: '10px' }}>CALENDAR</div>
 

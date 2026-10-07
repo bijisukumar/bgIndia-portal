@@ -1,5 +1,6 @@
-// Local-time wording for the Training Manual screens (the manual's own banner
-// and the owner's access screen). Timestamps arrive as ISO strings WITH a zone
+// Local-time wording for the owner screens that show when something happened
+// (the Training Manual's banner and access screen, the Channel calendar's links).
+// Timestamps arrive as ISO strings WITH a zone
 // ("…Z") — the API adds it, because D1 stores UTC with none and a browser reads
 // a bare string as local time — and are shown in the viewer's own timezone.
 //
@@ -42,4 +43,16 @@ export function timeLeft(iso) {
   const h = Math.round(min / 60)
   if (h < 48) return `${h} hour${h === 1 ? '' : 's'} left`
   return `${Math.round(h / 24)} days left`
+}
+
+// "just now" · "12 min ago" · "5 hours ago" · "3 days ago"
+export function timeAgo(iso) {
+  const d = parse(iso)
+  if (!d) return ''
+  const min = Math.round((Date.now() - d.getTime()) / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min} min ago`
+  const h = Math.round(min / 60)
+  if (h < 48) return `${h} hour${h === 1 ? '' : 's'} ago`
+  return `${Math.round(h / 24)} days ago`
 }

@@ -31,3 +31,27 @@ export function channelPillStyle(source) {
     ? { color: '#34A853', border: '1px solid rgba(52,168,83,0.35)', background: 'rgba(52,168,83,0.10)' }
     : { color: '#85B7EB', border: '1px solid rgba(133,183,235,0.35)', background: 'rgba(133,183,235,0.10)' }
 }
+
+// ── Telling two spellings of one platform apart from two platforms ────────
+// Stays store whatever the booking form sent ('Booking.com', 'booking_com',
+// 'airbnb'…) and calendar feeds store what the owner typed, so names are compared
+// by a normalised key rather than as written. Shared by the Worker (the hub
+// calendar in src/server/icalHub.js) and the Channel calendar screen, so the two
+// can never disagree about which platform a name means.
+const ALIASES = { booking: 'bookingcom', mmt: 'makemytrip' }
+
+export function channelKey(name) {
+  const k = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return ALIASES[k] || k
+}
+
+// The same platform under two spellings ('agoda' / 'agodahomes'). A short key
+// that is the start of a longer one counts, but only from 4 letters up, so two
+// unrelated short names can never collide.
+export function channelsMatch(a, b) {
+  const x = channelKey(a), y = channelKey(b)
+  if (!x || !y) return false
+  if (x === y) return true
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x]
+  return short.length >= 4 && long.startsWith(short)
+}

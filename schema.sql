@@ -449,6 +449,26 @@ CREATE TABLE IF NOT EXISTS stayvibe_ical_blocks (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ical_blocks_feed_uid ON stayvibe_ical_blocks(feed_id, uid);
 CREATE INDEX IF NOT EXISTS idx_ical_blocks_villa_dates ON stayvibe_ical_blocks(villa_id, checkin_date, checkout_date);
 
+-- The calendar published BACK to each booking platform: one private link per
+-- platform (/api/ical/<token>.ics) holding every night taken anywhere else,
+-- never that platform's own bookings. See
+-- migrations/2026-10-07-ical-exports.sql for the reasoning.
+CREATE TABLE IF NOT EXISTS stayvibe_ical_exports (
+  export_id        TEXT PRIMARY KEY,
+  villa_id         TEXT NOT NULL DEFAULT 'dwarka',
+  channel          TEXT NOT NULL,
+  channel_key      TEXT NOT NULL,
+  token            TEXT NOT NULL,
+  last_fetched_at  TEXT,
+  last_fetch_agent TEXT,
+  fetch_count      INTEGER NOT NULL DEFAULT 0,
+  created_by       TEXT DEFAULT 'owner',
+  created_at       TEXT DEFAULT (datetime('now')),
+  rotated_at       TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ical_exports_token         ON stayvibe_ical_exports(token);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ical_exports_villa_channel ON stayvibe_ical_exports(villa_id, channel_key);
+
 CREATE TABLE IF NOT EXISTS stayvibe_cform_filings (
   filing_id  TEXT PRIMARY KEY,
   stay_id    TEXT NOT NULL,

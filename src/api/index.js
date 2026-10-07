@@ -100,6 +100,11 @@ export const api = {
   deleteIcalFeed: (data)    => post('deleteIcalFeed', data),
   getVillaCalendar: (villaId) => get('getVillaCalendar', { villaId }),
   runIcalSyncNow: (data)    => post('runIcalSyncNow', data),
+  // The calendar links handed to each booking platform (owner only).
+  getIcalExports:       (villaId) => get('getIcalExports', { villaId }),
+  createIcalExport:     (data)    => post('createIcalExport', data),
+  regenerateIcalExport: (data)    => post('regenerateIcalExport', data),
+  deleteIcalExport:     (data)    => post('deleteIcalExport', data),
 
   // ── AGENT QUOTE LINKS (stayvibe only) ───────────────────────
   getAgentLinks:   (vId)  => get('getAgentLinks', { villaId: vId }),

@@ -60,6 +60,9 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // An API address typed or pasted into the browser (a calendar link being
+        // tested, say) must reach the network, not be answered with the app's start page.
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [{
           urlPattern: /^\/api\/.*/i,
           handler: 'NetworkFirst',

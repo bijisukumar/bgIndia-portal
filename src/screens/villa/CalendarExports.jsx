@@ -11,7 +11,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
-import { channelKey, channelLabel, channelPillStyle } from '../../utils/channel'
+import { channelKey, channelLabel, sourcePill } from '../../utils/channel'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { timeAgo } from '../../utils/localWhen'
 
@@ -124,7 +124,7 @@ export default function CalendarExports({ feeds, showToast }) {
         return (
           <div key={r.key} style={{ background: 'var(--dark-card)', border: '1px solid rgba(200,144,58,0.2)', borderRadius: '12px', padding: '12px 14px', marginBottom: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span style={{ ...channelPillStyle(r.channel), fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>{channelLabel(r.channel)}</span>
+              <span style={{ ...sourcePill(r.channel), fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>{channelLabel(r.channel)}</span>
               {l ? (
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', opacity: working ? 0.5 : 1 }}>
                   <button onClick={() => copy(l)} disabled={working}

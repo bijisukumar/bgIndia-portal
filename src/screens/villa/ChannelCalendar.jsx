@@ -10,36 +10,16 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
-import { channelLabel, channelPillStyle } from '../../utils/channel'
+import { channelLabel, channelsMatch, sourceStyle, sourcePill, colorAlpha, PARTNERS, DIRECT_STYLE, AGENT_STYLE } from '../../utils/channel'
 import CalendarExports from './CalendarExports'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
-// Fixed colors for known channels so they read consistently at a glance;
-// any future channel (added purely by pasting a new feed URL, no code
-// change) gets a stable color hashed from its name instead of grey.
-const CHANNEL_COLORS = {
-  direct: '#34A853', website: '#34A853',
-  airbnb: '#FF5A5F',
-  'booking.com': '#003B95', bookingcom: '#003B95', booking: '#003B95', booking_com: '#003B95',
-  expedia: '#FBC02D',
-  vrbo: '#3D67B1',
-  makemytrip: '#E74C3C', mmt: '#E74C3C',
-  agoda: '#5A2D8C',
-  goibibo: '#D6006C',
-  cleartrip: '#00A19C',
-  // Not platforms: nights kept back by an agreed late check-out / early check-in.
-  late_checkout: '#F59E0B', early_checkin: '#F59E0B',
-}
-const FALLBACK_PALETTE = ['#8B5CF6', '#0EA5E9', '#F97316', '#14B8A6', '#EC4899']
-function channelColor(source) {
-  const s = (source || '').trim().toLowerCase()
-  if (CHANNEL_COLORS[s]) return CHANNEL_COLORS[s]
-  let hash = 0
-  for (const ch of s) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
-  return FALLBACK_PALETTE[hash % FALLBACK_PALETTE.length]
-}
+// Colours and groups come from utils/channel.js (sourceStyle): each channel partner has its
+// own colour, every direct booking shares one, every agent booking another. Held nights
+// (an agreed late check-out / early check-in) are amber and hatched.
+const HOLD_COLOR = '#F59E0B'
 
 function pad2(n) { return String(n).padStart(2, '0') }
 function toISO(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
@@ -85,36 +65,36 @@ function weekSegments(week, items) {
   return segs
 }
 
-// Nights booked THIS month, per channel — clipped to the month's own
-// boundaries so a stay spanning a month edge only counts the nights that
-// actually fall inside it, matching what the grid itself shows.
+// Nights booked THIS month, per source — clipped to the month's own boundaries so a stay
+// spanning a month edge only counts the nights that actually fall inside it, matching what
+// the grid itself shows. Bucketed by sourceStyle().key, so every spelling of a platform
+// ('booking_com', 'Booking.com') and every direct door (website, WhatsApp, phone...) add up
+// together.
 function monthNightsTally(items, year, month) {
   const startISO = toISO(new Date(year, month, 1))
   const endISO = toISO(new Date(year, month + 1, 1))
-  const byChannel = {}
+  const byKey = {}
   let total = 0, held = 0
   for (const item of items) {
     if (item.checkoutDate <= startISO || item.checkinDate >= endISO) continue
-    // A held night is kept back, not booked: counted on its own, never as a channel's.
+    // A held night is kept back, not booked: counted on its own, never as a source's.
     if (item.kind === 'hold') { held += 1; continue }
     const clipStart = item.checkinDate > startISO ? item.checkinDate : startISO
     const clipEnd = item.checkoutDate < endISO ? item.checkoutDate : endISO
     const nights = Math.round((new Date(clipEnd) - new Date(clipStart)) / 86400000)
     if (nights <= 0) continue
-    const key = (item.source || 'direct').toLowerCase()
-    byChannel[key] = (byChannel[key] || 0) + nights
+    const key = sourceStyle(item.source).key
+    byKey[key] = (byKey[key] || 0) + nights
     total += nights
   }
-  return { byChannel, total, held }
+  return { byKey, total, held }
 }
 
-function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
+function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
   const year = monthCursor.getFullYear()
   const month = monthCursor.getMonth()
   const weeks = useMemo(() => buildMonthWeeks(year, month), [year, month])
   const todayISO = toISO(new Date())
-  const tally = useMemo(() => monthNightsTally(items, year, month), [items, year, month])
-  const tallyEntries = Object.entries(tally.byChannel).sort((a, b) => b[1] - a[1])
 
   return (
     <div>
@@ -128,18 +108,10 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
         <div style={{ width: '86px' }} />
       </div>
 
-      {tallyEntries.length > 0 && (
-        <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '10px' }}>
-          {tallyEntries.map(([src, n], i) => (
-            <span key={src}>
-              {i > 0 && '  ·  '}
-              <span style={{ color: channelColor(src) }}>{channelLabel(src)}</span> {n}n
-            </span>
-          ))}
-          <span style={{ color: 'var(--text)', fontWeight: '700' }}>  =  {tally.total} nights</span>
-          {tally.held > 0 && <span style={{ color: '#F59E0B' }}>  ·  🔒 {tally.held} held</span>}
-        </div>
-      )}
+      <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '10px' }}>
+        <span style={{ color: 'var(--text)', fontWeight: '700' }}>{tally.total} night{tally.total === 1 ? '' : 's'} booked</span>
+        {tally.held > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🔒 {tally.held} held</span>}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
         {WEEKDAYS.map(w => (
@@ -169,7 +141,7 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
             {segs.length > 0 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginTop: '2px' }}>
                 {segs.map((seg, si) => {
-                  const color = channelColor(seg.item.source)
+                  const st = sourceStyle(seg.item.source)
                   // A held night (an agreed late check-out / early check-in) is not a booking:
                   // hatched, so it reads as "kept back" rather than as another platform.
                   const isHold = seg.item.kind === 'hold'
@@ -177,8 +149,8 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
                     <div key={si} title={isHold ? 'Held night · ' + (seg.item.label || '') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
                       style={{
                         gridColumn: `${seg.startCol} / ${seg.endCol}`,
-                        background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)' : color,
-                        color: isHold ? '#F59E0B' : '#fff',
+                        background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)' : st.color,
+                        color: isHold ? HOLD_COLOR : st.text,
                         border: isHold ? '1px dashed rgba(245,158,11,0.7)' : 'none',
                         boxSizing: 'border-box',
                         borderRadius: '5px',
@@ -200,6 +172,94 @@ function CalendarGrid({ items, monthCursor, onPrev, onNext, onToday }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// The key to the calendar, in three groups: every CHANNEL PARTNER (a platform), then the
+// bookings the villa takes itself (DIRECT) and those that come through an AGENT. Each chip
+// carries the colour its bars use and the nights it has in the month on show. A platform
+// whose calendar is connected shows ✓; one that is not is a button that opens "+ Feed"
+// with that platform filled in, so connecting Vrbo or Booking.com is two taps.
+function SourceKey({ items, feeds, tally, onConnect }) {
+  const feedFor = key => feeds.find(f => channelsMatch(f.channel, key))
+  // Platforms beyond the usual list that this villa really uses: a feed, or a booking.
+  const extra = useMemo(() => {
+    const seen = new Map()
+    const note = src => {
+      const st = sourceStyle(src)
+      if (st.group === 'channel' && !PARTNERS.some(p => p.key === st.key) && !seen.has(st.key)) seen.set(st.key, st)
+    }
+    feeds.forEach(f => note(f.channel))
+    items.forEach(it => { if (it.kind !== 'hold') note(it.source) })
+    return [...seen.values()]
+  }, [items, feeds])
+  const hasOther = items.some(it => it.kind !== 'hold' && sourceStyle(it.source).group === 'other')
+  const hasHolds = items.some(it => it.kind === 'hold')
+
+  const label = { fontSize: '0.62rem', color: 'var(--text-dim)', fontWeight: '700', letterSpacing: '0.08em', marginBottom: '6px' }
+  const row = { display: 'flex', flexWrap: 'wrap', gap: '6px' }
+
+  function Chip({ st, status, onClick, title }) {
+    const n = tally.byKey[st.key] || 0
+    const Tag = onClick ? 'button' : 'span'
+    return (
+      <Tag onClick={onClick} title={title}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 10px 5px 8px', borderRadius: '999px',
+          fontSize: '0.7rem', color: 'var(--text)', fontWeight: n > 0 ? '700' : '500', fontFamily: 'inherit',
+          background: colorAlpha(st.color, n > 0 ? 0.18 : 0.06),
+          border: `1px ${onClick ? 'dashed' : 'solid'} ${colorAlpha(st.color, onClick ? 0.4 : 0.6)}`,
+          cursor: onClick ? 'pointer' : 'default',
+        }}>
+        <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: st.color, flexShrink: 0 }} />
+        {st.label}
+        {n > 0 && <span style={{ color: st.color, fontWeight: '700' }}>{n}n</span>}
+        {status}
+      </Tag>
+    )
+  }
+
+  const partnerChip = st => {
+    const f = feedFor(st.key)
+    if (!f) {
+      return <Chip key={st.key} st={st} onClick={() => onConnect(st.label)} title={`${st.label}'s calendar is not connected. Tap to connect it.`}
+        status={<span style={{ color: 'var(--text-dim)', fontWeight: '700' }}>+</span>} />
+    }
+    const bad = f.last_sync_status === 'error'
+    const status = bad ? <span style={{ color: '#EF4444' }}>⚠</span> : !f.is_active ? <span style={{ color: 'var(--text-dim)' }}>⏸</span> : <span style={{ color: '#34A853' }}>✓</span>
+    const when = bad ? 'last sync failed' : !f.is_active ? 'paused' : f.last_synced_at ? `synced ${f.last_synced_at.slice(0, 16)}` : 'not synced yet'
+    return <Chip key={st.key} st={st} status={status} title={`${st.label}'s calendar is connected · ${when}`} />
+  }
+
+  return (
+    <div style={{ background: 'var(--dark-card)', border: '1px solid var(--border-dim)', borderRadius: '12px', padding: '12px 14px', marginBottom: '14px' }}>
+      <div style={label}>CHANNEL PARTNERS</div>
+      <div style={row}>
+        {PARTNERS.map(p => partnerChip(sourceStyle(p.key)))}
+        {extra.map(st => partnerChip(st))}
+      </div>
+      <div style={{ ...label, marginTop: '12px' }}>BOOKED WITH YOU</div>
+      <div style={row}>
+        <Chip st={DIRECT_STYLE} title="Direct bookings: website, WhatsApp, phone, referral and walk-in guests" />
+        <Chip st={AGENT_STYLE} title="Agent bookings: a travel agent or sales partner (choose Agent as the booking channel)" />
+        {hasOther && <Chip st={sourceStyle('other')} />}
+      </div>
+      <div style={{ fontSize: '0.64rem', color: 'var(--text-dim)', marginTop: '6px', lineHeight: 1.5 }}>
+        Direct: website, WhatsApp, phone, referral · Agent: travel agents and sales partners
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: '10px', paddingTop: '9px', borderTop: '1px solid var(--border-dim)', fontSize: '0.64rem', color: 'var(--text-dim)' }}>
+        <span><span style={{ color: '#34A853' }}>✓</span> calendar connected</span>
+        <span><span style={{ fontWeight: '700' }}>+</span> not connected yet: tap to add it</span>
+        <span>⚠️ two sources claim one night</span>
+        {hasHolds && (
+          <span title="A guest with an agreed late check-out is still in the villa when the next family would arrive (likewise an early check-in the night before), so that night is not for sale: it is closed here, in enquiries and on every platform's calendar."
+            style={{ color: HOLD_COLOR }}>
+            <span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', border: `1px dashed ${HOLD_COLOR}`, background: 'rgba(245,158,11,0.3)', boxSizing: 'border-box', marginRight: '4px', verticalAlign: '-1px' }} />
+            held night
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -295,12 +355,16 @@ export default function ChannelCalendar() {
   const INP = { width: '100%', padding: '9px 12px', borderRadius: '8px', boxSizing: 'border-box', background: 'var(--dark-input)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.9rem' }
   const LBL = { display: 'block', fontSize: '0.68rem', color: 'var(--text-dim)', letterSpacing: '1px', marginBottom: '4px' }
 
-  const activeChannels = useMemo(() => {
-    const set = new Map()
-    for (const it of calItems) if (it.kind !== 'hold') set.set((it.source || '').toLowerCase(), it.source)
-    return [...set.values()]
-  }, [calItems])
-  const hasHolds = calItems.some(it => it.kind === 'hold')
+  // Nights per source in the month on show: the key's chips and the grid's summary read it.
+  const tally = useMemo(() => monthNightsTally(calItems, monthCursor.getFullYear(), monthCursor.getMonth()), [calItems, monthCursor])
+
+  // A platform in the key whose calendar is not connected yet: open "+ Feed" with it filled in.
+  const addFormRef = useRef(null)
+  function connectPartner(name) {
+    setForm({ channel: name, label: '', icsUrl: '' })
+    setShowAdd(true)
+    setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
+  }
 
   return (
     <div className="screen">
@@ -326,7 +390,7 @@ export default function ChannelCalendar() {
         </div>
 
         {showAdd && (
-          <div style={{ background: 'rgba(200,144,58,0.06)', border: '1px solid rgba(200,144,58,0.25)', borderRadius: '12px', padding: '16px', marginBottom: '14px' }}>
+          <div ref={addFormRef} style={{ background: 'rgba(200,144,58,0.06)', border: '1px solid rgba(200,144,58,0.25)', borderRadius: '12px', padding: '16px', marginBottom: '14px' }}>
             <div style={{ fontWeight: '700', color: 'var(--gold)', fontSize: '0.88rem', marginBottom: '12px' }}>New channel feed</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
               <div>
@@ -380,7 +444,7 @@ export default function ChannelCalendar() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ ...channelPillStyle(f.channel), fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>{channelLabel(f.channel)}</span>
+                  <span style={{ ...sourcePill(f.channel), fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>{channelLabel(f.channel)}</span>
                   {f.label && <span style={{ fontSize: '0.8rem', color: 'var(--text)', fontWeight: '600' }}>{f.label}</span>}
                   {!f.is_active && <span style={{ fontSize: '0.62rem', color: 'var(--text-dim)', background: 'rgba(255,255,255,0.06)', padding: '1px 6px', borderRadius: '8px' }}>PAUSED</span>}
                 </div>
@@ -410,37 +474,12 @@ export default function ChannelCalendar() {
 
         <div className="card-section-label" style={{ marginTop: '18px', marginBottom: '10px' }}>CALENDAR</div>
 
-        {(activeChannels.length > 0 || hasHolds) && (
-          <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', marginBottom: '12px' }}>
-            {activeChannels.map(src => {
-              const feed = feeds.find(f => (f.channel || '').toLowerCase() === (src || '').toLowerCase())
-              return (
-                <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: 'var(--text-dim)' }}>
-                  <span style={{ width: '9px', height: '9px', borderRadius: '3px', background: channelColor(src), display: 'inline-block' }} />
-                  {channelLabel(src)}
-                  {feed && (
-                    feed.last_sync_status === 'error'
-                      ? <span style={{ color: '#EF4444' }}> · sync failed</span>
-                      : feed.last_synced_at
-                        ? <span> · synced {feed.last_synced_at.slice(0, 16)}</span>
-                        : <span> · not synced yet</span>
-                  )}
-                </div>
-              )
-            })}
-            {hasHolds && (
-              <div title="A guest with an agreed late check-out is still in the villa when the next family would arrive (likewise an early check-in the night before), so that night is not for sale: it is closed here, in enquiries and on every platform's calendar."
-                style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: '#F59E0B' }}>
-                <span style={{ width: '9px', height: '9px', borderRadius: '3px', border: '1px dashed #F59E0B', background: 'rgba(245,158,11,0.3)', display: 'inline-block', boxSizing: 'border-box' }} />
-                Held night (late check-out / early check-in)
-              </div>
-            )}
-          </div>
-        )}
+        {!loading && <SourceKey items={calItems} feeds={feeds} tally={tally} onConnect={connectPartner} />}
 
         {!loading && (
           <CalendarGrid
             items={calItems}
+            tally={tally}
             monthCursor={monthCursor}
             onPrev={() => setMonthCursor(c => { const d = new Date(c); d.setMonth(d.getMonth() - 1); return d })}
             onNext={() => setMonthCursor(c => { const d = new Date(c); d.setMonth(d.getMonth() + 1); return d })}

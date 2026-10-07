@@ -7,9 +7,9 @@ import { CONFIG } from '../../config'
 
 const MANAGER_NAME = CONFIG.villas.find(v => v.active)?.managerName || CONFIG.villas[0]?.managerName || 'Manager'
 const TODAY    = localTodayStr()
-const CHANNELS = ['Direct', 'Airbnb', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Agoda', 'Expedia', 'VRBO', 'Other']
+const CHANNELS = ['Direct', 'Airbnb', 'MakeMyTrip', 'Booking.com', 'Goibibo', 'Agoda', 'Expedia', 'VRBO', 'Agent', 'Other']
 // HOST fee only (what OTA deducts from your payout — NOT the guest service fee)
-const COMM = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Expedia:3, VRBO:3, Other:10 }
+const COMM = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Expedia:3, VRBO:3, Agent:0, Other:10 }
 
 const STATUS_FLOW = [
   { key: 'booked',      label: 'Booked',      color: '#185FA5', desc: 'Booking received, not yet confirmed' },

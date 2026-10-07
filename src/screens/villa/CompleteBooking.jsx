@@ -27,7 +27,7 @@ import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink } from '../../utils/guestMessages'
 
-const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Other']
+const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Agent','Other']
 
 // Extra charge line items — single source of truth in utils/villaPricing
 // (shared with EnquiryDetail quotes) so the two dropdowns can never drift.
@@ -42,7 +42,7 @@ const EMPTY_AIRBNB = {
 // Airbnb: 3% HOST fee only (guest pays 15% separately — not your deduction)
 // Host-side commission % only (what OTA deducts from your payout)
 // Airbnb: 3% host fee. Booking.com: 15%. MakeMyTrip/Goibibo: 18%. Expedia/VRBO: 3% (similar to Airbnb)
-const COMMISSION = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Agoda:18, Expedia:3, VRBO:3, Other:10 }
+const COMMISSION = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Agoda:18, Expedia:3, VRBO:3, Agent:0, Other:10 }
 
 // Status badge config
 const STATUS_META = {

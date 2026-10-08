@@ -5418,9 +5418,16 @@ export async function onRequest(ctx) {
             checkinDate: h.night, checkoutDate: addDays(h.night, 1), holdFor: h.stayId, time: h.time,
           })
         }
+        // A block that only says "not available" (a night the owner closed by hand on a
+        // platform, or one the platform closed because of a calendar it imports) is no
+        // reservation: a held night on top of one is the same night closed twice, not a
+        // double booking. A block that is a reservation ("Reserved") still collides with a
+        // held night, as a booking would.
+        const isMarker = o => o.kind === 'block' && /not available|unavailable|blocked|closed/i.test(o.label || '')
         for (const item of items) {
           item.conflict = items.some(o =>
             o !== item && !(item.kind === 'hold' && o.kind === 'hold') &&
+            !(item.kind === 'hold' && isMarker(o)) && !(o.kind === 'hold' && isMarker(item)) &&
             (o.source || '').toLowerCase() !== (item.source || '').toLowerCase() &&
             overlaps(item.checkinDate, item.checkoutDate, o.checkinDate, o.checkoutDate))
         }

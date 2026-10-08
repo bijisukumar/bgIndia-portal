@@ -11,7 +11,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
-import { channelKey, channelLabel, sourcePill } from '../../utils/channel'
+import { channelKey, channelLabel, sourcePill, PARTNERS } from '../../utils/channel'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { timeAgo } from '../../utils/localWhen'
 
@@ -32,11 +32,13 @@ export default function CalendarExports({ feeds, showToast }) {
 
   useEffect(() => { load() }, [])
 
-  // One row per platform: every platform with a feed above, plus any that has a
-  // link without one. Grouped by the same normalised name the server uses, so
-  // "Booking.com" and "booking_com" are one row.
+  // One row per platform: all the usual platforms (so each site has its own link to
+  // make, connected or not), plus any other with a feed above or a link already made.
+  // Grouped by the same normalised name the server uses, so "Booking.com" and
+  // "booking_com" are one row. The usual ones keep their order, the rest follow A-Z.
   const rows = useMemo(() => {
     const byKey = new Map()
+    for (const p of PARTNERS) byKey.set(p.key, { key: p.key, channel: p.label, link: null })
     for (const f of feeds || []) {
       const k = channelKey(f.channel)
       if (k && !byKey.has(k)) byKey.set(k, { key: k, channel: f.channel, link: null })
@@ -47,7 +49,9 @@ export default function CalendarExports({ feeds, showToast }) {
       row.link = l
       byKey.set(k, row)
     }
-    return [...byKey.values()].sort((a, b) => channelLabel(a.channel).localeCompare(channelLabel(b.channel)))
+    const usual = PARTNERS.map(p => p.key)
+    const rank = r => { const i = usual.indexOf(r.key); return i < 0 ? usual.length : i }
+    return [...byKey.values()].sort((a, b) => rank(a) - rank(b) || channelLabel(a.channel).localeCompare(channelLabel(b.channel)))
   }, [feeds, links])
 
   const urlOf = l => `${guestBaseUrl()}/api/ical/${l.token}.ics`

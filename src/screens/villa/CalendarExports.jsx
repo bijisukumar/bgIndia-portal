@@ -30,7 +30,16 @@ export default function CalendarExports({ feeds, showToast }) {
     .then(list => { setLinks(Array.isArray(list) ? list : []); setLoadError('') })
     .catch(e => { setLinks([]); setLoadError(e.message || 'Could not load') })
 
-  useEffect(() => { load() }, [])
+  // "Read 14 min ago" is the only way to tell a platform is using its link, so it must not
+  // go stale: reload it with the feeds above (every sync or change up there), when the tab
+  // comes back into view, and once a minute while the screen is open.
+  useEffect(() => { load() }, [feeds])
+  useEffect(() => {
+    const again = () => { if (document.visibilityState === 'visible') load() }
+    document.addEventListener('visibilitychange', again)
+    const timer = setInterval(again, 60000)
+    return () => { document.removeEventListener('visibilitychange', again); clearInterval(timer) }
+  }, [])
 
   // One row per platform: all the usual platforms (so each site has its own link to
   // make, connected or not), plus any other with a feed above or a link already made.

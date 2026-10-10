@@ -644,6 +644,17 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     ? Math.min(CLIENT.bedroomCount, Math.ceil(billableGuests / 2))
     : CLIENT.bedroomCount;
 
+  // Said only to a guest who has asked for an early check-in or a late check-out. The request
+  // is listed in this email, and a list can read as a promise: say plainly that it is
+  // confirmed once the time (and any charge) has been agreed with them.
+  var wantsEarly = !!(stayDetails && stayDetails.requestEarlyCheckin);
+  var wantsLate  = !!(stayDetails && stayDetails.requestLateCheckout);
+  var timingAsk  = (wantsEarly || wantsLate)
+    ? 'We have noted your request for ' +
+      (wantsEarly && wantsLate ? 'an early check-in and a late check-out' : wantsEarly ? 'an early check-in' : 'a late check-out') +
+      '. It is confirmed once we have agreed the time (and any charge) with you, so please do not plan around it until you hear from us.\n\n'
+    : '';
+
   var guestBody =
     'Dear ' + guestName + ',\n\n' +
     'Thank you for completing your check-in registration. ' +
@@ -663,7 +674,11 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     'If anything looks incorrect, please contact us at ' + CLIENT.guestContactPhone + '.\n\n' +
     'We look forward to welcoming you to ' + CLIENT.villaName + '!\n\n' +
     'Just a friendly reminder before you arrive:\n\n' +
-    'Timing Matters: Our turnaround schedule between guests is very tight. Please stick strictly to the scheduled check-in and check-out times. Just as an extra hour taken by a previous guest would delay your clean check-in, any shift impacts the guests arriving right after you.\n\n' +
+    'A Note on Timings: The check-in and check-out times above give our team the time to prepare the villa with care for every family. ' +
+    'If you would love an early check-in or a late check-out, we will do our best to make it work. ' +
+    'Please arrange it with us as early as you can, ideally before you travel, so we can confirm what is possible and share any charge up front. ' +
+    'Agreeing it in advance means no confusion or surprise charges on the day, and keeps things smooth for the guests arriving after you.\n\n' +
+    timingAsk +
     'Guest Counts: Final guest counts will be validated upon arrival.\n\n' +
     'We appreciate your cooperation in helping us get the space perfect for you and our upcoming guests!\n\n' +
     'Warm regards,\n' + CLIENT.villaName + '\n' +

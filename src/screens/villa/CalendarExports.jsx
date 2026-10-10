@@ -99,13 +99,25 @@ export default function CalendarExports({ feeds, showToast }) {
     }
   }
 
+  // Agoda only imports addresses from sites on its own approved list and refuses ours
+  // ("Please enter a valid link") before it fetches anything, so its link is read by the
+  // "StayVibe to Agoda" Google script (scripts/AgodaCalendarBridge.gs), which keeps a
+  // private Google Calendar for Agoda to import. This row's "Read N ago" is that script.
   function status(l) {
     const name = channelLabel(l.channel)
-    if (!l.lastFetchedAt) return { text: `Not read yet. Paste it into ${name}'s calendar import.`, warn: false }
+    const agoda = channelKey(l.channel) === 'agoda'
+    if (!l.lastFetchedAt) {
+      return {
+        text: agoda
+          ? 'Not read yet. Agoda refuses addresses it has not approved, so this link goes in through a Google Calendar: set up the “StayVibe to Agoda” script (see the manual).'
+          : `Not read yet. Paste it into ${name}'s calendar import.`,
+        warn: false,
+      }
+    }
     const quiet = Date.now() - new Date(l.lastFetchedAt).getTime() > DAY_MS
     return {
       text: `Read ${timeAgo(l.lastFetchedAt)} · ${l.fetchCount} time${l.fetchCount === 1 ? '' : 's'}` +
-        (quiet ? ` · not read for over a day: is it still pasted into ${name}?` : ''),
+        (quiet ? (agoda ? ' · not read for over a day: is the “StayVibe to Agoda” script still running?' : ` · not read for over a day: is it still pasted into ${name}?`) : ''),
       warn: quiet,
     }
   }
@@ -117,8 +129,9 @@ export default function CalendarExports({ feeds, showToast }) {
       <div className="card-section-label" style={{ marginBottom: '6px' }}>SHARE YOUR CALENDAR BACK</div>
       <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: '10px' }}>
         Giving each platform its own link means it blocks the nights booked everywhere else, your direct
-        bookings included. Paste the link into that platform's calendar import. A link never contains that
-        platform's own bookings, and holds dates only: no guest names or contact details.
+        bookings included. Paste the link into that platform's calendar import (Agoda is the exception: it
+        only takes addresses it has approved, so its link goes in through a Google Calendar). A link never
+        contains that platform's own bookings, and holds dates only: no guest names or contact details.
       </div>
 
       {links === null && <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '14px', fontSize: '0.8rem' }}>Loading…</div>}

@@ -2902,7 +2902,18 @@ export async function onRequest(ctx) {
     // body from a clone here would parse megabytes twice for ocrReceipt,
     // which carries a photograph.
   }
-  await enforceTenantScope()
+  // Answered here, not left to the catch at the end of the handler: this call sits
+  // BEFORE that try block, so a foreign ?villaId= used to escape as the platform's
+  // HTML 500 page. Nothing leaked, but a client can act on a plain 403 and cannot
+  // on an error page (POST bodies are checked inside the try and already got this).
+  try {
+    await enforceTenantScope()
+  } catch (e) {
+    if (e.message === 'FORBIDDEN_PROPERTY') {
+      return json({ success: false, error: 'You do not have access to this property' }, 403)
+    }
+    throw e
+  }
 
   // Same principle for estates: raman/pradosh each only work one estate.
   // Previously the client-supplied ?estate= param was trusted outright;
@@ -3142,6 +3153,14 @@ export async function onRequest(ctx) {
 
       if (action === 'getTenantConfig') {
         const tenantId = url.searchParams.get('tenantId') || DEFAULT_VILLA_ID
+        // The id comes from the query string, so a signed-in user of one tenant could
+        // name another's and read its owner email, phones and Drive root. A tenant
+        // token (it carries tenantId) reads only its OWN tenant. The server-to-server
+        // SYSTEM_TOKEN (the Google scripts) and master_owner carry no tenantId and
+        // keep reading any tenant, as they must.
+        if (payload.tenantId && tenantId !== payload.tenantId) {
+          return err('You do not have access to this tenant', 403)
+        }
         const tenant = await DB.prepare(
           `SELECT tenant_id, villa_name, phone1, phone2, guest_contact,
                   address, checkin_time, checkout_time,

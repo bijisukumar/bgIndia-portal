@@ -439,6 +439,57 @@ We hope you had a truly beautiful and enjoyable time in Guruvayur, with wonderfu
 Warm regards,
 {brandName}`,
     },
+    // The email a guest gets after submitting the online check-in form ("Your
+    // Check-in Registration Completed"). Built and sent by the Google Apps Script
+    // (scripts/GuestFormScript.gs, sendCheckinConfirmationEmails), which reads
+    // this block from the worker (getTenantConfig) every time it runs. So a
+    // change to the words here goes live with the next deploy and nothing has to
+    // be pasted into Google. If this block is missing, or its template has lost
+    // {stayDetails}, the script falls back to its own built-in copy of this text
+    // (keep that copy in step with this when the wording changes).
+    //
+    // {placeholders} the script fills in:
+    //   {guestName}  {villaName}  {guestContact} (the number shown to guests)
+    //   {hostPhone}  {checkinTime}  {checkoutTime} (as "4:00 PM")
+    //   {stayDetails}   the Check-in / Check-out / Nights / Bedrooms / ETA lines
+    //   {guestDetails}  the Adults / Children / Phone / Email lines
+    //   {requests}      "ADDITIONAL REQUESTS:" and what the guest ticked, or "None"
+    // The last three are built from the form, so each should appear once.
+    checkinConfirmation: {
+      subject: 'Your Check-in Registration Completed — {villaName}',
+      // Added in brackets after the bedroom count on the Bedrooms line, e.g.
+      // "4 bedrooms (Indian Queen Size bed)". Leave blank to say nothing.
+      bedType: 'Indian Queen Size bed',
+      template:
+`Dear {guestName},
+
+Thank you for completing your check-in registration. Please verify the details we have on record:
+
+STAY DETAILS
+{stayDetails}
+  ** If you have been approved for an Early Check-in/Late Check-out, please confirm with Hosts.
+
+GUEST DETAILS
+{guestDetails}
+
+{requests}
+
+If anything looks incorrect, please contact us at {guestContact}.
+
+We look forward to welcoming you to {villaName}!
+
+Just a friendly reminder before you arrive:
+
+A Note on Timings: The check-in and check-out times above give our team the time to prepare the villa with care for every family. If you would love an early check-in or a late check-out, we will do our best to make it work. Please arrange it with us as early as you can, ideally before you travel, so we can confirm what is possible and share any charge up front. Agreeing it in advance means no confusion or surprise charges on the day, and keeps things smooth for the guests arriving after you.
+
+Guest Counts: Final guest counts will be validated upon arrival.
+
+We appreciate your cooperation in helping us get the space perfect for you and our upcoming guests!
+
+Warm regards,
+{villaName}
+{hostPhone}  |  {guestContact}`,
+    },
     // Manual WhatsApp send, any time during/after checkout — asks how the
     // stay was and closes the relationship warmly, hotel-front-desk style.
     farewell: {

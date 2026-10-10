@@ -226,6 +226,34 @@ We hope you had a truly beautiful and enjoyable stay, with wonderful family mome
 Warm regards,
 {brandName}`,
     },
+    // The email a guest gets after submitting the online check-in form. Built by
+    // the Google Apps Script, which reads this block from the worker
+    // (getTenantConfig). Same shape and {placeholders} as hosts/dwarka/config.js,
+    // where they are listed.
+    checkinConfirmation: {
+      subject: 'Your Check-in Registration Completed — {villaName}',
+      bedType: '',
+      template:
+`Dear {guestName},
+
+Thank you for completing your check-in registration. Please verify the details we have on record:
+
+STAY DETAILS
+{stayDetails}
+
+GUEST DETAILS
+{guestDetails}
+
+{requests}
+
+If anything looks incorrect, please contact us at {guestContact}.
+
+We look forward to welcoming you to {villaName}!
+
+Warm regards,
+{villaName}
+{hostPhone}  |  {guestContact}`,
+    },
     farewell: {
       template:
 `Namaskaram {guestName}! 🙏

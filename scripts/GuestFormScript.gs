@@ -9,6 +9,17 @@
 // via getTenantConfig (see v2.1 below).
 //
 // ── VERSION HISTORY (newest first) — bump on every change ──
+// v2.5  2026-10-10  The guest's check-in confirmation wording now comes
+//                    from the host config (guestMessages.checkinConfirmation
+//                    in hosts/<id>/config.js, served by getTenantConfig and
+//                    loaded into CLIENT by getClient), so a change of words
+//                    is a deploy, not a paste into Google. This file keeps
+//                    only a fallback copy (DEFAULT_CHECKIN_EMAIL) and builds
+//                    the data lines from the form. The "Timing Matters"
+//                    paragraph became the warmer "A Note on Timings" (agree
+//                    an early check-in / late check-out in advance), and
+//                    "1 bedrooms" now reads "1 bedroom". After pasting, run
+//                    testConnection(): the log should list checkinConfirmation.
 // v2.4  2026-07-12  Unified email log: sendCheckinConfirmationEmails
 //                    no longer calls GmailApp.sendEmail directly for
 //                    the guest/owner/CC check-in confirmation — it
@@ -88,6 +99,8 @@ function getClient() {
         breakfastRate:    resp.data.breakfastRate || 275,
         bedroomCount:     resp.data.bedroomCount  || 4,
         storeCarPhotos:   !!resp.data.storeCarPhotos,
+        // Wording of the guest's check-in email, from the host config (null: built-in text).
+        checkinConfirmation: resp.data.checkinConfirmation || null,
       };
       Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
       return _CLIENT;
@@ -111,6 +124,7 @@ function getClient() {
     breakfastRate:     275,
     bedroomCount:      4,
     storeCarPhotos:    false,
+    checkinConfirmation: null,
   };
   return _CLIENT;
 }
@@ -604,6 +618,75 @@ function processPendingDocumentUploads() {
 }
 
 // ── SEND CHECK-IN CONFIRMATION EMAILS ────────────────────
+// The words of the guest's check-in confirmation email belong to the host config
+// (guestMessages.checkinConfirmation in hosts/<id>/config.js, served by getTenantConfig and
+// loaded into CLIENT by getClient), so changing them is a deploy and nothing has to be
+// pasted into Google. This copy is only the fallback, used when the host config has no such
+// block or its template has lost {stayDetails}: a guest is never sent an email that leaves
+// out the details they are asked to check. Keep it in step with hosts/dwarka/config.js.
+//
+// {placeholders}: guestName villaName guestContact hostPhone checkinTime checkoutTime, and
+// the three blocks built from the form: stayDetails guestDetails requests.
+var DEFAULT_CHECKIN_EMAIL = {
+  subject: 'Your Check-in Registration Completed — {villaName}',
+  bedType: 'Indian Queen Size bed',
+  template: [
+    'Dear {guestName},',
+    '',
+    'Thank you for completing your check-in registration. Please verify the details we have on record:',
+    '',
+    'STAY DETAILS',
+    '{stayDetails}',
+    '  ** If you have been approved for an Early Check-in/Late Check-out, please confirm with Hosts.',
+    '',
+    'GUEST DETAILS',
+    '{guestDetails}',
+    '',
+    '{requests}',
+    '',
+    'If anything looks incorrect, please contact us at {guestContact}.',
+    '',
+    'We look forward to welcoming you to {villaName}!',
+    '',
+    'Just a friendly reminder before you arrive:',
+    '',
+    'A Note on Timings: The check-in and check-out times above give our team the time to prepare the villa with care for every family. ' +
+      'If you would love an early check-in or a late check-out, we will do our best to make it work. ' +
+      'Please arrange it with us as early as you can, ideally before you travel, so we can confirm what is possible and share any charge up front. ' +
+      'Agreeing it in advance means no confusion or surprise charges on the day, and keeps things smooth for the guests arriving after you.',
+    '',
+    'Guest Counts: Final guest counts will be validated upon arrival.',
+    '',
+    'We appreciate your cooperation in helping us get the space perfect for you and our upcoming guests!',
+    '',
+    'Warm regards,',
+    '{villaName}',
+    '{hostPhone}  |  {guestContact}',
+  ].join('\n'),
+};
+
+// Subject, template and bed type for the guest's check-in confirmation: the host config's
+// block when it has a usable one, otherwise DEFAULT_CHECKIN_EMAIL.
+function checkinEmailWording(CLIENT) {
+  var cfg = CLIENT && CLIENT.checkinConfirmation;
+  if (cfg && typeof cfg.subject === 'string' && cfg.subject &&
+      typeof cfg.template === 'string' && cfg.template.indexOf('{stayDetails}') !== -1) {
+    Logger.log('Check-in email wording: host config');
+    return { subject: cfg.subject, template: cfg.template, bedType: typeof cfg.bedType === 'string' ? cfg.bedType : '' };
+  }
+  Logger.log('Check-in email wording: built-in default (the host config has none)');
+  return DEFAULT_CHECKIN_EMAIL;
+}
+
+// {placeholder} substitution, same rule as the worker's: an unknown placeholder is left as it
+// is, so a typo in the config shows up in the email instead of vanishing. One pass, so text a
+// guest typed that happens to contain {braces} is never substituted again.
+function renderEmailTemplate(template, vars) {
+  return String(template).replace(/\{(\w+)\}/g, function (m, key) {
+    return (vars.hasOwnProperty(key) && vars[key] != null) ? vars[key] : m;
+  });
+}
+
 function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails, CLIENT) {
   if (!CLIENT) CLIENT = getClient();
   var guestName  = stay.guestName || 'Guest';
@@ -644,45 +727,38 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     ? Math.min(CLIENT.bedroomCount, Math.ceil(billableGuests / 2))
     : CLIENT.bedroomCount;
 
-  // Said only to a guest who has asked for an early check-in or a late check-out. The request
-  // is listed in this email, and a list can read as a promise: say plainly that it is
-  // confirmed once the time (and any charge) has been agreed with them.
-  var wantsEarly = !!(stayDetails && stayDetails.requestEarlyCheckin);
-  var wantsLate  = !!(stayDetails && stayDetails.requestLateCheckout);
-  var timingAsk  = (wantsEarly || wantsLate)
-    ? 'We have noted your request for ' +
-      (wantsEarly && wantsLate ? 'an early check-in and a late check-out' : wantsEarly ? 'an early check-in' : 'a late check-out') +
-      '. It is confirmed once we have agreed the time (and any charge) with you, so please do not plan around it until you hear from us.\n\n'
-    : '';
+  // The guest's words come from the host config (guestMessages.checkinConfirmation,
+  // served by getTenantConfig), so changing them is a deploy, not a paste into Google.
+  // What is built here is only the data from the form, laid out line by line; a line the
+  // form has no answer for is left out rather than printed blank.
+  var wording = checkinEmailWording(CLIENT);
 
-  var guestBody =
-    'Dear ' + guestName + ',\n\n' +
-    'Thank you for completing your check-in registration. ' +
-    'Please verify the details we have on record:\n\n' +
-    'STAY DETAILS\n' +
+  var stayLines =
     '  Check-in :  ' + checkIn  + ' (after ' + fmt(CLIENT.checkinTime)  + ')\n' +
     '  Check-out:  ' + checkOut + ' (by '    + fmt(CLIENT.checkoutTime) + ')\n' +
     '  Nights   :  ' + nights + '\n' +
-    '  Bedrooms :  ' + bedroomCount + ' bedrooms (Indian Queen Size bed)\n' +
-    (eta ? '  ETA      :  ' + eta + '\n' : '') +
-    '  ** If you have been approved for an Early Check-in/Late Check-out, please confirm with Hosts.\n\n' +
-    'GUEST DETAILS\n' +
-    '  Adults   :  ' + adults + (children > 0 ? '\n  Children :  ' + children : '') + '\n' +
-    (phone      ? '  Phone    :  ' + phone      + '\n' : '') +
-    (guestEmail ? '  Email    :  ' + guestEmail + '\n' : '') +
-    '\n' + reqSection +
-    'If anything looks incorrect, please contact us at ' + CLIENT.guestContactPhone + '.\n\n' +
-    'We look forward to welcoming you to ' + CLIENT.villaName + '!\n\n' +
-    'Just a friendly reminder before you arrive:\n\n' +
-    'A Note on Timings: The check-in and check-out times above give our team the time to prepare the villa with care for every family. ' +
-    'If you would love an early check-in or a late check-out, we will do our best to make it work. ' +
-    'Please arrange it with us as early as you can, ideally before you travel, so we can confirm what is possible and share any charge up front. ' +
-    'Agreeing it in advance means no confusion or surprise charges on the day, and keeps things smooth for the guests arriving after you.\n\n' +
-    timingAsk +
-    'Guest Counts: Final guest counts will be validated upon arrival.\n\n' +
-    'We appreciate your cooperation in helping us get the space perfect for you and our upcoming guests!\n\n' +
-    'Warm regards,\n' + CLIENT.villaName + '\n' +
-    CLIENT.phone1 + '  |  ' + CLIENT.guestContactPhone;
+    '  Bedrooms :  ' + bedroomCount + (Number(bedroomCount) === 1 ? ' bedroom' : ' bedrooms') +
+      (wording.bedType ? ' (' + wording.bedType + ')' : '') +
+    (eta ? '\n  ETA      :  ' + eta : '');
+
+  var guestLines =
+    '  Adults   :  ' + adults + (children > 0 ? '\n  Children :  ' + children : '') +
+    (phone      ? '\n  Phone    :  ' + phone      : '') +
+    (guestEmail ? '\n  Email    :  ' + guestEmail : '');
+
+  var vars = {
+    guestName:    guestName,
+    villaName:    CLIENT.villaName,
+    guestContact: CLIENT.guestContactPhone,
+    hostPhone:    CLIENT.phone1,
+    checkinTime:  fmt(CLIENT.checkinTime),
+    checkoutTime: fmt(CLIENT.checkoutTime),
+    stayDetails:  stayLines,
+    guestDetails: guestLines,
+    requests:     reqSection.replace(/\n+$/, ''),
+  };
+  var guestSubject = renderEmailTemplate(wording.subject, vars);
+  var guestBody    = renderEmailTemplate(wording.template, vars);
 
   var ownerBody =
     'NEW CHECK-IN FORM SUBMITTED\n' +
@@ -704,7 +780,7 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
   sendEmailViaWorker(CLIENT.ownerEmail, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody, 'owner_booking', CLIENT.villaId);
   sendEmailViaWorker(CLIENT.ownerEmailCC, 'Guest Check-in Received — ' + guestName + ' (' + checkIn + ')', ownerBody, 'owner_booking', CLIENT.villaId);
   if (guestEmail) {
-    var sent = sendEmailViaWorker(guestEmail, 'Your Check-in Registration Completed — ' + CLIENT.villaName, guestBody, 'guest_checkin', CLIENT.villaId);
+    var sent = sendEmailViaWorker(guestEmail, guestSubject, guestBody, 'guest_checkin', CLIENT.villaId);
     Logger.log(sent ? 'Guest email sent to ' + guestEmail : 'Guest email FAILED for ' + guestEmail);
   }
 }

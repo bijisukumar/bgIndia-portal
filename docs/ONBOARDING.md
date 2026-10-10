@@ -84,6 +84,12 @@ by frontend routing.
 5. Google: deploy the 3 Apps Script projects under host's Gmail; set
    `WORKER_URL`/`TENANT_ID` (2 lines, per `scripts/GuestFormScript.gs`'s
    own header) — everything else loads dynamically via `getTenantConfig`.
+   That includes the wording of the guest's check-in confirmation email:
+   it is `guestMessages.checkinConfirmation` in the host's `config.js`
+   (subject, template, bed type; placeholders are listed above the block),
+   so a change of words is a deploy, not a paste into Google. The script
+   keeps only a fallback copy (`DEFAULT_CHECKIN_EMAIL`), used when a host
+   has no such block.
    In the check-in **Form editor** (not the responses sheet — that setting
    lives on the Form itself, not in any script), mark the ID/passport
    upload question **Required** — easy to forget per-host, and without it

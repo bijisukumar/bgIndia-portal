@@ -3138,6 +3138,14 @@ export async function onRequest(ctx) {
           driveRootId:   tenant.drive_root_id || null,
           storeCarPhotos: !!tenant.store_car_photos,
           bedroomCount:  tenant.bedroom_count || 4,
+          // The words of the guest's check-in confirmation email, which the Apps
+          // Script builds and sends. They live in the host config (guestMessages)
+          // so a wording change is an ordinary deploy, not a paste into Google.
+          // This tenant's OWN block only: getHostConfig() falls back to dwarka's
+          // for an id it does not know, which would put one host's words in
+          // another host's guests' inboxes. null makes the script use its
+          // built-in text.
+          checkinConfirmation: HOST_CONFIGS[tenantId]?.guestMessages?.checkinConfirmation || null,
         }})
       }
 

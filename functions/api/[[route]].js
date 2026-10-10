@@ -11,9 +11,38 @@
 // at runtime instead, hence importing every host directly here.
 import { CONFIG as DWARKA_CONFIG } from '../../hosts/dwarka/config.js'
 import { CONFIG as DEMOVILLA_CONFIG } from '../../hosts/demovilla/config.js'
+// Lessor identity, bank details, PAN and Google ids. NOT part of the host config
+// above: that is compiled into the public site and served by getAppConfig with no
+// login. These are imported by the worker only and reach a browser only through
+// getPrivateConfig (owner login).
+import { PRIVATE as DWARKA_PRIVATE } from '../../hosts/dwarka/private.js'
+import { PRIVATE as DEMOVILLA_PRIVATE } from '../../hosts/demovilla/private.js'
 const HOST_CONFIGS = { dwarka: DWARKA_CONFIG, demovilla: DEMOVILLA_CONFIG }
 function getHostConfig(villaId) {
   return HOST_CONFIGS[villaId] || HOST_CONFIGS.dwarka
+}
+
+// Exact lookup, no fallback: a tenant with no private block gets {}, never dwarka's
+// bank details.
+const PRIVATE_CONFIGS = { dwarka: DWARKA_PRIVATE, demovilla: DEMOVILLA_PRIVATE }
+
+// Keys that must never be handed to a visitor, whatever a bundled or STORED config still
+// holds (platform_tenant_config.config_json is a snapshot, and older ones carried the
+// lessor's bank account and PAN). Applied when a config is served by getAppConfig and
+// when syncTenantConfig stores one, so a stale row cannot leak.
+const PRIVATE_CONFIG_KEYS = ['leaseIndia', 'driveRootId', 'spreadsheetId', 'guestFormSheetId']
+function publicConfig(config) {
+  if (!config || typeof config !== 'object') return config
+  const out = { ...config }
+  for (const k of PRIVATE_CONFIG_KEYS) delete out[k]
+  if (Array.isArray(out.rentalProperties)) {
+    out.rentalProperties = out.rentalProperties.map(p => {
+      if (!p || typeof p !== 'object') return p
+      const { electricityConsumerNo, ...rest } = p
+      return rest
+    })
+  }
+  return out
 }
 
 // The owner Training Manual's words. They are served from here, and only to a
@@ -2037,7 +2066,9 @@ export async function onRequest(ctx) {
         console.error('tenant config is not valid JSON:', villaId, e?.message)
         return json({ success: false, error: 'Config unreadable' }, 500)
       }
-      return json({ success: true, data: { villaId, config } })
+      // publicConfig(): this answers anyone, so whatever a stored row still holds, the
+      // private keys (bank, PAN, ids) are dropped on the way out.
+      return json({ success: true, data: { villaId, config: publicConfig(config) } })
     } catch (e) {
       console.error('getTenantConfig crash:', e.message)
       return json({ success: false, error: 'Could not load config' }, 500)
@@ -3147,6 +3178,23 @@ export async function onRequest(ctx) {
           // built-in text.
           checkinConfirmation: HOST_CONFIGS[tenantId]?.guestMessages?.checkinConfirmation || null,
         }})
+      }
+
+      // The lessor's identity, bank details and PAN, and the Google ids: what the
+      // lease deed, receipt and voucher generators need and a visitor must never
+      // see. They are NOT in hosts/<id>/config.js (that file is compiled into the
+      // public site and served with no login by getAppConfig); they live in
+      // hosts/<id>/private.js, which only this worker imports. Owner only, and only
+      // the block of the caller's OWN tenant: the tenant comes from the signed
+      // token (or the host, for master_owner), never from a query parameter.
+      // no-store: nothing between here and the owner's screen should keep a copy.
+      if (action === 'getPrivateConfig') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        return new Response(JSON.stringify({ success: true, data: PRIVATE_CONFIGS[tenantId] || {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS },
+        })
       }
 
       // Maintenance > Photo Storage toggle. Owner-only, deliberately
@@ -8653,7 +8701,8 @@ export async function onRequest(ctx) {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const villaId = body.villaId || DEFAULT_VILLA_ID
         const staticConfig = getHostConfig(villaId)
-        const configJson = JSON.stringify(staticConfig)
+        // The stored copy is served to anyone by getAppConfig, so it never holds the private keys.
+        const configJson = JSON.stringify(publicConfig(staticConfig))
         await DB.prepare(`
           INSERT INTO platform_tenant_config (tenant_id, config_json, updated_at)
           VALUES (?, ?, datetime('now'))

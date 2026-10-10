@@ -13,7 +13,7 @@
 //  saved/posted, never an in-progress edit.
 // ============================================================
 import { Document, Packer, Paragraph, AlignmentType } from 'docx'
-import { CONFIG } from '../config'
+import { loadLeaseOrNull } from './privateConfig'
 import { localTodayStr } from './dates'
 import { fmtLongDate, fmtCurrency, fmtCurrencyWords, p, r, centerLabel, twoColRow } from './docGenHelpers'
 
@@ -86,12 +86,12 @@ export async function downloadDepositReceipt(agreement, property) {
     throw new Error(`Cannot generate deposit receipt — missing: ${missing.join(', ')}. Fill these in and save first.`)
   }
   const currency = agreement.currency || 'INR'
-  // CONFIG.leaseIndia (lessor name/address/bank/executionCity) is real data
-  // for India tenancies only — there is no equivalent CONFIG.leaseUSA yet
+  // The India lessor block (name/address/bank/executionCity, from loadLeaseOrNull)
+  // is real data for India tenancies only — there is no US equivalent yet
   // (no US lessor/bank details have been provided). Only use it for INR;
   // for any other currency, fall back to the property's own city rather
   // than silently stamping an Indian lessor's city onto a US document.
-  const lease = currency === 'INR' ? CONFIG.leaseIndia : null
+  const lease = currency === 'INR' ? await loadLeaseOrNull() : null
   const doc = buildReceiptDocument({
     property,
     tenantName: agreement.tenant_name,
@@ -109,7 +109,7 @@ export async function downloadDepositReceipt(agreement, property) {
     isDeposit: true,
     lessorName: lease?.lessorName || '[LANDLORD NAME]',
     // "Place" on a receipt should reflect the PROPERTY's actual city, not
-    // CONFIG.leaseIndia.executionCity (a single fixed value for every
+    // leaseIndia.executionCity (a single fixed value for every
     // India property, originally meant for the Lease Deed's "place of
     // execution" concept). property.city takes priority; executionCity is
     // only a last-resort fallback if a property somehow has no city set.
@@ -126,7 +126,7 @@ export async function downloadDepositReceipt(agreement, property) {
 export async function downloadRentReceipt(rentTxn, agreement, property) {
   if (!rentTxn) throw new Error('No rent transaction provided — post the payment to the ledger first.')
   const currency = rentTxn.currency || 'INR'
-  const lease = currency === 'INR' ? CONFIG.leaseIndia : null
+  const lease = currency === 'INR' ? await loadLeaseOrNull() : null
   const purpose = rentTxn.late_fee > 0
     ? `rent and late fee for ${rentTxn.period_month}`
     : `rent for ${rentTxn.period_month}`

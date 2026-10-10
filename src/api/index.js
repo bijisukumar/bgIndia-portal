@@ -297,6 +297,8 @@ export const api = {
 
   // ── TENANT CONFIG ─────────────────────────────────────────
   getTenantConfig:          (tenantId) => get('getTenantConfig', { tenantId: tenantId || DEFAULT_VILLA_ID }),
+  // Lessor identity, bank details, PAN and Google ids. Owner login only: never part of CONFIG, which is public.
+  getPrivateConfig:         ()         => get('getPrivateConfig'),
   syncTenantConfig:         (villaId) => post('syncTenantConfig', { villaId: villaId || DEFAULT_VILLA_ID }),
   getTenantUsage:           ()         => get('getTenantUsage'),
   getPlatformSignups:       (days, counts) => get('getPlatformSignups', counts ? { days, counts: 1 } : { days }),

@@ -57,6 +57,14 @@ by frontend routing.
    `hosts/demovilla/config.js` for a leaner from-scratch template; edit
    every field, especially `villas[].id`, which becomes the villa id used
    everywhere else below).
+   **`config.js` is public**: it is compiled into the site's JavaScript and
+   served with no login by `getAppConfig`, so nothing private may go in it
+   (no bank details, PAN, ID numbers, secrets). The lessor's identity, bank
+   details and PAN, and the Google ids, go in `hosts/<hostId>/private.js`
+   instead (copy `hosts/dwarka/private.js`). That file is imported only by
+   the worker and reaches a signed-in owner through `getPrivateConfig`. Add
+   the host to `PRIVATE_CONFIGS` beside `HOST_CONFIGS` in
+   `functions/api/[[route]].js`.
 2. Create D1 pair `<hostId>-db`, `<hostId>-estates-db` (skip estates if
    unused); run `schema.sql` (+ `schema-estates.sql`) — these already
    define every table under its namespaced name (`stayvibe_`/`rev360_`/

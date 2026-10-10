@@ -48,7 +48,7 @@ export default function TenantProfileCard({ form, setField, onTenantNameChange, 
       <label style={F.label}>{isUS ? "SSN / DRIVER'S LICENSE NO." : 'TENANT PAN / AADHAAR NUMBER'}</label>
       <input value={form.tenantPan} disabled={readOnly}
         onChange={e=>setField('tenantPan',e.target.value)}
-        placeholder={isUS ? 'e.g. driver\u2019s license + issuing state' : 'e.g. AXRPS9969C or 1234 5678 9012'}
+        placeholder={isUS ? 'e.g. driver\u2019s license + issuing state' : 'e.g. ABCDE1234F or 1234 5678 9012'}
         style={{...F.input, opacity: readOnly ? 0.6 : 1}}/>
       <div style={{fontSize:'0.65rem',color:'#5C7080',marginTop:'4px'}}>
         {isUS

@@ -11,7 +11,7 @@
 //  docx version exactly), since those are meant for wet-ink initialing
 //  on a printed copy, not a baked-in signature image repeated 6 times.
 // ============================================================
-import { CONFIG } from '../config'
+import { loadLeaseOrNull } from './privateConfig'
 import { createPdfWithCursor, triggerPdfDownload, fmtLongDate } from './pdfGenHelpers'
 import { rgb } from 'pdf-lib'
 
@@ -144,7 +144,11 @@ function drawTerminationTable(cursor, lease, rent) {
 }
 
 export async function buildLeaseDeedPdf(agreement, property) {
-  const lease = CONFIG.leaseIndia
+  // Private (bank, PAN): fetched with the owner's login, never read from the public CONFIG.
+  const lease = await loadLeaseOrNull()
+  if (!lease) {
+    throw new Error('Lessor details are not set up for this account, so a lease deed cannot be drawn up.')
+  }
   const { doc, cursor } = await createPdfWithCursor()
   const todayStr = new Date().toISOString().slice(0, 10)
 

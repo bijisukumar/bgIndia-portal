@@ -5,6 +5,12 @@
 //  To onboard another host: copy this file to hosts/<hostId>/config.js,
 //  edit the values, and build with VITE_HOST=<hostId>.
 //
+//  THIS FILE IS PUBLIC. It is compiled into the JavaScript every visitor
+//  downloads and is served, with no login, by the getAppConfig action. Put
+//  nothing private in it: no bank details, PAN, ID numbers, tokens or
+//  secrets. Those go in hosts/<hostId>/private.js (worker-only, served to a
+//  signed-in owner by getPrivateConfig).
+//
 //  Values that must change WITHOUT a deploy (rates, phone numbers,
 //  check-in/checkout times, auth) live in the `tenants`/`auth_tokens` D1
 //  tables instead (served via the getTenantConfig worker action) — not
@@ -61,7 +67,7 @@ export const CONFIG = {
   },
 
   // Google integration
-  driveRootId:   '1Qyy37HJVo4RQ5MPVmSJt26-SkE65sFva',
+  // The Drive root and Google Sheet ids are in hosts/dwarka/private.js.
   // Signed on guest-facing payment messages.
   ownerName:     'Biji Sukumar',
   ownerEmail:    'bijisukumar@gmail.com',
@@ -83,8 +89,6 @@ export const CONFIG = {
     // internal address on a message addressed to them.
     guestBcc: 'kerala.luxuryvillas@gmail.com',
   },
-  spreadsheetId:    '1xpLBxd2Fhx26aNQZ3Z5L4gDB6yJVFsGHf3B1jUDkvQQ',  // add this
-  guestFormSheetId: '1Lt1aORPlrisE_4-DobQCecvlyH0yOsD2SAIgJLgyEo0',
 
 
   // Villa properties — add more objects here for additional villas
@@ -512,57 +516,26 @@ Snehapoorvam (സ്നേഹപൂർവ്വം),
   // and stored in the rental_props table. The fields below are fallbacks for display only.
   // Add leaseEnd (YYYY-MM-DD) here to enable renewal alerts (60-day warning) as a quick override.
   //
-  // unitNo/floor/building/hasParking/electricityConsumerNo are used by the
-  // Lease Deed generator (Tenant Agreement screen → "Generate Lease Deed").
-  // hasParking and electricityConsumerNo are optional — leave blank/false if
-  // not applicable to a given property; the generated document only
-  // mentions them when present, per explicit decision (not every property
-  // has covered parking or a tracked electricity consumer number).
+  // unitNo/floor/building/hasParking are used by the Lease Deed generator
+  // (Tenant Agreement screen → "Generate Lease Deed"); hasParking is optional.
+  // The electricity consumer number is deliberately NOT kept here: it is a
+  // property detail in the database (property_details.elec_consumer_id), and
+  // this file is public.
   rentalProperties: [
     { id: 'rental_1', name: 'Tritvam',  location: 'Kochi, KL',  tenantName: '', leaseEnd: '',
       unitNo: 'T4 9D', floor: '9th', building: 'Tata Tritvam at Marine Drive', city: 'Kochi',
-      hasParking: true, electricityConsumerNo: '1155466025977', furnishing: 'semi furnished' },
+      hasParking: true, furnishing: 'semi furnished' },
     { id: 'rental_2', name: 'Pacifica', location: 'OMR, TN',    tenantName: '', leaseEnd: '',
       unitNo: '', floor: '', building: 'Pacifica', city: 'Chennai',
-      hasParking: false, electricityConsumerNo: '', furnishing: 'non-furnished' },
+      hasParking: false, furnishing: 'non-furnished' },
     { id: 'rental_3', name: 'Pinnacle', location: 'TCR, KL',    tenantName: '', leaseEnd: '',
       unitNo: '103', floor: '1st', building: 'Pinnacle Residency', city: 'Trichur',
-      hasParking: false, electricityConsumerNo: '', furnishing: 'non-furnished' },
+      hasParking: false, furnishing: 'non-furnished' },
   ],
 
-  // Lessor + standard India lease terms — shared across every rentalProperties
-  // entry. Fixed, not per-tenant: late-fee tiers, premature-termination
-  // penalties, and the 5% renewal increase are deliberately standardized
-  // across all India tenancies (explicit decision, 2026-06-24) rather than
-  // configurable per agreement.
-  leaseIndia: {
-    lessorName:    'Biji Sukumar',
-    lessorAddress: 'Thandayamgattil House, P O Chavakkad, Trichur Dist, Kerala 680501',
-    lessorPan:     'AXRPS9969C',
-    executionCity: 'Cochin',
-    bank: {
-      accountName:   'Biji Sukumar',
-      bankName:      'Federal Bank',
-      accountNumber: '14320100138300',
-      ifsc:          'FDRL0001432',
-      swift:         'FDRLINBBIBD',
-    },
-    renewalIncreasePct: 5,
-    maintenanceIncludedInRent: false,   // standard: tenant pays maintenance separately
-    lateFeeTiers: [
-      { label: 'Due on 1st of every month',          from: 1,  to: 1,  fee: 0 },
-      { label: 'Emergency Grace period (2nd-5th)',    from: 2,  to: 5,  fee: 0 },
-      { label: '6th-8th of the month',                from: 6,  to: 8,  fee: 2000 },
-      { label: '9th-15th of the month',               from: 9,  to: 15, fee: 7000 },
-      { label: '16th-31st of the month',               from: 16, to: 31, fee: 12000 },
-    ],
-    prematureTermination: {
-      beforeFullTerm:  'LESSEE is to pay broker commission',
-      before6Months:   'LESSEE is to pay 1 month additional Rent amount',
-    },
-    defectNoticeDays: 10,
-    jurisdiction:  'Ernakulam',
-  },
+  // The lessor's identity, bank details and the standard India lease terms are
+  // in hosts/dwarka/private.js, not here: this file is compiled into the
+  // public site and is served to anyone, without a login, by getAppConfig.
 
   // Estate properties
   estates: [

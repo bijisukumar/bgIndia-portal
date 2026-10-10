@@ -9,7 +9,8 @@
 //  decision, the late-fee tiers, termination penalties, 5% renewal
 //  increase, and maintenance-excluded-from-rent are now FIXED
 //  standard terms for every India tenancy — not configurable per
-//  agreement — and live in CONFIG.leaseIndia. Only tenant identity,
+//  agreement — and live in hosts/<id>/private.js, which the worker hands to a
+//  signed-in owner (see privateConfig.js). Only tenant identity,
 //  dates, rent, and deposit vary per agreement; only unit/floor/
 //  building/parking/electricity vary per property.
 // ============================================================
@@ -17,7 +18,7 @@ import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   AlignmentType, BorderStyle, WidthType, ShadingType, TabStopType, TabStopPosition,
 } from 'docx'
-import { CONFIG } from '../config'
+import { loadLeaseOrNull } from './privateConfig'
 import { parseLocalDate } from './dates'
 
 function ordinal(n) {
@@ -148,10 +149,10 @@ function lateFeeTable(tiers, rentAmount) {
  * Builds the lease deed Document object for a given agreement + property.
  * @param {object} agreement - the saved rental_props row (snake_case fields)
  * @param {object} property  - a row from getAllProperties (usePropertyList), same field shape as the old CONFIG.rentalProperties entries
+ * @param {object} lease     - the India lessor + lease terms (loadLeaseOrNull): private, so passed in rather than read from CONFIG
  * @returns {Document}
  */
-export function buildLeaseDeedDocument(agreement, property) {
-  const lease = CONFIG.leaseIndia
+export function buildLeaseDeedDocument(agreement, property, lease) {
   const today = new Date()
   const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
 
@@ -359,7 +360,11 @@ export async function downloadLeaseDeed(agreement, property) {
     throw new Error(`Cannot generate lease deed — missing: ${missing.join(', ')}. Fill these in and save first.`)
   }
 
-  const doc = buildLeaseDeedDocument(agreement, property)
+  const lease = await loadLeaseOrNull()
+  if (!lease) {
+    throw new Error('Lessor details are not set up for this account, so a lease deed cannot be drawn up.')
+  }
+  const doc = buildLeaseDeedDocument(agreement, property, lease)
   const blob = await Packer.toBlob(doc)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

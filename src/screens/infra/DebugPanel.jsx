@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { logger } from '../../utils/logger'
 import { CONFIG } from '../../config'
+import { api } from '../../api'
 
 const LEVEL_COLORS = {
   error: '#EF9A9A',
@@ -14,6 +15,9 @@ export default function DebugPanel() {
   const [logs, setLogs]     = useState([])
   const [apiTest, setApiTest] = useState(null)
   const [testing, setTesting] = useState(false)
+  // The Drive root id is private, so it is not in the (public) CONFIG; an owner gets it from the worker.
+  const [priv, setPriv] = useState(null)
+  useEffect(() => { api.getPrivateConfig().then(d => setPriv(d || {})).catch(() => setPriv({})) }, [])
 
   useEffect(() => {
     setLogs(logger.getAll())
@@ -121,7 +125,7 @@ export default function DebugPanel() {
         <div className="card-section-label">SESSION INFO</div>
         <div className="card">
           {[
-            ['Drive root',    CONFIG.driveRootId],
+            ['Drive root',    priv ? (priv.driveRootId || '—') : '…'],
             ['Owner email',   CONFIG.ownerEmail],
             ['Villas',        CONFIG.villas.map(v=>v.name).join(', ')],
             ['Estates',       CONFIG.estates.map(e=>e.name).join(', ')],

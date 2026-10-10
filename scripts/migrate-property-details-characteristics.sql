@@ -41,7 +41,9 @@ INSERT OR IGNORE INTO property_details (prop_id) VALUES ('rental_3');
 
 UPDATE property_details SET
   unit_no = 'T4 9D', floor = '9th', building_name = 'Tata Tritvam at Marine Drive',
-  has_parking = 1, elec_consumer_id = COALESCE(elec_consumer_id, '1155466025977'),
+  has_parking = 1,
+  -- (the electricity consumer number was seeded here too; it is no longer kept in the repo:
+  --  it lives in property_details.elec_consumer_id)
   furnishing = 'semi furnished', city = COALESCE(city, 'Kochi')
 WHERE prop_id = 'rental_1';
 

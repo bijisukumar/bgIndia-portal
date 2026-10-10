@@ -11,7 +11,7 @@
 //  record, never live unsaved form state — a receipt is a claim that
 //  money was actually received.
 // ============================================================
-import { CONFIG } from '../config'
+import { loadLeaseOrNull } from './privateConfig'
 import { localTodayStr } from './dates'
 import {
   createPdfWithCursor, triggerPdfDownload, drawSignatureBlock,
@@ -80,7 +80,7 @@ export async function downloadDepositReceiptPdf(agreement, property) {
     throw new Error(`Cannot generate deposit receipt — missing: ${missing.join(', ')}. Fill these in and save first.`)
   }
   const currency = agreement.currency || 'INR'
-  const lease = currency === 'INR' ? CONFIG.leaseIndia : null
+  const lease = currency === 'INR' ? await loadLeaseOrNull() : null
   const doc = await buildReceiptPdf({
     property,
     tenantName: agreement.tenant_name,
@@ -104,7 +104,7 @@ export async function downloadDepositReceiptPdf(agreement, property) {
 export async function downloadRentReceiptPdf(rentTxn, agreement, property) {
   if (!rentTxn) throw new Error('No rent transaction provided — post the payment to the ledger first.')
   const currency = rentTxn.currency || 'INR'
-  const lease = currency === 'INR' ? CONFIG.leaseIndia : null
+  const lease = currency === 'INR' ? await loadLeaseOrNull() : null
   const purpose = rentTxn.late_fee > 0
     ? `rent and late fee for ${rentTxn.period_month}`
     : `rent for ${rentTxn.period_month}`

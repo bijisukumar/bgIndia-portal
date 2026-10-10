@@ -5,7 +5,7 @@
 //  baked in (unlike the tenant-facing receipts) -- this is an internal
 //  expense record, just a signature line for the owner/rep to sign.
 // ============================================================
-import { CONFIG } from '../config'
+import { loadLeaseOrNull } from './privateConfig'
 import { localTodayStr } from './dates'
 import { createPdfWithCursor, triggerPdfDownload, drawSingleSignatureBlock, fmtLongDate, fmtCurrency, fmtCurrencyWords } from './pdfGenHelpers'
 
@@ -62,7 +62,7 @@ export async function downloadPayoutVoucherPdf(expense, property) {
     throw new Error(`Cannot generate payout voucher — missing: ${missing.join(', ')}. Fill these in and save first.`)
   }
   const currency = expense.currency || 'INR'
-  const lease = currency === 'INR' ? CONFIG.leaseIndia : null
+  const lease = currency === 'INR' ? await loadLeaseOrNull() : null
   const doc = await buildVoucherPdf({
     property,
     vendorName: expense.vendor_name,

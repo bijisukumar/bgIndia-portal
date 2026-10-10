@@ -452,7 +452,7 @@ export const TILES = [
       { name: 'Each request', text: `Shows the guest, their contact and booking source, what they need, the times they asked for, how firm it is (**Must have**, **Will check on arrival** or **Nice to have**) and whether they **want to book direct**.` },
       { name: 'Can you do it?', text: `A verdict from your calendar: **Adjoining day is free**, **Booked either side — but this still fits** (allowing time to turn the villa around) or **No room to turn the villa around**, with the earliest hand-over and latest departure that would work.` },
       { name: 'What to charge', text: `The nightly rate with **25%** and **50%** worked out. Pick one, add a private note, then [[Approve]] or [[Can't do]].` },
-      { name: 'Booked through a platform?', text: `Their request is marked **OTA lead**: there is nothing to price, but they are asking for your direct rates — an invitation to win them next time.` },
+      { name: 'When the guest booked on a platform', text: `Their request is marked **OTA lead**: there is nothing to price, but they are asking for your direct rates — an invitation to win them next time.` },
     ],
   },
   {

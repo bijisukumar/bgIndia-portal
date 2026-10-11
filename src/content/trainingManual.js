@@ -503,8 +503,8 @@ export const TILES = [
     gain: `Pay on time, pay the right amount, and never wonder what is outstanding.`,
     insideLabel: 'Tabs',
     inside: [
-      { name: '⏳ Unpaid', text: `**Total outstanding**, grouped by quarter. Tick the stays you are paying and tap **Pay N selected**, or **Mark all paid**. A **GPay** button opens a UPI payment to your manager for that amount, ready for you to confirm.` },
-      { name: '📋 History', text: `The **all-time summary**, **paid to date**, a breakdown by year and month, and any stays that were checked out but never got a commission entry — flagged so you can review and add them by hand.` },
+      { name: '⏳ Unpaid', text: `**Total outstanding**, grouped by quarter. Tick the stays you are paying and tap **Pay N selected**, or **Mark all paid**. A **GPay** button opens a UPI payment to your manager for that amount, ready for you to confirm. If any checked-out stay has no commission entry, a red notice at the top says so and how much it would be: those stays are not in the total until you add them.` },
+      { name: '📋 History', text: `The **all-time summary**, **paid to date**, a breakdown by year and month, and any stays that were checked out but never got a commission entry. Each is listed with an **Add** button, and **Add all** puts the lot on the Unpaid list at the standard rate (the same amount a check-out would have made, so a held late check-out night is not paid twice). Add only the ones that are due; a stay is never added twice.` },
     ],
     note: `Your manager has their own **My earnings** screen. It shows which stays are paid and which are pending, but **never any amounts**.`,
   },

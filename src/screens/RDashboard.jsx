@@ -70,6 +70,7 @@ export default function RDashboard() {
   const [paying, setPaying]     = useState(false)
   const [toast, setToast]       = useState(null)
   const [apiError, setApiError] = useState(null)
+  const [adding, setAdding]   = useState(false)
   const [expandQ, setExpandQ]   = useState({})
   const [expandYear, setExpandYear]   = useState({})
   const [expandMonth, setExpandMonth] = useState({})
@@ -99,6 +100,33 @@ export default function RDashboard() {
   }
 
   useEffect(() => { loadData() }, [])
+
+  // ── MISSING COMMISSIONS ──────────────────────────────────────────────────
+  // Checked-out stays that never got a commission row (a crash at check-out between
+  // 2026-08-10 and the fix, or a stay closed straight from Complete Booking). They are NOT in
+  // the totals until added; the server uses the same rate calculation as a check-out.
+  const missed = report?.missedGuests || []
+  const missedEstimate = (g) => calcCommission(g.nights, report?.commissionRates)
+  const missedTotal = missed.reduce((s, g) => s + missedEstimate(g), 0)
+
+  const handleAddMissing = async (guests) => {
+    if (!guests.length || adding) return
+    const total = guests.reduce((s, g) => s + missedEstimate(g), 0)
+    const what = guests.length === 1 ? guests[0].guestName : guests.length + ' stays'
+    if (!window.confirm('Add about ' + fmt(total) + ' of commission for ' + what + '? It is put on the Unpaid list at the standard rate.')) return
+    setAdding(true)
+    try {
+      const r = await api.addMissingCommissions(guests.map(g => g.stayId))
+      const n = r?.added?.length || 0
+      const sum = (r?.added || []).reduce((s, a) => s + (a.commission || 0), 0)
+      showToast(n ? 'Added ' + fmt(sum) + ' for ' + n + ' stay' + (n !== 1 ? 's' : '') : 'Nothing was added', n ? 'success' : 'error')
+      loadData()
+    } catch (e) {
+      showToast(e.message || 'Could not add the commission', 'error')
+    } finally {
+      setAdding(false)
+    }
+  }
 
   // ── SELECTION HELPERS ────────────────────────────────────────────────────
   const toggleOne = (commId) => {
@@ -250,6 +278,22 @@ export default function RDashboard() {
         {/* ── UNPAID TAB ──────────────────────────────────────────────────── */}
         {tab === 'unpaid' && (
           <>
+            {/* Stays that were checked out but have no commission yet: not in the totals below */}
+            {!loading && missed.length > 0 && (
+              <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '12px', padding: '12px 14px', marginBottom: '14px' }}>
+                <div style={{ color: '#EF4444', fontWeight: '700', fontSize: '0.82rem', marginBottom: '4px' }}>
+                  ⚠️ {missed.length} checked-out stay{missed.length !== 1 ? 's' : ''} {missed.length !== 1 ? 'have' : 'has'} no commission recorded · about {fmt(missedTotal)}
+                </div>
+                <div style={{ color: '#FCA5A5', fontSize: '0.74rem', marginBottom: '10px' }}>
+                  They are not in the totals below. Review them and add the ones that are due.
+                </div>
+                <button onClick={() => setTab('history')}
+                  style={{ padding: '8px 14px', borderRadius: '9px', border: '1px solid rgba(239,68,68,0.5)', background: 'transparent', color: '#FCA5A5', fontSize: '0.78rem', fontWeight: '700', cursor: 'pointer' }}>
+                  Review {missed.length} stay{missed.length !== 1 ? 's' : ''} →
+                </button>
+              </div>
+            )}
+
             {/* Summary card */}
             <div className="card-section-label">TOTAL OUTSTANDING</div>
             {loading ? <Skeleton h={80} /> : (
@@ -417,14 +461,30 @@ export default function RDashboard() {
                   ⚠️ {report.missedGuests.length} checked-out guest{report.missedGuests.length !== 1 ? 's' : ''} missing from commission tracking
                 </div>
                 <div style={{ color: '#FCA5A5', fontSize: '0.74rem', marginBottom: '8px' }}>
-                  These stays were checked out but never got a commission record. Review and add manually if needed.
+                  These stays were checked out but never got a commission record, so they are not in the unpaid total.
+                  Add the ones that are due: each goes onto the Unpaid list at the standard rate.
                 </div>
                 {report.missedGuests.map((g, i) => (
-                  <div key={i} style={{ fontSize: '0.78rem', color: '#FCA5A5', padding: '4px 0',
-                    borderTop: i > 0 ? '1px solid rgba(239,68,68,0.15)' : 'none' }}>
-                    {g.guestName} · {fmtDate(g.checkIn)} · {g.nights} night{g.nights !== 1 ? 's' : ''}
+                  <div key={g.stayId || i} style={{ fontSize: '0.78rem', color: '#FCA5A5', padding: '6px 0',
+                    borderTop: i > 0 ? '1px solid rgba(239,68,68,0.15)' : 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                    <span>{g.guestName} · {fmtDate(g.checkIn)} · {g.nights} night{g.nights !== 1 ? 's' : ''}</span>
+                    <button disabled={adding} onClick={() => handleAddMissing([g])}
+                      style={{ flexShrink: 0, padding: '6px 11px', borderRadius: '8px', border: '1px solid rgba(200,144,58,0.5)',
+                        background: 'rgba(200,144,58,0.12)', color: 'var(--gold)', fontSize: '0.74rem', fontWeight: '700',
+                        cursor: adding ? 'default' : 'pointer', opacity: adding ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                      Add {fmt(missedEstimate(g))}
+                    </button>
                   </div>
                 ))}
+                {report.missedGuests.length > 1 && (
+                  <button disabled={adding} onClick={() => handleAddMissing(report.missedGuests)}
+                    style={{ marginTop: '10px', width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid rgba(200,144,58,0.6)',
+                      background: 'rgba(200,144,58,0.15)', color: 'var(--gold)', fontSize: '0.82rem', fontWeight: '700',
+                      cursor: adding ? 'default' : 'pointer', opacity: adding ? 0.6 : 1 }}>
+                    {adding ? 'Adding…' : 'Add all ' + report.missedGuests.length + ' · about ' + fmt(missedTotal)}
+                  </button>
+                )}
               </div>
             )}
 

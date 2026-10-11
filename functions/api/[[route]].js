@@ -1309,6 +1309,11 @@ const STAY_STAGES = ['booked','confirmed','docs_uploaded','pending_review','read
 // A commission that's already been PAID is a real payment record — it is
 // never deleted here; the caller is told so it can say as much.
 async function reconcileStayStamps(DB, stayId, status) {
+  // This helper's OWN clock. The handler's now() is declared inside onRequest and is not in
+  // scope up here: referencing it threw "now is not defined" on every check-in and check-out
+  // from 2026-08-10 (527d6a5), AFTER the status had been saved, so no commission row was
+  // made, no arrival/departure time was kept and no owner alert went out.
+  const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
   const idx = STAY_STAGES.indexOf(status)
   if (idx < 0) return { commissionRemoved: 0, paidCommissionKept: false }
 
@@ -5355,22 +5360,8 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
-      if (action === 'updateFlexRequest') {
-        const { requestId, status, quotedPct, ownerNote } = body
-        if (!requestId) return err('requestId required')
-        const row = await DB.prepare(`SELECT villa_id FROM stayvibe_flex_requests WHERE request_id = ?`).bind(requestId).first()
-        if (!row) return err('Request not found', 404)
-        assertPropertyAccess(payload, row.villa_id)
-        await DB.prepare(
-          `UPDATE stayvibe_flex_requests
-              SET status = COALESCE(?, status),
-                  quoted_pct = COALESCE(?, quoted_pct),
-                  owner_note = COALESCE(?, owner_note),
-                  updated_at = ?
-            WHERE request_id = ?`
-        ).bind(status || null, quotedPct ?? null, ownerNote || null, now(), requestId).run()
-        return json({ success: true, data: { requestId } })
-      }
+      // (updateFlexRequest lives in the POST section below: it reads `body`, which does not
+      // exist up here, so a copy in this GET section was unreachable.)
 
       if (action === 'getCheckinLinks') {
         const cl = villaScope(payload, url.searchParams.get('villaId'))
@@ -7388,9 +7379,13 @@ export async function onRequest(ctx) {
       if (action === 'cancelStay') {
         // Cancelling someone else's booking is the worst case of acting on a
         // caller-supplied id — check it is theirs first.
+        // stayId was never read from the body here, so the guard line threw
+        // "stayId is not defined" and cancelStay could not run at all.
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
-        await DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), body.stayId).run()
-        await DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(body.stayId).run()
+        await DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(actor, now(), stayId).run()
+        await DB.prepare(`DELETE FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 0`).bind(stayId).run()
         return json({ success: true })
       }
 
@@ -8298,6 +8293,73 @@ export async function onRequest(ctx) {
           }
         }
         return json({ success: true, data: { stayId, status, ...stamps } })
+      }
+
+      // The owner's Approve / Can't do on a flexibility request (FlexRequests.jsx). It was
+      // written in the GET section, where `body` is not defined and a POST never arrives,
+      // so the buttons answered "Unknown POST action". Anything that reads `body` belongs here.
+      if (action === 'updateFlexRequest') {
+        const { requestId, status, quotedPct, ownerNote } = body
+        if (!requestId) return err('requestId required')
+        const row = await DB.prepare(`SELECT villa_id FROM stayvibe_flex_requests WHERE request_id = ?`).bind(requestId).first()
+        if (!row) return err('Request not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        await DB.prepare(
+          `UPDATE stayvibe_flex_requests
+              SET status = COALESCE(?, status),
+                  quoted_pct = COALESCE(?, quoted_pct),
+                  owner_note = COALESCE(?, owner_note),
+                  updated_at = ?
+            WHERE request_id = ?`
+        ).bind(status || null, quotedPct ?? null, ownerNote || null, now(), requestId).run()
+        return json({ success: true, data: { requestId } })
+      }
+
+      // The owner adds the commission for a stay that was serviced but never got one. A row
+      // is made when a stay is checked out; from 2026-08-10 until reconcileStayStamps was
+      // fixed that step crashed, and a stay closed straight from Complete Booking never had
+      // one. Staff Perks lists those stays as "missing from commission tracking"; this is
+      // how they get resolved, one at a time or all at once, at the same rate the check-out
+      // calculation uses (managerCommissionFor). Owner only: it creates money owed to staff.
+      // created_by stays 'system' like a check-out's row, so walking a stay back still
+      // unwinds it (reconcileStayStamps removes only unpaid system rows).
+      if (action === 'addMissingCommissions') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const ids = Array.isArray(body.stayIds) ? [...new Set(body.stayIds.map(String))].slice(0, 100) : []
+        if (!ids.length) return err('stayIds required')
+        const tenantId = payload.tenantId || DEFAULT_VILLA_ID
+        const added = []
+        const skipped = []
+        for (const sid of ids) {
+          // Another tenant's stay is refused outright (403), not skipped quietly.
+          await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', sid)
+          const stay = await DB.prepare(
+            `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, villa_id, status, checked_out_by, request_late_checkout, expected_departure_at
+               FROM stayvibe_stays WHERE stay_id = ?`
+          ).bind(sid).first()
+          if (!stay) { skipped.push({ stayId: sid, reason: 'Stay not found' }); continue }
+          if (!['checked_out', 'closed'].includes(stay.status)) { skipped.push({ stayId: sid, reason: `Not checked out yet (${stay.status})` }); continue }
+          const has = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ?`).bind(sid).first()
+          if (has) { skipped.push({ stayId: sid, reason: 'Already has a commission' }); continue }
+          const ext = await DB.prepare(`SELECT late_checkout_nights, occupancy_tax FROM stayvibe_stay_ext WHERE stay_id = ?`).bind(sid).first()
+          // The rate of whoever checked the guest out; failing that, the villa's manager.
+          const rateRow =
+            (stay.checked_out_by && await DB.prepare(
+              `SELECT commission_single_night, commission_multi_night FROM platform_auth_tokens WHERE tenant_id = ? AND actor = ? AND active = 1 LIMIT 1`
+            ).bind(tenantId, stay.checked_out_by).first()) ||
+            await DB.prepare(
+              `SELECT commission_single_night, commission_multi_night FROM platform_auth_tokens WHERE tenant_id = ? AND actor = 'raman' AND active = 1 LIMIT 1`
+            ).bind(tenantId).first()
+          const rates = { singleNight: rateRow?.commission_single_night, multiNight: rateRow?.commission_multi_night }
+          const commission = managerCommissionFor(stay, ext, rates)
+          const nights = parseInt(stay.nights) || 1
+          await DB.prepare(
+            `INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at, villa_id)
+             VALUES (?, ?, ?, ?, ?, ?, 0, 'system', ?, ?, ?, ?)`
+          ).bind(genId('RC'), sid, stay.guest_name, stay.checkin_date, nights, commission, actor, now(), now(), stay.villa_id).run()
+          added.push({ stayId: sid, guestName: stay.guest_name, nights, commission })
+        }
+        return json({ success: true, data: { added, skipped } })
       }
 
       // No-show: status stays 'cancelled' (already excluded from every

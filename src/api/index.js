@@ -322,6 +322,8 @@ export const api = {
   getMarketingStats:    (villaId, statYear) => get('getMarketingStats', { villaId: villaId || DEFAULT_VILLA_ID, ...(statYear ? { statYear: String(statYear) } : {}) }),
   getRamanHistory:      ()       => get('getRamanHistory'),
   markRamanPaid:        (data)   => post('markRamanPaid', data),
+  // Owner only: adds the commission for checked-out stays that never got one (Staff Perks > missing list).
+  addMissingCommissions: (stayIds) => post('addMissingCommissions', { stayIds }),
 
   // ── REVIEW CHASE ─────────────────────────────────────────
   getReviewChaseList:   ()       => get('getReviewChaseList'),

@@ -1584,35 +1584,16 @@ export async function onRequest(ctx) {
           tenantId: row.tenant_id, propertyIds: props.map(p => p.property_id),
           compType: row.comp_type || 'commission',
         }
-      } else {
-        // Self-healing migration path: the 3 original users' PINs live
-        // only in these env vars until each one logs in for the first
-        // time post-cutover. On a match here, silently write the hashed
-        // row so every subsequent login uses the fast DB path — nobody
-        // needs to retype a PIN, and their real PIN value is never seen
-        // or typed into a migration script. Safe to delete this block
-        // (and the 3 env vars) once all 3 have logged in at least once.
-        const LEGACY = {
-          [env.PIN_OWNER]:   { tenantId: 'dwarka', role: 'owner',          actor: 'owner'   },
-          [env.PIN_RAMAN]:   { tenantId: 'dwarka', role: 'manager',        actor: 'raman'   },
-          [env.PIN_PRADOSH]: { tenantId: 'dwarka', role: 'estate_manager', actor: 'pradosh' },
-        }
-        const legacy = LEGACY[String(pin)]
-        if (legacy) {
-          try {
-            await DB.prepare(
-              `INSERT OR IGNORE INTO platform_auth_tokens (token_hash, tenant_id, role, actor, label, active, created_at)
-               VALUES (?, ?, ?, ?, ?, 1, datetime('now'))`
-            ).bind(pinHash, legacy.tenantId, legacy.role, legacy.actor, legacy.actor).run()
-          } catch (e) { console.error('legacy PIN auto-migration failed:', e?.message || e) }
-          const { results: props } = await DB.prepare(
-            `SELECT property_id FROM platform_properties WHERE tenant_id = ? AND active = 1`
-          ).bind(legacy.tenantId).all()
-          found = { name: legacy.actor, role: legacy.role, actor: legacy.actor,
-            tenantId: legacy.tenantId, propertyIds: props.map(p => p.property_id),
-            compType: 'commission' }
-        }
       }
+      // There is no other way in. A PIN that is neither the master PIN nor an active row of
+      // platform_auth_tokens is refused, so a PIN that has been retired or reset stays dead.
+      //
+      // The built-in PIN_OWNER / PIN_RAMAN / PIN_PRADOSH values used to be accepted here and
+      // silently written into that table on first use (a one-time cut-over path). That left a
+      // reset PIN's predecessor working for ever, created a second active row for the same
+      // person (token_hash is unique, so resetting that person's PIN then failed), and keyed
+      // the lookup on env values that are the string "undefined" when one is unset, so typing
+      // "undefined" signed in. Removed 2026-10-11; the three env values are now inert.
     }
 
     if (!found) {

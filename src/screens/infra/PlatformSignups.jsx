@@ -9,7 +9,7 @@
  * answers badly.
  */
 import { useEffect, useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { whatsappDraft, waLink, fillTemplate } from './leadOutreach'
 
@@ -24,7 +24,7 @@ function fmtWhen(d) {
 }
 
 export default function PlatformSignups() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [days, setDays] = useState(90)
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -75,7 +75,7 @@ export default function PlatformSignups() {
 
   return (
     <div style={s.page}>
-      <button style={s.back} onClick={() => navigate('/owner/maintenance')}>&larr; Maintenance</button>
+      <button style={s.back} onClick={goBack}>&larr; Maintenance</button>
       <h1 style={s.h1}>Signups</h1>
       <p style={s.sub}>Everyone who came in through the invite, host registration and demo forms.</p>
 

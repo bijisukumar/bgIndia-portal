@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 
 // created_at is stored 'YYYY-MM-DD HH:MM:SS' UTC with no timezone marker —
@@ -33,7 +33,7 @@ const EVENT_TYPES = ['', 'error', 'warning', 'info', 'success']
 //     already existed, but was neither scoped nor owner-gated, and its
 //     only prior UI (NotificationSettings) was pinned to one villa.
 export default function PlatformErrorLog() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [tab, setTab] = useState('processing')  // 'processing' | 'alerts'
 
   const [procLog, setProcLog]         = useState([])
@@ -65,7 +65,7 @@ export default function PlatformErrorLog() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Platform Error Log</div><div className="topbar-sub">MASTER OWNER · ALL TENANTS</div></div>
       </div>
 

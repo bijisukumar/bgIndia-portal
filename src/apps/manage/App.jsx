@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { NavTrail } from '../../utils/navTrail'
 import { useState } from 'react'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
 import { restoreActiveVillaId, clearActiveVillaId } from '../../utils/villaContext'
@@ -149,6 +150,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <NavTrail />
         <Routes>
           <Route path="/login" element={<LoginGate />} />
           <Route path="/*"     element={<ProtectedRoutes />} />

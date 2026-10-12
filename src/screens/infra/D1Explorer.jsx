@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { CONFIG } from '../../config'
@@ -212,7 +212,7 @@ function SavedQueryModal({ initial, onSave, onCancel }) {
 
 // ── MAIN COMPONENT ────────────────────────────────────────
 export default function D1Explorer() {
-  const navigate = useNavigate()
+  const goBack = useBack('/')
   const { user } = useAuth()
   const isMaster = user?.role === 'master_owner'
   const [tab, setTab]               = useState(isMaster ? 'saved' : 'presets')
@@ -365,7 +365,7 @@ export default function D1Explorer() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">{isMaster ? 'DB Admin' : 'Quick Reports'}</div>
           {/* Database name is an internal detail — never surfaced to non-master hosts */}

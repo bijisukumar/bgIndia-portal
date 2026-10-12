@@ -6,6 +6,7 @@
 //  Single DB, tenant isolated by auth token → villa_id
 // ============================================================
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { NavTrail } from '../../utils/navTrail'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
 import AccessDenied from '../../components/AccessDenied'
 import InstallAppBanner from '../../components/InstallAppBanner'
@@ -143,6 +144,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <NavTrail />
         <Routes>
           <Route path="/login"        element={<LoginGate />} />
           {/* Signup and demo belong to the acquisition hosts only. Hiding the

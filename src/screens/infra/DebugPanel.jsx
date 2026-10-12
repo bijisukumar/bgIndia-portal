@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { logger } from '../../utils/logger'
 import { CONFIG } from '../../config'
 import { api } from '../../api'
@@ -11,7 +11,7 @@ const LEVEL_COLORS = {
 }
 
 export default function DebugPanel() {
-  const navigate  = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [logs, setLogs]     = useState([])
   const [apiTest, setApiTest] = useState(null)
   const [testing, setTesting] = useState(false)
@@ -85,7 +85,7 @@ export default function DebugPanel() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Debug panel</div>
           <div className="topbar-sub">OWNER ONLY · ERROR LOG</div>

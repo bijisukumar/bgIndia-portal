@@ -7,7 +7,7 @@
  * Route: /owner/maintenance/staff
  */
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -28,7 +28,7 @@ function fmtDate(d) {
 }
 
 export default function StaffAccess() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const { user } = useAuth()
   const [staff, setStaff]   = useState(null)
   const [loading, setLoading] = useState(true)
@@ -84,7 +84,7 @@ export default function StaffAccess() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Staff &amp; Access</div>
           <div className="topbar-sub">MAINTENANCE · LOGINS &amp; PINS</div>

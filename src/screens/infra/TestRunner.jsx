@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -180,7 +180,7 @@ const GROUP_COLORS = {
 }
 
 export default function TestRunner() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [results, setResults]   = useState({})
   const [running, setRunning]   = useState(false)
   const [current, setCurrent]   = useState(null)
@@ -222,7 +222,7 @@ export default function TestRunner() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Test Runner</div>
           <div className="topbar-sub">END-TO-END VALIDATION · OWNER ONLY</div>

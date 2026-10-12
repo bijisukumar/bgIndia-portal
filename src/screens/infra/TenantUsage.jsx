@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 
 // Per-tenant storage usage, read from getTenantUsage.
@@ -51,7 +51,7 @@ const S = {
 }
 
 export default function TenantUsage() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [data, setData]   = useState(null)
   const [error, setError] = useState('')
 
@@ -69,7 +69,7 @@ export default function TenantUsage() {
   return (
     <div className="screen">
       <div style={S.head}>
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <h2 style={{ margin: 0 }}>Tenant usage</h2>
       </div>
 

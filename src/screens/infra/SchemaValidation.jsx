@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONTRACTS, REQUIRED_TABLES } from './schemaContracts'
 
@@ -137,7 +137,7 @@ function runChecks(snapshot) {
 
 // ── MAIN COMPONENT ───────────────────────────────────────────
 export default function SchemaValidation() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [loading, setLoading]   = useState(false)
   const [snapshot, setSnapshot] = useState(null)
   const [results, setResults]   = useState(null)
@@ -182,7 +182,7 @@ export default function SchemaValidation() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Schema validation</div>
           <div className="topbar-sub">MAINTENANCE · DB CONTRACT CHECKS</div>

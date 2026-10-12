@@ -11,7 +11,7 @@
  * opened, not by anything on this screen.
  */
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -41,7 +41,7 @@ const smallBtn = (hue) => ({ fontSize: '0.76rem', fontWeight: 700, padding: '8px
   background: `rgba(${hue},0.1)`, border: `1px solid rgba(${hue},0.3)`, color: `rgb(${hue})` })
 
 export default function ManualAccess() {
-  const navigate = useNavigate()
+  const goBack = useBack('/owner/maintenance')
   const [data, setData]       = useState(null)
   const [loadErr, setLoadErr] = useState('')
   const [toast, setToast]     = useState(null)
@@ -127,7 +127,7 @@ export default function ManualAccess() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Training manual access</div>
           <div className="topbar-sub">MAINTENANCE · WHO CAN READ THE MANUAL</div>

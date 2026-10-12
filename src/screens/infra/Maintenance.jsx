@@ -10,6 +10,7 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -92,6 +93,7 @@ const ITEMS = [
 
 export default function Maintenance({ rows }) {
   const navigate = useNavigate()
+  const goBack = useBack('/')
   const { user } = useAuth()
   const visibleItems = ITEMS.filter(item =>
     (!rows || rows.includes(item.id)) &&
@@ -119,7 +121,7 @@ export default function Maintenance({ rows }) {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Maintenance</div>
           <div className="topbar-sub">OWNER ONLY · SYSTEM TOOLS</div>

@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect, Component } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../utils/navTrail'
 import { api } from '../api'
 import { parseLocalDate } from '../utils/dates'
 
@@ -29,7 +29,7 @@ class EB extends Component {
         <div style={{fontWeight:'700',marginBottom:'8px'}}>My Earnings Error</div>
         <div style={{fontSize:'0.8rem',wordBreak:'break-all'}}>{this.state.err?.message}</div>
         <pre style={{fontSize:'0.65rem',color:'#888',marginTop:'8px',whiteSpace:'pre-wrap'}}>{this.state.err?.stack}</pre>
-        <button onClick={()=>window.history.back()} style={{marginTop:'12px',padding:'8px 16px',background:'#e74c3c',color:'white',border:'none',borderRadius:'6px',cursor:'pointer'}}>← Back</button>
+        <button onClick={()=>window.location.assign('/')} style={{marginTop:'12px',padding:'8px 16px',background:'#e74c3c',color:'white',border:'none',borderRadius:'6px',cursor:'pointer'}}>← Home</button>
       </div>
     )
     return this.props.children
@@ -57,7 +57,7 @@ function currentQuarter() {
 }
 
 function RDashboardSnapshotInner() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [report, setReport]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
@@ -73,7 +73,7 @@ function RDashboardSnapshotInner() {
   if (loading) return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">My earnings</div></div>
       </div>
       <div className="screen-body">
@@ -85,7 +85,7 @@ function RDashboardSnapshotInner() {
   if (error || !report) return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">My earnings</div></div>
       </div>
       <div className="screen-body">
@@ -125,7 +125,7 @@ function RDashboardSnapshotInner() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">My earnings</div>
           <div className="topbar-sub">COMMISSION SNAPSHOT</div>

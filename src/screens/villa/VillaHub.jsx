@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { useEffect, useState } from 'react'
 import { CONFIG } from '../../config'
 import { api } from '../../api'
@@ -26,6 +27,7 @@ function daysUntil(d) {
 
 export default function VillaHub() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [allUpcoming, setAllUpcoming] = useState([])
   const [days, setDays] = useState(60)
   const [loadingGuests, setLoadingGuests] = useState(true)
@@ -52,7 +54,7 @@ export default function VillaHub() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate('/')}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Serviced Villas</div>
           <div className="topbar-sub">OWNER VIEW · {CONFIG.villas.length} PROPERT{CONFIG.villas.length === 1 ? 'Y' : 'IES'}</div>

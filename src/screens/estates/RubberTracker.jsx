@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { localTodayStr, parseLocalDate } from '../../utils/dates'
@@ -37,7 +37,7 @@ function wkTotals(w) {
 }
 
 export default function RubberTracker() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [weekStart, setWeekStart] = useState(mondayOf(localTodayStr()))
   const [workers, setWorkers] = useState([{ name: 'Satishan', rate: DEFAULT_TAPPING_RATE, days: emptyDays(mondayOf(localTodayStr())) }])
   const [active, setActive] = useState(0)
@@ -123,7 +123,7 @@ export default function RubberTracker() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Rubber tracker</div><div className="topbar-sub">PAVUTUMURI ESTATE · DAILY PRODUCTION</div></div>
       </div>
 

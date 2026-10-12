@@ -1,6 +1,8 @@
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 export default function PavutumuriHub() {
   const navigate=useNavigate()
+  const goBack = useBack()
   const rows=[
     {icon:'🌳',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Rubber tracker',sub:'Daily production · sheet & ottupal',action:()=>navigate('/pavutumuri/rubber')},
     {icon:'🌿',bg:'rgba(15,110,86,0.08)',arrow:'#0F6E56',title:'Income / expense',sub:'Sales · expenses · monthly ledger',action:()=>navigate('/pavutumuri/ledger')},
@@ -10,7 +12,7 @@ export default function PavutumuriHub() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Pavutumuri estate</div><div className="topbar-sub">RUBBER ESTATE · OWNER VIEW</div></div>
       </div>
       <div className="screen-body">

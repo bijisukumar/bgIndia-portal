@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
@@ -301,6 +302,7 @@ function buildQuote(e, rich = true) {
 
 export default function EnquiryDetail() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const { enquiryId } = useParams()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -644,7 +646,7 @@ export default function EnquiryDetail() {
     return (
       <div className="screen">
         <div className="topbar">
-          <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+          <button className="back-btn" onClick={goBack}>‹</button>
           <div className="topbar-title">Loading…</div>
         </div>
       </div>
@@ -657,7 +659,7 @@ export default function EnquiryDetail() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">{e.guest_name}</div>
           <div className="topbar-sub">{e.enquiry_id}</div>

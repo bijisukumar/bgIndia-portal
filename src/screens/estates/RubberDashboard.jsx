@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { useAuth } from '../../hooks/useAuth'
@@ -68,7 +68,7 @@ function WeightTrendChart({ harvests }) {
 }
 
 export default function RubberDashboard() {
-  const navigate   = useNavigate()
+  const goBack = useBack()
   const { user }   = useAuth()
   const isOwner    = user?.role === 'owner'
   const [year, setYear]         = useState(0)  // 0 = All
@@ -113,7 +113,7 @@ export default function RubberDashboard() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Rubber Dashboard</div>
           <div className="topbar-sub">PAVUTUMURI ESTATE</div>

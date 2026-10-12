@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -10,7 +10,7 @@ const COMMISSION = {'Direct':0,'Airbnb':15,'MakeMyTrip':18,'Booking.com':15,'Goi
 function fmt(n){ return isNaN(n)||n===''?'—':`₹${Number(n).toLocaleString('en-IN')}` }
 
 export default function VillaRentalIncome() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [form, setForm] = useState({
@@ -38,7 +38,7 @@ export default function VillaRentalIncome() {
     try {
       await api.saveVillaRentalIncome({...form,nights,gross,commPct,commAmt,net,villaId:DEFAULT_VILLA_ID})
       showToast('Income record saved ✓')
-      setTimeout(()=>navigate(-1),1500)
+      setTimeout(goBack, 1500)
     } catch { showToast('Failed to save. Check connection.','error') }
     finally { setSaving(false) }
   }
@@ -46,7 +46,7 @@ export default function VillaRentalIncome() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Villa rental income</div><div className="topbar-sub">DWARKA · NEW BOOKING</div></div>
       </div>
       <div className="screen-body">

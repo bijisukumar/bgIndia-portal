@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
@@ -17,6 +18,7 @@ function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 
 export default function NewEnquiry() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const { enquiryId } = useParams()   // present when editing
   const isEdit = !!enquiryId
 
@@ -221,7 +223,7 @@ export default function NewEnquiry() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">{isEdit ? 'Edit Enquiry' : 'New Enquiry'}</div>
           <div className="topbar-sub">DWARKA · GUEST ENQUIRY</div>

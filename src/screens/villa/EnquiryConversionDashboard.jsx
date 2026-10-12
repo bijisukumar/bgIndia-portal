@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -17,6 +18,7 @@ function KpiCard({ label, value, color }) {
 
 export default function EnquiryConversionDashboard() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [data, setData] = useState(null)
   const [followUps, setFollowUps] = useState([])
   const [loading, setLoading] = useState(true)
@@ -39,7 +41,7 @@ export default function EnquiryConversionDashboard() {
     return (
       <div className="screen">
         <div className="topbar">
-          <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+          <button className="back-btn" onClick={goBack}>‹</button>
           <div className="topbar-title">Loading…</div>
         </div>
       </div>
@@ -51,7 +53,7 @@ export default function EnquiryConversionDashboard() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Conversion Dashboard</div>
           <div className="topbar-sub">DWARKA · ENQUIRIES {year}</div>

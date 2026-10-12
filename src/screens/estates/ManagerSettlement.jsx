@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { localTodayStr, fmtDate } from '../../utils/dates'
 
@@ -7,7 +7,7 @@ function fmt(n) { return isNaN(n) || n === '' ? '₹0' : `₹${Number(n).toLocal
 const METHODS = ['cash', 'bank', 'upi', 'other']
 
 export default function ManagerSettlement({ estate = 'pavutumuri' }) {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [data, setData]     = useState({ payments: [], totalExpenses: 0, totalPaid: 0, balance: 0 })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -57,7 +57,7 @@ export default function ManagerSettlement({ estate = 'pavutumuri' }) {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Manager settlement</div><div className="topbar-sub">PAVUTUMURI ESTATE · {mgr.toUpperCase()}</div></div>
       </div>
 

@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../utils/navTrail'
 import { useAuth } from '../hooks/useAuth'
 
 /**
@@ -8,15 +8,15 @@ import { useAuth } from '../hooks/useAuth'
  *   title    — main heading
  *   sub      — small subtitle (optional)
  *   back     — show a back chevron on the left (default false = home icon)
- *   onBack   — override back action (default: navigate(-1))
+ *   onBack   — override back action (default: back to where you came from, or up a level)
  */
 export default function TopBar({ title, sub, back = false, onBack }) {
   const { logout } = useAuth()
-  const navigate   = useNavigate()
+  const goBack     = useBack()
 
   const handleBack = () => {
     if (onBack) onBack()
-    else navigate(-1)
+    else goBack()
   }
 
   return (

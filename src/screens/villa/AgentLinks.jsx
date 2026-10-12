@@ -4,13 +4,13 @@
 //  Route: /owner/villa/agent-links
 // ============================================================
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 export default function AgentLinks() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [links, setLinks] = useState([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -71,7 +71,7 @@ export default function AgentLinks() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Agent quote links</div>
           <div className="topbar-sub">SELF-SERVE PRICING FOR PARTNERS</div>

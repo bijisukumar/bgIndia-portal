@@ -15,6 +15,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '../../utils/stayTimes'
@@ -127,6 +128,7 @@ const EMPTY_FORM = { channel:'Direct', tariffPerNight:'', extraCharges:'0', note
 
 export default function CompleteBooking() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [searchParams] = useSearchParams()
   const [stays, setStays]       = useState([])
   const [selected, setSelected] = useState(null)
@@ -748,7 +750,7 @@ export default function CompleteBooking() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Complete booking</div>
           <div className="topbar-sub">DWARKA · UPCOMING STAYS</div>

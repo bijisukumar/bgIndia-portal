@@ -15,7 +15,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { fmtDate } from '../../utils/dates'
@@ -56,7 +56,7 @@ function when(s) {
 }
 
 export default function FlexRequests() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [rows, setRows]       = useState([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast]     = useState(null)
@@ -129,7 +129,7 @@ export default function FlexRequests() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Flexibility requests</div>
           <div className="topbar-sub">DWARKA · EARLY CHECK-IN / LATE CHECK-OUT</div>

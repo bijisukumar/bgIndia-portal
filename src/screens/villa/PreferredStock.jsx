@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -11,7 +11,7 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 // hardcoded INVENTORY_MASTER import — so archived items disappear here too,
 // and newly-added items show up automatically with no code change.
 export default function PreferredStock() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [items, setItems] = useState([])     // [{id, name, unit}]
   const [levels, setLevels] = useState({})
   const [current, setCurrent] = useState({})  // item_id -> qty_in_stock, for context while editing
@@ -51,7 +51,7 @@ export default function PreferredStock() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Preferred Stock Levels</div>
           <div className="topbar-sub">DWARKA · LOW-STOCK THRESHOLDS{loading ? ' · loading…' : ''}</div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -35,7 +35,7 @@ function fmt(n) { return isNaN(n) || n === '' ? '—' : `₹${Number(n).toLocale
 const EMPTY_FORM = { date: TODAY, category: '', amount: '', description: '', paidTo: '' }
 
 export default function VillaExpenses() {
-  const navigate   = useNavigate()
+  const goBack = useBack()
   const villaId     = DEFAULT_VILLA_ID
   const [tab, setTab]       = useState('add')        // 'add' | 'history'
   const [saving, setSaving] = useState(false)
@@ -166,7 +166,7 @@ export default function VillaExpenses() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Expenses</div><div className="topbar-sub">DWARKA · RECURRING COSTS</div></div>
       </div>
 

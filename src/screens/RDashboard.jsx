@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../utils/navTrail'
 import { api } from '../api'
 import { parseLocalDate } from '../utils/dates'
 import { CONFIG } from '../config'
@@ -62,7 +62,7 @@ function Skeleton({ h = 60 }) {
 }
 
 export default function RDashboard() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [tab, setTab]           = useState('unpaid')
   const [unpaid, setUnpaid]     = useState(null)
   const [report, setReport]     = useState(null)
@@ -237,7 +237,7 @@ export default function RDashboard() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Staff Perks</div>
           <div className="topbar-sub">{MANAGER_NAME.toUpperCase()} · COMMISSION TRACKER</div>

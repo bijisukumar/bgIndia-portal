@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
@@ -34,7 +34,7 @@ function CalcBox({ value, color = '#85B7EB' }) {
 }
 
 export default function CoconutTracker() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
 
@@ -116,7 +116,7 @@ export default function CoconutTracker() {
         totalPaid, balanceDue, nextHarvestDate, flagNoRejRev, flagHighRej, estate: 'pollachi',
       })
       showToast('Harvest record saved ✓')
-      setTimeout(() => navigate(-1), 1500)
+      setTimeout(goBack, 1500)
     } catch { showToast('Failed to save. Check connection.', 'error') }
     finally { setSaving(false) }
   }
@@ -137,7 +137,7 @@ export default function CoconutTracker() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Coconut tracker</div>
           <div className="topbar-sub">POLLACHI ESTATE · HARVEST LOG</div>

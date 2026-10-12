@@ -4,7 +4,7 @@
 //  Route: /pollachi/irrigation
 // ============================================================
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
@@ -17,7 +17,7 @@ function fmtDate(d) {
 }
 
 export default function IrrigationLog({ estate = 'pollachi' }) {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [zones, setZones]       = useState([])
   const [selected, setSelected] = useState({}) // zone_id -> checked
   const [date, setDate]         = useState(TODAY)
@@ -100,7 +100,7 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Irrigation log</div>
           <div className="topbar-sub">POLLACHI ESTATE · ZONE TRACKING</div>

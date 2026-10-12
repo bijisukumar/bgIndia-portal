@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -44,7 +44,7 @@ function buildInvoiceWaLink(stay, lines, total) {
 }
 
 export default function KitchenIncidentals() {
-  const navigate  = useNavigate()
+  const goBack = useBack()
   const [stay, setStay]     = useState(null)
   const [cart, setCart]     = useState({})
   // Live catalog (kitchen category, active items only) — was previously a
@@ -172,7 +172,7 @@ export default function KitchenIncidentals() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Check-out incidentals</div>
           <div className="topbar-sub">{stay?.guestName || 'No active stay'} · DWARKA</div>

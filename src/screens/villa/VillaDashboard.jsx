@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -1322,6 +1323,7 @@ function MarketingTab({ data, stays, loading, year }) {
 
 function VillaDashboardInner() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [tab,    setTab]    = useState('financials')
   const [month,  setMonth]  = useState(CUR_MONTH)
   const [year,   setYear]   = useState(CUR_YEAR)
@@ -1359,7 +1361,7 @@ function VillaDashboardInner() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Dashboard</div>
           <div className="topbar-sub">DWARKA · GVR · {year}</div>

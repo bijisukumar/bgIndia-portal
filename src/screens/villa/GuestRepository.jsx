@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -438,7 +438,7 @@ function MarketingTab() {
               </div>
               {/* Revenue bar */}
               <div style={{ height:5, background:'rgba(255,255,255,0.06)', borderRadius:3, overflow:'hidden' }}>
-                <div style={{ height:'100%', borderRadius:3, background:m.color,
+                <div style={{ height:'100%', borderRadius:3, background:channelPillStyle(ch.channel).color,
                   width:`${Math.round(ch.net_revenue/maxChRev*100)}%` }}/>
               </div>
             </div>
@@ -490,7 +490,7 @@ function MarketingTab() {
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────────────────
 export default function GuestRepository() {
-  const navigate  = useNavigate()
+  const goBack = useBack()
   const [guests, setGuests]   = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch]   = useState('')
@@ -535,7 +535,7 @@ export default function GuestRepository() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Guest Repository</div>
           <div className="topbar-sub">MARKETING · RELATIONSHIPS</div>

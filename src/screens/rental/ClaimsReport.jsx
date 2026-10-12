@@ -3,8 +3,10 @@
 //  Route: /owner/rental/claims/report?prop=rental_1
 // ============================================================
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { usePropertyList } from './usePropertyList'
 import { parseLocalDate } from '../../utils/dates'
 
@@ -22,7 +24,7 @@ function fmtAmt(amount, currency='INR') {
 }
 
 export default function ClaimsReport() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [params] = useSearchParams()
   const { properties } = usePropertyList()
   // If ?prop= is given, use it directly (works immediately, no need to
@@ -68,7 +70,7 @@ export default function ClaimsReport() {
     <div className="screen">
       {/* Screen controls — hidden on print */}
       <div className="topbar no-print">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Claims report</div>
           <div className="topbar-sub">SMALL CLAIMS · COURT-READY</div>

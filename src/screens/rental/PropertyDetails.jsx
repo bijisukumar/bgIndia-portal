@@ -3,7 +3,7 @@
 //  HOA and Tax use history tables (line items per change/year)
 // ============================================================
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import PropertyDocs from './PropertyDocs'
 import { usePropertyList } from './usePropertyList'
@@ -430,7 +430,7 @@ function TaxSection({ propId, currency }) {
 
 // ── main component ────────────────────────────────────────────
 export default function PropertyDetails() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const { properties, reload: reloadProperties } = usePropertyList()
   const [tab, setTab] = useState('edit')
   const [selectedProp, setSelectedProp] = useState(null)
@@ -511,7 +511,7 @@ export default function PropertyDetails() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Property details</div>
           <div className="topbar-sub">UTILITIES · LOAN · TAX · INSURANCE</div>

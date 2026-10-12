@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../utils/navTrail'
 import { api } from '../api'
 
 // New Host Registration — the intake form from docs/ONBOARDING.md section A.
@@ -106,6 +107,7 @@ function Section({ n, title, children }) {
 
 export default function NewHostRegistration() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [form, setForm] = useState(EMPTY)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -155,7 +157,7 @@ export default function NewHostRegistration() {
     <div style={styles.container}>
       <div style={styles.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <button style={styles.back} onClick={() => navigate('/')}>‹ Back</button>
+          <button style={styles.back} onClick={goBack}>‹ Back</button>
           <button style={styles.helpToggle} onClick={() => setHelpOpen(o => !o)}>{helpOpen ? '✕ Close help' : '❓ Help — what does each field mean?'}</button>
         </div>
         <h1 style={styles.title}>New Host Registration</h1>

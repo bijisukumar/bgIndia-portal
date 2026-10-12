@@ -4,6 +4,7 @@
 // ============================================================
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { usePropertyList } from './usePropertyList'
 
@@ -23,6 +24,7 @@ const EMPTY_ITEM = { itemCategory:'Damage', description:'', amount:'', currency:
 
 export default function ClaimsLedger() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const { properties, loading: loadingProperties } = usePropertyList()
   const [selectedProp, setSelectedProp] = useState(null)
   const [agreements, setAgreements] = useState({})
@@ -152,7 +154,7 @@ export default function ClaimsLedger() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Claims ledger</div>
           <div className="topbar-sub">DAMAGE · LOSS · LEGAL TRACKING</div>

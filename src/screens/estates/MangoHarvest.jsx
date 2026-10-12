@@ -4,7 +4,7 @@
 //  Route: /pollachi/mango
 // ============================================================
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
@@ -39,7 +39,7 @@ function summarizeYear(rows, year) {
 }
 
 export default function MangoHarvest({ estate = 'pollachi' }) {
-  const navigate   = useNavigate()
+  const goBack = useBack()
   const [tab, setTab]       = useState('add')
   const [form, setForm]     = useState({...EMPTY_FORM})
   const [saving, setSaving] = useState(false)
@@ -97,7 +97,7 @@ export default function MangoHarvest({ estate = 'pollachi' }) {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Mango harvest</div>
           <div className="topbar-sub">POLLACHI ESTATE · BOX TRACKING</div>

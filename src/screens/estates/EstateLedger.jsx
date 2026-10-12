@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { localTodayStr } from '../../utils/dates'
@@ -18,7 +18,7 @@ function fmt(n) { return isNaN(n)||n==='' ? '—' : `₹${Number(n).toLocaleStri
 const EMPTY_FORM = { date: TODAY, category: '', amount: '', description: '', paidTo: '' }
 
 export default function EstateLedger({ estate }) {
-  const navigate   = useNavigate()
+  const goBack = useBack()
   const [tab, setTab]       = useState('add')        // 'add' | 'history'
   const [type, setType]     = useState('expense')
   const [saving, setSaving] = useState(false)
@@ -108,7 +108,7 @@ export default function EstateLedger({ estate }) {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Income / Expense</div><div className="topbar-sub">{estateLabel.toUpperCase()}</div></div>
       </div>
 

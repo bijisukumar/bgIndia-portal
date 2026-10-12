@@ -22,7 +22,7 @@
 //  under a "history" filter.
 // ============================================================
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { parseLocalDate } from '../../utils/dates'
@@ -83,7 +83,7 @@ const EMPTY_FORM = {
 }
 
 export default function RentalAgreement() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const { properties, reload: reloadProperties } = usePropertyList()
   const [country, setCountry] = useState('IN')
   const [showSignedUp, setShowSignedUp] = useState(false)   // tucked-away toggle
@@ -524,7 +524,7 @@ export default function RentalAgreement() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Tenant agreements</div>
           <div className="topbar-sub">RENTAL PROPERTIES · LEASE DETAILS</div>

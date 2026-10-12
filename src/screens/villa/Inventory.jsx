@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -37,6 +38,7 @@ function fmt(n) { return n ? `₹${Number(n).toLocaleString('en-IN')}` : '₹0' 
 
 export default function Inventory() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [cat, setCat]   = useState('all')
   const [tab, setTab]   = useState('stock')   // 'stock' | 'prices' | 'restock'
   const [toast, setToast] = useState(null)
@@ -212,7 +214,7 @@ export default function Inventory() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Inventory</div>
           <div className="topbar-sub">DWARKA · STOCK & PRICING{loading ? ' · loading…' : ''}</div>

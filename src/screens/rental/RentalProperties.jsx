@@ -24,6 +24,7 @@
 // ============================================================
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { localTodayStr } from '../../utils/dates'
@@ -59,6 +60,7 @@ function periodMonthStr(year, monthIdx) { return `${year}-${String(monthIdx+1).p
 
 export default function RentalProperties() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const { properties, loading: loadingProperties, reload: reloadProperties } = usePropertyList()
   const [tab, setTab] = useState('tracker')
   const [trackerCountry, setTrackerCountry] = useState('IN') // shared by Rent + Expenses sections
@@ -270,7 +272,7 @@ export default function RentalProperties() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Rental properties</div>
           <div className="topbar-sub">MONTHLY TRACKER · {selectedYear}</div>

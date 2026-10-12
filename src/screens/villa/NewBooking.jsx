@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -25,6 +26,7 @@ function fmt(n) {
 
 export default function NewBooking() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [saving, setSaving]   = useState(false)
   // Airbnb breakdown — shown when channel = Airbnb
   const [airbnb, setAirbnb] = useState({ nightFee:'', cleaningFee:'1000', hostServiceFee:'', youEarn:'', guestServiceFee:'', guestPaid:'' })
@@ -108,7 +110,7 @@ export default function NewBooking() {
     return (
       <div className="screen">
         <div className="topbar">
-          <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+          <button className="back-btn" onClick={goBack}>‹</button>
           <div>
             <div className="topbar-title">Booking created</div>
             <div className="topbar-sub">GVR DWARKA VILLA</div>
@@ -206,7 +208,7 @@ export default function NewBooking() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">New booking</div>
           <div className="topbar-sub">GVR DWARKA VILLA</div>

@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { buildReviewRequestWaLink } from '../../utils/guestMessages'
 import { parseLocalDate, formatTime12h } from '../../utils/dates'
@@ -100,7 +100,7 @@ function CarPlatePhotos({ stayId }) {
 }
 
 export default function CheckIn() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [stays,    setStays]    = useState([])
   const [futureGuests, setFutureGuests] = useState([])
   const [selected, setSelected] = useState(null)
@@ -336,7 +336,7 @@ export default function CheckIn() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Guest check-in</div>
           <div className="topbar-sub">GVR DWARKA VILLA</div>

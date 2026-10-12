@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { daysFromToday } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -134,6 +135,7 @@ function EnquiryCard({ enq, navigate, nudging, handleNudge, dimmed = false }) {
 
 export default function EnquiryTracker() {
   const navigate = useNavigate()
+  const goBack = useBack()
   const [enquiries, setEnquiries] = useState([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -231,7 +233,7 @@ export default function EnquiryTracker() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Guest Enquiries</div>
           <div className="topbar-sub">DWARKA · ENQUIRY TRACKER{loading ? ' · loading…' : ''}</div>

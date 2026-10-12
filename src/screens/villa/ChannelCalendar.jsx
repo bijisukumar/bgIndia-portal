@@ -7,7 +7,7 @@
 //  Route: /owner/villa/channel-calendar
 // ============================================================
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelsMatch, sourceStyle, sourcePill, colorAlpha, PARTNERS, DIRECT_STYLE, AGENT_STYLE } from '../../utils/channel'
@@ -265,7 +265,7 @@ function SourceKey({ items, feeds, tally, onConnect }) {
 }
 
 export default function ChannelCalendar() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [feeds, setFeeds] = useState([])
   const [calItems, setCalItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -369,7 +369,7 @@ export default function ChannelCalendar() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Channel calendar</div>
           <div className="topbar-sub">SYNCED AVAILABILITY ACROSS OTAs</div>

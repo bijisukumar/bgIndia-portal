@@ -3,6 +3,7 @@
 //  Serves: rev360.luxuryvillasofguruvayur.com
 // ============================================================
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { NavTrail } from '../../utils/navTrail'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
 import AccessDenied from '../../components/AccessDenied'
 import '../../index.css'
@@ -44,6 +45,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <NavTrail />
         <Routes>
           <Route path="/login" element={<LoginGate />} />
           <Route path="/*"     element={<ProtectedRoutes />} />

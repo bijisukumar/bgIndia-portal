@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../utils/navTrail'
 import { api } from '../api'
 
 export default function RequestDemo() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [form, setForm] = useState({ name: '', phone: '', email: '', notes: '' })
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -28,7 +28,7 @@ export default function RequestDemo() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <button style={styles.back} onClick={() => navigate('/')}>‹ Back</button>
+        <button style={styles.back} onClick={goBack}>‹ Back</button>
         <h1 style={styles.title}>Request a Demo</h1>
         <p style={styles.sub}>See how StayVibe360 runs a villa's bookings, check-ins and P&amp;L in one place. No commitment.</p>
 

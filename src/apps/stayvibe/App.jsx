@@ -124,6 +124,9 @@ function ProtectedRoutes() {
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />
         <Route path="/raman/expenses"         element={<VillaExpenses />} />
+        {/* The home screen has an Inventory tile (restock after a purchase, 91c8774); the route was
+            only in the owner block above, so for Raman the tile bounced back to Home. */}
+        <Route path="/raman/inventory"        element={<Inventory />} />
         {/* Purely salaried staff (comp_type='salary') have no commission to
             see — the backend already blocks the data (getRamanReport), this
             just avoids rendering a screen that would only show an error.

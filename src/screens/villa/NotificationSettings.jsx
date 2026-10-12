@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -23,7 +23,7 @@ function fmtLocalTime(utcStr) {
 // one), add a field block here bound to a new key; no schema change or
 // backend redeploy is needed, since the table already supports arbitrary keys.
 export default function NotificationSettings() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const villaId  = DEFAULT_VILLA_ID
 
   const [ownerEmailAlert, setOwnerEmailAlert] = useState('')
@@ -67,7 +67,7 @@ export default function NotificationSettings() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Notification Settings</div><div className="topbar-sub">DWARKA</div></div>
       </div>
 

@@ -4,7 +4,7 @@
 //  Route: /owner/marketing
 // ============================================================
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -179,7 +179,7 @@ function FunnelBar({ clicks, inquiries, bookings }) {
 
 // ── Main component ────────────────────────────────────────────
 export default function MarketingCampaigns() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [campaigns, setCampaigns] = useState([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -280,7 +280,7 @@ export default function MarketingCampaigns() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div>
           <div className="topbar-title">Marketing campaigns</div>
           <div className="topbar-sub">FLYERS · QR CODES · TRACKING</div>

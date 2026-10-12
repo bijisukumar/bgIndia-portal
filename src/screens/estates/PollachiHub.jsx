@@ -1,7 +1,9 @@
 // v2 — includes irrigation + mango screens
 import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 export default function PollachiHub() {
   const navigate=useNavigate()
+  const goBack = useBack()
   const rows=[
     {icon:'💧',bg:'rgba(24,95,165,0.08)',arrow:'#185FA5',title:'Irrigation log',sub:'Zone tracking · Health dashboard',action:()=>navigate('/pollachi/irrigation')},
     {icon:'🌿',bg:'rgba(59,109,17,0.08)',arrow:'#3B6D11',title:'Income / expense',sub:'Monthly ledger',action:()=>navigate('/pollachi/ledger')},
@@ -12,7 +14,7 @@ export default function PollachiHub() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={()=>navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Pollachi estate</div><div className="topbar-sub">COCONUT ESTATE · OWNER VIEW</div></div>
       </div>
       <div className="screen-body">

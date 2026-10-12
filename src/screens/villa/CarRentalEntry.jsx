@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -15,7 +15,7 @@ function guestLabel(g) {
 }
 
 export default function CarRentalEntry() {
-  const navigate = useNavigate()
+  const goBack = useBack()
   const [stay, setStay]             = useState(null)
   // Combined list: active stay (if any) first, then recent checkouts —
   // always offered together so Raman can log a just-checked-out guest's
@@ -67,7 +67,7 @@ export default function CarRentalEntry() {
   return (
     <div className="screen">
       <div className="topbar">
-        <button className="back-btn" onClick={() => navigate(-1)}>‹</button>
+        <button className="back-btn" onClick={goBack}>‹</button>
         <div><div className="topbar-title">Car rental</div><div className="topbar-sub">{stay?.guestName || 'No active stay'}</div></div>
         <div style={{width:34}}/>
       </div>

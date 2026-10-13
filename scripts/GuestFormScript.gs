@@ -894,6 +894,114 @@ function sniffDocument(bytes, originalName) {
   if (byName[ext]) return { ext: ext === '.jpeg' ? '.jpg' : ext, mime: byName[ext] };
   return { ext: '.jpg', mime: 'image/jpeg' };
 }
+
+// Run this from the editor after pasting the script: it shows the document-type detection is in
+// place without touching Drive or StayVibe (a PDF, a JPEG and a HEIC photo, each given a wrong name).
+function testSniffDocument() {
+  function bytes(s) { var out = []; for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i) & 0xFF; out.push(c > 127 ? c - 256 : c); } return out; }
+  var cases = [
+    ['PDF',  '%PDF-1.4\r\n%\xA1\xB3\xC5\xD7\r\n1 0 obj', 'ID-DWK-2026-1-20261011-060528.jpg', '.pdf',  'application/pdf'],
+    ['JPEG', '\xFF\xD8\xFF\xE0\x00\x10JFIF\x00',          'scan.png',                          '.jpg',  'image/jpeg'],
+    ['HEIC', '\x00\x00\x00\x18ftypheic\x00\x00\x00\x00',  'IMG_1.jpg',                         '.heic', 'image/heic'],
+  ];
+  var allOk = true;
+  cases.forEach(function(c) {
+    var r  = sniffDocument(bytes(c[1]), c[2]);
+    var ok = r.ext === c[3] && r.mime === c[4];
+    if (!ok) allOk = false;
+    Logger.log((ok ? 'OK     ' : 'WRONG  ') + c[0] + ' (named ' + c[2] + ') -> ' + r.ext + '  ' + r.mime);
+  });
+  Logger.log(allOk ? 'Document type detection is in place.' : 'Document type detection is NOT working: paste the whole script again.');
+}
+
+// ── REPAIR: documents saved with the wrong type before sniffDocument existed ───────────
+// Until then every ID / passport / visa the form sent was saved to Drive as image/jpeg named .jpg,
+// whatever it really was, so a PDF or HEIC among them cannot be previewed in Drive or opened by
+// its name. Each file is whole. This saves it again with its real type and extension, beside the
+// original, and moves the original to the Drive Trash (30 days to undo).
+//
+//   previewMislabelledDocuments()   only lists what would change; writes nothing
+//   fixMislabelledDocuments()       does it
+//
+// Run the preview first and read the log (View > Logs, or the Execution log). A run stops by
+// itself after about four and a half minutes, says so, and the next run carries on from there.
+// Only files named like the ones this script makes (ID-, Passport- or Visa- + stay id + date and
+// time) whose stored type is image/jpeg are opened, and a file whose bytes really are a JPEG is
+// left alone, so running it twice, or after the fix is in, changes nothing more.
+function previewMislabelledDocuments() { repairMislabelledDocuments_(false); }
+function fixMislabelledDocuments()     { repairMislabelledDocuments_(true); }
+
+function repairMislabelledDocuments_(apply) {
+  var started  = Date.now();
+  var props    = PropertiesService.getScriptProperties();
+  var tokenKey = 'docRepairToken_' + (apply ? 'fix' : 'preview');
+  var files    = null;
+  var saved    = props.getProperty(tokenKey);
+  if (saved) {
+    try { files = DriveApp.continueFileIterator(saved); Logger.log('Carrying on from the previous run.'); }
+    catch (e) { files = null; props.deleteProperty(tokenKey); }
+  }
+  if (!files) {
+    files = DriveApp.searchFiles("mimeType = 'image/jpeg' and trashed = false and " +
+      "(title contains 'ID-' or title contains 'Passport-' or title contains 'Visa-')");
+  }
+  var MADE_BY_SCRIPT = /^(ID|Passport|Visa)-.+-\d{8}-\d{6}\.[A-Za-z0-9]{2,5}$/;
+  var seen = 0, wrong = 0, fixed = 0, failed = 0;
+
+  while (files.hasNext()) {
+    if (Date.now() - started > 270000) {
+      props.setProperty(tokenKey, files.getContinuationToken());
+      Logger.log('Stopped after about 4.5 minutes to stay inside Google\'s time limit; run it again to carry on. ' +
+        'So far: opened ' + seen + ', mislabelled ' + wrong + (apply ? ', fixed ' + fixed + ', failed ' + failed : '') + '.');
+      return;
+    }
+    var f    = files.next();
+    var name = f.getName();
+    if (!MADE_BY_SCRIPT.test(name)) continue;
+    seen++;
+    try {
+      var bytes = f.getBlob().getBytes();
+      var kind  = sniffDocument(bytes, null);
+      if (kind.mime === 'image/jpeg') continue;     // really a JPEG (or a format we cannot tell): leave it
+      wrong++;
+      var newName = name.replace(/\.[A-Za-z0-9]{2,5}$/, '') + kind.ext;
+      var parents = f.getParents();
+      var parent  = parents.hasNext() ? parents.next() : null;
+      var where   = parent ? parent.getName() : '(no folder)';
+      if (!apply) {
+        Logger.log('WOULD FIX  ' + where + ' / ' + name + '  ->  ' + newName + '  [' + kind.mime + ', ' + bytes.length + ' bytes]');
+        continue;
+      }
+      if (!parent) { failed++; Logger.log('SKIPPED (no folder to save into)  ' + name); continue; }
+
+      // A corrected copy left by an earlier run that could not trash the original: reuse it.
+      var copy = null;
+      var same = parent.getFilesByName(newName);
+      while (same.hasNext()) {
+        var c = same.next();
+        if (c.getId() !== f.getId() && c.getSize() === f.getSize() && c.getMimeType() !== 'image/jpeg') { copy = c; break; }
+      }
+      if (!copy) {
+        copy = parent.createFile(Utilities.newBlob(bytes, kind.mime, newName));
+        if (copy.getSize() !== f.getSize()) {
+          copy.setTrashed(true);
+          failed++;
+          Logger.log('FAILED (the new file came out a different size; original kept)  ' + where + ' / ' + name);
+          continue;
+        }
+      }
+      f.setTrashed(true);
+      fixed++;
+      Logger.log('FIXED  ' + where + ' / ' + name + '  ->  ' + newName);
+    } catch (e) {
+      failed++;
+      Logger.log('ERROR  ' + name + ': ' + e.message);
+    }
+  }
+  props.deleteProperty(tokenKey);
+  Logger.log('Done. Opened ' + seen + ' document file(s); mislabelled ' + wrong +
+    (apply ? '; fixed ' + fixed + '; failed ' + failed + '.' : ' (nothing was changed: this was a preview).'));
+}
 function normaliseDate(str) {
   if (!str) return '';
   try {

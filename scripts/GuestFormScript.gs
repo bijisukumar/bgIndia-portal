@@ -453,7 +453,8 @@ function processPendingCheckInForms() {
               var decoded   = Utilities.base64Decode(doc.file_b64);
               var ts        = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
               var typeLabel = doc.doc_type === 'govt_id' ? 'ID' : doc.doc_type === 'passport' ? 'Passport' : 'Visa';
-              folder.createFile(Utilities.newBlob(decoded, 'image/jpeg', typeLabel + '-' + stay.stayId + '-' + ts + '.jpg'));
+              var kind      = sniffDocument(decoded, doc.file_name);
+              folder.createFile(Utilities.newBlob(decoded, kind.mime, typeLabel + '-' + stay.stayId + '-' + ts + kind.ext));
               var markResp = callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
               if (markResp && markResp.success) { docUploadedCount++; }
               else { docFailedCount++; Logger.log('markDocumentUploaded failed for ' + doc.doc_id + ': ' + JSON.stringify(markResp)); }
@@ -589,7 +590,8 @@ function processPendingDocumentUploads() {
                       : doc.doc_type === 'plate_photo' ? 'PlatePhoto'
                       : doc.doc_type === 'govt_id' ? 'ID'
                       : doc.doc_type === 'passport' ? 'Passport' : doc.doc_type;
-          folder.createFile(Utilities.newBlob(decoded, 'image/jpeg', label + '-' + stay.stayId + '-' + ts + '.jpg'));
+          var kind = sniffDocument(decoded, doc.file_name);
+          folder.createFile(Utilities.newBlob(decoded, kind.mime, label + '-' + stay.stayId + '-' + ts + kind.ext));
           var mr = callWorker('POST', 'markDocumentUploaded', { docId: doc.doc_id });
           if (mr && mr.success) uploaded++; else failed++;
         } catch(docErr) { failed++; Logger.log('Doc upload error [' + doc.doc_type + ']: ' + docErr.message); }
@@ -862,6 +864,36 @@ function getOrCreateGuestFolder(guestName, stayId, checkInDate) {
 // ── HELPERS ───────────────────────────────────────────────
 function firstName(n) { return String(n || '').split(' ')[0] || 'Guest'; }
 function getExtension(f) { var p = String(f||'').split('.'); return p.length > 1 ? '.'+p[p.length-1].toLowerCase() : ''; }
+
+// What a stored document REALLY is, judged by its first bytes. The guest form takes a PDF (a
+// DigiLocker or Aadhaar download) as readily as a photo, and a phone may hand over HEIC, but every
+// upload used to be saved as image/jpeg called .jpg: a PDF then showed as "No preview available"
+// in Drive and as an unsupported file on Windows although the file itself was whole. The bytes
+// decide; the guest's own file name is only the fallback for a format not listed here.
+// Utilities.base64Decode returns SIGNED bytes (-128..127), hence the & 0xFF.
+function sniffDocument(bytes, originalName) {
+  function b(i) { return i < bytes.length ? (bytes[i] & 0xFF) : -1; }
+  function at(i, s) { for (var k = 0; k < s.length; k++) { if (b(i + k) !== s.charCodeAt(k)) return false; } return true; }
+  if (b(0) === 0xFF && b(1) === 0xD8 && b(2) === 0xFF) return { ext: '.jpg',  mime: 'image/jpeg' };
+  if (b(0) === 0x89 && at(1, 'PNG'))                   return { ext: '.png',  mime: 'image/png' };
+  if (at(0, '%PDF'))                                   return { ext: '.pdf',  mime: 'application/pdf' };
+  if (at(0, 'GIF8'))                                   return { ext: '.gif',  mime: 'image/gif' };
+  if (at(0, 'RIFF') && at(8, 'WEBP'))                  return { ext: '.webp', mime: 'image/webp' };
+  if (at(4, 'ftyp')) {
+    var brand = String.fromCharCode(b(8), b(9), b(10), b(11));
+    if (brand === 'avif' || brand === 'avis') return { ext: '.avif', mime: 'image/avif' };
+    if (/^(heic|heix|hevc|hevx|heim|heis|hevm|hevs|mif1|msf1)$/.test(brand)) return { ext: '.heic', mime: 'image/heic' };
+  }
+  if (b(0) === 0x42 && b(1) === 0x4D) return { ext: '.bmp', mime: 'image/bmp' };
+  if ((b(0) === 0x49 && b(1) === 0x49 && b(2) === 0x2A && b(3) === 0x00) ||
+      (b(0) === 0x4D && b(1) === 0x4D && b(2) === 0x00 && b(3) === 0x2A)) return { ext: '.tif', mime: 'image/tiff' };
+  // Not recognised: believe the guest's file name when it names a format we know, else a JPEG as before.
+  var byName = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.pdf': 'application/pdf',
+                 '.heic': 'image/heic', '.heif': 'image/heif', '.webp': 'image/webp', '.gif': 'image/gif' };
+  var ext = getExtension(originalName);
+  if (byName[ext]) return { ext: ext === '.jpeg' ? '.jpg' : ext, mime: byName[ext] };
+  return { ext: '.jpg', mime: 'image/jpeg' };
+}
 function normaliseDate(str) {
   if (!str) return '';
   try {

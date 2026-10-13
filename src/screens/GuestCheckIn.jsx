@@ -173,12 +173,26 @@ function readAndCompressFile(file, maxDim = 1600, quality = 0.75) {
 }
 
 function UploadBox({ label, preview, onClick, color='#C8903A', icon='📷', hint }) {
+  // An <img> cannot draw a PDF (nor a HEIC photo, on most browsers): the box showed the
+  // broken-image icon, which looks like a failed upload although the file is attached and will be
+  // sent. The form invites PDFs ("photo or PDF"), so say what was attached instead.
+  const [undrawable, setUndrawable] = useState(false)
+  useEffect(() => { setUndrawable(false) }, [preview])
+  const kind   = typeof preview === 'string' ? preview.slice(0, 24).toLowerCase() : ''
+  const isPdf  = kind.startsWith('data:application/pdf')
+  const isFile = !!preview && (isPdf || undrawable || !kind.startsWith('data:image/'))
   return (
     <div onClick={onClick} style={{ padding:'16px', borderRadius:'10px',
       border:`1px dashed ${color}66`, background:`${color}08`,
       cursor:'pointer', textAlign:'center' }}>
-      {preview
-        ? <img src={preview} alt={label}
+      {isFile
+        ? <>
+            <div style={{ fontSize:'1.8rem', marginBottom:'6px' }}>📄</div>
+            <div style={{ color, fontSize:'0.82rem', fontWeight:'600' }}>{isPdf ? 'PDF attached' : 'File attached'}</div>
+            <div style={{ color:'#6B7280', fontSize:'0.7rem', marginTop:'3px' }}>Tap to choose a different one</div>
+          </>
+        : preview
+        ? <img src={preview} alt={label} onError={() => setUndrawable(true)}
             style={{ maxWidth:'100%', maxHeight:'150px', borderRadius:'6px', objectFit:'contain' }} />
         : <>
             <div style={{ fontSize:'1.8rem', marginBottom:'6px' }}>{icon}</div>

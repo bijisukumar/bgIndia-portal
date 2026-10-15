@@ -6,6 +6,7 @@ import { CONFIG } from '../../config'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
 import { parseLocalDate, fmtDate } from '../../utils/dates'
 import { fmtTime } from '../../utils/stayTimes'
+import { buildNoAvailabilityMessage, buildNoAvailabilityWaLink, greetingName } from '../../utils/guestMessages'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
@@ -145,6 +146,20 @@ export default function NewEnquiry() {
   const heldWhy = c => c.reason === 'early_checkin_turnaround'
     ? `${c.guest_name} has an agreed early check-in at ${fmtTime(c.early_checkin_time)}`
     : `${c.guest_name} has an agreed late check-out until ${fmtTime(c.late_checkout_time)}`
+  // When the dates are taken: the reply to the guest, an apology plus a few open dates just
+  // before and after (worked out by the server, src/utils/openDates.js). Built from what is on
+  // the form, so it follows every edit; never names whoever holds the dates.
+  const dateTaken = !!avail && avail !== 'loading' && avail.available === false
+  const replyInput = { guestName: form.guestName, checkIn: form.checkInDate, checkOut: form.checkOutDate,
+                       alternatives: dateTaken ? avail.alternatives : null }
+  const replyText = dateTaken ? buildNoAvailabilityMessage(replyInput) : null
+  const replyLink = dateTaken && form.phone.trim() ? buildNoAvailabilityWaLink({ ...replyInput, phone: form.phone }) : null
+  const copyReply = () => {
+    navigator.clipboard.writeText(replyText)
+      .then(() => showToast('Message copied — paste into WhatsApp ✓'))
+      .catch(() => showToast('Could not copy the message', 'error'))
+  }
+  const openWindows = ws => (ws || []).map(w => `${fmtShort(w.checkIn)}→${fmtShort(w.checkOut)}`).join(' · ')
   const adultsNum = parseInt(form.adults, 10) || 0
   const childrenNum = parseInt(form.children, 10) || 0
   const infantsNum = parseInt(form.infants, 10) || 0
@@ -341,6 +356,45 @@ export default function NewEnquiry() {
                 <div style={{ color: '#5C7080', fontSize: '0.7rem', marginTop: '3px', lineHeight: 1.5 }}>
                   Around these dates: {avail.nearby.map(r =>
                     `${r.guest_name} ${fmtShort(r.checkin_date)}→${fmtShort(r.checkout_date)}${turnoverTag(r)}`).join(' · ')}
+                </div>
+              )}
+              {dateTaken && replyText && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '10px',
+                  background: 'rgba(37,211,102,0.05)', border: '1px solid rgba(37,211,102,0.25)' }}>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text)' }}>
+                    Reply to {form.guestName.trim() ? greetingName(form.guestName) : 'the guest'}
+                  </div>
+                  <div style={{ color: '#5C7080', fontSize: '0.7rem', lineHeight: 1.6, margin: '4px 0 8px' }}>
+                    {avail.alternatives && (avail.alternatives.before.length > 0 || avail.alternatives.after.length > 0) ? (
+                      <>
+                        Open for the same {avail.alternatives.nights} night{avail.alternatives.nights === 1 ? '' : 's'}:
+                        {avail.alternatives.before.length > 0 && <><br />Earlier — {openWindows(avail.alternatives.before)}</>}
+                        {avail.alternatives.after.length > 0 && <><br />Later — {openWindows(avail.alternatives.after)}</>}
+                      </>
+                    ) : (
+                      <>No window of {nights} night{nights === 1 ? '' : 's'} is open close to these dates.</>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {replyLink ? (
+                      <a href={replyLink} target="_blank" rel="noreferrer" className="btn"
+                        style={{
+                          flex: '1 1 200px', display: 'block', textAlign: 'center', textDecoration: 'none',
+                          background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)',
+                          color: '#25D366', fontWeight: '700',
+                        }}>
+                        💬 Send “not available” in WhatsApp
+                      </a>
+                    ) : (
+                      <div style={{ flex: '1 1 160px', alignSelf: 'center', fontSize: '0.7rem', color: '#5C7080' }}>
+                        Add the guest's mobile number above to send this on WhatsApp.
+                      </div>
+                    )}
+                    <button type="button" className="btn" onClick={copyReply}
+                      style={{ width: 'auto', flex: '0 0 auto', padding: '0 14px', whiteSpace: 'nowrap' }}>
+                      📋 Copy message
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

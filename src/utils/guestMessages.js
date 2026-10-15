@@ -273,3 +273,119 @@ export function buildReviewRequestWaLink(stay = {}) {
   if (!msg) return null
   return waLink(phone, msg)
 }
+
+// ── "THOSE DATES ARE NOT AVAILABLE" REPLY ─────────────────────────────────
+// Offered on the New enquiry screen when the dates asked for are taken: an
+// apology, the dates asked for, and windows of the same length just before and
+// after that ARE open (worked out by the Worker's checkAvailability, with the
+// same taken-nights rules as the calendar: bookings, nights held by an agreed
+// late check-out / early check-in, dates closed on a platform's calendar).
+// It never says who holds the dates.
+//
+// Wording: the built-in text below; a host can replace it with
+// CONFIG.guestMessages.noAvailability.template, which may use {firstName}
+// {villaName} {requestedDates} {nights} {options} {ownerName} {phoneLine}.
+// Plain text on purpose: this travels through wa.me, where astral-plane emoji
+// arrive as "�" on WhatsApp Desktop for Windows.
+const DEFAULT_NO_AVAILABILITY = [
+  'Namaskaram {firstName},',
+  '',
+  'Thank you for your enquiry for {villaName}.',
+  '',
+  'I am sorry, the villa is not available for the dates you asked about:',
+  '{requestedDates}',
+  '',
+  '{options}',
+  '',
+  'Thank you for your understanding.',
+  '',
+  'സസ്നേഹം (Sasneham)',
+  '{ownerName}',
+  '{villaName}',
+  '{phoneLine}',
+].join('\n')
+
+const WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTH_ABBR   = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// 'YYYY-MM-DD' -> { y, m, d, dow } read as a calendar date, never through the
+// viewer's time zone (so a date cannot slip a day for someone far from India).
+function calendarDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''))
+  if (!m) return null
+  const y = +m[1], mo = +m[2], d = +m[3]
+  return { y, m: mo, d, dow: new Date(Date.UTC(y, mo - 1, d)).getUTCDay() }
+}
+// Two plain functions rather than one with a flag: the production minifier has
+// been seen dropping a helper's second argument (see src/utils/stayHolds.js).
+function dayLabel(iso) {
+  const c = calendarDate(iso)
+  return c ? WEEKDAY_ABBR[c.dow] + ' ' + c.d + ' ' + MONTH_ABBR[c.m - 1] : String(iso || '')
+}
+function dayLabelYear(iso) {
+  const c = calendarDate(iso)
+  return c ? dayLabel(iso) + ' ' + c.y : String(iso || '')
+}
+function windowLine(w, year) {
+  const crossesYear = String(w.checkIn).slice(0, 4) !== year || String(w.checkOut).slice(0, 4) !== year
+  return crossesYear
+    ? '* ' + dayLabelYear(w.checkIn) + ' to ' + dayLabelYear(w.checkOut)
+    : '* ' + dayLabel(w.checkIn) + ' to ' + dayLabel(w.checkOut)
+}
+
+// Enquiries are often typed in capitals ("VIGNESH M"), and a greeting in capitals shouts.
+export function greetingName(fullName) {
+  const first = String(fullName || '').trim().split(/\s+/)[0] || ''
+  if (!first) return 'there'
+  const shouting = first === first.toUpperCase() && first !== first.toLowerCase()
+  return shouting ? first.charAt(0) + first.slice(1).toLowerCase() : first
+}
+
+// { guestName, checkIn, checkOut ('YYYY-MM-DD'), alternatives } -> the message
+// text, or null when the dates are not usable. `alternatives` is what
+// checkAvailability returned: { nights, before: [{checkIn, checkOut}], after: [...] }.
+export function buildNoAvailabilityMessage({ guestName, checkIn, checkOut, alternatives } = {}) {
+  const ci = calendarDate(checkIn)
+  const co = calendarDate(checkOut)
+  if (!ci || !co) return null
+  const nights = Math.round((Date.UTC(co.y, co.m - 1, co.d) - Date.UTC(ci.y, ci.m - 1, ci.d)) / 86400000)
+  if (!(nights >= 1)) return null
+  const nightsWord = nights === 1 ? '1 night' : nights + ' nights'
+
+  const before = (alternatives && alternatives.before) || []
+  const after  = (alternatives && alternatives.after)  || []
+  const year   = String(checkIn).slice(0, 4)
+
+  let options
+  if (before.length || after.length) {
+    const lines = ['These dates are open for the same ' + nightsWord + ':']
+    if (before.length) lines.push('', 'Earlier:', ...before.map(w => windowLine(w, year)))
+    if (after.length)  lines.push('', 'Later:',   ...after.map(w => windowLine(w, year)))
+    lines.push('', 'If one of these works for you, please let me know and I can block the dates for you. ' +
+      'If your plans are flexible, tell me your preferred dates or number of nights and I will check for you.')
+    options = lines.join('\n')
+  } else {
+    options = 'I do not have ' + nightsWord + ' open close to those dates just now. ' +
+      'If your dates are flexible, please tell me and I will let you know as soon as something opens up.'
+  }
+
+  const template = CONFIG.guestMessages?.noAvailability?.template || DEFAULT_NO_AVAILABILITY
+  const text = renderTemplate(template, {
+    firstName: greetingName(guestName),
+    villaName: villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || '',
+    requestedDates: dayLabelYear(checkIn) + ' to ' + dayLabelYear(checkOut) + ' (' + nightsWord + ')',
+    nights: String(nights),
+    options,
+    ownerName: CONFIG.ownerName || '',
+    phoneLine: CONFIG.checkinAddress?.phone || '',
+  })
+  // Lines left empty by an unset name or phone must not leave a gap.
+  return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+export function buildNoAvailabilityWaLink({ phone, ...rest } = {}) {
+  if (!phone) return null
+  const msg = buildNoAvailabilityMessage(rest)
+  if (!msg) return null
+  return waLink(phone, msg)
+}

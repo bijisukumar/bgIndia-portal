@@ -59,6 +59,7 @@ import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, t
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
 import { stayHolds, holdPhrase } from '../../src/utils/stayHolds.js'
+import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
@@ -4281,7 +4282,10 @@ export async function onRequest(ctx) {
       // ── CHECK AVAILABILITY (enquiry screen) ─────────────────────────────
       // Conflicts = stays overlapping the requested range (same-day
       // turnover allowed: checkout day == requested check-in is NOT a
-      // conflict). Nearby = stays within ±3 days for turnover context.
+      // conflict). Nearby = stays within ±3 days for turnover context. A night
+      // held by an agreed late check-out / early check-in, or closed on a
+      // platform's calendar, is a conflict too; and when there are conflicts,
+      // `alternatives` lists open windows of the same length just before and after.
       if (action === 'checkAvailability') {
         const villaId  = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
@@ -4321,7 +4325,58 @@ export async function onRequest(ctx) {
           }
           nearby.push(r)
         }
-        return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby } })
+
+        // A date a platform's own calendar has closed (a reservation not entered here yet, or
+        // a night the host closed over there) is not for sale either. The Channel calendar
+        // already treats it as occupied; this check used to call it available. Blocks come
+        // from calendars that are switched on, as in the links handed to the platforms, and a
+        // block that a booking listed above already explains is not listed twice.
+        const today = todayIst()
+        const lo = addDays(checkIn, -45), hi = addDays(checkOut, 75)
+        let blocks = []
+        try {
+          const b = await DB.prepare(`
+            SELECT b.channel, b.checkin_date, b.checkout_date
+              FROM stayvibe_ical_blocks b JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
+             WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1
+               AND b.checkin_date < ? AND b.checkout_date > ?`).bind(villaId, hi, lo).all()
+          blocks = b.results || []
+        } catch (e) {
+          // A database that has not had the calendar migration yet has no blocks.
+          if (!/no such table/i.test(e?.message || '')) throw e
+        }
+        for (const b of blocks) {
+          if (!(b.checkin_date < checkOut && b.checkout_date > checkIn)) continue
+          if (conflicts.some(c => c.checkin_date < b.checkout_date && c.checkout_date > b.checkin_date)) continue
+          conflicts.push({
+            kind: 'block', source: b.channel, guest_name: `${sourceLabel(b.channel)} calendar`,
+            checkin_date: b.checkin_date, checkout_date: b.checkout_date,
+          })
+        }
+        conflicts.sort((a, b) => (a.checkin_date < b.checkin_date ? -1 : a.checkin_date > b.checkin_date ? 1 : 0))
+
+        // Not free: say what IS, so the reply to the guest can offer real dates. Windows of the
+        // same length, a few just before and after, from the same taken-nights rules as above
+        // (bookings, nights held by an agreed late check-out / early check-in, platform blocks).
+        let alternatives = null
+        if (conflicts.length) {
+          const { results: around } = await DB.prepare(`
+            SELECT stay_id, guest_name, checkin_date, checkout_date, early_checkin_time, late_checkout_time
+              FROM stayvibe_stays
+             WHERE villa_id = ? AND status NOT IN ('cancelled','void')
+               AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date != ''
+               AND checkin_date < ? AND checkout_date >= ?`).bind(villaId, hi, lo).all()
+          const stayRows = around || []
+          const taken = takenNights({
+            ranges: [
+              ...stayRows.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
+              ...blocks.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
+            ],
+            nights: heldNights(stayRows, rules).map(h => h.night),
+          })
+          alternatives = otherDates({ taken, checkIn, checkOut, today })
+        }
+        return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby, alternatives } })
       }
 
       // Live cleaning-turnaround check for a requested early-checkin/late-

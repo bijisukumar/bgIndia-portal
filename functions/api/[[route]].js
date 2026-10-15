@@ -1166,6 +1166,54 @@ function heldNights(rows, rules, from) {
   return out
 }
 
+// ── DATES THE OWNER HAS CLOSED BY HAND ("Block dates") ────────────────────────
+// A range of nights taken out of sale: no stay, no guest, no manager commission, no revenue
+// (migrations/2026-10-15-date-blocks.sql). They are taken nights like any other, so everything
+// that decides whether a night is free reads them: the Channel calendar, the links handed to
+// every platform (Airbnb's too: no platform made them), the enquiry availability check and its
+// "other dates", and the upcoming-gaps card. start_date is the first night closed, end_date the
+// morning it opens again (exclusive), as for a booking's checkout.
+const BLOCK_REASON_LABELS = { owner_use: 'owner use', maintenance: 'maintenance', festival: 'festival / event', other: '' }
+
+// "Closed by you (maintenance)": how a closure reads on the owner's own screens.
+function blockPhrase(reason) {
+  const label = Object.prototype.hasOwnProperty.call(BLOCK_REASON_LABELS, reason) ? BLOCK_REASON_LABELS[reason] : ''
+  return label ? `Closed by you (${label})` : 'Closed by you'
+}
+
+// The blocks overlapping [from, to) ('YYYY-MM-DD', half-open like every range here). A database
+// that has not had the migration yet simply has none.
+async function loadDateBlocks(DB, villaId, from, to) {
+  try {
+    const { results } = await DB.prepare(`
+      SELECT block_id, start_date, end_date, reason, note, created_by, created_at
+        FROM stayvibe_date_blocks
+       WHERE villa_id = ? AND removed_at IS NULL AND end_date > ? AND start_date < ?
+       ORDER BY start_date, end_date`).bind(villaId, from, to).all()
+    return results || []
+  } catch (e) {
+    if (/no such table/i.test(e?.message || '')) return []
+    throw e
+  }
+}
+
+// Dates a platform's own calendar has closed (a reservation not entered here yet, or a night
+// the host closed over there), from the calendars that are switched on: the same set the links
+// handed to the platforms are built from. Overlapping [from, to).
+async function loadPlatformBlocks(DB, villaId, from, to) {
+  try {
+    const { results } = await DB.prepare(`
+      SELECT b.channel, b.checkin_date, b.checkout_date
+        FROM stayvibe_ical_blocks b JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
+       WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1
+         AND b.checkin_date < ? AND b.checkout_date > ?`).bind(villaId, to, from).all()
+    return results || []
+  } catch (e) {
+    if (/no such table/i.test(e?.message || '')) return []
+    throw e
+  }
+}
+
 // Two independent directions — a stay can have an early-checkin ask, a
 // late-checkout ask, both, or neither, and each is checked against a
 // DIFFERENT adjacent stay (whoever checks out the same day this one checks
@@ -2727,10 +2775,16 @@ export async function onRequest(ctx) {
       for (const s of (stayRows || [])) createdAt[s.stay_id] = s.created_at
       const holds = heldNights(stayRows, await holdRules(DB, link.villa_id), today)
         .map(h => ({ id: `${h.stayId}:${h.kind}`, kind: h.kind, start: h.night, end: addDays(h.night, 1), stamp: createdAt[h.stayId] }))
+      // Dates the owner closed by hand (Block dates) come from no platform, so they go to every
+      // one of them, the platform that already shows a hand-made block of its own included.
+      const ownerRows = await loadDateBlocks(DB, link.villa_id, today, '9999-12-31')
       const events = buildHubEvents({
         targetChannel: link.channel, today, holds,
         stays:  (stayRows  || []).map(s => ({ id: s.stay_id,  source:  s.source,  start: s.checkin_date, end: s.checkout_date, stamp: s.created_at })),
-        blocks: (blockRows || []).map(b => ({ id: b.block_id, channel: b.channel, start: b.checkin_date, end: b.checkout_date, stamp: b.first_seen_at })),
+        blocks: [
+          ...(blockRows || []).map(b => ({ id: b.block_id, channel: b.channel, start: b.checkin_date, end: b.checkout_date, stamp: b.first_seen_at })),
+          ...ownerRows.map(o => ({ id: o.block_id, channel: 'owner', start: o.start_date, end: o.end_date, stamp: o.created_at })),
+        ],
       })
       const calendar = await renderHubIcs({ events, calendarName: `StayVibe360 availability (for ${sourceLabel(link.channel)})` })
 
@@ -3708,7 +3762,18 @@ export async function onRequest(ctx) {
         // A night held by an agreed late check-out / early check-in is not for sale
         // either (src/utils/stayHolds.js), so it ends a gap the way a booking does.
         const held = new Set(heldNights(stays, await holdRules(DB, villaId)).map(h => h.night))
-        const isOccupied = dateStr => held.has(dateStr) || stays.some(s => s.checkin_date <= dateStr && dateStr < s.checkout_date)
+        // Dates closed on a platform's own calendar, and dates the owner closed by hand (Block
+        // dates), are not open nights either: they end a gap the way a booking does. (Without
+        // this, nights you had closed on purpose were offered back to you as "gaps to fill".)
+        const closedFrom = fmt(today)
+        const closedTo = fmt(new Date(today.getTime() + (windowDays + 1) * 86400000))
+        const closed = [
+          ...(await loadPlatformBlocks(DB, villaId, closedFrom, closedTo)).map(b => ({ start: b.checkin_date, end: b.checkout_date })),
+          ...(await loadDateBlocks(DB, villaId, closedFrom, closedTo)).map(b => ({ start: b.start_date, end: b.end_date })),
+        ]
+        const isOccupied = dateStr => held.has(dateStr) ||
+          stays.some(s => s.checkin_date <= dateStr && dateStr < s.checkout_date) ||
+          closed.some(c => c.start <= dateStr && dateStr < c.end)
 
         const gaps = []
         let gapStart = null
@@ -4333,18 +4398,7 @@ export async function onRequest(ctx) {
         // block that a booking listed above already explains is not listed twice.
         const today = todayIst()
         const lo = addDays(checkIn, -45), hi = addDays(checkOut, 75)
-        let blocks = []
-        try {
-          const b = await DB.prepare(`
-            SELECT b.channel, b.checkin_date, b.checkout_date
-              FROM stayvibe_ical_blocks b JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
-             WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1
-               AND b.checkin_date < ? AND b.checkout_date > ?`).bind(villaId, hi, lo).all()
-          blocks = b.results || []
-        } catch (e) {
-          // A database that has not had the calendar migration yet has no blocks.
-          if (!/no such table/i.test(e?.message || '')) throw e
-        }
+        const blocks = await loadPlatformBlocks(DB, villaId, lo, hi)
         for (const b of blocks) {
           if (!(b.checkin_date < checkOut && b.checkout_date > checkIn)) continue
           if (conflicts.some(c => c.checkin_date < b.checkout_date && c.checkout_date > b.checkin_date)) continue
@@ -4353,11 +4407,21 @@ export async function onRequest(ctx) {
             checkin_date: b.checkin_date, checkout_date: b.checkout_date,
           })
         }
+        // Dates the owner has closed by hand (Block dates on the Channel calendar).
+        const owned = await loadDateBlocks(DB, villaId, lo, hi)
+        for (const o of owned) {
+          if (!(o.start_date < checkOut && o.end_date > checkIn)) continue
+          conflicts.push({
+            kind: 'owner_block', source: 'owner', guest_name: blockPhrase(o.reason),
+            checkin_date: o.start_date, checkout_date: o.end_date,
+          })
+        }
         conflicts.sort((a, b) => (a.checkin_date < b.checkin_date ? -1 : a.checkin_date > b.checkin_date ? 1 : 0))
 
         // Not free: say what IS, so the reply to the guest can offer real dates. Windows of the
         // same length, a few just before and after, from the same taken-nights rules as above
-        // (bookings, nights held by an agreed late check-out / early check-in, platform blocks).
+        // (bookings, nights held by an agreed late check-out / early check-in, platform blocks,
+        // dates the owner closed by hand).
         let alternatives = null
         if (conflicts.length) {
           const { results: around } = await DB.prepare(`
@@ -4371,6 +4435,7 @@ export async function onRequest(ctx) {
             ranges: [
               ...stayRows.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
               ...blocks.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
+              ...owned.map(r => ({ start: r.start_date, end: r.end_date })),
             ],
             nights: heldNights(stayRows, rules).map(h => h.night),
           })
@@ -5460,6 +5525,21 @@ export async function onRequest(ctx) {
         return json({ success: true, data: rows.map(icalExportShape) })
       }
 
+      // The nights the owner has closed by hand (Block dates), from today on, for the Channel
+      // calendar's list. Owner only: the reason and the note are private.
+      if (action === 'getDateBlocks') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const rows = await loadDateBlocks(DB, villaId, todayIst(), '9999-12-31')
+        const nightsBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000)
+        return json({ success: true, data: rows.map(r => ({
+          blockId: r.block_id, startDate: r.start_date, endDate: r.end_date,
+          nights: nightsBetween(r.start_date, r.end_date),
+          reason: r.reason, note: r.note || null, createdBy: r.created_by || null, createdAt: r.created_at || null,
+        })) })
+      }
+
       // Merges every active feed's blocks for the villa and flags a block as
       // a conflict when its dates overlap a live stay booked through a
       // DIFFERENT channel — a block with no matching stay at all is either a
@@ -5520,16 +5600,31 @@ export async function onRequest(ctx) {
             checkinDate: h.night, checkoutDate: addDays(h.night, 1), holdFor: h.stayId, time: h.time,
           })
         }
+        // Dates the owner closed by hand (Block dates): a range of closed nights, no guest. They
+        // go out on every platform's link, so the grid shows them like any other taken night. The
+        // note is the owner's own, so it goes only to an owner's screen.
+        const ownerSees = payload.role === 'owner' || payload.role === 'master_owner'
+        for (const o of await loadDateBlocks(DB, villaId, '0000-01-01', '9999-12-31')) {
+          items.push({
+            id: o.block_id, kind: 'ownerblock', source: 'owner',
+            label: blockPhrase(o.reason) + (ownerSees && o.note ? ` · ${o.note}` : ''),
+            checkinDate: o.start_date, checkoutDate: o.end_date,
+            reason: o.reason, note: ownerSees ? (o.note || null) : null,
+          })
+        }
         // A block that only says "not available" (a night the owner closed by hand on a
         // platform, or one the platform closed because of a calendar it imports) is no
         // reservation: a held night on top of one is the same night closed twice, not a
         // double booking. A block that is a reservation ("Reserved") still collides with a
-        // held night, as a booking would.
+        // held night, as a booking would. The same goes for the owner's own closures: another
+        // closure or a held night on one is not a clash, but a reservation that lands on it is.
         const isMarker = o => o.kind === 'block' && /not available|unavailable|blocked|closed/i.test(o.label || '')
+        const isClosure = o => o.kind === 'ownerblock' || isMarker(o)
         for (const item of items) {
           item.conflict = items.some(o =>
             o !== item && !(item.kind === 'hold' && o.kind === 'hold') &&
-            !(item.kind === 'hold' && isMarker(o)) && !(o.kind === 'hold' && isMarker(item)) &&
+            !(item.kind === 'hold' && isClosure(o)) && !(o.kind === 'hold' && isClosure(item)) &&
+            !(item.kind === 'ownerblock' && isClosure(o)) && !(o.kind === 'ownerblock' && isClosure(item)) &&
             (o.source || '').toLowerCase() !== (item.source || '').toLowerCase() &&
             overlaps(item.checkinDate, item.checkoutDate, o.checkinDate, o.checkoutDate))
         }
@@ -6203,6 +6298,64 @@ export async function onRequest(ctx) {
         assertPropertyAccess(payload, feed.villa_id)
         await DB.prepare(`DELETE FROM stayvibe_ical_blocks WHERE feed_id = ?`).bind(feedId).run()
         await DB.prepare(`DELETE FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).run()
+        return json({ success: true })
+      }
+
+      // ── DATES THE OWNER CLOSES BY HAND (Block dates, owner only) ───────────────
+      // A range of nights taken out of sale: no stay, no guest, no commission, no revenue. It
+      // shows on the Channel calendar, goes out on every platform's link, and counts as taken for
+      // enquiries and gaps. startDate is the first night closed, endDate the morning it opens
+      // again (exclusive). Refused while a booking sits on any of those nights: close them once
+      // the booking is moved or cancelled, so a guest is never shut out of a villa they booked.
+      if (action === 'saveDateBlock') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const vId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, vId)
+        const isDay = s => /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s + 'T00:00:00Z'))
+        const start = String(body.startDate || '').slice(0, 10)
+        const end   = String(body.endDate   || '').slice(0, 10)
+        if (!isDay(start) || !isDay(end)) return err('startDate and endDate (YYYY-MM-DD) are required')
+        if (end <= start) return err('The villa must open again after the first closed night')
+        if ((Date.parse(end + 'T00:00:00Z') - Date.parse(start + 'T00:00:00Z')) / 86400000 > 366) return err('A block can be at most 366 nights: make two')
+        if (end <= todayIst()) return err('Those nights have already passed')
+        const reason = Object.prototype.hasOwnProperty.call(BLOCK_REASON_LABELS, body.reason) ? body.reason : 'other'
+        const note = String(body.note || '').trim().slice(0, 300) || null
+
+        const { results: inTheWay } = await DB.prepare(`
+          SELECT stay_id, guest_name, checkin_date, checkout_date FROM stayvibe_stays
+           WHERE villa_id = ? AND status NOT IN ('cancelled','void')
+             AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date != ''
+             AND checkin_date < ? AND checkout_date > ?
+           ORDER BY checkin_date`).bind(vId, end, start).all()
+        if ((inTheWay || []).length) {
+          return json({ success: false, code: 'bookings_in_the_way',
+            conflict: inTheWay.map(s => ({ stayId: s.stay_id, guestName: s.guest_name, checkIn: s.checkin_date, checkOut: s.checkout_date })),
+            error: `A booking is in the way: ${inTheWay.map(s => `${s.guest_name} ${s.checkin_date} to ${s.checkout_date}`).join('; ')}. Move or cancel it first.` }, 409)
+        }
+
+        // The same closure sent twice (a double tap) is one block, not two.
+        const same = await DB.prepare(`
+          SELECT block_id FROM stayvibe_date_blocks
+           WHERE villa_id = ? AND start_date = ? AND end_date = ? AND reason = ? AND removed_at IS NULL`
+        ).bind(vId, start, end, reason).first()
+        if (same) return json({ success: true, data: { blockId: same.block_id, existing: true } })
+
+        const blockId = genId('BLK')
+        await DB.prepare(`
+          INSERT INTO stayvibe_date_blocks (block_id, villa_id, start_date, end_date, reason, note, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(blockId, vId, start, end, reason, note, actor).run()
+        return json({ success: true, data: { blockId } })
+      }
+
+      if (action === 'deleteDateBlock') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const blockId = body.blockId
+        if (!blockId) return err('blockId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_date_blocks', 'block_id', blockId)
+        const done = await DB.prepare(`
+          UPDATE stayvibe_date_blocks SET removed_at = ?, removed_by = ?
+           WHERE block_id = ? AND removed_at IS NULL`).bind(now(), actor, blockId).run()
+        if (!done.meta?.changes) return err('Block not found', 404)
         return json({ success: true })
       }
 

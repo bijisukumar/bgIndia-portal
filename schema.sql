@@ -1063,3 +1063,21 @@ CREATE INDEX IF NOT EXISTS stayvibe_idx_flex_requests ON stayvibe_flex_requests(
 -- turnaround the villa needs, which is what the 5-hour window rests on.
 -- ALTER TABLE stayvibe_stays ADD COLUMN actual_checkin_at TEXT DEFAULT NULL;
 -- ALTER TABLE stayvibe_stays ADD COLUMN actual_checkout_at TEXT DEFAULT NULL;
+
+-- Dates the owner closes by hand (family use, maintenance, a festival): not a booking, no
+-- guest, no commission. See migrations/2026-10-15-date-blocks.sql for the reasoning.
+CREATE TABLE IF NOT EXISTS stayvibe_date_blocks (
+  block_id    TEXT PRIMARY KEY,
+  villa_id    TEXT NOT NULL DEFAULT 'dwarka',
+  start_date  TEXT NOT NULL,                 -- first night closed, 'YYYY-MM-DD'
+  end_date    TEXT NOT NULL,                 -- the morning it opens again (exclusive)
+  reason      TEXT NOT NULL DEFAULT 'other', -- owner_use | maintenance | festival | other
+  note        TEXT,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by  TEXT,
+  updated_at  TEXT,
+  removed_at  TEXT,
+  removed_by  TEXT
+);
+CREATE INDEX IF NOT EXISTS stayvibe_idx_date_blocks ON stayvibe_date_blocks(villa_id, removed_at, start_date, end_date);

@@ -12,6 +12,7 @@ import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelsMatch, sourceStyle, sourcePill, colorAlpha, PARTNERS, DIRECT_STYLE, AGENT_STYLE } from '../../utils/channel'
 import CalendarExports from './CalendarExports'
+import BlockDates from './BlockDates'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -20,6 +21,9 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 // own colour, every direct booking shares one, every agent booking another. Held nights
 // (an agreed late check-out / early check-in) are amber and hatched.
 const HOLD_COLOR = '#F59E0B'
+// Nights the owner closed by hand (Block dates): slate and hatched, "closed" rather than booked.
+const CLOSED_COLOR = '#64748B'
+const CLOSED_TEXT = '#CBD5E1'
 
 function pad2(n) { return String(n).padStart(2, '0') }
 function toISO(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
@@ -74,7 +78,7 @@ function monthNightsTally(items, year, month) {
   const startISO = toISO(new Date(year, month, 1))
   const endISO = toISO(new Date(year, month + 1, 1))
   const byKey = {}
-  let total = 0, held = 0
+  let total = 0, held = 0, closed = 0
   for (const item of items) {
     if (item.checkoutDate <= startISO || item.checkinDate >= endISO) continue
     // A held night is kept back, not booked: counted on its own, never as a source's.
@@ -83,11 +87,13 @@ function monthNightsTally(items, year, month) {
     const clipEnd = item.checkoutDate < endISO ? item.checkoutDate : endISO
     const nights = Math.round((new Date(clipEnd) - new Date(clipStart)) / 86400000)
     if (nights <= 0) continue
+    // Nights the owner closed by hand: counted on their own too, never as a source's.
+    if (item.kind === 'ownerblock') { closed += nights; continue }
     const key = sourceStyle(item.source).key
     byKey[key] = (byKey[key] || 0) + nights
     total += nights
   }
-  return { byKey, total, held }
+  return { byKey, total, held, closed }
 }
 
 function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
@@ -111,6 +117,7 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
       <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '10px' }}>
         <span style={{ color: 'var(--text)', fontWeight: '700' }}>{tally.total} night{tally.total === 1 ? '' : 's'} booked</span>
         {tally.held > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🔒 {tally.held} held</span>}
+        {tally.closed > 0 && <span style={{ color: CLOSED_TEXT }}>  ·  ⛔ {tally.closed} closed by you</span>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
@@ -145,13 +152,16 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
                   // A held night (an agreed late check-out / early check-in) is not a booking:
                   // hatched, so it reads as "kept back" rather than as another platform.
                   const isHold = seg.item.kind === 'hold'
+                  // Nights the owner closed by hand: slate and hatched too, "closed", not a booking.
+                  const isClosed = seg.item.kind === 'ownerblock'
                   return (
-                    <div key={si} title={isHold ? 'Held night · ' + (seg.item.label || '') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
+                    <div key={si} title={isHold ? 'Held night · ' + (seg.item.label || '') : isClosed ? (seg.item.label || 'Closed by you') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
                       style={{
                         gridColumn: `${seg.startCol} / ${seg.endCol}`,
-                        background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)' : st.color,
-                        color: isHold ? HOLD_COLOR : st.text,
-                        border: isHold ? '1px dashed rgba(245,158,11,0.7)' : 'none',
+                        background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)'
+                          : isClosed ? 'repeating-linear-gradient(135deg, rgba(100,116,139,0.55) 0 5px, rgba(100,116,139,0.28) 5px 10px)' : st.color,
+                        color: isHold ? HOLD_COLOR : isClosed ? CLOSED_TEXT : st.text,
+                        border: isHold ? '1px dashed rgba(245,158,11,0.7)' : isClosed ? '1px dashed rgba(148,163,184,0.8)' : 'none',
                         boxSizing: 'border-box',
                         borderRadius: '5px',
                         padding: '3px 6px',
@@ -163,7 +173,7 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
                         outline: seg.item.conflict ? '2px solid #EF4444' : 'none',
                         outlineOffset: '1px',
                       }}>
-                      {seg.item.conflict && '⚠️ '}{isHold ? '🔒 ' + (seg.item.label || 'Held night') : channelLabel(seg.item.source) + (seg.item.label ? ' · ' + seg.item.label : '')}
+                      {seg.item.conflict && '⚠️ '}{isHold ? '🔒 ' + (seg.item.label || 'Held night') : isClosed ? '⛔ ' + (seg.item.label || 'Closed by you') : channelLabel(seg.item.source) + (seg.item.label ? ' · ' + seg.item.label : '')}
                     </div>
                   )
                 })}
@@ -191,11 +201,12 @@ function SourceKey({ items, feeds, tally, onConnect }) {
       if (st.group === 'channel' && !PARTNERS.some(p => p.key === st.key) && !seen.has(st.key)) seen.set(st.key, st)
     }
     feeds.forEach(f => note(f.channel))
-    items.forEach(it => { if (it.kind !== 'hold') note(it.source) })
+    items.forEach(it => { if (it.kind !== 'hold' && it.kind !== 'ownerblock') note(it.source) })
     return [...seen.values()]
   }, [items, feeds])
-  const hasOther = items.some(it => it.kind !== 'hold' && sourceStyle(it.source).group === 'other')
+  const hasOther = items.some(it => it.kind !== 'hold' && it.kind !== 'ownerblock' && sourceStyle(it.source).group === 'other')
   const hasHolds = items.some(it => it.kind === 'hold')
+  const hasClosed = items.some(it => it.kind === 'ownerblock')
 
   const label = { fontSize: '0.62rem', color: 'var(--text-dim)', fontWeight: '700', letterSpacing: '0.08em', marginBottom: '6px' }
   const row = { display: 'flex', flexWrap: 'wrap', gap: '6px' }
@@ -259,6 +270,13 @@ function SourceKey({ items, feeds, tally, onConnect }) {
             held night
           </span>
         )}
+        {hasClosed && (
+          <span title="Nights you closed by hand (Block dates, above the calendar). They are shut on every connected calendar and refused by the enquiry check; a booking that lands on one is flagged."
+            style={{ color: CLOSED_TEXT }}>
+            <span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', border: '1px dashed rgba(148,163,184,0.8)', background: 'rgba(100,116,139,0.5)', boxSizing: 'border-box', marginRight: '4px', verticalAlign: '-1px' }} />
+            closed by you
+          </span>
+        )}
       </div>
     </div>
   )
@@ -268,6 +286,7 @@ export default function ChannelCalendar() {
   const goBack = useBack()
   const [feeds, setFeeds] = useState([])
   const [calItems, setCalItems] = useState([])
+  const [dateBlocks, setDateBlocks] = useState([])   // nights the owner closed by hand (Block dates)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
@@ -283,12 +302,15 @@ export default function ChannelCalendar() {
   async function load() {
     setLoading(true)
     try {
-      const [f, c] = await Promise.all([
+      const [f, c, b] = await Promise.all([
         api.getIcalFeeds(DEFAULT_VILLA_ID),
         api.getVillaCalendar(DEFAULT_VILLA_ID),
+        // owner only; the rest of the screen must still load for anyone else, or before the migration
+        api.getDateBlocks(DEFAULT_VILLA_ID).catch(() => []),
       ])
       setFeeds(Array.isArray(f) ? f : [])
       setCalItems(Array.isArray(c) ? c : [])
+      setDateBlocks(Array.isArray(b) ? b : [])
     } catch (e) { showToast('Failed to load: ' + e.message, 'error') }
     finally { setLoading(false) }
   }
@@ -471,6 +493,10 @@ export default function ChannelCalendar() {
         ))}
 
         <CalendarExports feeds={feeds} showToast={showToast} />
+
+        <div style={{ marginTop: '18px' }}>
+          <BlockDates blocks={dateBlocks} loading={loading} onChanged={load} showToast={showToast} />
+        </div>
 
         <div className="card-section-label" style={{ marginTop: '18px', marginBottom: '10px' }}>CALENDAR</div>
 

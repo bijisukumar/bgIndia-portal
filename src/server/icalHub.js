@@ -27,6 +27,9 @@ export { channelKey, channelsMatch }
 const KNOWN_LABELS = {
   airbnb: 'Airbnb', bookingcom: 'Booking.com', expedia: 'Expedia', vrbo: 'VRBO',
   makemytrip: 'MakeMyTrip', agoda: 'Agoda', goibibo: 'Goibibo', cleartrip: 'Cleartrip',
+  // Dates the owner closed by hand (Block dates): from no platform, so the platform reads
+  // "Unavailable (Owner block)" and never the reason or the note.
+  owner: 'Owner block',
 }
 // Sources that are the owner's own bookings rather than a platform.
 const OWN_SOURCES = new Set(['', 'direct', 'website', 'guestform', 'manualtrigger', 'whatsapp', 'phone', 'agent', 'referral', 'walkin', 'other'])

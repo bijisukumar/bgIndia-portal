@@ -105,6 +105,10 @@ export const api = {
   createIcalExport:     (data)    => post('createIcalExport', data),
   regenerateIcalExport: (data)    => post('regenerateIcalExport', data),
   deleteIcalExport:     (data)    => post('deleteIcalExport', data),
+  // Nights the owner closes by hand (Block dates): owner only, no guest, no booking.
+  getDateBlocks:        (villaId) => get('getDateBlocks', { villaId }),
+  saveDateBlock:        (data)    => post('saveDateBlock', data),
+  deleteDateBlock:      (data)    => post('deleteDateBlock', data),
 
   // ── AGENT QUOTE LINKS (stayvibe only) ───────────────────────
   getAgentLinks:   (vId)  => get('getAgentLinks', { villaId: vId }),

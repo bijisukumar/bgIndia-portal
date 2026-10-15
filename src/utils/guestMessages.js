@@ -14,6 +14,7 @@ import { CONFIG } from '../config'
 import { parseLocalDate } from './dates'
 import { guestFacingTimes } from './stayTimes'
 import { dayMonth } from './stayHolds'
+import { bedroomsNeeded } from './villaPricing'
 
 const villa = CONFIG.villas[0]
 
@@ -109,9 +110,9 @@ export function buildHostIntroMessage(stay = {}) {
   // (total 0) shows the villa's full count too, same as "how big is this
   // place" rather than a wrong small number.
   const totalBedrooms = villa.bedrooms || 0
-  const bedroomsNeeded = total > 0 ? Math.min(Math.ceil(total / 2), totalBedrooms || 1) : totalBedrooms
+  const roomsForParty = bedroomsNeeded(totalBedrooms, total)   // the shared rule, src/utils/villaPricing.js
   const bedroomLine = totalBedrooms
-    ? (cfg.bedType ? `${bedroomsNeeded} [${cfg.bedType}]` : `${bedroomsNeeded}`)
+    ? (cfg.bedType ? `${roomsForParty} [${cfg.bedType}]` : `${roomsForParty}`)
     : '—'
 
   // Never ask a guest who has already registered. Also omitted entirely if

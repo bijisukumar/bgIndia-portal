@@ -14,6 +14,8 @@
 import { CONFIG } from '../config'
 import { parseLocalDate } from './dates'
 import { guestFacingTimes } from './stayTimes'
+import { bedroomsNeeded } from './villaPricing'
+import { waNumber } from './guestMessages'
 
 // Villa facts for the booking-info block, sourced from the per-host config
 // (hosts/<hostId>/config.js). Constant lookup here is fine while Dwarka is
@@ -36,6 +38,16 @@ const MANAGER_PHONE   = villa.managerPhone
 const CHECKIN_TIME    = 'after 4:00 PM'
 const CHECKOUT_TIME   = 'by 11:00 AM'
 
+// Emoji by name. A message opened through a wa.me link reaches the guest's chat with every
+// emoji replaced by "\uFFFD" on WhatsApp Desktop/Web for Windows (seen on THIS message on
+// 2026-10-15 — the greeting and the "Hearty welcome" line — and on the enquiry quote on
+// 2026-10-05; the BMP ones such as \u2705 go too), so the link version carries none. The text
+// version, for previewing or copying by hand, keeps them.
+const EMOJI = {
+  pray: '\uD83D\uDE4F', check: '\u2705', alarm: '\u23F0', moon: '\uD83C\uDF19',
+  pin: '\uD83D\uDCCD', person: '\uD83D\uDC64', home: '\uD83C\uDFE1',
+}
+
 function fmtLong(d) {
   const parsed = parseLocalDate(d)
   if (!parsed) return null
@@ -51,9 +63,13 @@ function fmtLong(d) {
  *   himself from his own WhatsApp. 'owner' is for when Biji sends it instead —
  *   the message can't pretend to be Raman texting, so it introduces him and
  *   gives the guest his direct number instead of a bare "message me."
+ *   `plain: true` leaves every emoji out (what the wa.me link sends, see EMOJI).
  */
 export function buildArrivalMessage(stay = {}, opts = {}) {
   const senderRole = opts.senderRole === 'owner' ? 'owner' : 'raman'
+  const plain = !!opts.plain
+  const lead = key => (plain ? '' : EMOJI[key] + ' ')    // "<emoji> text"
+  const tail = key => (plain ? '' : ' ' + EMOJI[key])    // "text <emoji>"
   // Full name in the greeting (matches the owner's established format and
   // avoids 'Namaskaram J!' for initials-style names like 'J S Jagadish Babu')
   const name = (stay.guest_name || '').trim() || 'there'
@@ -62,6 +78,10 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
   const adults   = parseInt(stay.adults, 10)   || 1
   const children = parseInt(stay.children, 10) || 0
   const totalGuests = adults + children
+  // Only the bedrooms this party needs (about two guests to a room, rounded up, never more than
+  // the villa has) — the same rule as the quote and the host intro. 5 guests: 3 bedrooms, not
+  // the villa's full 4.
+  const bedrooms = bedroomsNeeded(VILLA_BEDROOMS, totalGuests)
   const breakdown = children > 0 ? ` (${adults} adult${adults !== 1 ? 's' : ''} + ${children} child${children !== 1 ? 'ren' : ''})` : ''
 
   // Nights: prefer stored value, else derive from the dates
@@ -78,16 +98,16 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
   // from the check-in form is added when it fits what the villa gives (a time the
   // owner has not agreed to is never quoted back as if it had been).
   const gt = guestFacingTimes(stay, { checkin: '4:00 PM', checkout: '11:00 AM' })
-  let ciTime = stay.request_early_checkin ? 'early check-in as agreed \u23F0' : CHECKIN_TIME
-  let coTime = stay.request_late_checkout ? 'late check-out as agreed \uD83C\uDF19' : CHECKOUT_TIME
-  if (gt.inAgreed)  ciTime = `from ${gt.inTime} \u2014 early check-in as agreed \u23F0`
-  if (gt.outAgreed) coTime = `until ${gt.outTime} \u2014 late check-out as agreed \uD83C\uDF19`
+  let ciTime = stay.request_early_checkin ? `early check-in as agreed${tail('alarm')}` : CHECKIN_TIME
+  let coTime = stay.request_late_checkout ? `late check-out as agreed${tail('moon')}` : CHECKOUT_TIME
+  if (gt.inAgreed)  ciTime = `from ${gt.inTime} \u2014 early check-in as agreed${tail('alarm')}`
+  if (gt.outAgreed) coTime = `until ${gt.outTime} \u2014 late check-out as agreed${tail('moon')}`
   if (gt.arrivalNote)   ciTime += ` (${gt.arrivalNote})`
   if (gt.departureNote) coTime += ` (${gt.departureNote})`
 
   const intro = senderRole === 'owner'
-    ? `Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`
-    : `This is Raman, your host coordinator. Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India! \u2705`
+    ? `Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India!${tail('check')}`
+    : `This is Raman, your host coordinator. Hearty welcome \u2014 looking forward to hosting your family at ${VILLA_FULL_NAME}, Kerala, India!${tail('check')}`
 
   // The "call ahead" instruction is the one thing that actually prevents a bad
   // arrival: it stops the guest waiting at a locked gate AND stops staff
@@ -95,29 +115,29 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
   // is actually sending it \u2014 Raman speaking for himself, or the owner
   // pointing the guest to Raman by name.
   const callAhead = senderRole === 'owner'
-    ? `\u2705 Please call or WhatsApp ${MANAGER_NAME} about 1 hour before you reach Guruvayur \u2014 that way he's already waiting at the gate when you arrive, instead of either of you waiting on the other.`
-    : `\u2705 Please call or WhatsApp me about 1 hour before you reach Guruvayur \u2014 that way I'm already waiting at the gate when you arrive, instead of either of us waiting on the other.`
+    ? `${lead('check')}Please call or WhatsApp ${MANAGER_NAME} about 1 hour before you reach Guruvayur \u2014 that way he's already waiting at the gate when you arrive, instead of either of you waiting on the other.`
+    : `${lead('check')}Please call or WhatsApp me about 1 hour before you reach Guruvayur \u2014 that way I'm already waiting at the gate when you arrive, instead of either of us waiting on the other.`
 
   const lines = [
-    `Namaskaram ${name}! \uD83D\uDE4F`,
+    `Namaskaram ${name}!${tail('pray')}`,
     ``,
     intro,
     ``,
     `*BOOKING INFO*`,
     `\u2022 Max guest count: ${totalGuests} guest${totalGuests !== 1 ? 's' : ''}${breakdown} \u2014 count validated at check-in`,
-    `\u2022 Bedrooms: ${VILLA_BEDROOMS} bedrooms [Standard Indian Queen size beds]`,
+    `\u2022 Bedrooms: ${bedrooms} bedroom${bedrooms === 1 ? '' : 's'} [Standard Indian Queen size beds]`,
     `\u2022 Nights of stay: ${nights || '\u2014'}`,
     `\u2022 Check-in: ${ci || '\u2014'} \u2014 ${ciTime}`,
     `\u2022 Check-out: ${co || '\u2014'} \u2014 ${coTime}`,
     ``,
-    `\u23F0 IMPORTANT: please keep a close watch on the check-in and check-out times above. Unless a different time has been agreed with us in advance, these timings are critical \u2014 the next guest's arrival and the villa's preparation are planned around them.`,
+    `${lead('alarm')}IMPORTANT: please keep a close watch on the check-in and check-out times above. Unless a different time has been agreed with us in advance, these timings are critical \u2014 the next guest's arrival and the villa's preparation are planned around them.`,
     ``,
     `*DRIVING DIRECTIONS*`,
-    `\uD83D\uDCCD ${VILLA_MAPS_LINK}`,
+    `${lead('pin')}${VILLA_MAPS_LINK}`,
     VILLA_ADDRESS,
     ``,
     `*STAFF ON SITE*`,
-    `\uD83D\uDC64 ${MANAGER_NAME} \u2014 ${MANAGER_PHONE}`,
+    `${lead('person')}${MANAGER_NAME} \u2014 ${MANAGER_PHONE}`,
     ``,
     callAhead,
     ``,
@@ -128,7 +148,7 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
       `Note: any changes to your booking (dates, guest count, or requests) need to be approved directly by our host Biji \u2014 please reach out on WhatsApp at ${HOST_WA_NUMBER}.`,
       ``,
     ]),
-    `Looking forward to hosting you! \uD83C\uDFE1`,
+    `Looking forward to hosting you!${tail('home')}`,
   ]
 
   return lines.join('\n')
@@ -142,8 +162,10 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
 export function buildArrivalWaLink(stay = {}, opts = {}) {
   const phone = stay.guest_phone || stay.phone
   if (!phone) return null
-  const raw = String(phone).replace(/\D/g, '')
-  const num = raw.startsWith('91') ? raw : (raw.length === 10 ? `91${raw}` : raw)
-  const msg = encodeURIComponent(buildArrivalMessage(stay, opts))
+  // The shared number rule (a domestic trunk 0 or a "+1 ..." must not get a 91 put in front).
+  const num = waNumber(phone)
+  if (!num) return null
+  // No emoji: they arrive as "\uFFFD" through a wa.me link (see EMOJI).
+  const msg = encodeURIComponent(buildArrivalMessage(stay, { ...opts, plain: true }))
   return `https://wa.me/${num}?text=${msg}`
 }

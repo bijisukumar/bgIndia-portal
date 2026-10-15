@@ -114,9 +114,10 @@ function pricingLines(c, iconPrefix, rateLabel) {
 // rich=true (Generate & copy): full colorful emoji — safe for copy/paste,
 // which doesn't go through the URI-decode path that corrupts them on
 // WhatsApp Desktop/Windows. rich=false (Send quote in WhatsApp button):
-// only the BMP symbols ✨ ✅ ☎. ❓ was in that set, but a sent quote showed it
-// as "�" in front of "FAQs:" (2026-10-05), so it is rich-only now — if a "�"
-// ever shows next to one of the others, drop that one the same way.
+// only ☎. ❓ was in the "safe" set, but a sent quote showed it as "�" in front of
+// "FAQs:" (2026-10-05), and ✅ did the same on the arrival message (2026-10-15), so all
+// three pictographs (❓ ✅ ✨) are rich-only now — if a "�" ever shows next to ☎, drop
+// that one the same way.
 function icons(rich) {
   return {
     pray:      rich ? '🙏 ' : '',
@@ -130,8 +131,11 @@ function icons(rich) {
     gift:      rich ? '🎁 ' : '',
     handshake: rich ? '🤝 ' : '',
     phone:     rich ? '📞 ' : '☎ ',
-    sparkle:   '✨ ',
-    check:     '✅ ',
+    // Rich-only like the rest: ✅ was seen arriving as "�" through wa.me on 2026-10-15 (on the
+    // arrival message), so the "safe BMP symbols" assumption below did not hold for it, and ✨
+    // is the same kind of character.
+    sparkle:   rich ? '✨ ' : '',
+    check:     rich ? '✅ ' : '',
     question:  rich ? '❓ ' : '',
   }
 }

@@ -28,10 +28,19 @@ export const RATE_CARD_MAX_GUESTS = CONFIG.pricing.rateCardMaxGuests
 export const VILLA_BEDROOMS = Object.fromEntries(CONFIG.villas.map(v => [v.id, v.bedrooms]))
 export const GUESTS_PER_BEDROOM = 2
 
+// The one rule for "how many bedrooms does this party take": about two guests to a room,
+// rounded up, never more than the villa has; an unknown party size means the whole villa.
+// Used by the enquiry quote (getBedroomEstimate below), the host intro and the arrival
+// message, so a family of 5 is told 3 bedrooms everywhere, not the villa's full 4.
+export function bedroomsNeeded(villaBedrooms, billableGuests) {
+  const max = Number(villaBedrooms) || 0
+  if (!billableGuests || billableGuests <= 0) return max
+  return Math.min(max || 1, Math.ceil(billableGuests / GUESTS_PER_BEDROOM))
+}
+
 export function getBedroomEstimate(villaId, billableGuests) {
   const maxBedrooms = VILLA_BEDROOMS[villaId] || VILLA_BEDROOMS.dwarka
-  if (!billableGuests || billableGuests <= 0) return maxBedrooms
-  return Math.min(maxBedrooms, Math.ceil(billableGuests / GUESTS_PER_BEDROOM))
+  return bedroomsNeeded(maxBedrooms, billableGuests)
 }
 
 // Fallback rate card used only if the backend rate-card fetch hasn't completed yet

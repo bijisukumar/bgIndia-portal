@@ -7,6 +7,8 @@ import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 import DatePicker from '../../components/DatePicker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { addDays } from '../../utils/stayHolds'
+import AvailabilityNote from '../../components/AvailabilityNote'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
@@ -328,6 +330,7 @@ export default function EnquiryDetail() {
   const [extraLines, setExtraLines] = useState([])             // [{label, amount, earlyCheckinTime?, lateCheckoutTime?}]
   const [extraBusy, setExtraBusy] = useState(false)
   const [turnaroundInfo, setTurnaroundInfo] = useState(null)
+  const [avail, setAvail] = useState(undefined)   // checkAvailability for this enquiry's dates (see below)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
@@ -380,6 +383,35 @@ export default function EnquiryDetail() {
     }).then(r => { if (alive) setTurnaroundInfo(r) }).catch(() => { if (alive) setTurnaroundInfo(null) })
     return () => { alive = false }
   }, [requestedEarlyTime, requestedLateTime, e?.checkin_date, e?.checkout_date])
+
+  // Are this enquiry's dates still free? A saved enquiry can be overtaken by a booking or a
+  // platform block after it came in; when they are not, a reply card offers other dates and a
+  // "not available" message. Not asked for a settled enquiry (confirmed, lost, cancelled: a
+  // confirmed one would meet its own booking) nor for dates that have passed.
+  useEffect(() => {
+    const ci = e?.checkin_date ? String(e.checkin_date).slice(0, 10) : ''
+    const co = e?.checkout_date ? String(e.checkout_date).slice(0, 10) : ''
+    const open = !!e && !['confirmed', 'lost', 'cancelled'].includes(e.status)
+    if (!open || !ci || !co || co <= ci || co < localTodayStr()) { setAvail(undefined); return }
+    let alive = true
+    api.checkAvailability({ villaId: e.villa_id || DEFAULT_VILLA_ID, checkIn: ci, checkOut: co })
+      .then(d => { if (alive) setAvail(d || undefined) })
+      .catch(() => { if (alive) setAvail(undefined) })
+    return () => { alive = false }
+  }, [e?.status, e?.checkin_date, e?.checkout_date])
+
+  // The "not available" reply was opened in WhatsApp: log it as a communication (which also
+  // restarts the "days since contact" clock), set a follow-up for two days on, and move a New
+  // enquiry to Follow-Up Needed.
+  const handleReplySent = async ({ note }) => {
+    try {
+      await api.logCommunication({ enquiryId, type: 'whatsapp', notes: note,
+        followUpDue: addDays(localTodayStr(), 2),
+        status: e.status === 'new' ? 'follow_up_needed' : undefined })
+      showToast('Reply logged ✓')
+      load()
+    } catch { showToast('WhatsApp opened, but the reply could not be logged', 'error') }
+  }
 
   const handleLogComm = async () => {
     if (!commNote.trim()) { showToast('Add a note', 'error'); return }
@@ -687,6 +719,14 @@ export default function EnquiryDetail() {
             🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {SOURCES.find(s => s.id === e.source)?.label || e.source}
           </div>
         </div>
+
+        {!isFinal && avail && avail !== 'loading' && avail.available === false && (
+          <div className="card" style={{ padding: '12px 14px', marginTop: '10px' }}>
+            <AvailabilityNote quiet avail={avail} checkIn={e.checkin_date} checkOut={e.checkout_date}
+              guestName={e.guest_name} phone={e.phone}
+              onReplySent={handleReplySent} onToast={showToast} style={{ margin: 0 }} />
+          </div>
+        )}
 
         <div className="card-section-label" style={{ marginTop: '14px' }}>PRICING</div>
         <div className="card">

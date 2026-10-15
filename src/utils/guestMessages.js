@@ -13,6 +13,7 @@
 import { CONFIG } from '../config'
 import { parseLocalDate } from './dates'
 import { guestFacingTimes } from './stayTimes'
+import { dayMonth } from './stayHolds'
 
 const villa = CONFIG.villas[0]
 
@@ -388,4 +389,14 @@ export function buildNoAvailabilityWaLink({ phone, ...rest } = {}) {
   const msg = buildNoAvailabilityMessage(rest)
   if (!msg) return null
   return waLink(phone, msg)
+}
+
+// The one line the enquiry's activity log keeps when that reply is sent: what was
+// not available and what was offered, not the whole message.
+//   "Replied on WhatsApp: dates not available (21 Oct–23 Oct). Offered: 16 Oct–18 Oct, 23 Oct–25 Oct."
+export function noAvailabilityLogNote({ checkIn, checkOut, alternatives } = {}) {
+  const span = w => dayMonth(w.checkIn) + '–' + dayMonth(w.checkOut)
+  const offered = [...((alternatives && alternatives.before) || []), ...((alternatives && alternatives.after) || [])]
+  return 'Replied on WhatsApp: dates not available (' + dayMonth(checkIn) + '–' + dayMonth(checkOut) + '). ' +
+    (offered.length ? 'Offered: ' + offered.map(span).join(', ') + '.' : 'No open dates offered.')
 }

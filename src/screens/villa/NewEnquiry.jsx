@@ -4,9 +4,9 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { SOURCES, PURPOSES, STATUS_META } from './EnquiryTracker'
-import { parseLocalDate, fmtDate } from '../../utils/dates'
-import { fmtTime } from '../../utils/stayTimes'
-import { buildNoAvailabilityMessage, buildNoAvailabilityWaLink, greetingName } from '../../utils/guestMessages'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
+import { addDays } from '../../utils/stayHolds'
+import AvailabilityNote from '../../components/AvailabilityNote'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import {
   getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
@@ -138,28 +138,26 @@ export default function NewEnquiry() {
     return () => { stale = true }
   }, [form.checkInDate, form.checkOutDate])
 
-  const fmtShort = d => { try { return fmtDate(d, { day: 'numeric', month: 'short' }) } catch (_) { return d } }
-  const turnoverTag = r => (r.checkout_date === form.checkInDate || r.checkin_date === form.checkOutDate) ? ' (same-day turnover)' : ''
-  // A night nobody has booked but that is not for sale: the guest before has an
-  // agreed late check-out (or the one after an early check-in), so there is no time
-  // to reset the villa. The server names the night; the words are ours.
-  const heldWhy = c => c.reason === 'early_checkin_turnaround'
-    ? `${c.guest_name} has an agreed early check-in at ${fmtTime(c.early_checkin_time)}`
-    : `${c.guest_name} has an agreed late check-out until ${fmtTime(c.late_checkout_time)}`
-  // When the dates are taken: the reply to the guest, an apology plus a few open dates just
-  // before and after (worked out by the server, src/utils/openDates.js). Built from what is on
-  // the form, so it follows every edit; never names whoever holds the dates.
-  const dateTaken = !!avail && avail !== 'loading' && avail.available === false
-  const replyInput = { guestName: form.guestName, checkIn: form.checkInDate, checkOut: form.checkOutDate,
-                       alternatives: dateTaken ? avail.alternatives : null }
-  const replyText = dateTaken ? buildNoAvailabilityMessage(replyInput) : null
-  const replyLink = dateTaken && form.phone.trim() ? buildNoAvailabilityWaLink({ ...replyInput, phone: form.phone }) : null
-  const copyReply = () => {
-    navigator.clipboard.writeText(replyText)
-      .then(() => showToast('Message copied — paste into WhatsApp ✓'))
-      .catch(() => showToast('Could not copy the message', 'error'))
+  // When the dates are taken, <AvailabilityNote/> shows the reply to the guest (also used on
+  // Enquiry detail). Sending it is logged on the enquiry as a WhatsApp communication with a
+  // follow-up due in two days, and a new enquiry moves to "Follow-Up Needed". A saved enquiry
+  // (editing) is logged at once; a new one remembers it and logs it when it is created.
+  const [pendingReply, setPendingReply] = useState(null)   // { note, followUpDue } waiting for an enquiry id
+  const handleReplySent = async ({ note }) => {
+    const followUpDue = addDays(localTodayStr(), 2)
+    const status = form.status === 'new' ? 'follow_up_needed' : form.status
+    if (!isEdit) {
+      setPendingReply({ note, followUpDue })
+      setForm(f => ({ ...f, status }))
+      showToast('WhatsApp opened — create the enquiry to keep a record of this reply')
+      return
+    }
+    try {
+      await api.logCommunication({ enquiryId, type: 'whatsapp', notes: note, followUpDue, status })
+      setForm(f => ({ ...f, status }))
+      showToast('Reply logged ✓')
+    } catch { showToast('WhatsApp opened, but the reply could not be logged', 'error') }
   }
-  const openWindows = ws => (ws || []).map(w => `${fmtShort(w.checkIn)}→${fmtShort(w.checkOut)}`).join(' · ')
   const adultsNum = parseInt(form.adults, 10) || 0
   const childrenNum = parseInt(form.children, 10) || 0
   const infantsNum = parseInt(form.infants, 10) || 0
@@ -229,6 +227,11 @@ export default function NewEnquiry() {
         discountCategory: form.discountCategory || null, discountPct: form.discountCategory ? discountPct : 0,
         status: form.status, notes: form.notes,
       })
+      if (pendingReply && result?.enquiryId) {
+        try {
+          await api.logCommunication({ enquiryId: result.enquiryId, type: 'whatsapp', notes: pendingReply.note, followUpDue: pendingReply.followUpDue })
+        } catch { /* the enquiry is saved; only its activity-log line for the reply is missing */ }
+      }
       showToast(isEdit ? 'Enquiry updated ✓' : 'Enquiry created ✓')
       setTimeout(() => navigate(`/owner/villa/enquiries/${result.enquiryId}`), 600)
     } catch { showToast('Failed to save', 'error') }
@@ -328,77 +331,9 @@ export default function NewEnquiry() {
               {nights} night{nights === 1 ? '' : 's'} · Check-in after {villa.checkinTime} · Check-out by {villa.checkoutTime}
             </div>
           )}
-          {avail === 'loading' && (
-            <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '-2px 0 10px' }}>Checking availability…</div>
-          )}
-          {avail && avail !== 'loading' && (
-            <div style={{ margin: '-2px 0 10px' }}>
-              {avail.available ? (
-                <div style={{ color: '#34A853', fontSize: '0.76rem', fontWeight: 600 }}>
-                  ✓ Villa available {fmtShort(form.checkInDate)} → {fmtShort(form.checkOutDate)}
-                </div>
-              ) : (
-                <>
-                  <div style={{ color: '#E06C5A', fontSize: '0.76rem', fontWeight: 600 }}>
-                    ✕ Not available — {avail.conflicts.map(c => c.heldNight
-                      ? `${fmtShort(c.heldNight)} night is held`
-                      : `${c.guest_name} ${fmtShort(c.checkin_date)}→${fmtShort(c.checkout_date)}`).join(' · ')}
-                  </div>
-                  {avail.conflicts.some(c => c.heldNight) && (
-                    <div style={{ color: '#E06C5A', fontSize: '0.7rem', marginTop: '3px', lineHeight: 1.5 }}>
-                      {avail.conflicts.filter(c => c.heldNight).map(c => heldWhy(c)).join(' · ')}
-                      {' '}— not enough time to reset the villa before the next guest.
-                    </div>
-                  )}
-                </>
-              )}
-              {avail.nearby && avail.nearby.length > 0 && (
-                <div style={{ color: '#5C7080', fontSize: '0.7rem', marginTop: '3px', lineHeight: 1.5 }}>
-                  Around these dates: {avail.nearby.map(r =>
-                    `${r.guest_name} ${fmtShort(r.checkin_date)}→${fmtShort(r.checkout_date)}${turnoverTag(r)}`).join(' · ')}
-                </div>
-              )}
-              {dateTaken && replyText && (
-                <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '10px',
-                  background: 'rgba(37,211,102,0.05)', border: '1px solid rgba(37,211,102,0.25)' }}>
-                  <div style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text)' }}>
-                    Reply to {form.guestName.trim() ? greetingName(form.guestName) : 'the guest'}
-                  </div>
-                  <div style={{ color: '#5C7080', fontSize: '0.7rem', lineHeight: 1.6, margin: '4px 0 8px' }}>
-                    {avail.alternatives && (avail.alternatives.before.length > 0 || avail.alternatives.after.length > 0) ? (
-                      <>
-                        Open for the same {avail.alternatives.nights} night{avail.alternatives.nights === 1 ? '' : 's'}:
-                        {avail.alternatives.before.length > 0 && <><br />Earlier — {openWindows(avail.alternatives.before)}</>}
-                        {avail.alternatives.after.length > 0 && <><br />Later — {openWindows(avail.alternatives.after)}</>}
-                      </>
-                    ) : (
-                      <>No window of {nights} night{nights === 1 ? '' : 's'} is open close to these dates.</>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {replyLink ? (
-                      <a href={replyLink} target="_blank" rel="noreferrer" className="btn"
-                        style={{
-                          flex: '1 1 200px', display: 'block', textAlign: 'center', textDecoration: 'none',
-                          background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)',
-                          color: '#25D366', fontWeight: '700',
-                        }}>
-                        💬 Send “not available” in WhatsApp
-                      </a>
-                    ) : (
-                      <div style={{ flex: '1 1 160px', alignSelf: 'center', fontSize: '0.7rem', color: '#5C7080' }}>
-                        Add the guest's mobile number above to send this on WhatsApp.
-                      </div>
-                    )}
-                    <button type="button" className="btn" onClick={copyReply}
-                      style={{ width: 'auto', flex: '0 0 auto', padding: '0 14px', whiteSpace: 'nowrap' }}>
-                      📋 Copy message
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <AvailabilityNote avail={avail} checkIn={form.checkInDate} checkOut={form.checkOutDate}
+            guestName={form.guestName} phone={form.phone}
+            onReplySent={handleReplySent} onToast={showToast} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
             <div className="field">
               <div className="field-label">Adults</div>

@@ -145,6 +145,12 @@ export default function CoconutDashboard() {
   const [editInterval, setEditInterval] = useState(false)       // next-harvest interval editor open
   const [intervalInput, setIntervalInput] = useState('')
   const [intervalSaving, setIntervalSaving] = useState(false)
+  // Owner's "email me a report" card — range defaults to the last 7 full days
+  const dayShift = (n) => { const d = parseLocalDate(localTodayStr()); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+  const [reportFrom, setReportFrom] = useState(() => dayShift(-7))
+  const [reportTo, setReportTo]     = useState(() => dayShift(-1))
+  const [reportSending, setReportSending] = useState(false)
+  const [reportMsg, setReportMsg]   = useState(null)   // { ok, text }
 
   useEffect(() => {
     setLoading(true)
@@ -261,6 +267,37 @@ export default function CoconutDashboard() {
           )}
         </div>
 
+
+        {/* ── EMAIL REPORT — owner only: irrigation compliance + expenses logged, for any date range ── */}
+        {isOwner && (
+          <div style={s.reportCard}>
+            <div style={s.reportTitle}>EMAIL ME A REPORT</div>
+            <div style={s.reportSub}>Irrigation days missed &amp; zone status, plus expenses logged (with date logged)</div>
+            <div style={{ display:'flex', gap:10, marginTop:10, flexWrap:'wrap', alignItems:'flex-end' }}>
+              <label style={s.reportLbl}>From
+                <input type="date" value={reportFrom} max={dayShift(-1)} onChange={e => { setReportFrom(e.target.value); setReportMsg(null) }} style={s.reportInput} />
+              </label>
+              <label style={s.reportLbl}>To
+                <input type="date" value={reportTo} max={dayShift(-1)} onChange={e => { setReportTo(e.target.value); setReportMsg(null) }} style={s.reportInput} />
+              </label>
+              <button disabled={reportSending || !reportFrom || !reportTo} style={s.reportBtn}
+                onClick={async () => {
+                  setReportSending(true); setReportMsg(null)
+                  try {
+                    const r = await api.sendEstateReport({ estate: 'pollachi', from: reportFrom, to: reportTo })
+                    setReportMsg({ ok: true, text: `Sent to ${r?.to || 'your owner address'} (${r?.days} days)` })
+                  } catch (e) {
+                    setReportMsg({ ok: false, text: e?.message || 'Could not send the report' })
+                  } finally { setReportSending(false) }
+                }}>
+                {reportSending ? 'Sending…' : '✉ Email report'}
+              </button>
+            </div>
+            {reportMsg && (
+              <div style={{ marginTop:8, fontSize:'0.72rem', color: reportMsg.ok ? '#4CAF50' : '#EF9A9A' }}>{reportMsg.ok ? '✓ ' : '⚠ '}{reportMsg.text}</div>
+            )}
+          </div>
+        )}
 
         {/* ── OPERATIONAL HIGHLIGHTS — estate manager only ── */}
         {!isOwner && <EstateHighlights estate="pollachi" />}
@@ -637,6 +674,12 @@ const s = {
   nextDate:   { fontSize: '1.4rem', fontWeight: 700, color: '#E8B86D', fontFamily: "'Cormorant Garamond', serif" },
   nextDays:   { fontSize: '0.8rem', fontWeight: 600, marginTop: 4 },
   nextNote:   { fontSize: '0.6rem', color: '#3A4550', marginTop: 4 },
+  reportCard: { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: '14px 16px', marginBottom: 14 },
+  reportTitle:{ fontSize: '0.62rem', letterSpacing: '0.14em', color: '#8A9BAE', fontWeight: 700 },
+  reportSub:  { fontSize: '0.68rem', color: '#5C7080', marginTop: 3 },
+  reportLbl:  { display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.62rem', color: '#8A9BAE' },
+  reportInput:{ background: '#12161c', border: '1px solid rgba(200,144,58,0.35)', borderRadius: 8, color: '#E6D3A8', padding: '8px 10px', fontSize: '0.8rem' },
+  reportBtn:  { background: '#C8903A', color: '#111', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer', minHeight: 38 },
 
   harvestCard: {
     background: '#1A1F24',

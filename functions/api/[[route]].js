@@ -466,6 +466,7 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
         .run()
     } catch (e) { console.error('alert_log insert failed:', e?.message || e) }
   }
+  return { ok, statusCode, detail, to: recipient }
 }
 
 // ── {placeholder} substitution for config-driven guest message templates ──
@@ -572,17 +573,18 @@ const istStamp = (utc) => {
 }
 const inr = n => '₹' + (Number(n) || 0).toLocaleString('en-IN')
 
-async function buildEstateWeeklyDigest(DBE, estate, today, span = 7) {
+async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = null) {
   const label    = ESTATE_LABELS[estate] || estate
-  const start    = addDaysISO(today, -span)
-  const end      = addDaysISO(today, -1)
+  const end      = endDate || addDaysISO(today, -1)
+  const start    = addDaysISO(end, -(span - 1))
+  const asOf     = addDaysISO(end, 1)   // statuses are judged as of the morning after the period
   const days     = Array.from({ length: span }, (_, i) => addDaysISO(start, i))
-  const lookback = addDaysISO(today, -(span + 60))
+  const lookback = addDaysISO(start, -60)
   const sinceTs  = addDaysISO(start, -1) + ' 00:00:00'   // UTC cut a day early; filtered to IST dates below
 
   const { results: zones } = await DBE.prepare(`SELECT * FROM estate360_irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`).bind(estate).all()
   const { results: logs }  = await DBE.prepare(`SELECT zone_id, zone_name, logged_date, duration_mins, created_by, created_at FROM estate360_irrigation_logs WHERE estate = ? AND logged_date >= ? ORDER BY logged_date ASC`).bind(estate, lookback).all()
-  const { results: lastRows } = await DBE.prepare(`SELECT zone_id, MAX(logged_date) AS last FROM estate360_irrigation_logs WHERE estate = ? AND zone_id IS NOT NULL GROUP BY zone_id`).bind(estate).all()
+  const { results: lastRows } = await DBE.prepare(`SELECT zone_id, MAX(logged_date) AS last FROM estate360_irrigation_logs WHERE estate = ? AND zone_id IS NOT NULL AND logged_date <= ? GROUP BY zone_id`).bind(estate, end).all()
   const { results: expRows } = await DBE.prepare(`SELECT txn_id, date, category, amount, paid_to, description, created_by, created_at, updated_at FROM estate360_estate_transactions WHERE estate = ? AND type = 'expense' AND (created_at >= ? OR updated_at >= ?) ORDER BY created_at ASC`).bind(estate, sinceTs, sinceTs).all()
   const { results: cocoRows } = await DBE.prepare(`SELECT harvest_date, harvester_name, total_nuts, total_expense, net_income, created_at FROM estate360_coconut_harvests WHERE estate_id = ? AND created_at >= ? ORDER BY created_at ASC`).bind(estate, sinceTs).all()
   const lastMap = Object.fromEntries(lastRows.map(r => [r.zone_id, r.last]))
@@ -608,7 +610,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7) {
   const zoneOut = zones.map(z => {
     const freq = z.expected_freq_days || 7
     const last = lastMap[z.zone_id] || null
-    const st   = irrigationZoneStatus(last, freq, today)
+    const st   = irrigationZoneStatus(last, freq, asOf)
     counts[st.status]++
     const zl       = winLogs.filter(l => l.zone_id === z.zone_id)
     const runDates = [...new Set(zl.map(l => l.logged_date))]
@@ -622,11 +624,11 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7) {
     if (expected > 0 && runDates.length < expected) out.push(`     Missed in period: ${expected - runDates.length} of ${expected} expected run(s)`)
 
     // Gaps longer than the zone's cycle in the last 30 days
-    const dates = [...new Set(logs.filter(l => l.zone_id === z.zone_id).map(l => l.logged_date))].sort()
+    const dates = [...new Set(logs.filter(l => l.zone_id === z.zone_id && l.logged_date <= end).map(l => l.logged_date))].sort()
     const gaps = []
     for (let i = 1; i < dates.length; i++) {
       const g = diffDaysISO(dates[i - 1], dates[i])
-      if (g > freq + 2 && dates[i] >= addDaysISO(today, -Math.max(30, span))) gaps.push(`${dayLabel(dates[i - 1])} → ${dayLabel(dates[i])} (${g}d)`)
+      if (g > freq + 2 && dates[i] >= addDaysISO(asOf, -Math.max(30, span))) gaps.push(`${dayLabel(dates[i - 1])} → ${dayLabel(dates[i])} (${g}d)`)
     }
     if (gaps.length) out.push(`     Gaps in last ${Math.max(30, span)} days: ${gaps.slice(-3).join('; ')}`)
 
@@ -688,7 +690,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7) {
   const zoneSummary = zones.length
     ? `${counts.ok} OK, ${counts.warn} warn, ${counts.alert} alert, ${counts.critical} critical, ${counts.never} never logged (of ${zones.length} zones)`
     : 'No irrigation zones are configured for this estate'
-  L.push(`${span === 7 ? 'Weekly' : span + '-day'} report — ${label}`, `${span === 7 ? 'Week' : 'Period'}: ${dayLabel(start)} to ${dayLabel(end)}`, '')
+  L.push(`${span === 7 ? 'Weekly' : span + '-day'} report — ${label}`, `Period: ${dayLabel(start)} to ${dayLabel(end)}`, '')
   L.push('NEEDS YOUR CALL')
   if (issues.length) issues.forEach(i => L.push(`  • ${i}`)); else L.push('  • Nothing flagged — irrigation on schedule and expenses look normal.')
   L.push('', 'IRRIGATION — ' + zoneSummary, '', 'Day by day:', ...strip)
@@ -1716,7 +1718,7 @@ export async function onRequest(ctx) {
   }
 
   const ESTATE_ACTIONS = new Set([
-    'getCoconutHarvests', 'saveCoconutHarvest', 'setCoconutInterval',
+    'getCoconutHarvests', 'saveCoconutHarvest', 'setCoconutInterval', 'sendEstateReport',
     'getRubberHarvests',  'saveRubberHarvest',
     'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction', 'getRubberMonthly', 'backfillRubberWages',
     'getManagerSettlements', 'saveManagerSettlement', 'deleteManagerSettlement',
@@ -8390,6 +8392,22 @@ export async function onRequest(ctx) {
         ], await getEstateAlertEmail(DB, env, cocoEstate), DB, cocoEstate))
 
         return json({ success: true, data: { harvestId: id, scheduledNextHarvest: scheduledNext } })
+      }
+
+      // ESTATE REPORT — owner picks a date range and emails the report to themself
+      if (action === 'sendEstateReport') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const estate = body.estate || 'pollachi'
+        const isoDay = /^\d{4}-\d{2}-\d{2}$/
+        if (!isoDay.test(body.from || '') || !isoDay.test(body.to || '')) return err('from and to dates required (YYYY-MM-DD)', 400)
+        if (body.to < body.from) return err('"To" date is before "From" date', 400)
+        const span = diffDaysISO(body.from, body.to) + 1
+        if (span > 62) return err('Pick a range of 62 days or less', 400)
+        if (body.to >= istToday()) return err('"To" date must be before today — today is not over yet', 400)
+        const d = await buildEstateWeeklyDigest(ActiveDB, estate, istToday(), span, body.to)
+        const res = await sendAlert(env, d.subject, d.lines, await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_report')
+        if (!res.ok) return err(`Email could not be sent (${res.statusCode || 'error'}): ${String(res.detail || '').slice(0, 160)}`, 502)
+        return json({ success: true, data: { to: res.to, from: body.from, toDate: body.to, days: span } })
       }
 
       // COCONUT HARVEST — Change the days-until-next-harvest on an existing record

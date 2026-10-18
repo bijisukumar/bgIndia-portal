@@ -528,6 +528,180 @@ async function getOwnerAlertEmail(DB, env, villaId) {
   return env.OWNER_EMAIL || 'bijits@hotmail.com'
 }
 
+// ── ESTATE360 WEEKLY OWNER DIGEST ────────────────────────────────────────
+// Irrigation compliance + Pradosh's logged expenses, emailed weekly by
+// runEstateWeeklyDigest (GitHub Actions cron, CRON_SECRET-guarded).
+// Dates are IST. Pure helpers first, then the builder.
+const ESTATE_LABELS = { pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' }
+
+// Estates belong to the one owner, so an estate with no alert address of its
+// own uses the default villa's (the owner's) before the env/last-resort one.
+async function getEstateAlertEmail(DB, env, estate) {
+  for (const id of [estate, env.DEFAULT_VILLA_ID || 'dwarka']) {
+    try {
+      const row = await DB.prepare(`SELECT value FROM stayvibe_villa_settings WHERE villa_id = ? AND key = 'owner_email_alert'`).bind(id).first()
+      if (row?.value) return row.value
+    } catch (e) { console.error('getEstateAlertEmail lookup failed:', e?.message || e) }
+  }
+  return env.OWNER_EMAIL || 'bijits@hotmail.com'
+}
+
+// Same thresholds the dashboard's zone-health panel uses, shared so the
+// email and the app can never disagree about a zone's status.
+function irrigationZoneStatus(lastLogged, freq, today) {
+  const daysSince = lastLogged ? Math.round((new Date(today) - new Date(lastLogged)) / 86400000) : null
+  let consecutiveMisses = 0
+  if (!lastLogged) { consecutiveMisses = 3 }
+  else {
+    const missedCycles = daysSince !== null ? Math.floor(daysSince / freq) : 3
+    consecutiveMisses = Math.max(0, missedCycles - 1)
+    if (daysSince > freq + 2) consecutiveMisses = Math.max(1, consecutiveMisses)
+  }
+  const status = !lastLogged ? 'never' : consecutiveMisses >= 3 ? 'critical' : consecutiveMisses === 2 ? 'alert' : consecutiveMisses === 1 ? 'warn' : daysSince !== null && daysSince > freq + 2 ? 'warn' : 'ok'
+  return { daysSince, consecutiveMisses, status }
+}
+
+const istToday    = () => new Date(Date.now() + 19800000).toISOString().slice(0, 10)
+const addDaysISO  = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10)
+const diffDaysISO = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)
+const dayLabel    = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+// created_at is stored UTC ("YYYY-MM-DD HH:MM:SS"); show when it was logged in IST.
+const istStamp = (utc) => {
+  const d = new Date(new Date(String(utc).replace(' ', 'T') + 'Z').getTime() + 19800000)
+  return isNaN(d) ? { date: null, time: '' } : { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) }
+}
+const inr = n => '₹' + (Number(n) || 0).toLocaleString('en-IN')
+
+async function buildEstateWeeklyDigest(DBE, estate, today) {
+  const label    = ESTATE_LABELS[estate] || estate
+  const start    = addDaysISO(today, -7)
+  const end      = addDaysISO(today, -1)
+  const days     = Array.from({ length: 7 }, (_, i) => addDaysISO(start, i))
+  const lookback = addDaysISO(today, -60)
+  const sinceTs  = addDaysISO(start, -1) + ' 00:00:00'   // UTC cut a day early; filtered to IST dates below
+
+  const { results: zones } = await DBE.prepare(`SELECT * FROM estate360_irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`).bind(estate).all()
+  const { results: logs }  = await DBE.prepare(`SELECT zone_id, zone_name, logged_date, duration_mins, created_by, created_at FROM estate360_irrigation_logs WHERE estate = ? AND logged_date >= ? ORDER BY logged_date ASC`).bind(estate, lookback).all()
+  const { results: lastRows } = await DBE.prepare(`SELECT zone_id, MAX(logged_date) AS last FROM estate360_irrigation_logs WHERE estate = ? AND zone_id IS NOT NULL GROUP BY zone_id`).bind(estate).all()
+  const { results: expRows } = await DBE.prepare(`SELECT txn_id, date, category, amount, paid_to, description, created_by, created_at, updated_at FROM estate360_estate_transactions WHERE estate = ? AND type = 'expense' AND (created_at >= ? OR updated_at >= ?) ORDER BY created_at ASC`).bind(estate, sinceTs, sinceTs).all()
+  const { results: cocoRows } = await DBE.prepare(`SELECT harvest_date, harvester_name, total_nuts, total_expense, net_income, created_at FROM estate360_coconut_harvests WHERE estate_id = ? AND created_at >= ? ORDER BY created_at ASC`).bind(estate, sinceTs).all()
+  const lastMap = Object.fromEntries(lastRows.map(r => [r.zone_id, r.last]))
+
+  const issues = []
+  const L = []
+
+  // ── Irrigation: day by day ──
+  const winLogs = logs.filter(l => l.logged_date >= start && l.logged_date <= end)
+  const quietDays = []
+  const strip = days.map(d => {
+    const dl = winLogs.filter(l => l.logged_date === d)
+    if (!dl.length) { quietDays.push(d); return `  ✗ ${dayLabel(d)} — nothing logged` }
+    const mins = dl.reduce((s, l) => s + (l.duration_mins || 0), 0)
+    const names = [...new Set(dl.map(l => l.zone_name || 'untagged'))].join(', ')
+    return `  ✓ ${dayLabel(d)} — ${dl.length} run${dl.length > 1 ? 's' : ''}, ${mins} min (${names})`
+  })
+
+  // ── Irrigation: per zone ──
+  const rank = { never: 0, critical: 1, alert: 2, warn: 3, ok: 4 }
+  const counts = { ok: 0, warn: 0, alert: 0, critical: 0, never: 0 }
+  const prior30 = addDaysISO(start, -30)
+  const zoneOut = zones.map(z => {
+    const freq = z.expected_freq_days || 7
+    const last = lastMap[z.zone_id] || null
+    const st   = irrigationZoneStatus(last, freq, today)
+    counts[st.status]++
+    const zl       = winLogs.filter(l => l.zone_id === z.zone_id)
+    const runDates = [...new Set(zl.map(l => l.logged_date))]
+    const expected = Math.floor(7 / freq)
+    const name  = z.zone_label ? `${z.zone_name} (${z.zone_label})` : z.zone_name
+    const badge = { ok: 'OK', warn: 'WARN', alert: 'ALERT', critical: 'CRITICAL', never: 'NEVER LOGGED' }[st.status]
+    const out = [`  ${name} — every ${freq}d — ${badge}`]
+    out.push(last
+      ? `     Last run ${dayLabel(last)} (${st.daysSince}d ago${st.daysSince > freq ? `, ${st.daysSince - freq}d overdue` : ''}); this week: ${runDates.length ? runDates.map(dayLabel).join(', ') : 'none'}`
+      : `     No run ever logged for this zone`)
+    if (expected > 0 && runDates.length < expected) out.push(`     Missed this week: ${expected - runDates.length} of ${expected} expected run(s)`)
+
+    // Gaps longer than the zone's cycle in the last 30 days
+    const dates = [...new Set(logs.filter(l => l.zone_id === z.zone_id).map(l => l.logged_date))].sort()
+    const gaps = []
+    for (let i = 1; i < dates.length; i++) {
+      const g = diffDaysISO(dates[i - 1], dates[i])
+      if (g > freq + 2 && dates[i] >= addDaysISO(today, -30)) gaps.push(`${dayLabel(dates[i - 1])} → ${dayLabel(dates[i])} (${g}d)`)
+    }
+    if (gaps.length) out.push(`     Gaps in last 30 days: ${gaps.slice(-3).join('; ')}`)
+
+    // Shorter runs than usual
+    const avg = (arr) => { const m = arr.map(l => l.duration_mins || 0).filter(Boolean); return m.length ? m.reduce((a, b) => a + b, 0) / m.length : 0 }
+    const winAvg   = avg(zl)
+    const priorAvg = avg(logs.filter(l => l.zone_id === z.zone_id && l.logged_date >= prior30 && l.logged_date < start))
+    if (winAvg && priorAvg && winAvg < priorAvg * 0.6) {
+      out.push(`     Runs were shorter: avg ${Math.round(winAvg)} min vs ${Math.round(priorAvg)} min before`)
+      issues.push(`${z.zone_name}: runs cut to ~${Math.round(winAvg)} min (was ~${Math.round(priorAvg)}) — check water/motor`)
+    }
+    const noDur = zl.filter(l => !l.duration_mins).length
+    if (noDur) out.push(`     ${noDur} run(s) logged with no duration`)
+
+    if (st.status === 'never') issues.push(`${z.zone_name}: no irrigation has ever been logged`)
+    else if (st.status === 'critical' || st.status === 'alert') issues.push(`${z.zone_name}: ${st.daysSince}d since last run (due every ${freq}d) — ${st.consecutiveMisses} cycles missed`)
+    return { st, out }
+  })
+  zoneOut.sort((a, b) => rank[a.st.status] - rank[b.st.status])
+  const zoneLines = zoneOut.flatMap(z => z.out)
+
+  // ── Irrigation: data-quality flags ──
+  const backdated = winLogs.filter(l => { const s = istStamp(l.created_at).date; return s && diffDaysISO(l.logged_date, s) > 2 })
+  const untagged  = winLogs.filter(l => !l.zone_id)
+  if (!winLogs.length) issues.unshift('No irrigation was logged anywhere this week — not done, or not being recorded?')
+  else if (quietDays.length >= 3) issues.push(`${quietDays.length} of 7 days had no irrigation logged at all (${quietDays.map(dayLabel).join(', ')})`)
+  if (backdated.length) issues.push(`${backdated.length} irrigation entr${backdated.length > 1 ? 'ies were' : 'y was'} logged 3+ days after the date it claims`)
+  if (untagged.length) issues.push(`${untagged.length} irrigation entr${untagged.length > 1 ? 'ies have' : 'y has'} no zone selected, so ${untagged.length > 1 ? 'they do' : 'it does'} not count toward any zone`)
+
+  // ── Expenses ──
+  const inWindow = (utc) => { const d = istStamp(utc).date; return !!d && d >= start && d <= end }
+  const expNew    = expRows.filter(r => inWindow(r.created_at))
+  const expEdited = expRows.filter(r => !inWindow(r.created_at) && r.updated_at && inWindow(r.updated_at))
+  const expLines = []
+  if (!expNew.length) expLines.push('  No expenses were logged this week.')
+  const byCat = {}
+  expNew.forEach(r => {
+    const lg  = istStamp(r.created_at)
+    const lag = lg.date ? diffDaysISO(r.date, lg.date) : 0
+    const note = lag > 3 ? `  ⚠ logged ${lag}d after the expense date` : lag < 0 ? '  ⚠ expense date is in the future' : ''
+    const edited = r.updated_at && Math.abs(new Date(r.updated_at.replace(' ', 'T') + 'Z') - new Date(r.created_at.replace(' ', 'T') + 'Z')) > 60000
+    expLines.push(`  Logged ${dayLabel(lg.date)} ${lg.time} | expense date ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}${r.description ? ' | ' + r.description : ''}${edited ? ' | EDITED ' + dayLabel(istStamp(r.updated_at).date) : ''}${note}`)
+    byCat[r.category] = (byCat[r.category] || 0) + (r.amount || 0)
+  })
+  const expTotal = expNew.reduce((s, r) => s + (r.amount || 0), 0)
+  if (expNew.length) {
+    expLines.push(`  Total: ${inr(expTotal)} across ${expNew.length} entr${expNew.length > 1 ? 'ies' : 'y'}`)
+    expLines.push('  By category: ' + Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `${c} ${inr(v)}`).join(', '))
+  }
+  expEdited.forEach(r => expLines.push(`  Earlier entry EDITED ${dayLabel(istStamp(r.updated_at).date)}: ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}`))
+  const lateExp = expNew.filter(r => { const lg = istStamp(r.created_at).date; return lg && diffDaysISO(r.date, lg) > 3 })
+  if (lateExp.length) issues.push(`${lateExp.length} expense${lateExp.length > 1 ? 's were' : ' was'} logged more than 3 days after the expense date`)
+  if (expEdited.length) issues.push(`${expEdited.length} older expense entr${expEdited.length > 1 ? 'ies were' : 'y was'} edited this week`)
+
+  const cocoLines = cocoRows.filter(r => inWindow(r.created_at)).map(r =>
+    `  Logged ${dayLabel(istStamp(r.created_at).date)} | harvest ${r.harvest_date} | ${r.harvester_name || '—'} | ${(r.total_nuts || 0).toLocaleString('en-IN')} nuts | expense ${inr(r.total_expense)} | net ${inr(r.net_income)}`)
+
+  // ── Assemble ──
+  const zoneSummary = zones.length
+    ? `${counts.ok} OK, ${counts.warn} warn, ${counts.alert} alert, ${counts.critical} critical, ${counts.never} never logged (of ${zones.length} zones)`
+    : 'No irrigation zones are configured for this estate'
+  L.push(`Weekly report — ${label}`, `Week: ${dayLabel(start)} to ${dayLabel(end)}`, '')
+  L.push('NEEDS YOUR CALL')
+  if (issues.length) issues.forEach(i => L.push(`  • ${i}`)); else L.push('  • Nothing flagged — irrigation on schedule and expenses look normal.')
+  L.push('', 'IRRIGATION — ' + zoneSummary, '', 'Day by day:', ...strip)
+  if (zones.length) L.push('', 'By zone (worst first):', ...zoneLines)
+  L.push('', 'EXPENSES LOGGED THIS WEEK (date logged shown first)', ...expLines)
+  if (cocoLines.length) L.push('', 'COCONUT HARVESTS LOGGED THIS WEEK', ...cocoLines)
+  L.push('', 'Source: Estate360 weekly digest (every Monday, IST)')
+
+  const sev = counts.critical + counts.never + counts.alert
+  const subject = `💧 Estate360 weekly — ${label}: ${issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} need attention` : 'all on track'}, ${expNew.length} expense${expNew.length === 1 ? '' : 's'} (${inr(expTotal)})${sev ? ` · ${sev} zone${sev > 1 ? 's' : ''} overdue` : ''}`
+  return { subject, lines: L }
+}
+
 // ── STOPGAP: Resend API key via DB, bypassing a broken Cloudflare secret ──
 // env.RESEND_API_KEY has been confirmed, repeatedly, bound in the
 // Cloudflare dashboard but absent from the live Function's runtime env —
@@ -2635,6 +2809,49 @@ export async function onRequest(ctx) {
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
     const results = await syncIcalFeedsForVillas(DB, null)
     return json({ success: true, data: { feeds: results.length, results } })
+  }
+
+  // ── ESTATE360 WEEKLY DIGEST (external cron, not a logged-in user) ───────
+  // Same pattern as runCheckoutEmailAutosend / syncIcalFeeds: a GitHub Actions
+  // schedule (estate-weekly-digest.yml, Mondays 7:00 AM IST) POSTs here with
+  // CRON_SECRET. Emails the owner the week's irrigation compliance and the
+  // expenses the estate manager logged. `dryRun: true` returns the text
+  // without sending; `estate` limits it to one estate.
+  if (action === 'runEstateWeeklyDigest' && method === 'POST') {
+    const secret = request.headers.get('X-Cron-Secret') || ''
+    if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
+    if (!DB_ESTATES) return err('DB_ESTATES binding not configured', 503)
+    const dBody = await request.json().catch(() => ({}))
+    const today = istToday()
+
+    let estates = []
+    if (dBody.estate) estates = [dBody.estate]
+    else {
+      const { results: ez } = await DB_ESTATES.prepare(`SELECT DISTINCT estate FROM estate360_irrigation_zones WHERE active = 1`).all()
+      const { results: et } = await DB_ESTATES.prepare(`SELECT DISTINCT estate FROM estate360_estate_transactions WHERE created_at >= ?`).bind(addDaysISO(today, -9) + ' 00:00:00').all()
+      estates = [...new Set([...ez, ...et].map(r => r.estate).filter(Boolean))]
+      if (!estates.length) estates = ['pollachi']
+    }
+
+    const out = []
+    for (const estate of estates) {
+      try {
+        const d = await buildEstateWeeklyDigest(DB_ESTATES, estate, today)
+        if (dBody.dryRun) { out.push({ estate, subject: d.subject, text: d.lines.join('\n') }); continue }
+        await sendAlert(env, d.subject, d.lines, await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_weekly')
+        out.push({ estate, sent: true })
+      } catch (e) {
+        // A silent failure would read as "all clear" — tell the owner the report broke.
+        console.error('runEstateWeeklyDigest failed:', estate, e?.message || e)
+        if (!dBody.dryRun) {
+          await sendAlert(env, `⚠️ Estate360 weekly report FAILED (${ESTATE_LABELS[estate] || estate})`,
+            ['The weekly irrigation / expense report could not be built, so nothing below was checked.', '', `Error: ${e?.message || e}`],
+            await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_weekly')
+        }
+        out.push({ estate, error: e?.message || String(e) })
+      }
+    }
+    return json({ success: true, data: { results: out } })
   }
 
   // ── TRAINING MANUAL (public, passcode-gated) ────────────────────────────
@@ -4934,17 +5151,7 @@ export async function onRequest(ctx) {
 
           const lastLogged   = logs[0]?.logged_date || null
           const freq         = z.expected_freq_days || 7
-          const daysSince    = lastLogged ? Math.round((new Date(today) - new Date(lastLogged)) / 86400000) : null
-
-          let consecutiveMisses = 0
-          if (!lastLogged) { consecutiveMisses = 3 }
-          else {
-            const missedCycles = daysSince !== null ? Math.floor(daysSince / freq) : 3
-            consecutiveMisses = Math.max(0, missedCycles - 1)
-            if (daysSince > freq + 2) consecutiveMisses = Math.max(1, consecutiveMisses)
-          }
-
-          const status = !lastLogged ? 'never' : consecutiveMisses >= 3 ? 'critical' : consecutiveMisses === 2 ? 'alert' : consecutiveMisses === 1 ? 'warn' : daysSince !== null && daysSince > freq + 2 ? 'warn' : 'ok'
+          const { daysSince, consecutiveMisses, status } = irrigationZoneStatus(lastLogged, freq, today)
 
           return { zone_id: z.zone_id, zone_name: z.zone_name, zone_label: z.zone_label, expected_freq_days: freq, last_logged: lastLogged, days_since: daysSince, consecutive_misses: consecutiveMisses, status }
         }))
@@ -8158,6 +8365,30 @@ export async function onRequest(ctx) {
           parseFloat(body.secondPayment)||0, parseFloat(body.finalSettlement)||0, parseFloat(body.balanceDue)||0,
           body.nextHarvestDate||null, scheduledNext, body.notes||null, actor, actor, now(), now()
         ).run()
+
+        const cocoEstate = body.estate || 'pollachi'
+        const cocoLabel  = ESTATE_LABELS[cocoEstate] || cocoEstate
+        ctx.waitUntil(sendAlert(env, `🥥 Estate360 — New coconut harvest: ${(parseInt(body.totalNuts)||0).toLocaleString('en-IN')} nuts, net ${inr(body.netIncome)} (${cocoLabel})`, [
+          'Source: Estate360 > Coconut Tracker',
+          'Action: New coconut harvest logged',
+          '',
+          `Estate:        ${cocoLabel}`,
+          `Harvest date:  ${body.harvestDate}`,
+          `Harvester:     ${body.harvesterName || '—'}`,
+          `Nuts:          ${(parseInt(body.totalNuts)||0).toLocaleString('en-IN')} (rejected ${(parseInt(body.nutsRejected)||0).toLocaleString('en-IN')})`,
+          `Weight:        ${parseFloat(body.totalWeightKg)||0} kg @ ${inr(body.pricePerKg)}/kg`,
+          `Earnings:      ${inr(body.totalEarnings)}`,
+          `Expenses:      ${inr(body.totalExpense)}`,
+          `Net income:    ${inr(body.netIncome)}`,
+          `Balance due:   ${inr(body.balanceDue)}`,
+          `Next harvest:  ${scheduledNext || '—'} (${intervalDays} days)`,
+          `Notes:         ${body.notes || '—'}`,
+          `Harvest ID:    ${id}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ], await getEstateAlertEmail(DB, env, cocoEstate), DB, cocoEstate))
+
         return json({ success: true, data: { harvestId: id, scheduledNextHarvest: scheduledNext } })
       }
 
@@ -8211,7 +8442,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
+        ], await getEstateAlertEmail(DB, env, estateId), DB, estateId))
 
         return json({ success: true, data: { harvestId: id } })
       }
@@ -8294,7 +8525,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
+        ], await getEstateAlertEmail(DB, env, estateId), DB, estateId))
 
         return json({ success: true, data: { saved, sumTree, sumSheet, sumOttupal } })
       }
@@ -8369,7 +8600,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estateId), DB, estateId))
+        ], await getEstateAlertEmail(DB, env, estateId), DB, estateId))
 
         return json({ success: true, data: { settlementId: id } })
       }
@@ -8412,7 +8643,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
+        ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success:true, data:{ harvestId:id } })
       }
@@ -9167,7 +9398,7 @@ export async function onRequest(ctx) {
             '',
             `Updated by: ${actor}`,
             `Updated at: ${now()}`,
-          ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
+          ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
           return json({ success: true, data: { txnId } })
         } else {
@@ -9189,7 +9420,7 @@ export async function onRequest(ctx) {
             '',
             `Logged by: ${actor}`,
             `Logged at: ${now()}`,
-          ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
+          ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
           return json({ success: true, data: { txnId: id } })
         }
@@ -9263,7 +9494,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
+        ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { logId: id } })
       }
@@ -9292,7 +9523,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
+        ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { logId: id } })
       }
@@ -9336,7 +9567,7 @@ export async function onRequest(ctx) {
           '',
           `Logged by: ${actor}`,
           `Logged at: ${now()}`,
-        ], await getOwnerAlertEmail(DB, env, estate), DB, estate))
+        ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { id } })
       }

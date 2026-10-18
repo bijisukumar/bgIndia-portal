@@ -141,6 +141,10 @@ export default function CoconutDashboard() {
   const [drillCategory, setDrillCategory] = useState(null)   // 'YYYY-MM::Category' currently expanded to line items
   const [harvestLogOpen, setHarvestLogOpen] = useState(false)   // Harvest Log collapsible
   const [irrigationOpen, setIrrigationOpen] = useState(false)   // Irrigation Zone Health collapsible
+  const [reloadKey, setReloadKey] = useState(0)                 // bump to refetch harvests
+  const [editInterval, setEditInterval] = useState(false)       // next-harvest interval editor open
+  const [intervalInput, setIntervalInput] = useState('')
+  const [intervalSaving, setIntervalSaving] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -148,7 +152,7 @@ export default function CoconutDashboard() {
       .then(d => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false))
-  }, [year])
+  }, [year, reloadKey])
 
   useEffect(() => {
     // P&L only for owner
@@ -188,6 +192,22 @@ export default function CoconutDashboard() {
     ? daysBetween(localTodayStr(), nextHarvestDate)
     : null
 
+  // Interval of the latest harvest (default 45; adjustable per season)
+  const latestHarvest = harvests[0]
+  const intervalDays  = latestHarvest?.intervalDays || 45
+
+  const saveInterval = async () => {
+    const n = parseInt(intervalInput)
+    if (!latestHarvest?.harvestId || !(n >= 1 && n <= 365)) return
+    setIntervalSaving(true)
+    try {
+      await api.setCoconutInterval({ harvestId: latestHarvest.harvestId, intervalDays: n })
+      setEditInterval(false)
+      setReloadKey(k => k + 1)
+    } catch { /* leave editor open so the value can be retried */ }
+    finally { setIntervalSaving(false) }
+  }
+
   return (
     <div className="screen">
       <div className="topbar">
@@ -215,7 +235,30 @@ export default function CoconutDashboard() {
               {daysToNext === 0 ? 'Today!' : daysToNext > 0 ? `in ${daysToNext} days` : `${Math.abs(daysToNext)} days overdue`}
             </div>
           )}
-          <div style={s.nextNote}>Target interval: 45 days</div>
+          {editInterval ? (
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, marginTop:8 }}>
+              <input type="number" min="1" max="365" value={intervalInput}
+                onChange={e => setIntervalInput(e.target.value)}
+                style={{ width:64, background:'#12161c', border:'1px solid rgba(200,144,58,0.4)', borderRadius:6, color:'#C8903A', padding:'4px 8px', fontSize:'0.8rem', textAlign:'center' }} />
+              <span style={s.nextNote}>days after {latestHarvest?.date ? fmtDate(latestHarvest.date) : 'last harvest'}</span>
+              <button onClick={saveInterval} disabled={intervalSaving}
+                style={{ background:'#C8903A', color:'#111', border:'none', borderRadius:6, padding:'4px 10px', fontSize:'0.72rem', fontWeight:700, cursor:'pointer' }}>
+                {intervalSaving ? '…' : 'Save'}
+              </button>
+              <button onClick={() => setEditInterval(false)}
+                style={{ background:'none', color:'#8A9BAE', border:'none', fontSize:'0.72rem', cursor:'pointer' }}>Cancel</button>
+            </div>
+          ) : (
+            <div style={s.nextNote}>
+              Target interval: {intervalDays} days
+              {latestHarvest?.harvestId && (
+                <button onClick={() => { setIntervalInput(String(intervalDays)); setEditInterval(true) }}
+                  style={{ background:'none', border:'none', color:'#C8903A', fontSize:'0.6rem', marginLeft:8, cursor:'pointer', textDecoration:'underline' }}>
+                  Adjust
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
 

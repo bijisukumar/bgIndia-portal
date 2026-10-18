@@ -271,6 +271,7 @@ export const api = {
   // ── COCONUT ──────────────────────────────────────────────
   saveCoconutHarvest:   (data)   => post('saveCoconutHarvest', data),
   getCoconutHarvests:   (year)   => get('getCoconutHarvests', { year }),
+  setCoconutInterval:   (data)   => post('setCoconutInterval', data),
 
   // ── RUBBER ───────────────────────────────────────────────
   saveRubberHarvest:    (data)        => post('saveRubberHarvest', data),

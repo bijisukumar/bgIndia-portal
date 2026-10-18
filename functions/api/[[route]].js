@@ -1542,7 +1542,7 @@ export async function onRequest(ctx) {
   }
 
   const ESTATE_ACTIONS = new Set([
-    'getCoconutHarvests', 'saveCoconutHarvest',
+    'getCoconutHarvests', 'saveCoconutHarvest', 'setCoconutInterval',
     'getRubberHarvests',  'saveRubberHarvest',
     'getRubberProduction', 'saveRubberProduction', 'deleteRubberProduction', 'getRubberMonthly', 'backfillRubberWages',
     'getManagerSettlements', 'saveManagerSettlement', 'deleteManagerSettlement',
@@ -4045,6 +4045,7 @@ export async function onRequest(ctx) {
         const netIncome      = results.reduce((s, r) => s + (r.net_income || 0), 0)
         const totalExpense   = results.reduce((s, r) => s + (r.total_expense || 0), 0)
         const harvests = results.map(r => ({
+          harvestId:         r.harvest_id,
           date:              r.harvest_date,
           monthShort:        new Date(r.harvest_date).toLocaleString('en-IN', { month: 'short' }),
           year:              new Date(r.harvest_date).getFullYear(),
@@ -4057,6 +4058,9 @@ export async function onRequest(ctx) {
           totalExpense:      r.total_expense     || 0,
           balanceDue:        r.balance_due       || 0,
           scheduledNext:     r.scheduled_harvest_date || null,
+          intervalDays:      (r.harvest_date && r.scheduled_harvest_date)
+            ? Math.round((new Date(r.scheduled_harvest_date) - new Date(r.harvest_date)) / 86400000)
+            : 45,
           actualNext:        r.next_harvest_date || null,
         }))
         const nextHarvestDate = results[0]?.scheduled_harvest_date || null
@@ -8124,7 +8128,9 @@ export async function onRequest(ctx) {
       if (action === 'saveCoconutHarvest') {
         const id = genId('CH')
         const harvestDate = body.harvestDate
-        const scheduledNext = harvestDate ? new Date(new Date(harvestDate).getTime() + 45 * 86400000).toISOString().slice(0, 10) : null
+        // Days until the next harvest — default 45, adjustable per harvest (e.g. 55 in a slow season)
+        const intervalDays  = Math.min(Math.max(parseInt(body.intervalDays) || 45, 1), 365)
+        const scheduledNext = harvestDate ? new Date(new Date(harvestDate).getTime() + intervalDays * 86400000).toISOString().slice(0, 10) : null
         await ActiveDB.prepare(`
           INSERT INTO estate360_coconut_harvests
             (harvest_id, estate_id, harvester_name, harvest_date, final_payment_date,
@@ -8153,6 +8159,18 @@ export async function onRequest(ctx) {
           body.nextHarvestDate||null, scheduledNext, body.notes||null, actor, actor, now(), now()
         ).run()
         return json({ success: true, data: { harvestId: id, scheduledNextHarvest: scheduledNext } })
+      }
+
+      // COCONUT HARVEST — Change the days-until-next-harvest on an existing record
+      if (action === 'setCoconutInterval') {
+        const intervalDays = parseInt(body.intervalDays)
+        if (!body.harvestId || !(intervalDays >= 1 && intervalDays <= 365)) return err('harvestId and intervalDays (1-365) required', 400)
+        const row = await ActiveDB.prepare(`SELECT harvest_date FROM estate360_coconut_harvests WHERE harvest_id = ?`).bind(body.harvestId).first()
+        if (!row?.harvest_date) return err('Harvest not found', 404)
+        const scheduledNext = new Date(new Date(row.harvest_date).getTime() + intervalDays * 86400000).toISOString().slice(0, 10)
+        await ActiveDB.prepare(`UPDATE estate360_coconut_harvests SET scheduled_harvest_date = ?, updated_by = ?, updated_at = ? WHERE harvest_id = ?`)
+          .bind(scheduledNext, actor, now(), body.harvestId).run()
+        return json({ success: true, data: { scheduledNextHarvest: scheduledNext, intervalDays } })
       }
 
       // RUBBER HARVEST — Record entries (Mapped cleanly to exact layout)

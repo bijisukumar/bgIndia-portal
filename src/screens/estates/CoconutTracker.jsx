@@ -48,6 +48,7 @@ export default function CoconutTracker() {
     harvestNuts: '', harvestCostPerNut: '0',
     dehuskNuts: '', dehuskCostPerNut: CONFIG.dehuskDefaultRate.toString(),
     tractorExpense: '0', otherExpense: '0',
+    intervalDays: '45',
     advancePayment: '0', advancePaymentDate: '',
     secondPayment: '0', finalSettlement: '0',
     notes: '',
@@ -98,7 +99,8 @@ export default function CoconutTracker() {
   const rejPct           = totalNuts > 0 ? nutsRejected / totalNuts : 0
   const flagNoRejRev     = nutsRejected > 0 && rejRevenue === 0
   const flagHighRej      = rejPct > 0.02
-  const nextHarvestDate  = addDays(form.harvestDate, 45)
+  const intervalDays     = Math.min(Math.max(parseInt(form.intervalDays) || 45, 1), 365)
+  const nextHarvestDate  = addDays(form.harvestDate, intervalDays)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 4000)
@@ -113,7 +115,7 @@ export default function CoconutTracker() {
       await api.saveCoconutHarvest({
         ...form, nutsRejected, earningsMain, avgWeight, huskEarnings,
         totalEarnings, harvestExpense, dehuskExpense, totalExpense, netIncome,
-        totalPaid, balanceDue, nextHarvestDate, flagNoRejRev, flagHighRej, estate: 'pollachi',
+        totalPaid, balanceDue, intervalDays, nextHarvestDate, flagNoRejRev, flagHighRej, estate: 'pollachi',
       })
       showToast('Harvest record saved ✓')
       setTimeout(goBack, 1500)
@@ -184,6 +186,10 @@ export default function CoconutTracker() {
                 value={form.finalPaymentDate} onChange={e => set('finalPaymentDate', e.target.value)} />
             </Field>
           </div>
+          <Field label="Days until next harvest" hint="(default 45 — e.g. 55 in a slow season)">
+            <input className="field-input" type="number" min="1" max="365" placeholder="45"
+              value={form.intervalDays} onChange={e => set('intervalDays', e.target.value)} />
+          </Field>
           {nextHarvestDate && (
             <div style={{ color: '#5C7080', fontSize: '0.75rem', marginTop: '2px' }}>
               📅 Next harvest estimate: <span style={{ color: '#80CBC4' }}>{nextHarvestDate}</span>

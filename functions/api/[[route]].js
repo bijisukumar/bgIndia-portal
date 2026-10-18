@@ -572,12 +572,12 @@ const istStamp = (utc) => {
 }
 const inr = n => '₹' + (Number(n) || 0).toLocaleString('en-IN')
 
-async function buildEstateWeeklyDigest(DBE, estate, today) {
+async function buildEstateWeeklyDigest(DBE, estate, today, span = 7) {
   const label    = ESTATE_LABELS[estate] || estate
-  const start    = addDaysISO(today, -7)
+  const start    = addDaysISO(today, -span)
   const end      = addDaysISO(today, -1)
-  const days     = Array.from({ length: 7 }, (_, i) => addDaysISO(start, i))
-  const lookback = addDaysISO(today, -60)
+  const days     = Array.from({ length: span }, (_, i) => addDaysISO(start, i))
+  const lookback = addDaysISO(today, -(span + 60))
   const sinceTs  = addDaysISO(start, -1) + ' 00:00:00'   // UTC cut a day early; filtered to IST dates below
 
   const { results: zones } = await DBE.prepare(`SELECT * FROM estate360_irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`).bind(estate).all()
@@ -612,23 +612,23 @@ async function buildEstateWeeklyDigest(DBE, estate, today) {
     counts[st.status]++
     const zl       = winLogs.filter(l => l.zone_id === z.zone_id)
     const runDates = [...new Set(zl.map(l => l.logged_date))]
-    const expected = Math.floor(7 / freq)
+    const expected = Math.floor(span / freq)
     const name  = z.zone_label ? `${z.zone_name} (${z.zone_label})` : z.zone_name
     const badge = { ok: 'OK', warn: 'WARN', alert: 'ALERT', critical: 'CRITICAL', never: 'NEVER LOGGED' }[st.status]
     const out = [`  ${name} — every ${freq}d — ${badge}`]
     out.push(last
-      ? `     Last run ${dayLabel(last)} (${st.daysSince}d ago${st.daysSince > freq ? `, ${st.daysSince - freq}d overdue` : ''}); this week: ${runDates.length ? runDates.map(dayLabel).join(', ') : 'none'}`
+      ? `     Last run ${dayLabel(last)} (${st.daysSince}d ago${st.daysSince > freq ? `, ${st.daysSince - freq}d overdue` : ''}); in period: ${runDates.length ? runDates.map(dayLabel).join(', ') : 'none'}`
       : `     No run ever logged for this zone`)
-    if (expected > 0 && runDates.length < expected) out.push(`     Missed this week: ${expected - runDates.length} of ${expected} expected run(s)`)
+    if (expected > 0 && runDates.length < expected) out.push(`     Missed in period: ${expected - runDates.length} of ${expected} expected run(s)`)
 
     // Gaps longer than the zone's cycle in the last 30 days
     const dates = [...new Set(logs.filter(l => l.zone_id === z.zone_id).map(l => l.logged_date))].sort()
     const gaps = []
     for (let i = 1; i < dates.length; i++) {
       const g = diffDaysISO(dates[i - 1], dates[i])
-      if (g > freq + 2 && dates[i] >= addDaysISO(today, -30)) gaps.push(`${dayLabel(dates[i - 1])} → ${dayLabel(dates[i])} (${g}d)`)
+      if (g > freq + 2 && dates[i] >= addDaysISO(today, -Math.max(30, span))) gaps.push(`${dayLabel(dates[i - 1])} → ${dayLabel(dates[i])} (${g}d)`)
     }
-    if (gaps.length) out.push(`     Gaps in last 30 days: ${gaps.slice(-3).join('; ')}`)
+    if (gaps.length) out.push(`     Gaps in last ${Math.max(30, span)} days: ${gaps.slice(-3).join('; ')}`)
 
     // Shorter runs than usual
     const avg = (arr) => { const m = arr.map(l => l.duration_mins || 0).filter(Boolean); return m.length ? m.reduce((a, b) => a + b, 0) / m.length : 0 }
@@ -651,8 +651,8 @@ async function buildEstateWeeklyDigest(DBE, estate, today) {
   // ── Irrigation: data-quality flags ──
   const backdated = winLogs.filter(l => { const s = istStamp(l.created_at).date; return s && diffDaysISO(l.logged_date, s) > 2 })
   const untagged  = winLogs.filter(l => !l.zone_id)
-  if (!winLogs.length) issues.unshift('No irrigation was logged anywhere this week — not done, or not being recorded?')
-  else if (quietDays.length >= 3) issues.push(`${quietDays.length} of 7 days had no irrigation logged at all (${quietDays.map(dayLabel).join(', ')})`)
+  if (!winLogs.length) issues.unshift('No irrigation was logged anywhere in this period — not done, or not being recorded?')
+  else if (quietDays.length >= Math.ceil(span * 0.4)) issues.push(`${quietDays.length} of ${span} days had no irrigation logged at all${quietDays.length <= 8 ? ' (' + quietDays.map(dayLabel).join(', ') + ')' : ' — see the day-by-day list below'}`)
   if (backdated.length) issues.push(`${backdated.length} irrigation entr${backdated.length > 1 ? 'ies were' : 'y was'} logged 3+ days after the date it claims`)
   if (untagged.length) issues.push(`${untagged.length} irrigation entr${untagged.length > 1 ? 'ies have' : 'y has'} no zone selected, so ${untagged.length > 1 ? 'they do' : 'it does'} not count toward any zone`)
 
@@ -661,7 +661,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today) {
   const expNew    = expRows.filter(r => inWindow(r.created_at))
   const expEdited = expRows.filter(r => !inWindow(r.created_at) && r.updated_at && inWindow(r.updated_at))
   const expLines = []
-  if (!expNew.length) expLines.push('  No expenses were logged this week.')
+  if (!expNew.length) expLines.push('  No expenses were logged in this period.')
   const byCat = {}
   expNew.forEach(r => {
     const lg  = istStamp(r.created_at)
@@ -679,7 +679,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today) {
   expEdited.forEach(r => expLines.push(`  Earlier entry EDITED ${dayLabel(istStamp(r.updated_at).date)}: ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}`))
   const lateExp = expNew.filter(r => { const lg = istStamp(r.created_at).date; return lg && diffDaysISO(r.date, lg) > 3 })
   if (lateExp.length) issues.push(`${lateExp.length} expense${lateExp.length > 1 ? 's were' : ' was'} logged more than 3 days after the expense date`)
-  if (expEdited.length) issues.push(`${expEdited.length} older expense entr${expEdited.length > 1 ? 'ies were' : 'y was'} edited this week`)
+  if (expEdited.length) issues.push(`${expEdited.length} older expense entr${expEdited.length > 1 ? 'ies were' : 'y was'} edited in this period`)
 
   const cocoLines = cocoRows.filter(r => inWindow(r.created_at)).map(r =>
     `  Logged ${dayLabel(istStamp(r.created_at).date)} | harvest ${r.harvest_date} | ${r.harvester_name || '—'} | ${(r.total_nuts || 0).toLocaleString('en-IN')} nuts | expense ${inr(r.total_expense)} | net ${inr(r.net_income)}`)
@@ -688,17 +688,17 @@ async function buildEstateWeeklyDigest(DBE, estate, today) {
   const zoneSummary = zones.length
     ? `${counts.ok} OK, ${counts.warn} warn, ${counts.alert} alert, ${counts.critical} critical, ${counts.never} never logged (of ${zones.length} zones)`
     : 'No irrigation zones are configured for this estate'
-  L.push(`Weekly report — ${label}`, `Week: ${dayLabel(start)} to ${dayLabel(end)}`, '')
+  L.push(`${span === 7 ? 'Weekly' : span + '-day'} report — ${label}`, `${span === 7 ? 'Week' : 'Period'}: ${dayLabel(start)} to ${dayLabel(end)}`, '')
   L.push('NEEDS YOUR CALL')
   if (issues.length) issues.forEach(i => L.push(`  • ${i}`)); else L.push('  • Nothing flagged — irrigation on schedule and expenses look normal.')
   L.push('', 'IRRIGATION — ' + zoneSummary, '', 'Day by day:', ...strip)
   if (zones.length) L.push('', 'By zone (worst first):', ...zoneLines)
-  L.push('', 'EXPENSES LOGGED THIS WEEK (date logged shown first)', ...expLines)
-  if (cocoLines.length) L.push('', 'COCONUT HARVESTS LOGGED THIS WEEK', ...cocoLines)
+  L.push('', `EXPENSES LOGGED ${span === 7 ? 'THIS WEEK' : 'IN THE LAST ' + span + ' DAYS'} (date logged shown first)`, ...expLines)
+  if (cocoLines.length) L.push('', 'COCONUT HARVESTS LOGGED IN THIS PERIOD', ...cocoLines)
   L.push('', 'Source: Estate360 weekly digest (every Monday, IST)')
 
   const sev = counts.critical + counts.never + counts.alert
-  const subject = `💧 Estate360 weekly — ${label}: ${issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} need attention` : 'all on track'}, ${expNew.length} expense${expNew.length === 1 ? '' : 's'} (${inr(expTotal)})${sev ? ` · ${sev} zone${sev > 1 ? 's' : ''} overdue` : ''}`
+  const subject = `💧 Estate360 ${span === 7 ? 'weekly' : span + '-day'} report — ${label}: ${issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} need attention` : 'all on track'}, ${expNew.length} expense${expNew.length === 1 ? '' : 's'} (${inr(expTotal)})${sev ? ` · ${sev} zone${sev > 1 ? 's' : ''} overdue` : ''}`
   return { subject, lines: L }
 }
 
@@ -2836,7 +2836,7 @@ export async function onRequest(ctx) {
     const out = []
     for (const estate of estates) {
       try {
-        const d = await buildEstateWeeklyDigest(DB_ESTATES, estate, today)
+        const d = await buildEstateWeeklyDigest(DB_ESTATES, estate, today, Math.min(Math.max(parseInt(dBody.days) || 7, 1), 35))
         if (dBody.dryRun) { out.push({ estate, subject: d.subject, text: d.lines.join('\n') }); continue }
         await sendAlert(env, d.subject, d.lines, await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_weekly')
         out.push({ estate, sent: true })

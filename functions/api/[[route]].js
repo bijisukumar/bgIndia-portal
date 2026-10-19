@@ -1731,7 +1731,7 @@ export async function onRequest(ctx) {
     'logIrrigation',         
     'getEstateHighlights',    
     'getIrrigationZoneHealth', 
-    'saveIrrigationZoneLog',   
+    'saveIrrigationZoneLog', 'saveIrrigationZoneLogs',   
     'saveIrrigationZone',      
     'saveFertilization',      
     'saveMangoHarvest',        
@@ -9547,6 +9547,45 @@ export async function onRequest(ctx) {
         ], await getEstateAlertEmail(DB, env, estate), DB, estate))
 
         return json({ success: true, data: { logId: id } })
+      }
+
+      // IRRIGATION ZONE LOGS — several zones in one save, ONE summary email
+      // (saveIrrigationZoneLog above emails once per zone: nine zones, nine emails)
+      if (action === 'saveIrrigationZoneLogs') {
+        const { estate, loggedDate, durationMins, notes } = body
+        const zoneList = Array.isArray(body.zones) ? body.zones.filter(z => z && z.zoneId) : []
+        if (!estate || !loggedDate || !zoneList.length) return err('estate, loggedDate and at least one zone required')
+        if (zoneList.length > 50) return err('Too many zones in one save', 400)
+        const mins = parseInt(durationMins) || 0
+        const ids  = []
+        const stmts = zoneList.map(z => {
+          const id = 'irr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+          ids.push(id)
+          return ActiveDB.prepare(
+            `INSERT INTO estate360_irrigation_logs (log_id, estate, logged_date, notes, created_by, created_at, zone_id, zone_name, duration_mins)
+             VALUES (?,?,?,?,?,?,?,?,?)`
+          ).bind(id, estate, loggedDate, notes||null, actor, now(), z.zoneId, z.zoneName||null, mins)
+        })
+        await ActiveDB.batch(stmts)
+
+        const batchEstateLabel = ESTATE_LABELS[estate] || estate
+        const rained = /^rain/i.test(notes || '')
+        const names  = zoneList.map(z => z.zoneName || z.zoneId)
+        ctx.waitUntil(sendAlert(env, `${rained ? '🌧' : '💧'} Estate360 — Irrigation logged: ${names.length} zone${names.length > 1 ? 's' : ''} (${batchEstateLabel})`, [
+          'Source: Estate360 > Irrigation Log',
+          `Action: ${rained ? 'Rain day — all selected zones logged' : 'Irrigation logged'}`,
+          '',
+          `Estate:    ${batchEstateLabel}`,
+          `Date:      ${loggedDate}`,
+          `Zones (${names.length}): ${names.join(', ')}`,
+          `Duration:  ${mins} mins${mins ? ' per zone' : ''}`,
+          `Notes:     ${notes || '—'}`,
+          '',
+          `Logged by: ${actor}`,
+          `Logged at: ${now()}`,
+        ], await getEstateAlertEmail(DB, env, estate), DB, estate))
+
+        return json({ success: true, data: { logIds: ids, zones: names.length } })
       }
 
       // IRRIGATION ZONE CONFIG — Cleaned to completely isolate non-existent 'notes' column

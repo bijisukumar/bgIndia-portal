@@ -73,16 +73,14 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     if (selectedZones.length === 0) { showToast('Select at least one zone', 'error'); return }
     setSaving(true)
     try {
-      await Promise.all(selectedZones.map(z =>
-        api.saveIrrigationZoneLog({
-          estate,
-          zoneId:       z.zone_id,
-          zoneName:     z.zone_name,
-          loggedDate:   date,
-          durationMins: parseInt(duration) || 0,
-          notes:        (raining ? ['Rain', notes.trim()].filter(Boolean).join(' — ') : notes.trim()) || null,
-        })
-      ))
+      // One request, one summary email — not one per zone
+      await api.saveIrrigationZoneLogs({
+        estate,
+        loggedDate:   date,
+        durationMins: parseInt(duration) || 0,
+        notes:        (raining ? ['Rain', notes.trim()].filter(Boolean).join(' — ') : notes.trim()) || null,
+        zones:        selectedZones.map(z => ({ zoneId: z.zone_id, zoneName: z.zone_name })),
+      })
       showToast(`✅ Logged irrigation for ${selectedZones.length} zone${selectedZones.length>1?'s':''}`)
       setSelected({})
       setRaining(false)

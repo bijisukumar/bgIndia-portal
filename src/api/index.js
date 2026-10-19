@@ -260,6 +260,7 @@ export const api = {
   getEstateHighlights:        (estate) => get('getEstateHighlights', { estate }),
   getIrrigationZoneHealth:    (estate) => get('getIrrigationZoneHealth', { estate }),
   saveIrrigationZoneLog:      (data)   => post('saveIrrigationZoneLog', data),
+  saveIrrigationZoneLogs:     (data)   => post('saveIrrigationZoneLogs', data),
   saveIrrigationZone:         (data)   => post('saveIrrigationZone', data),
   saveFertilization:       (data)   => post('saveFertilization', data),
   saveMangoHarvest:        (data)   => post('saveMangoHarvest', data),

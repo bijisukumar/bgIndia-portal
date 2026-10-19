@@ -571,6 +571,8 @@ const istStamp = (utc) => {
   const d = new Date(new Date(String(utc).replace(' ', 'T') + 'Z').getTime() + 19800000)
   return isNaN(d) ? { date: null, time: '' } : { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) }
 }
+// The irrigation screen prefixes notes with "Rain" when the day's watering was rain.
+const isRainLog = l => /^rain/i.test(l.notes || '')
 const inr = n => '₹' + (Number(n) || 0).toLocaleString('en-IN')
 
 async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = null) {
@@ -583,7 +585,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
   const sinceTs  = addDaysISO(start, -1) + ' 00:00:00'   // UTC cut a day early; filtered to IST dates below
 
   const { results: zones } = await DBE.prepare(`SELECT * FROM estate360_irrigation_zones WHERE estate = ? AND active = 1 ORDER BY sort_order ASC`).bind(estate).all()
-  const { results: logs }  = await DBE.prepare(`SELECT zone_id, zone_name, logged_date, duration_mins, created_by, created_at FROM estate360_irrigation_logs WHERE estate = ? AND logged_date >= ? ORDER BY logged_date ASC`).bind(estate, lookback).all()
+  const { results: logs }  = await DBE.prepare(`SELECT zone_id, zone_name, logged_date, duration_mins, notes, created_by, created_at FROM estate360_irrigation_logs WHERE estate = ? AND logged_date >= ? ORDER BY logged_date ASC`).bind(estate, lookback).all()
   const { results: lastRows } = await DBE.prepare(`SELECT zone_id, MAX(logged_date) AS last FROM estate360_irrigation_logs WHERE estate = ? AND zone_id IS NOT NULL AND logged_date <= ? GROUP BY zone_id`).bind(estate, end).all()
   const { results: expRows } = await DBE.prepare(`SELECT txn_id, date, category, amount, paid_to, description, created_by, created_at, updated_at FROM estate360_estate_transactions WHERE estate = ? AND type = 'expense' AND (created_at >= ? OR updated_at >= ?) ORDER BY created_at ASC`).bind(estate, sinceTs, sinceTs).all()
   const { results: cocoRows } = await DBE.prepare(`SELECT harvest_date, harvester_name, total_nuts, total_expense, net_income, created_at FROM estate360_coconut_harvests WHERE estate_id = ? AND created_at >= ? ORDER BY created_at ASC`).bind(estate, sinceTs).all()
@@ -600,7 +602,8 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
     if (!dl.length) { quietDays.push(d); return `  ✗ ${dayLabel(d)} — nothing logged` }
     const mins = dl.reduce((s, l) => s + (l.duration_mins || 0), 0)
     const names = [...new Set(dl.map(l => l.zone_name || 'untagged'))].join(', ')
-    return `  ✓ ${dayLabel(d)} — ${dl.length} run${dl.length > 1 ? 's' : ''}, ${mins} min (${names})`
+    const rained = dl.some(isRainLog)
+    return `  ✓ ${dayLabel(d)} — ${rained ? 'rain, ' : ''}${dl.length} run${dl.length > 1 ? 's' : ''}, ${mins} min (${names})`
   })
 
   // ── Irrigation: per zone ──
@@ -640,7 +643,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
       out.push(`     Runs were shorter: avg ${Math.round(winAvg)} min vs ${Math.round(priorAvg)} min before`)
       issues.push(`${z.zone_name}: runs cut to ~${Math.round(winAvg)} min (was ~${Math.round(priorAvg)}) — check water/motor`)
     }
-    const noDur = zl.filter(l => !l.duration_mins).length
+    const noDur = zl.filter(l => !l.duration_mins && !isRainLog(l)).length
     if (noDur) out.push(`     ${noDur} run(s) logged with no duration`)
 
     if (st.status === 'never') issues.push(`${z.zone_name}: no irrigation has ever been logged`)

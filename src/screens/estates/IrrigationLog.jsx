@@ -23,6 +23,7 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   const [date, setDate]         = useState(TODAY)
   const [duration, setDuration] = useState('')
   const [notes, setNotes]       = useState('')
+  const [raining, setRaining]   = useState(false)   // rain watered every zone
   const [saving, setSaving]     = useState(false)
   const [toast, setToast]       = useState(null)
   const [history, setHistory]   = useState([])
@@ -62,6 +63,12 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
 
   const selectedZones = zones.filter(z => selected[z.zone_id])
 
+  // A rainy day waters everything: ticking the box selects every zone, unticking clears them.
+  function toggleRaining(on) {
+    setRaining(on)
+    if (on) selectAll(); else setSelected({})
+  }
+
   async function handleSave() {
     if (selectedZones.length === 0) { showToast('Select at least one zone', 'error'); return }
     setSaving(true)
@@ -73,11 +80,12 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
           zoneName:     z.zone_name,
           loggedDate:   date,
           durationMins: parseInt(duration) || 0,
-          notes:        notes.trim() || null,
+          notes:        (raining ? ['Rain', notes.trim()].filter(Boolean).join(' — ') : notes.trim()) || null,
         })
       ))
       showToast(`✅ Logged irrigation for ${selectedZones.length} zone${selectedZones.length>1?'s':''}`)
       setSelected({})
+      setRaining(false)
       setNotes('')
       setDuration('')
       loadZones() // refresh zone health
@@ -133,6 +141,11 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                 <label style={{display:'block', fontSize:'0.68rem', color:'var(--text-dim)', letterSpacing:'1px', marginBottom:'4px'}}>NOTES</label>
                 <input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Any issues, pump problems, partial zones…" style={INP}/>
               </div>
+              <label style={{display:'flex', alignItems:'center', gap:'10px', marginTop:'12px', cursor:'pointer', userSelect:'none', fontSize:'0.86rem', color: raining ? '#85B7EB' : 'var(--text)'}}>
+                <input type="checkbox" checked={raining} onChange={e=>toggleRaining(e.target.checked)}
+                  style={{width:'20px', height:'20px', accentColor:'#185FA5', flexShrink:0}}/>
+                🌧 Raining — rain watered all zones
+              </label>
             </div>
 
             {/* Zone selector */}

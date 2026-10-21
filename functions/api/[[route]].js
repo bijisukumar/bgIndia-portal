@@ -4732,6 +4732,10 @@ export async function onRequest(ctx) {
                   night_fee, cleaning_fee, host_service_fee, you_earn,
                   guest_service_fee, guest_paid_total,
                   airbnb_conf, folder_created,
+                  -- Whether the guest has done the online check-in form. The WhatsApp intro
+                  -- (thanks, or the ask) and the "Send check-in link" button both read it. It was
+                  -- missing from this list, so every guest looked unregistered and was asked again.
+                  checkin_form_submitted, checkin_form_submitted_at,
                   request_early_checkin, request_late_checkout,
                   early_checkin_time, late_checkout_time,
                   nationality, purpose_of_visit, mode_of_transport, eta,

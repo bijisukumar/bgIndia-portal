@@ -78,6 +78,13 @@ function checkinUrlFor(stay) {
   return token ? `${base}/checkin/${token}` : ''
 }
 
+// Spliced into {checkinPrompt} when the guest has ALREADY done the online check-in form: a thank
+// you in place of the ask. A host can word it itself with CONFIG.guestMessages.hostIntro
+// .checkinThanks. Blank lines either side keep the paragraph spacing, as the ask's do. No emoji:
+// it goes out through wa.me, where they arrive as "�" on WhatsApp for Windows.
+const DEFAULT_CHECKIN_THANKS =
+  '\n*Pre-Arrival Registration*\nThank you for completing your online check-in registration — it helps us ensure a smooth, hassle-free arrival.\n'
+
 export function buildHostIntroMessage(stay = {}) {
   const cfg = CONFIG.guestMessages?.hostIntro
   if (!cfg?.template) return null   // see buildCheckinLinkMessage — same runtime-config fragility
@@ -115,13 +122,15 @@ export function buildHostIntroMessage(stay = {}) {
     ? (cfg.bedType ? `${roomsForParty} [${cfg.bedType}]` : `${roomsForParty}`)
     : '—'
 
-  // Never ask a guest who has already registered. Also omitted entirely if
-  // this host has no check-in link configured, so the message can't ship a
-  // dangling "please complete it here:" with nothing after it.
+  // A guest who has already done the online check-in form is THANKED for it, never asked again
+  // (stay.checkin_form_submitted: getUpcomingStays must return it; it once did not, so every guest
+  // looked unregistered and was asked to register a second time). One who has not is asked, with
+  // the link; if this host has no check-in link configured the ask is left out entirely, so the
+  // message can't ship a dangling "please complete it here:" with nothing after it.
   const url = checkinUrlFor(stay)
-  const checkinPrompt = (stay.checkin_form_submitted || !url)
-    ? ''
-    : renderTemplate(cfg.checkinPrompt, { checkinUrl: url })
+  let checkinPrompt = ''
+  if (stay.checkin_form_submitted) checkinPrompt = cfg.checkinThanks != null ? cfg.checkinThanks : DEFAULT_CHECKIN_THANKS
+  else if (url) checkinPrompt = renderTemplate(cfg.checkinPrompt, { checkinUrl: url })
 
   // An approved early-checkin/late-checkout time overrides the house
   // default — this is exactly what Complete Booking already shows Raman,

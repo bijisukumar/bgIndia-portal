@@ -101,6 +101,10 @@ function getClient() {
         storeCarPhotos:   !!resp.data.storeCarPhotos,
         // Wording of the guest's check-in email, from the host config (null: built-in text).
         checkinConfirmation: resp.data.checkinConfirmation || null,
+        // The biggest party the check-in form takes without asking the guest to confirm the count with the
+        // host (the villa's rate card), and the host config's sentence about it (null: DEFAULT_PARTY_NOTE).
+        partyLimit:       resp.data.partyLimit || 12,
+        partyNote:        resp.data.partyNote || null,
       };
       Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
       return _CLIENT;
@@ -125,6 +129,8 @@ function getClient() {
     bedroomCount:      4,
     storeCarPhotos:    false,
     checkinConfirmation: null,
+    partyLimit:        12,
+    partyNote:         null,
   };
   return _CLIENT;
 }
@@ -667,6 +673,12 @@ var DEFAULT_CHECKIN_EMAIL = {
   ].join('\n'),
 };
 
+// What the guest's confirmation says to a party bigger than the villa's rate card prices (CLIENT.partyLimit,
+// the number the check-in form uses): the form already asks them to confirm the count with the host after
+// they submit, and the email says it again for a guest who closed the page. The host config can word it
+// (checkinConfirmation.partyNote); {party} and {limit} are filled in.
+var DEFAULT_PARTY_NOTE = 'Your party is {party} guests, more than {limit}. Please connect with your host to confirm the guest count.';
+
 // Subject, template and bed type for the guest's check-in confirmation: the host config's
 // block when it has a usable one, otherwise DEFAULT_CHECKIN_EMAIL.
 function checkinEmailWording(CLIENT) {
@@ -743,10 +755,19 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
       (wording.bedType ? ' (' + wording.bedType + ')' : '') +
     (eta ? '\n  ETA      :  ' + eta : '');
 
+  // A party bigger than the rate card prices is asked, on the form, to confirm the count with the host.
+  var party      = (parseInt(adults, 10) || 0) + (parseInt(children, 10) || 0);
+  var partyLimit = CLIENT.partyLimit || 12;
+  var partyNote  = party > partyLimit
+    ? renderEmailTemplate(CLIENT.partyNote || DEFAULT_PARTY_NOTE,
+        { party: party, limit: partyLimit, hostPhone: CLIENT.phone1, guestContact: CLIENT.guestContactPhone })
+    : '';
+
   var guestLines =
     '  Adults   :  ' + adults + (children > 0 ? '\n  Children :  ' + children : '') +
     (phone      ? '\n  Phone    :  ' + phone      : '') +
-    (guestEmail ? '\n  Email    :  ' + guestEmail : '');
+    (guestEmail ? '\n  Email    :  ' + guestEmail : '') +
+    (partyNote  ? '\n\n  ' + partyNote : '');
 
   var vars = {
     guestName:    guestName,
@@ -770,6 +791,7 @@ function sendCheckinConfirmationEmails(stay, folderUrl, txtContent, stayDetails,
     'Check-out:  ' + checkOut   + '\n' +
     'Nights   :  ' + nights     + '\n' +
     'Adults   :  ' + adults + (children > 0 ? '  |  Children: ' + children : '') + '\n' +
+    (partyNote ? '>> ' + party + ' guests is more than ' + partyLimit + ': connect with the guest to confirm the count.\n' : '') +
     (phone      ? 'Phone    :  ' + phone      + '\n' : '') +
     (guestEmail ? 'Email    :  ' + guestEmail + '\n' : '') +
     '\n' + reqSection +

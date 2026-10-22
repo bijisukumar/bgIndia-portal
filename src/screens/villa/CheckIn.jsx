@@ -21,6 +21,7 @@ import { parseLocalDate, formatTime12h } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { stayTimes } from '../../utils/stayTimes'
+import { breakfastList, parseBreakfast } from '../../utils/breakfastSplit'
 import { villaTimeDefaults } from '../../utils/villaTimes'
 import StayTimesLine from '../../components/StayTimesLine'
 
@@ -549,6 +550,24 @@ export default function CheckIn() {
                         {selected.eta && (
                           <div style={{color:'var(--text-dim)', fontSize:'0.78rem', marginTop:'4px'}}>
                             Guest's requested ETA: <strong style={{color:'var(--text)'}}>{selected.eta}</strong>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Breakfast the guest asked for, with how many of each once the host has
+                        recorded it in Guest info: what Raman cooks and serves. */}
+                    {!!selected.request_breakfast && (
+                      <div style={{
+                        marginBottom:'12px', padding:'10px 14px', borderRadius:'10px',
+                        background:'rgba(200,144,58,0.1)', border:'1px solid rgba(200,144,58,0.35)',
+                      }}>
+                        <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem'}}>
+                          {'🍳 Breakfast' + (selected.breakfast_choice ? ` — ${breakfastList(selected.breakfast_choice)}` : '')}
+                        </div>
+                        {parseBreakfast(selected.breakfast_choice).total != null && (
+                          <div style={{color:'var(--text-dim)', fontSize:'0.78rem', marginTop:'4px'}}>
+                            {parseBreakfast(selected.breakfast_choice).total} to serve
                           </div>
                         )}
                       </div>

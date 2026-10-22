@@ -464,6 +464,10 @@ Warm regards,
       // Added in brackets after the bedroom count on the Bedrooms line, e.g.
       // "4 bedrooms (Indian Queen Size bed)". Leave blank to say nothing.
       bedType: 'Indian Queen Size bed',
+      // Said under the guest details to a party bigger than the rate card prices
+      // (pricing.rateCardMaxGuests), and the same on the form's confirmation screen. {party} and
+      // {limit} are filled in. Leave it out and the script uses its own sentence.
+      partyNote: 'Your party is {party} guests, more than {limit}. Please connect with your host to confirm the guest count.',
       template:
 `Dear {guestName},
 

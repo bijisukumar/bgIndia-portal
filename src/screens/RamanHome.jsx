@@ -8,6 +8,7 @@ import { stayTimes as sharedStayTimes } from '../utils/stayTimes'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 import { useAuth } from '../hooks/useAuth'
 import { breakfastRateFor } from '../utils/breakfast'
+import { breakfastList, parseBreakfast } from '../utils/breakfastSplit'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmtDate(d) {
@@ -284,6 +285,10 @@ export default function RamanHome() {
   const guestName   = activeStay ? (activeStay.guestName   || activeStay.guest_name   || 'Guest') : null
   const checkInDate = activeStay ? (activeStay.checkInDate  || activeStay.checkin_date  || '')     : null
   const adultCount  = activeStay ? (activeStay.guestCount   || activeStay.adults        || '')     : null
+  // The breakfast the host recorded for this stay ("Appam ×5 + Idli ×5"): Raman cooks for that many,
+  // not for the number of guests. Types without counts are shown, but there is nothing to total.
+  const bfWanted    = activeStay && activeStay.request_breakfast ? (activeStay.breakfast_choice || '') : ''
+  const bfTotal     = bfWanted ? parseBreakfast(bfWanted).total : null
 
   const activeLabel = activeStay
     ? `Linked to ${guestName}`
@@ -315,7 +320,9 @@ export default function RamanHome() {
       icon: '🍳', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Breakfast',
       sub: activeStay
-        ? `${adultCount} guests · ₹${breakfastRateFor(adultCount)}/person`
+        ? (bfTotal != null
+            ? `${bfTotal} breakfasts: ${breakfastList(bfWanted)} · ₹${breakfastRateFor(bfTotal)}/person`
+            : `${adultCount} guests${bfWanted ? ` · ${breakfastList(bfWanted)}` : ''} · ₹${breakfastRateFor(adultCount)}/person`)
         : 'Log for active stay or a recent checkout',
       path: '/raman/breakfast',
       disabled: false,

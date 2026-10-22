@@ -63,6 +63,8 @@ import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 // The biggest party the check-in form takes without asking the guest to confirm the number with the host.
 import { partyLimit, partyOf } from '../../src/utils/partySize.js'
+// How a breakfast split is written down and checked (Guest info's editor).
+import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -1181,9 +1183,28 @@ async function recordGuestDeparture(DB, stayId, villaId, expectedDeparture) {
   }
 }
 
-// Lists that read stayvibe_stays whole get the guest's expected departure
-// attached here, as etd (getUpcomingStays joins the same table directly).
-async function attachGuestTimes(DB, rows) {
+// The host's breakfast request for a stay (Guest info's editor): `choice` is the text from
+// formatBreakfast ("Appam ×5 + Idli ×5"), or empty for no breakfast. Unlike upsertStaySide this can
+// CLEAR a request: that helper skips an all-empty write, which is right for a guest's form but not
+// for an edit.
+async function recordBreakfast(DB, stayId, villaId, choice) {
+  if (!stayId) return
+  if (choice) {
+    await DB.prepare(
+      `INSERT INTO stayvibe_stay_prefs (stay_id, villa_id, request_breakfast, breakfast_choice) VALUES (?, ?, 1, ?)
+         ON CONFLICT(stay_id) DO UPDATE SET request_breakfast = 1, breakfast_choice = excluded.breakfast_choice,
+           updated_at = datetime('now')`
+    ).bind(stayId, villaId || null, choice).run()
+  } else {
+    await DB.prepare(
+      `UPDATE stayvibe_stay_prefs SET request_breakfast = 0, breakfast_choice = NULL, updated_at = datetime('now') WHERE stay_id = ?`
+    ).bind(stayId).run()
+  }
+}
+
+// Lists that read stayvibe_stays whole get what the guest told us attached here: their expected
+// departure as etd, and their breakfast request (getUpcomingStays joins the same table directly).
+async function attachStayPrefs(DB, rows) {
   const ids = [...new Set((rows || []).map(r => r.stay_id).filter(Boolean))]
   if (!ids.length) return rows
   const byId = {}
@@ -1192,11 +1213,16 @@ async function attachGuestTimes(DB, rows) {
     // tenant-scope-exempt: only ever given ids of stays the caller has just
     // read under villaScope, so it cannot reach another tenant's rows.
     const { results } = await DB.prepare(
-      `SELECT stay_id, expected_departure_time FROM stayvibe_stay_prefs WHERE stay_id IN (${part.map(() => '?').join(',')})`
+      `SELECT stay_id, expected_departure_time, request_breakfast, breakfast_choice FROM stayvibe_stay_prefs WHERE stay_id IN (${part.map(() => '?').join(',')})`
     ).bind(...part).all()
-    for (const p of (results || [])) byId[p.stay_id] = p.expected_departure_time
+    for (const p of (results || [])) byId[p.stay_id] = p
   }
-  for (const r of rows) r.etd = byId[r.stay_id] || null
+  for (const r of rows) {
+    const p = byId[r.stay_id] || {}
+    r.etd = p.expected_departure_time || null
+    r.request_breakfast = p.request_breakfast ? 1 : 0
+    r.breakfast_choice = p.breakfast_choice || null
+  }
   return rows
 }
 
@@ -3476,6 +3502,10 @@ export async function onRequest(ctx) {
           // another host's guests' inboxes. null makes the script use its
           // built-in text.
           checkinConfirmation: HOST_CONFIGS[tenantId]?.guestMessages?.checkinConfirmation || null,
+          // The biggest party the check-in form takes without asking the guest to confirm the count with
+          // the host, and the sentence the confirmation email says about it (null: the script's own).
+          partyLimit:    partyLimit(HOST_CONFIGS[tenantId]?.pricing),
+          partyNote:     HOST_CONFIGS[tenantId]?.guestMessages?.checkinConfirmation?.partyNote || null,
         }})
       }
 
@@ -3617,6 +3647,7 @@ export async function onRequest(ctx) {
            ORDER BY CASE status WHEN 'ready_for_checkout' THEN 0 ELSE 1 END, checkout_date DESC
            LIMIT 3`
         ).bind(villaId).all()
+        await attachStayPrefs(DB, results)
         return json({ success: true, data: results })
       }
 
@@ -3631,6 +3662,7 @@ export async function onRequest(ctx) {
              ORDER BY checkin_date DESC LIMIT 1`
         ).bind(villaId, todayIST).first()
         if (!stay) return json({ success: true, data: null })
+        await attachStayPrefs(DB, [stay])
         return json({ success: true, data: {
           ...stay,
           stayId:       stay.stay_id,
@@ -3650,7 +3682,7 @@ export async function onRequest(ctx) {
              ORDER BY checkin_date ASC`
           ).bind(...sc.binds)
         })().all()
-        await attachGuestTimes(DB, results)
+        await attachStayPrefs(DB, results)
         return json({ success: true, data: results })
       }
 
@@ -4536,8 +4568,8 @@ export async function onRequest(ctx) {
         // Next N arrivals rather than a 7-day window: on a quiet week Raman
         // saw an empty card and had no idea who was coming next.
         const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= date('now') ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
-        await attachGuestTimes(DB, overdueRows)
-        await attachGuestTimes(DB, upcomingRows)
+        await attachStayPrefs(DB, overdueRows)
+        await attachStayPrefs(DB, upcomingRows)
         const mapRow = r => ({
           stayId: r.stay_id, guestName: r.guest_name,
           checkInDate: r.checkin_date, checkOutDate: r.checkout_date,
@@ -5899,7 +5931,7 @@ export async function onRequest(ctx) {
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))${pr1.sql}
            ORDER BY checkin_date ASC`
         ).bind(...pr1.binds).all()
-        await attachGuestTimes(DB, results)
+        await attachStayPrefs(DB, results)
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
           guestName:       r.guest_name,
@@ -8122,7 +8154,7 @@ export async function onRequest(ctx) {
       if (action === 'updateStayGuestInfo') {
         const { stayId, guestName, guestPhone, guestEmail,
                 checkinDate, checkoutDate, adults, children, eta, etd,
-                earlyCheckinTime, lateCheckoutTime } = body
+                earlyCheckinTime, lateCheckoutTime, breakfast } = body
         if (!stayId) return err('stayId required')
         // An agreed check-in / check-out time closes a night on every calendar
         // (src/utils/stayHolds.js), so only the owner sets one, here as in
@@ -8181,7 +8213,15 @@ export async function onRequest(ctx) {
           put('late_checkout_time', late)
           if (late && clockMinutes(late) > stdOut) put('request_late_checkout', 1)
         }
-        if (!sets.length && etd === undefined) return err('nothing to update')
+        // Breakfast: how many of each type (Guest info's editor); [] clears the request. Checked before
+        // anything is written, so a bad list leaves the stay as it was.
+        let breakfastText
+        if (breakfast !== undefined) {
+          const clean = cleanBreakfast(breakfast)
+          if (clean === null) return err('breakfast must be a list of { type, count }')
+          breakfastText = formatBreakfast(clean)
+        }
+        if (!sets.length && etd === undefined && breakfastText === undefined) return err('nothing to update')
 
         if (sets.length) {
           put('updated_by', actor); put('updated_at', now())
@@ -8189,10 +8229,13 @@ export async function onRequest(ctx) {
         }
         // The guest's expected departure sits with their form answers.
         if (etd !== undefined) await recordGuestDeparture(DB, stayId, cur.villa_id, scrub(etd))
+        if (breakfastText !== undefined) await recordBreakfast(DB, stayId, cur.villa_id, breakfastText)
         const row = await DB.prepare(`SELECT stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, eta FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        // The breakfast as it now stands (the screen reloads its list from the server anyway).
+        const bf = await DB.prepare(`SELECT request_breakfast, breakfast_choice FROM stayvibe_stay_prefs WHERE stay_id = ?`).bind(stayId).first()
         // Which nights the agreed times now keep out of sale, so the screen can say so.
         const holds = stayHolds({ stay_id: stayId, checkin_date: ci, checkout_date: co, early_checkin_time: early, late_checkout_time: late }, rules)
-        return json({ success: true, data: { ...row, holds } })
+        return json({ success: true, data: { ...row, request_breakfast: bf?.request_breakfast ? 1 : 0, breakfast_choice: bf?.breakfast_choice || null, holds } })
       }
 
       if (action === 'updateStayGuestPhone') {

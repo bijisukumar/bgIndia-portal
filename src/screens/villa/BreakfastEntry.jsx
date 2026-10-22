@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { breakfastRateFor } from '../../utils/breakfast'
+import { breakfastCount, breakfastList } from '../../utils/breakfastSplit'
 import { localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -38,7 +39,8 @@ export default function BreakfastEntry() {
   const selectGuest = (g) => {
     setStay(g)
     setRateTyped(null)
-    setCount(parseInt(g.adults || g.guestCount || 0))
+    // How many breakfasts the host recorded for this stay (Guest info), else the number of guests.
+    setCount(breakfastCount(g.request_breakfast ? g.breakfast_choice : '', parseInt(g.adults || g.guestCount || 0)))
   }
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function BreakfastEntry() {
         ...(Array.isArray(checkouts) ? checkouts.map(c => ({
           stayId: c.stay_id, guestName: c.guest_name, adults: c.adults,
           status: c.status, isHistoricalSession: c.status !== 'ready_for_checkout',
+          request_breakfast: c.request_breakfast, breakfast_choice: c.breakfast_choice,
           checkoutDate: c.checkout_date,
         })) : []),
       ]
@@ -111,6 +114,11 @@ export default function BreakfastEntry() {
           <>
             <div className="card-section-label">BREAKFAST ENTRY</div>
             <div className="card">
+              {!!stay.request_breakfast && !!stay.breakfast_choice && (
+                <div style={{fontSize:'0.78rem',color:'var(--gold)',marginBottom:'10px'}}>
+                  🍳 Requested: {breakfastList(stay.breakfast_choice)}
+                </div>
+              )}
               <div className="grid-2">
                 <div className="field">
                   <div className="field-label">Date</div>

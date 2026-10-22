@@ -27,6 +27,7 @@ import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink } from '../../utils/guestMessages'
+import { breakfastDraft, breakfastItems, breakfastTypesFor, formatBreakfast } from '../../utils/breakfastSplit'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Agent','Other']
 
@@ -397,6 +398,9 @@ export default function CompleteBooking() {
       checkoutDate: selected.checkout_date || '',
       adults:       selected.adults   != null ? String(selected.adults)   : '',
       children:     selected.children != null ? String(selected.children) : '',
+      // how many of each breakfast (src/utils/breakfastSplit.js): what the editor shows and edits
+      breakfast:    breakfastDraft(selected.request_breakfast ? selected.breakfast_choice : '',
+                      (parseInt(selected.adults) || 0) + (parseInt(selected.children) || 0)),
       // toClock: a time input only shows 'HH:MM'; anything it cannot show comes back blank
       eta:              toClock(selected.eta),
       etd:              toClock(selected.etd),
@@ -420,6 +424,10 @@ export default function CompleteBooking() {
       // (a guest typed "around 3") would otherwise be saved back as blank.
       const body = { ...d }
       for (const k of ['eta', 'etd', 'earlyCheckinTime', 'lateCheckoutTime']) if (d[k] === infoOrig[k]) delete body[k]
+      // Breakfast goes as a list of { type, count }, and only when it was changed: a request that only
+      // has types (no counts) must not be rewritten by saving a new phone number.
+      delete body.breakfast
+      if (formatBreakfast(breakfastItems(d.breakfast)) !== formatBreakfast(breakfastItems(infoOrig.breakfast))) body.breakfast = breakfastItems(d.breakfast)
       const saved = await api.updateStayGuestInfo({ stayId: selected.stay_id, ...body })
       // Say which nights are now held when the agreed times or the dates moved them.
       const moved = d.earlyCheckinTime !== infoOrig.earlyCheckinTime || d.lateCheckoutTime !== infoOrig.lateCheckoutTime
@@ -1237,6 +1245,11 @@ export default function CompleteBooking() {
                       ? stayHolds({ checkin_date: infoDraft.checkinDate, checkout_date: infoDraft.checkoutDate,
                           early_checkin_time: infoDraft.earlyCheckinTime, late_checkout_time: infoDraft.lateCheckoutTime }, villaHoldRules())
                       : []
+                    // Breakfast in the editor: the menu (plus any other type already on the request),
+                    // how many breakfasts are typed, and for how many guests.
+                    const bfTypes  = breakfastTypesFor(s.request_breakfast ? s.breakfast_choice : '')
+                    const bfNow    = editInfo ? breakfastItems(infoDraft.breakfast).reduce((n, i) => n + i.count, 0) : 0
+                    const partyNow = editInfo ? (parseInt(infoDraft.adults) || 0) + (parseInt(infoDraft.children) || 0) : 0
                     if (editInfo) return (
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 12px'}}>
                         <div style={{gridColumn:'1 / -1'}}>
@@ -1277,6 +1290,26 @@ export default function CompleteBooking() {
                           <div style={infoLabel}>Children</div>
                           <input type="number" min="0" style={dfield} value={infoDraft.children}
                             onChange={e=>setD('children', e.target.value)} />
+                        </div>
+                        <div style={{gridColumn:'1 / -1',fontSize:'0.66rem',color:'var(--text-dim)',fontWeight:'600',
+                          letterSpacing:'0.05em',marginTop:'4px'}}>BREAKFAST</div>
+                        <div style={{gridColumn:'1 / -1',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'10px 12px'}}>
+                          {bfTypes.map(t => (
+                            <div key={t}>
+                              <div style={infoLabel}>{t}</div>
+                              <input type="number" min="0" style={dfield} value={(infoDraft.breakfast || {})[t] ?? ''}
+                                autoFocus={infoFocus === 'breakfast' && t === bfTypes[0]}
+                                onChange={e => { const v = e.target.value; setInfoDraft(p => ({ ...p, breakfast: { ...(p.breakfast || {}), [t]: v } })) }} />
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{gridColumn:'1 / -1',fontSize:'0.68rem',color:'var(--text-dim)'}}>
+                          {bfNow > 0
+                            ? `${bfNow} breakfast${bfNow === 1 ? '' : 's'} for ${partyNow} guest${partyNow === 1 ? '' : 's'}`
+                            : (s.request_breakfast && s.breakfast_choice && !formatBreakfast(breakfastItems(infoOrig.breakfast))
+                                ? `${s.breakfast_choice} asked for, no counts yet`
+                                : 'No breakfast')}
+                          {' · '}how many of each; it need not match the number of guests. Raman starts his breakfast entry from this total.
                         </div>
                         <div style={{gridColumn:'1 / -1',fontSize:'0.66rem',color:'var(--text-dim)',fontWeight:'600',
                           letterSpacing:'0.05em',marginTop:'4px'}}>TIMES</div>
@@ -1565,7 +1598,13 @@ export default function CompleteBooking() {
                       )}
                       {(!!s.request_breakfast || !!s.request_cab || !!s.request_extra_beds) && (
                         <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
-                          {!!s.request_breakfast     && <span style={reqPill}>{'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}</span>}
+                          {!!s.request_breakfast     && (
+                            <span style={reqPill}>
+                              {'🍳 Breakfast' + (s.breakfast_choice ? ` — ${s.breakfast_choice}` : '')}
+                              <button onClick={() => openInfoEdit('breakfast')} title="Edit breakfast" aria-label="Edit breakfast"
+                                style={{background:'none',border:'none',padding:'0 0 0 6px',cursor:'pointer',color:'#85B7EB',fontSize:'0.74rem'}}>✎</button>
+                            </span>
+                          )}
                           {!!s.request_cab           && <span style={reqPill}>🚗 Cab</span>}
                           {!!s.request_extra_beds    && <span style={reqPill}>{'🛏 Extra beds' + (s.extra_beds_count > 0 ? ` × ${s.extra_beds_count}` : '')}</span>}
                         </div>

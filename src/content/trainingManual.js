@@ -519,6 +519,7 @@ export const GUEST_PAGES = [
     text: [
       `A public form — no login — where each guest enters their personal details, stay details and ID. Foreign nationals complete a Form C block for each person. It opens already showing which platform the guest booked through. It also asks when they expect to arrive and to leave; a time beyond what you give waits for your approval in {{needs-attention|Needs attention}}.`,
       `When it is submitted the stay moves to **Pending review**, which is what puts the guest in {{needs-attention|Needs attention}}. You make the links in {{checkin-links|Check-in links}}.`,
+      `Adults go up to the largest party your rate card prices (12 for Dwarka). A party bigger than that, adults and children together, sees a gentle note asking them to confirm the guest count with you once they have submitted, and the stay's notes carry the same reminder. Breakfast can be a split of up to two types, and a party of more than 10 is shown the group rate.`,
     ],
   },
   {
@@ -547,7 +548,7 @@ export const MANAGER = {
     { icon: '🏠', name: 'Home', text: `Today's arrivals and who is in the house. Guests appear only after **you** mark them ready for check-in. A red **Overdue — still open** list asks them to close stays so you can settle their commission.` },
     { icon: '🔑', name: 'Check-in', text: `Two tabs, **Check-in** and **In-house**. Pick a guest, review the booking summary, when they are due in and out (the times you give, any you agreed, and what the guest told you) and the extra services, photograph the car and number plate (the plate is read for them), confirm the check-in, then **Ready for check-out** and **Complete check-out** at the end. They can also ask a guest for a review on WhatsApp while they are still at the gate.` },
     { icon: '🍽️', name: 'Kitchen incidentals', text: `Charges for items a guest used, priced from your Inventory or entered ad hoc, with an itemised message the guest can be sent on WhatsApp. You are emailed when it is saved.` },
-    { icon: '🥞', name: 'Breakfast', text: `Rate per person times number of guests.` },
+    { icon: '🥞', name: 'Breakfast', text: `Rate per person times number of guests. A party of more than 10 gets the group rate filled in for you, if your host settings have one; you can still type a different rate.` },
     { icon: '🚗', name: 'Car rental', text: `Destination, trip amount, your commission on it and the net to the villa.` },
     { icon: '🧾', name: 'Expenses and Inventory', text: `The same screens you have, so they can log a bill or restock after a purchase.` },
     { icon: '💼', name: 'My earnings', text: `A snapshot of which of their stays are paid and which are pending, with no amounts shown.` },

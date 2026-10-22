@@ -564,6 +564,8 @@ Snehapoorvam (സ്നേഹപൂർവ്വം),
 
   // Pricing defaults
   breakfastRate:       275,   // ₹ per person per day
+  breakfastGroupRate:  250,   // ₹ per person per day once the party is MORE than breakfastGroupAbove
+  breakfastGroupAbove: 10,    // guests (adults + children); a tenant that leaves these out has one rate
   additionalGuestRate: 750,   // ₹ per night
   dehuskDefaultRate:   1.50,  // ₹ per coconut
 

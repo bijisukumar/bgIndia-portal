@@ -7,6 +7,7 @@ import { parseLocalDate } from '../utils/dates'
 import { stayTimes as sharedStayTimes } from '../utils/stayTimes'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 import { useAuth } from '../hooks/useAuth'
+import { breakfastRateFor } from '../utils/breakfast'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmtDate(d) {
@@ -314,7 +315,7 @@ export default function RamanHome() {
       icon: '🍳', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Breakfast',
       sub: activeStay
-        ? `${adultCount} guests · ₹${CONFIG.breakfastRate}/person`
+        ? `${adultCount} guests · ₹${breakfastRateFor(adultCount)}/person`
         : 'Log for active stay or a recent checkout',
       path: '/raman/breakfast',
       disabled: false,

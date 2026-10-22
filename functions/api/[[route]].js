@@ -61,6 +61,8 @@ import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, t
 import { stayHolds, holdPhrase } from '../../src/utils/stayHolds.js'
 import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
+// The biggest party the check-in form takes without asking the guest to confirm the number with the host.
+import { partyLimit, partyOf } from '../../src/utils/partySize.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -2129,6 +2131,21 @@ export async function onRequest(ctx) {
           `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), status = 'pending_review', updated_at = datetime('now') WHERE stay_id = ?`
         ).bind(reviewNote, stayId).run()
       }
+
+      // A party bigger than the villa's rate card prices (pricing.rateCardMaxGuests) is asked on the
+      // form to confirm the count with the host afterwards; leave the host the same reminder on the
+      // stay. One line, written once so a resubmission does not repeat it, and never allowed to fail
+      // a submission that has already been saved.
+      try {
+        const limit = partyLimit(HOST_CONFIGS[villaId]?.pricing)
+        const party = partyOf(adults, children)
+        if (party > limit) {
+          const line = `Party of ${party} (${parseInt(adults) || 1} adults + ${parseInt(children) || 0} children) is over ${limit}: confirm the guest count with the guest.`
+          await DB.prepare(
+            `UPDATE stayvibe_stays SET notes = CASE WHEN COALESCE(notes,'') = '' THEN ? WHEN instr(notes, ?) > 0 THEN notes ELSE notes || ' | ' || ? END, updated_at = datetime('now') WHERE stay_id = ?`
+          ).bind(line, 'confirm the guest count with the guest', line, stayId).run()
+        }
+      } catch (e) { console.error('party-size note (check-in form):', e?.message || e) }
 
       // Genuine overlap with a DIFFERENT guest — a real double booking arriving
       // through the check-in form, the exact gap that let the Gulshan case

@@ -9,6 +9,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
 import { CONFIG } from '../config'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
+import { partyLimit } from '../utils/partySize'
+import { breakfastRateFor, BREAKFAST_MAX_TYPES, joinBreakfastTypes } from '../utils/breakfast'
 
 const VILLA_NAMES = Object.fromEntries(CONFIG.villas.map(v => [v.id, v.full || v.name]))
 
@@ -41,6 +43,14 @@ const PARTNER_NAMES = {
 }
 const PURPOSE_OPTIONS  = ['Pilgrimage / Temple visit','Tourism','Family visit','Wedding / Function','Business','Arangettam','Other']
 const TRANSPORT_OPTIONS= ['Car / SUV','Train','Flight','Bus','Auto / Taxi']
+// The breakfast menu as the guest reads it. The first word is what is stored and shown to staff
+// ("Breakfast — Idli + Appam"); a guest may tick two (a split), never all three.
+const BREAKFAST_MENU_ITEMS = [
+  'Idli, Vada, Chutney, Coffee/Tea & Water',
+  'Puttu, Kadala, Kerala Banana, Coffee/Tea & Water',
+  'Appam, Curry, Coffee/Tea & Water',
+]
+const BREAKFAST_MENU = BREAKFAST_MENU_ITEMS.map(o => o.split(',')[0])
 const ID_TYPES_INDIAN  = ['Aadhaar Card','PAN Card','Driving License','Voter ID','Passport']
 const VISA_TYPES       = ['Tourist','Business','e-Visa','OCI Card','PIO Card','Other']
 const INDIAN_STATES    = ['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Delhi','Jammu & Kashmir','Ladakh','Puducherry','Other']
@@ -363,6 +373,14 @@ export default function GuestCheckIn() {
   const formCFiled  = 1 + extraGuests.length      // guest 1 is this form
   const formCMissing = Math.max(0, partySize - formCFiled)
 
+  // The biggest party the villa's rate card prices: the form takes that many adults, and a party
+  // over it is asked to confirm the count with the host afterwards (a note, never a block).
+  const partyMax = partyLimit(CONFIG.pricing)
+  const bigParty = partySize > partyMax
+  // Breakfast is per person; a big party gets the host's group rate (CONFIG.breakfastGroupRate).
+  const breakfastBase = Number(CONFIG.breakfastRate) || 0
+  const breakfastRate = breakfastRateFor(partySize)
+
   const patchGuest  = (i, patch) =>
     setExtraGuests(gs => gs.map((g, idx) => idx === i ? { ...g, ...patch } : g))
   const addGuest    = () => setExtraGuests(gs => [...gs, { ...BLANK_GUEST }])
@@ -388,7 +406,7 @@ export default function GuestCheckIn() {
   const [reqEarly,        setReqEarly]        = useState(false)
   const [reqLate,         setReqLate]         = useState(false)
   const [reqBreakfast,    setReqBreakfast]    = useState(false)
-  const [breakfastChoice, setBreakfastChoice] = useState('')
+  const [breakfastTypes,  setBreakfastTypes]  = useState([])   // ticked types, at most BREAKFAST_MAX_TYPES
   const [reqExtraBeds,    setReqExtraBeds]    = useState(false)
   const [extraBedsCount,  setExtraBedsCount]  = useState(1)
   const [reqCab,          setReqCab]          = useState(false)
@@ -571,7 +589,7 @@ export default function GuestCheckIn() {
         requestEarlyCheckIn: reqEarly,
         requestLateCheckOut: reqLate,
         requestBreakfast: reqBreakfast,
-        breakfastChoice: reqBreakfast ? breakfastChoice : null,
+        breakfastChoice: reqBreakfast ? (joinBreakfastTypes(BREAKFAST_MENU, breakfastTypes) || null) : null,
         requestCab: reqCab,
         requestExtraBeds: reqExtraBeds,
         extraBedsCount: reqExtraBeds ? (parseInt(extraBedsCount) || 1) : 0,
@@ -604,6 +622,7 @@ export default function GuestCheckIn() {
           <br /><br />
           Our team will verify your details and prepare your room.
           {docsLater && <><br /><br /><span style={{ color:'#F59E0B' }}>⚠️ Please bring your passport and visa documents at check-in.</span></>}
+          {bigParty && <><br /><br /><span style={{ color:'#C8903A' }}>👥 Your party is {partySize} guests, more than {partyMax}. Please connect with your host to confirm the guest count.</span></>}
           <br /><br />
           <strong style={{ color:'#C8903A' }}>{villaName}</strong><br />
           <span style={{ fontSize:'0.78rem' }}>{villaAddr.phone}</span>
@@ -848,12 +867,21 @@ export default function GuestCheckIn() {
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
           <Field label="Adults" required>
-            <Select value={adults} onChange={setAdults} options={['1','2','3','4','5','6','7','8']} />
+            <Select value={adults} onChange={setAdults} options={Array.from({ length: partyMax }, (_, i) => String(i + 1))} />
           </Field>
           <Field label="Children (under 12)">
             <Select value={children} onChange={setChildren} options={['0','1','2','3','4','5']} />
           </Field>
         </div>
+
+        {bigParty && (
+          <div style={{ marginBottom:'14px', padding:'10px 12px', background:'rgba(200,144,58,0.06)',
+            border:'1px solid rgba(200,144,58,0.2)', borderRadius:'10px', fontSize:'0.78rem',
+            color:'#9AA5B4', lineHeight:'1.6' }}>
+            👥 That's <strong style={{ color:'#C8903A' }}>{partySize} guests</strong> in total, more than {partyMax}.
+            You can still submit this form. Afterwards, please connect with your host to confirm the guest count.
+          </div>
+        )}
 
         <Field label="Names of other guests in your group" hint="Helps us prepare and keep records">
           <Textarea value={guestList} onChange={setGuestList}
@@ -1230,24 +1258,25 @@ export default function GuestCheckIn() {
           checked={reqEarly} onClick={() => setReqEarly(!reqEarly)} />
         <ServiceToggle label="Request late check-out" hint="Subject to availability · No last-minute extensions"
           checked={reqLate} onClick={() => setReqLate(!reqLate)} />
-        <ServiceToggle label="Breakfast" priceNote="(₹275 per person)"
+        <ServiceToggle label="Breakfast"
+          priceNote={breakfastRate ? `(₹${breakfastRate} per person${breakfastRate !== breakfastBase ? ' · group rate' : ''})` : undefined}
           hint="Fresh traditional Kerala breakfast prepared and served at the villa."
           checked={reqBreakfast}
-          onClick={() => { const next = !reqBreakfast; setReqBreakfast(next); if (!next) setBreakfastChoice('') }} />
+          onClick={() => { const next = !reqBreakfast; setReqBreakfast(next); if (!next) setBreakfastTypes([]) }} />
 
         {reqBreakfast && (
           <div style={{ marginLeft:'30px', marginBottom:'10px' }}>
             <div style={{ fontSize:'0.72rem', color:'#9AA5B4', marginBottom:'6px' }}>Select breakfast type:</div>
-            {[
-              'Idli, Vada, Chutney, Coffee/Tea & Water',
-              'Puttu, Kadala, Kerala Banana, Coffee/Tea & Water',
-              'Appam, Curry, Coffee/Tea & Water',
-            ].map(opt => {
+            {BREAKFAST_MENU_ITEMS.map(opt => {
               const key = opt.split(',')[0]
-              const active = breakfastChoice === key
+              const active = breakfastTypes.includes(key)
+              // A split is two types at most: once two are ticked the third waits until one is unticked.
+              const locked = !active && breakfastTypes.length >= BREAKFAST_MAX_TYPES
               return (
-                <div key={key} onClick={() => setBreakfastChoice(active ? '' : key)}
-                  style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px', cursor:'pointer' }}>
+                <div key={key}
+                  onClick={() => { if (!locked) setBreakfastTypes(t => active ? t.filter(k => k !== key) : [...t, key]) }}
+                  style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px',
+                    cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.45 : 1 }}>
                   <div style={{ width:'16px', height:'16px', borderRadius:'4px', flexShrink:0,
                     border: active ? '1px solid #8B5CF6' : '1px solid rgba(255,255,255,0.2)',
                     background: active ? '#8B5CF6' : 'transparent',
@@ -1258,6 +1287,9 @@ export default function GuestCheckIn() {
                 </div>
               )
             })}
+            <div style={{ fontSize:'0.7rem', color:'#6B7280', marginTop:'2px', lineHeight:'1.5' }}>
+              Want a split? You can tick up to {BREAKFAST_MAX_TYPES} types. We can't do 3 different options for 3 people. If possible, please confirm your split with your host.
+            </div>
           </div>
         )}
 

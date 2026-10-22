@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { CONFIG } from '../../config'
+import { breakfastRateFor } from '../../utils/breakfast'
 import { localTodayStr } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -25,16 +25,19 @@ export default function BreakfastEntry() {
   const [guestOptions, setGuestOptions] = useState([])
   const [date, setDate]         = useState(localTodayStr())
   const [guestCount, setCount]  = useState(0)
-  const [rate, setRate]         = useState(CONFIG.breakfastRate || 275)
+  // The rate follows the party (a big one gets the host's group rate) until Raman types one himself.
+  const [rateTyped, setRateTyped] = useState(null)
   const [notes, setNotes]       = useState('')
   const [saving, setSaving]     = useState(false)
   const [toast, setToast]       = useState(null)
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3500) }
+  const rate  = rateTyped ?? (breakfastRateFor(guestCount) || 275)
   const total = guestCount * rate
 
   const selectGuest = (g) => {
     setStay(g)
+    setRateTyped(null)
     setCount(parseInt(g.adults || g.guestCount || 0))
   }
 
@@ -115,7 +118,7 @@ export default function BreakfastEntry() {
                 </div>
                 <div className="field">
                   <div className="field-label">Rate / person (₹)</div>
-                  <input className="field-input" type="number" value={rate} onChange={e=>setRate(e.target.value)}/>
+                  <input className="field-input" type="number" value={rate} onChange={e=>setRateTyped(e.target.value)}/>
                 </div>
               </div>
               <div className="field">

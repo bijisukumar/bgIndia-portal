@@ -138,6 +138,7 @@ export const api = {
   ocrPlate:             (data)   => post('ocrPlate', data),
   ocrReceipt:           (data)   => post('ocrReceipt', data),
   confirmCheckIn:       (data)   => post('confirmCheckIn', data),
+  addStayCars:          (data)   => post('addStayCars', data),
   resolveStay:          (data)   => post('resolveStay', data),
   deleteStay:           (data)   => post('deleteStay', data),
   resolveDuplicate:     (data)   => post('resolveDuplicate', data),

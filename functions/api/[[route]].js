@@ -71,7 +71,7 @@ import { checkinDateStatus } from '../../src/utils/checkinDate.js'
 import { namesAlike } from '../../src/utils/guestNames.js'
 // The property's time zone and every way of reading a stored time in it. Nothing in this file reads
 // the server's clock for a business decision: see zoneFor below.
-import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr } from '../../src/utils/tz.js'
+import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong } from '../../src/utils/tz.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -7882,6 +7882,65 @@ export async function onRequest(ctx) {
         ], await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId))
 
         return json({ success: true, data: { stayId } })
+      }
+
+      // CARS AND PLATES ADDED AFTER CHECK-IN (2026-10-24). Rain stopped Raman taking the photos at the gate, or a
+      // second car turned up later. The same pipeline as at check-in (photos land in D1 as base64 and the Apps
+      // Script files them in the guest's Drive folder), but the guest is already in the villa, so this only ADDS:
+      // numbers are appended to vehicle_number (one that is already there is not repeated, spacing and case
+      // ignored) and every photo gets an id of its own, so nothing taken at check-in is ever overwritten.
+      if (action === 'addStayCars') {
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT stay_id, guest_name, villa_id, status, vehicle_number FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        if (!['checked_in', 'ready_for_checkout'].includes(stay.status)) {
+          return err('Cars can be added to a guest who is in the villa. For a guest who is arriving, use the check-in screen.', 409)
+        }
+        const MAX_PHOTO_B64 = 9000000          // characters of base64: about 6.5 MB, well above a phone photo
+        const plateKey = n => String(n || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+        const have = String(stay.vehicle_number || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)
+        const known = new Set(have.map(plateKey))
+        const cars = (Array.isArray(body.cars) ? body.cars : []).slice(0, 3)
+        const added = []
+        let photos = 0
+        const stamp = Date.now()
+        for (let idx = 0; idx < cars.length; idx++) {
+          const c = cars[idx] || {}
+          for (const [field, type, label] of [['carPhotoB64', 'car_photo', 'Car'], ['platePhotoB64', 'plate_photo', 'Plate']]) {
+            const b64 = c[field]
+            if (typeof b64 !== 'string' || !b64) continue
+            if (b64.length > MAX_PHOTO_B64) return err('A photo is too large: please take it again', 413)
+            await DB.prepare(
+              `INSERT INTO stayvibe_guest_documents (doc_id, stay_id, doc_type, file_name, file_b64, folder_created, created_at, villa_id)
+               VALUES (?, ?, ?, ?, ?, 0, datetime('now'), ?)`
+            ).bind(`DOC-${stayId}-${label.toLowerCase()}-late-${stamp}-${idx}`, stayId, type, `${label}-${stayId}-late-${stamp}-${idx + 1}.jpg`, b64, stay.villa_id).run()
+            photos++
+          }
+          const num = String(c.number || '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 20)
+          if (plateKey(num).length >= 3 && !known.has(plateKey(num))) { known.add(plateKey(num)); added.push(num) }
+        }
+        if (!photos && !added.length) return err('Nothing to add: take a photo or type a number')
+        const all = [...have, ...added]
+        if (added.length) {
+          await DB.prepare(`UPDATE stayvibe_stays SET vehicle_number = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
+            .bind(all.join(', '), actor, now(), stayId).run()
+        }
+        const zone = await zoneFor(DB, stay.villa_id)
+        ctx.waitUntil(sendAlert(env, `🚗 bgIndia — Car details added after check-in: ${stay.guest_name}`, [
+          `Source: Raman > Check-in screen > In-house`,
+          `Action: Car photos / numbers added after check-in`,
+          '',
+          `Guest:      ${stay.guest_name}`,
+          `Stay ID:    ${stayId}`,
+          `Car(s) now: ${all.join(', ') || '—'}`,
+          `Added:      ${added.length ? added.join(', ') : 'no new number'}   (photos saved: ${photos})`,
+          '',
+          `Added by: ${actor}`,
+          `Time:     ${stampLong(Date.now(), zone)}`,
+        ], await getOwnerAlertEmail(DB, env, stay.villa_id), DB, stay.villa_id))
+        return json({ success: true, data: { stayId, vehicleNumber: all.join(', '), numbersAdded: added, photosSaved: photos } })
       }
 
       if (action === 'checkOut') {

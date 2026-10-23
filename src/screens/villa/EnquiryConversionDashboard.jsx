@@ -4,6 +4,7 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { SOURCES, LOST_REASONS } from './EnquiryTracker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { propertyYear } from '../../utils/dates'
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 
@@ -22,7 +23,7 @@ export default function EnquiryConversionDashboard() {
   const [data, setData] = useState(null)
   const [followUps, setFollowUps] = useState([])
   const [loading, setLoading] = useState(true)
-  const year = new Date().getFullYear()
+  const year = propertyYear()
 
   useEffect(() => {
     let cancelled = false

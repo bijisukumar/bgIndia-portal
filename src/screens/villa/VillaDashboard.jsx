@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, localTodayStr, propertyYear, propertyMonth, stampDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
 class ErrorBoundary extends Component {
@@ -31,8 +31,8 @@ class ErrorBoundary extends Component {
 
 const MONTHS     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const MONTHS_FULL= ['January','February','March','April','May','June','July','August','September','October','November','December']
-const CUR_MONTH  = new Date().getMonth()
-const CUR_YEAR   = new Date().getFullYear()
+const CUR_MONTH  = propertyMonth()
+const CUR_YEAR   = propertyYear()
 
 // Guruvayur peak seasons — temple festivals & holidays
 const PEAK_SEASONS = [
@@ -205,8 +205,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
   const [filter, setFilter] = useState('all')
   const [selMonth, setSelMonth] = useState(CUR_MONTH)
 
-  const today = new Date()
-  today.setHours(0,0,0,0)
+  const today = parseLocalDate(localTodayStr())
 
   const parsed = (stays || []).map(s => ({
     ...s,
@@ -444,7 +443,9 @@ function BookingLeadTimeChart({ allStays }) {
 
   ;(allStays || []).forEach(s => {
     // Use created_at as booking date proxy (D1 has no separate booked_date)
-    const bd = s.bookedDate || s.bookeddate || s.created_at || s.createdAt || ''
+    const rawBd = s.bookedDate || s.bookeddate || s.created_at || s.createdAt || ''
+    // created_at is a stored moment (UTC): the day it was booked is the day AT THE PROPERTY
+    const bd = String(rawBd).length > 10 ? (stampDate(rawBd) || rawBd) : rawBd
     const ci = s.checkIn || s.checkInDate || s.checkin_date || ''
     if (!bd || !ci) return
     try {

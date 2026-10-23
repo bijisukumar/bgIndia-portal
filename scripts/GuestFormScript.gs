@@ -9,6 +9,12 @@
 // via getTenantConfig (see v2.1 below).
 //
 // ── VERSION HISTORY (newest first) — bump on every change ──
+// —     2026-10-23  The time stamped into a Drive file name (CarPhoto-…, ID-…)
+//                    is the property's time zone (CLIENT.timezone, from
+//                    `timezone` in hosts/<id>/config.js via getTenantConfig),
+//                    not a fixed 'Asia/Kolkata'. No change for an Indian
+//                    property: it only matters to one elsewhere, so pasting
+//                    this is optional.
 // v2.5  2026-10-10  The guest's check-in confirmation wording now comes
 //                    from the host config (guestMessages.checkinConfirmation
 //                    in hosts/<id>/config.js, served by getTenantConfig and
@@ -105,6 +111,8 @@ function getClient() {
         // host (the villa's rate card), and the host config's sentence about it (null: DEFAULT_PARTY_NOTE).
         partyLimit:       resp.data.partyLimit || 12,
         partyNote:        resp.data.partyNote || null,
+        // The property's time zone (an IANA name), for the time stamped into a Drive file name.
+        timezone:         resp.data.timezone || 'Asia/Kolkata',
       };
       Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
       return _CLIENT;
@@ -131,6 +139,7 @@ function getClient() {
     checkinConfirmation: null,
     partyLimit:        12,
     partyNote:         null,
+    timezone:          'Asia/Kolkata',
   };
   return _CLIENT;
 }
@@ -457,7 +466,7 @@ function processPendingCheckInForms() {
             if (!doc.file_b64) return;
             try {
               var decoded   = Utilities.base64Decode(doc.file_b64);
-              var ts        = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
+              var ts        = Utilities.formatDate(new Date(), CLIENT.timezone, 'yyyyMMdd-HHmmss');
               var typeLabel = doc.doc_type === 'govt_id' ? 'ID' : doc.doc_type === 'passport' ? 'Passport' : 'Visa';
               var kind      = sniffDocument(decoded, doc.file_name);
               folder.createFile(Utilities.newBlob(decoded, kind.mime, typeLabel + '-' + stay.stayId + '-' + ts + kind.ext));
@@ -591,7 +600,7 @@ function processPendingDocumentUploads() {
         if (isCarDoc && !CLIENT.storeCarPhotos) { skipped++; return; }
         try {
           var decoded = Utilities.base64Decode(doc.file_b64);
-          var ts      = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
+          var ts      = Utilities.formatDate(new Date(), CLIENT.timezone, 'yyyyMMdd-HHmmss');
           var label   = doc.doc_type === 'car_photo' ? 'CarPhoto'
                       : doc.doc_type === 'plate_photo' ? 'PlatePhoto'
                       : doc.doc_type === 'govt_id' ? 'ID'

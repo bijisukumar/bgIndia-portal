@@ -4,7 +4,7 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
-import { parseLocalDate, localTodayStr } from '../../utils/dates'
+import { parseLocalDate, localTodayStr, fmtStampYear } from '../../utils/dates'
 import DatePicker from '../../components/DatePicker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { addDays } from '../../utils/stayHolds'
@@ -18,7 +18,8 @@ import {
 const villa = CONFIG.villas[0]
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
-function fmtDateTime(d) { if (!d) return ''; return String(d).replace('T', ' ').slice(0, 16) }
+// occurred_at is a stored moment (UTC): shown as the clock at the property (utils/tz.js)
+function fmtDateTime(d) { return d ? fmtStampYear(d) : '' }
 
 // Same loose word-containment check as the worker's getEnquiryMatchCandidates —
 // "Karthikeyan" is fully contained in "Karthikeyan Dhanasekaran". Used here to

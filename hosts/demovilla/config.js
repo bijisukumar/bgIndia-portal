@@ -7,6 +7,9 @@
 // ============================================================
 
 export const CONFIG = {
+  // The time zone this property keeps (an IANA name); see hosts/dwarka/config.js.
+  timezone: 'Asia/Kolkata',
+
   // Branding
   brandName:  'Demo Test Villas',
   brandShort: 'Demo Portal',

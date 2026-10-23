@@ -7,7 +7,7 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import PropertyDocs from './PropertyDocs'
 import { usePropertyList } from './usePropertyList'
-import { parseLocalDate, localTodayStr } from '../../utils/dates'
+import { parseLocalDate, localTodayStr, propertyYear } from '../../utils/dates'
 
 const toCamel = s => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
 function fromDB(row) {
@@ -271,7 +271,7 @@ function TaxSection({ propId, currency }) {
   const [open, setOpen]       = useState(false)
   const [history, setHistory] = useState([])
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm]       = useState({ taxYear:new Date().getFullYear(), annualAmount:'', parcelId:'', taxAuthority:'', dueDate:'', paidDate:'', paidAmount:'', receiptRef:'', notes:'' })
+  const [form, setForm]       = useState({ taxYear:propertyYear(), annualAmount:'', parcelId:'', taxAuthority:'', dueDate:'', paidDate:'', paidAmount:'', receiptRef:'', notes:'' })
   const [editId, setEditId]   = useState(null)
   const [saving, setSaving]   = useState(false)
   const cur = currency==='USD'?'$':'₹'
@@ -289,7 +289,7 @@ function TaxSection({ propId, currency }) {
     try {
       await api.saveTaxEntry({ id:editId||null, propId, taxYear:form.taxYear, annualAmount:parseFloat(form.annualAmount)||0, currency, parcelId:form.parcelId||null, taxAuthority:form.taxAuthority||null, dueDate:form.dueDate||null, paidDate:form.paidDate||null, paidAmount:parseFloat(form.paidAmount)||0, receiptRef:form.receiptRef||null, notes:form.notes||null })
       setShowForm(false); setEditId(null)
-      setForm({taxYear:new Date().getFullYear(),annualAmount:'',parcelId:'',taxAuthority:'',dueDate:'',paidDate:'',paidAmount:'',receiptRef:'',notes:''})
+      setForm({taxYear:propertyYear(),annualAmount:'',parcelId:'',taxAuthority:'',dueDate:'',paidDate:'',paidAmount:'',receiptRef:'',notes:''})
       load()
     } catch(e) {}
     finally { setSaving(false) }
@@ -300,7 +300,7 @@ function TaxSection({ propId, currency }) {
     await api.deleteTaxEntry({ id }); load()
   }
 
-  const thisYear = new Date().getFullYear()
+  const thisYear = propertyYear()
   const currentYear = history.find(h=>h.tax_year===thisYear) || history[0]
 
   const SF = {width:'100%',padding:'9px 12px',borderRadius:'8px',boxSizing:'border-box',background:'var(--dark-input)',border:'1px solid var(--border-dim)',color:'var(--text)',fontSize:'0.9rem'}

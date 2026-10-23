@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { localTodayStr } from '../../utils/dates'
 
-const TODAY = new Date().toISOString().split('T')[0]
+const TODAY = localTodayStr()
 const CHANNELS = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Other']
 const COMMISSION = {'Direct':0,'Airbnb':15,'MakeMyTrip':18,'Booking.com':15,'Goibibo':18,'Other':10}
 

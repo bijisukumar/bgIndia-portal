@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { isAcquisitionHost } from '../utils/hostContext'
+import { propertyYear } from '../utils/dates'
 
 // This gateway pitches the StayVibe PLATFORM, not the tenant currently
 // serving this domain — deliberately not CONFIG.brandName/tagline (that's
@@ -52,7 +53,7 @@ export default function Welcome() {
       </div>
 
       <p style={styles.footer}>
-        StayVibe360 © {new Date().getFullYear()} · All rights reserved
+        StayVibe360 © {propertyYear()} · All rights reserved
       </p>
     </div>
   )

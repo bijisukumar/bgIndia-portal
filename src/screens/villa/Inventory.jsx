@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { fmtStamp } from '../../utils/dates'
 
 // Legacy default catalog — used ONLY as first-paint scaffolding before the
 // real DB-driven catalog loads (avoids an empty-screen flash), and as the
@@ -472,7 +473,7 @@ export default function Inventory() {
                         <div style={{ color: 'var(--text)', fontSize: '0.82rem', fontWeight: '500' }}>{r.item_name}</div>
                         <div style={{ color: '#5C7080', fontSize: '0.68rem' }}>
                           {r.qty_bought} units{r.rate_per_unit != null ? ` @ ${fmt(r.rate_per_unit)}` : ''}
-                          {r.gst_pct ? ` +${r.gst_pct}% GST` : ''} = {fmt(r.total_cost)} · {r.created_at}
+                          {r.gst_pct ? ` +${r.gst_pct}% GST` : ''} = {fmt(r.total_cost)} · {fmtStamp(r.created_at)}
                         </div>
                       </div>
                       <div style={{ color: '#34A853', fontSize: '0.8rem', fontWeight: '600' }}>{fmt(r.price_per_unit)}/unit</div>

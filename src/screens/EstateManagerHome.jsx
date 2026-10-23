@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
 import TopBar from '../components/TopBar'
-import { parseLocalDate } from '../utils/dates'
+import { parseLocalDate, fmtClock } from '../utils/dates'
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -201,7 +201,7 @@ export default function EstateManagerHome() {
               </div>
               {marketPrice.fetchedAt && (
                 <div style={s.marketFetched}>
-                  Source: coconutboard.in · fetched {new Date(marketPrice.fetchedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                  Source: coconutboard.in · fetched {fmtClock(marketPrice.fetchedAt)}
                 </div>
               )}
             </>

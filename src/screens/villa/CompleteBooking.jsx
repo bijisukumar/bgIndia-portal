@@ -17,7 +17,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { parseLocalDate, formatTime12h } from '../../utils/dates'
+import { parseLocalDate, formatTime12h, fmtClockZ } from '../../utils/dates'
 import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '../../utils/stayTimes'
 import { stayHolds, dayMonth, heldSummary } from '../../utils/stayHolds'
 import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
@@ -88,13 +88,6 @@ function fmtDate(d) {
   if (!d) return '—'
   try { return parseLocalDate(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) }
   catch { return d }
-}
-// actual_checkin_at/actual_checkout_at are full 'YYYY-MM-DD HH:MM:SS'
-// timestamps — pull just the time-of-day for a friendly display.
-function fmtTimeOfDay(dt) {
-  if (!dt) return ''
-  const t = String(dt).split(/[ T]/)[1]
-  return t ? formatTime12h(t) : ''
 }
 const villa = CONFIG.villas[0]
 // checked_in_by/checked_out_by store the raw actor slug (e.g. 'raman',
@@ -815,7 +808,7 @@ export default function CompleteBooking() {
                           {(stay.actual_checkin_at || stay.eta) && (
                             <div style={{fontSize:'0.68rem',color:'#5FD0AE',marginBottom:'6px'}}>
                               {stay.actual_checkin_at
-                                ? `Checked in ${fmtTimeOfDay(stay.actual_checkin_at)}`
+                                ? `Checked in ${fmtClockZ(stay.actual_checkin_at)}`
                                 : `Requested ETA ${formatTime12h(stay.eta)}`}
                               {stay.checked_in_by && ` · by ${fmtActor(stay.checked_in_by)}`}
                             </div>

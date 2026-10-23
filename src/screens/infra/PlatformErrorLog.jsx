@@ -1,19 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
+import { fmtStampYear } from '../../utils/dates'
 
-// created_at is stored 'YYYY-MM-DD HH:MM:SS' UTC with no timezone marker —
-// mark it UTC explicitly before formatting, same fix as NotificationSettings.
-function fmtLocalTime(utcStr) {
-  if (!utcStr) return '—'
-  try {
-    const d = new Date(utcStr.replace(' ', 'T') + 'Z')
-    return d.toLocaleString(undefined, {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-    })
-  } catch { return utcStr }
-}
+// created_at is a stored moment ('YYYY-MM-DD HH:MM:SS' UTC): shown as the clock at the property.
+const fmtLocalTime = fmtStampYear
 
 const EVENT_COLORS = {
   error:   '#EF4444',

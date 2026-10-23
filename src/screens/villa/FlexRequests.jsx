@@ -18,7 +18,7 @@ import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
-import { fmtDate } from '../../utils/dates'
+import { fmtDate, fmtStamp } from '../../utils/dates'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 
@@ -392,7 +392,7 @@ export default function FlexRequests() {
               )}
 
               <div style={{ marginTop: 10, fontSize: '0.68rem', color: 'var(--text-dim)' }}>
-                Received {r.created_at}
+                Received {fmtStamp(r.created_at)}
               </div>
             </div>
           )

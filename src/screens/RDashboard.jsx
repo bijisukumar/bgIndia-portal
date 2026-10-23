@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useBack } from '../utils/navTrail'
 import { api } from '../api'
-import { parseLocalDate } from '../utils/dates'
+import { parseLocalDate, localTodayStr, propertyYear } from '../utils/dates'
 import { CONFIG } from '../config'
 
 const ACTIVE_VILLA = CONFIG.villas.find(v => v.active) || CONFIG.villas[0] || {}
@@ -46,7 +46,7 @@ function StarRating({ rating }) {
   )
 }
 
-const CUR_YEAR = new Date().getFullYear()
+const CUR_YEAR = propertyYear()
 
 function fmt(n) {
   if (!n && n !== 0) return '—'
@@ -165,7 +165,7 @@ export default function RDashboard() {
   const handleMarkSelected = async () => {
     if (selected.size === 0) { showToast('Select at least one stay first', 'error'); return }
     setPaying(true)
-    const today = new Date().toISOString().substring(0, 10)
+    const today = localTodayStr()
     try {
       // Send selected comm_ids to backend
       await api.markRamanPaid({ commIds: [...selected], paidDate: today })
@@ -185,7 +185,7 @@ export default function RDashboard() {
   // ── PAY WHOLE QUARTER ────────────────────────────────────────────────────
   const handleMarkQuarterPaid = async (qLabel) => {
     setPaying(true)
-    const today = new Date().toISOString().substring(0, 10)
+    const today = localTodayStr()
     try {
       await api.markRamanPaid({ quarter: qLabel, paidDate: today })
       const q = unpaid?.quarters?.find(q => q.label === qLabel)
@@ -202,7 +202,7 @@ export default function RDashboard() {
   // ── PAY ALL ──────────────────────────────────────────────────────────────
   const handleMarkAllPaid = async () => {
     setPaying(true)
-    const today = new Date().toISOString().substring(0, 10)
+    const today = localTodayStr()
     try {
       await api.markRamanPaid({ paidDate: today })
       showToast(`✅ ${fmt(unpaid?.totalUnpaid)} — all unpaid stays marked paid`)

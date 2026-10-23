@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { CONFIG } from '../config'
+import { propertyYear } from '../utils/dates'
 
 export default function Login() {
   const { login }     = useAuth()
@@ -95,7 +96,7 @@ export default function Login() {
       </div>
 
       <p style={styles.footer}>
-        {CONFIG.brandName} © {new Date().getFullYear()} · All rights reserved
+        {CONFIG.brandName} © {propertyYear()} · All rights reserved
       </p>
 
       <style>{`

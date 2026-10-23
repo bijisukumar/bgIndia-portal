@@ -27,13 +27,13 @@ import { useNavigate } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
-import { localTodayStr } from '../../utils/dates'
+import { localTodayStr, propertyYear, propertyMonth } from '../../utils/dates'
 import MaintenanceEventsLog from './MaintenanceEventsLog'
 import { usePropertyList } from './usePropertyList'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const CUR_MONTH = new Date().getMonth()
-const CUR_YEAR  = new Date().getFullYear()
+const CUR_MONTH = propertyMonth()
+const CUR_YEAR  = propertyYear()
 const YEAR_OPTIONS = [CUR_YEAR, CUR_YEAR - 1]
 
 const EXPENSE_FIELDS = [

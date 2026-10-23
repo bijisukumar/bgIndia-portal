@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { CONFIG } from '../../config'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { daysFromToday } from '../../utils/dates'
 
 const STATUS_COLOR = {
   confirmed:          { bg: 'rgba(52,168,83,0.12)',   text: '#34A853', label: 'Confirmed' },
@@ -22,7 +23,7 @@ function fmtDate(d) {
 
 function daysUntil(d) {
   if (!d) return null
-  return Math.ceil((new Date(d + 'T00:00:00') - new Date().setHours(0,0,0,0)) / 86400000)
+  return daysFromToday(d)   // days from the PROPERTY's today (utils/tz.js)
 }
 
 export default function VillaHub() {

@@ -2,6 +2,7 @@ import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { checkTime } from './scripts/vite-check-time.mjs'
 
 // Demovilla — sales-demo tenant (villa management, same app shell as StayVibe)
 // Build: vite build --config vite.demovilla.config.js
@@ -25,6 +26,7 @@ export default defineConfig({
     }
   },
   plugins: [
+    checkTime(),   // fails the build on a time shown or decided the old way (scripts/check-time.mjs)
     react(),
     VitePWA({
       registerType: 'autoUpdate',

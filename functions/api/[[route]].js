@@ -55,7 +55,7 @@ const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 
 // The calendar published back to each booking platform: what goes in a
 // platform's link and how it is written (see src/server/icalHub.js).
-import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, todayIst, addDays } from '../../src/server/icalHub.js'
+import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, addDays } from '../../src/server/icalHub.js'
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
 import { stayHolds, holdPhrase } from '../../src/utils/stayHolds.js'
@@ -67,6 +67,9 @@ import { partyLimit, partyOf } from '../../src/utils/partySize.js'
 import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.js'
 // A guest booked for a LATER date than today (India) needs a deliberate yes at check-in.
 import { checkinDateStatus } from '../../src/utils/checkinDate.js'
+// The property's time zone and every way of reading a stored time in it. Nothing in this file reads
+// the server's clock for a business decision: see zoneFor below.
+import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr } from '../../src/utils/tz.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -214,7 +217,7 @@ function parseMrzTD3(text) {
     const mm = yymmdd.slice(2, 4)
     const dd = yymmdd.slice(4, 6)
     if (mm < '01' || mm > '12' || dd < '01' || dd > '31') return ''
-    const curYY = new Date().getFullYear() % 100
+    const curYY = new Date().getFullYear() % 100   // time-ok: the pivot for a two-digit year read off an ID document, not a business date
     const year = kind === 'expiry' ? 2000 + yy : (yy > curYY ? 1900 + yy : 2000 + yy)
     return `${year}-${mm}-${dd}`
   }
@@ -323,8 +326,8 @@ function manualExpiry(v) {
   return { ok: true, at: new Date(Date.now() + h * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ') }
 }
 // D1 stores UTC without a zone marker ('YYYY-MM-DD HH:MM:SS'); the browser
-// would read that as LOCAL time. Hand it out with the Z it should have had.
-const manualIso = d => (d ? String(d).replace(' ', 'T') + 'Z' : null)
+// would read that as LOCAL time. Hand it out as the ISO moment it is (instantMs, src/utils/tz.js).
+const manualIso = d => { const ms = instantMs(d); return Number.isFinite(ms) ? new Date(ms).toISOString() : null }
 
 // WRONG passcodes only — someone holding a good one reloads freely. Per
 // isolate, like the login limiter; the size of the code space is what really
@@ -538,7 +541,7 @@ async function getOwnerAlertEmail(DB, env, villaId) {
 // ── ESTATE360 WEEKLY OWNER DIGEST ────────────────────────────────────────
 // Irrigation compliance + Pradosh's logged expenses, emailed weekly by
 // runEstateWeeklyDigest (GitHub Actions cron, CRON_SECRET-guarded).
-// Dates are IST. Pure helpers first, then the builder.
+// Dates and times are the property's own zone (src/utils/tz.js). Pure helpers first, then the builder.
 const ESTATE_LABELS = { pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' }
 
 // Estates belong to the one owner, so an estate with no alert address of its
@@ -568,21 +571,50 @@ function irrigationZoneStatus(lastLogged, freq, today) {
   return { daysSince, consecutiveMisses, status }
 }
 
-const istToday    = () => new Date(Date.now() + 19800000).toISOString().slice(0, 10)
+const addMonthsISO = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10) }
 const addDaysISO  = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10)
 const diffDaysISO = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)
 const dayLabel    = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
-// created_at is stored UTC ("YYYY-MM-DD HH:MM:SS"); show when it was logged in IST.
-const istStamp = (utc) => {
-  const d = new Date(new Date(String(utc).replace(' ', 'T') + 'Z').getTime() + 19800000)
-  return isNaN(d) ? { date: null, time: '' } : { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) }
+// created_at is stored UTC ("YYYY-MM-DD HH:MM:SS"); the date and clock it was logged at, in the property's zone.
+const stampIn = (utc, tz) => ({ date: dateInZone(utc, tz) || null, time: clock24(utc, tz) })
+
+// ── THE PROPERTY'S TIME ZONE ──────────────────────────────────────────────────────────────────────
+// A stored time is UTC and the server's clock is UTC, but the property keeps its own: `timezone` in its
+// config (hosts/<id>/config.js; the copy the app is served from is platform_tenant_config), India's if it
+// names none. Every "today", every overdue test and every time printed in an email is read in THAT zone,
+// never the server's (src/utils/tz.js). scripts/check-time.mjs fails the build on the old ways.
+// Cached per isolate for a few minutes like the hostname lookup: a zone changes only when a host is onboarded.
+const ZONE_CACHE = new Map()
+const ZONE_TTL   = 5 * 60 * 1000
+async function zoneFor(DB, villaId) {
+  const key = villaId || ''
+  const hit = ZONE_CACHE.get(key)
+  if (hit && Date.now() - hit.at < ZONE_TTL) return hit.tz
+  let named = null
+  try {
+    const row = villaId ? await DB.prepare(`SELECT config_json FROM platform_tenant_config WHERE tenant_id = ?`).bind(villaId).first() : null
+    if (row?.config_json) named = JSON.parse(row.config_json)?.timezone || null
+  } catch (e) {
+    // A tenant database with no platform_tenant_config (the demo) or an unreadable row: use the host file.
+    console.warn('zoneFor lookup failed:', e?.message || e)
+  }
+  const tz = zoneName(named || HOST_CONFIGS[villaId]?.timezone)
+  ZONE_CACHE.set(key, { tz, at: Date.now() })
+  return tz
+}
+// A day as an SQL literal. The value is made from todayInZone (digits and dashes only), never from a
+// request, so it can sit in the statement text instead of needing a bind slot threaded through a long query.
+const sqlDay = d => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('sqlDay: not a day: ' + d)
+  return `'${d}'`
 }
 // The irrigation screen prefixes notes with "Rain" when the day's watering was rain.
 const isRainLog = l => /^rain/i.test(l.notes || '')
 const inr = n => '₹' + (Number(n) || 0).toLocaleString('en-IN')
 
-async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = null) {
+async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = null, tz = DEFAULT_TIMEZONE) {
   const label    = ESTATE_LABELS[estate] || estate
+  const stampAt  = (utc) => stampIn(utc, tz)
   const end      = endDate || addDaysISO(today, -1)
   const start    = addDaysISO(end, -(span - 1))
   const asOf     = addDaysISO(end, 1)   // statuses are judged as of the morning after the period
@@ -660,7 +692,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
   const zoneLines = zoneOut.flatMap(z => z.out)
 
   // ── Irrigation: data-quality flags ──
-  const backdated = winLogs.filter(l => { const s = istStamp(l.created_at).date; return s && diffDaysISO(l.logged_date, s) > 2 })
+  const backdated = winLogs.filter(l => { const s = stampAt(l.created_at).date; return s && diffDaysISO(l.logged_date, s) > 2 })
   const untagged  = winLogs.filter(l => !l.zone_id)
   if (!winLogs.length) issues.unshift('No irrigation was logged anywhere in this period — not done, or not being recorded?')
   else if (quietDays.length >= Math.ceil(span * 0.4)) issues.push(`${quietDays.length} of ${span} days had no irrigation logged at all${quietDays.length <= 8 ? ' (' + quietDays.map(dayLabel).join(', ') + ')' : ' — see the day-by-day list below'}`)
@@ -668,18 +700,18 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
   if (untagged.length) issues.push(`${untagged.length} irrigation entr${untagged.length > 1 ? 'ies have' : 'y has'} no zone selected, so ${untagged.length > 1 ? 'they do' : 'it does'} not count toward any zone`)
 
   // ── Expenses ──
-  const inWindow = (utc) => { const d = istStamp(utc).date; return !!d && d >= start && d <= end }
+  const inWindow = (utc) => { const d = stampAt(utc).date; return !!d && d >= start && d <= end }
   const expNew    = expRows.filter(r => inWindow(r.created_at))
   const expEdited = expRows.filter(r => !inWindow(r.created_at) && r.updated_at && inWindow(r.updated_at))
   const expLines = []
   if (!expNew.length) expLines.push('  No expenses were logged in this period.')
   const byCat = {}
   expNew.forEach(r => {
-    const lg  = istStamp(r.created_at)
+    const lg  = stampAt(r.created_at)
     const lag = lg.date ? diffDaysISO(r.date, lg.date) : 0
     const note = lag > 3 ? `  ⚠ logged ${lag}d after the expense date` : lag < 0 ? '  ⚠ expense date is in the future' : ''
-    const edited = r.updated_at && Math.abs(new Date(r.updated_at.replace(' ', 'T') + 'Z') - new Date(r.created_at.replace(' ', 'T') + 'Z')) > 60000
-    expLines.push(`  Logged ${dayLabel(lg.date)} ${lg.time} | expense date ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}${r.description ? ' | ' + r.description : ''}${edited ? ' | EDITED ' + dayLabel(istStamp(r.updated_at).date) : ''}${note}`)
+    const edited = r.updated_at && Math.abs(instantMs(r.updated_at) - instantMs(r.created_at)) > 60000
+    expLines.push(`  Logged ${dayLabel(lg.date)} ${lg.time} | expense date ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}${r.description ? ' | ' + r.description : ''}${edited ? ' | EDITED ' + dayLabel(stampAt(r.updated_at).date) : ''}${note}`)
     byCat[r.category] = (byCat[r.category] || 0) + (r.amount || 0)
   })
   const expTotal = expNew.reduce((s, r) => s + (r.amount || 0), 0)
@@ -687,13 +719,13 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
     expLines.push(`  Total: ${inr(expTotal)} across ${expNew.length} entr${expNew.length > 1 ? 'ies' : 'y'}`)
     expLines.push('  By category: ' + Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `${c} ${inr(v)}`).join(', '))
   }
-  expEdited.forEach(r => expLines.push(`  Earlier entry EDITED ${dayLabel(istStamp(r.updated_at).date)}: ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}`))
-  const lateExp = expNew.filter(r => { const lg = istStamp(r.created_at).date; return lg && diffDaysISO(r.date, lg) > 3 })
+  expEdited.forEach(r => expLines.push(`  Earlier entry EDITED ${dayLabel(stampAt(r.updated_at).date)}: ${r.date} | ${r.category} | ${inr(r.amount)} | to ${r.paid_to || '—'}`))
+  const lateExp = expNew.filter(r => { const lg = stampAt(r.created_at).date; return lg && diffDaysISO(r.date, lg) > 3 })
   if (lateExp.length) issues.push(`${lateExp.length} expense${lateExp.length > 1 ? 's were' : ' was'} logged more than 3 days after the expense date`)
   if (expEdited.length) issues.push(`${expEdited.length} older expense entr${expEdited.length > 1 ? 'ies were' : 'y was'} edited in this period`)
 
   const cocoLines = cocoRows.filter(r => inWindow(r.created_at)).map(r =>
-    `  Logged ${dayLabel(istStamp(r.created_at).date)} | harvest ${r.harvest_date} | ${r.harvester_name || '—'} | ${(r.total_nuts || 0).toLocaleString('en-IN')} nuts | expense ${inr(r.total_expense)} | net ${inr(r.net_income)}`)
+    `  Logged ${dayLabel(stampAt(r.created_at).date)} | harvest ${r.harvest_date} | ${r.harvester_name || '—'} | ${(r.total_nuts || 0).toLocaleString('en-IN')} nuts | expense ${inr(r.total_expense)} | net ${inr(r.net_income)}`)
 
   // ── Assemble ──
   const zoneSummary = zones.length
@@ -706,7 +738,7 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
   if (zones.length) L.push('', 'By zone (worst first):', ...zoneLines)
   L.push('', `EXPENSES LOGGED ${span === 7 ? 'THIS WEEK' : 'IN THE LAST ' + span + ' DAYS'} (date logged shown first)`, ...expLines)
   if (cocoLines.length) L.push('', 'COCONUT HARVESTS LOGGED IN THIS PERIOD', ...cocoLines)
-  L.push('', 'Source: Estate360 weekly digest (every Monday, IST)')
+  L.push('', `Source: Estate360 weekly digest (every Monday, ${zoneAbbr(tz)})`)
 
   const sev = counts.critical + counts.never + counts.alert
   const subject = `💧 Estate360 ${span === 7 ? 'weekly' : span + '-day'} report — ${label}: ${issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} need attention` : 'all on track'}, ${expNew.length} expense${expNew.length === 1 ? '' : 's'} (${inr(expTotal)})${sev ? ` · ${sev} zone${sev > 1 ? 's' : ''} overdue` : ''}`
@@ -820,7 +852,7 @@ function splitSqlStatements(sql) {
 
 function genStayId(villaId = 'dwarka') {
   const prefix = villaId === 'dwarka' ? 'DWK' : villaId.toUpperCase().slice(0, 3)
-  const year   = new Date().getFullYear()
+  const year   = new Date().getFullYear()   // time-ok: the year in a new stay's ID label, not a business date
   // Timestamp-based: last 4 digits of ms epoch + 1 random digit = 5-char suffix
   // Near-zero collision probability; deleted IDs are never re-rolled
   const suffix = String(Date.now()).slice(-4) + String(Math.floor(Math.random() * 10))
@@ -1749,6 +1781,11 @@ export async function onRequest(ctx) {
       headers: { 'Content-Type': 'application/json', ...CORS }
     })
   }
+
+  // The property's own "today" (src/utils/tz.js): for any decision about which day it is. The database's
+  // date('now') and the server's clock are UTC, which is yesterday in India until 05:30.
+  const todayOf = async (villaId) => todayInZone(await zoneFor(DB, villaId || DEFAULT_VILLA_ID))
+  const yearOf  = async (villaId) => Number((await todayOf(villaId)).slice(0, 4))
 
   const ESTATE_ACTIONS = new Set([
     'getCoconutHarvests', 'saveCoconutHarvest', 'setCoconutInterval', 'sendEstateReport',
@@ -2810,16 +2847,24 @@ export async function onRequest(ctx) {
     const secret = request.headers.get('X-Cron-Secret') || ''
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
 
-    const today = new Date().toISOString().slice(0, 10)
+    // "The day this guest checks out" is the PROPERTY's day (src/utils/tz.js), not the server's. So fetch the
+    // few days around UTC today and keep each stay whose check-out date is today AT ITS OWN PROPERTY.
+    const today = new Date().toISOString().slice(0, 10)   // time-ok: only the middle of a window that narrows the query; each stay is matched to its own property's today below
     // tenant-scope-exempt: daily cron behind CRON_SECRET with no user session.
     // It must sweep every tenant; each stay is emailed to its own owner.
-    const { results: due } = await DB.prepare(`
+    const { results: dueWindow } = await DB.prepare(`
       SELECT * FROM stayvibe_stays
-      WHERE checkout_date = ?
+      WHERE checkout_date IN (?, ?, ?)
         AND status IN ('checked_in', 'ready_for_checkout')
         AND guest_email IS NOT NULL AND guest_email != ''
         AND checkout_email_sent_at IS NULL
-    `).bind(today).all()
+    `).bind(addDaysISO(today, -1), today, addDaysISO(today, 1)).all()
+    const dayAt = {}
+    const due = []
+    for (const s of (dueWindow || [])) {
+      if (!(s.villa_id in dayAt)) dayAt[s.villa_id] = await todayOf(s.villa_id)
+      if (s.checkout_date === dayAt[s.villa_id]) due.push(s)
+    }
 
     let sent = 0, failed = 0
     for (const stay of (due || [])) {
@@ -2872,7 +2917,8 @@ export async function onRequest(ctx) {
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
     if (!DB_ESTATES) return err('DB_ESTATES binding not configured', 503)
     const dBody = await request.json().catch(() => ({}))
-    const today = istToday()
+    const tz = await zoneFor(DB, DEFAULT_VILLA_ID)
+    const today = todayInZone(tz)
 
     let estates = []
     if (dBody.estate) estates = [dBody.estate]
@@ -2886,7 +2932,7 @@ export async function onRequest(ctx) {
     const out = []
     for (const estate of estates) {
       try {
-        const d = await buildEstateWeeklyDigest(DB_ESTATES, estate, today, Math.min(Math.max(parseInt(dBody.days) || 7, 1), 35))
+        const d = await buildEstateWeeklyDigest(DB_ESTATES, estate, today, Math.min(Math.max(parseInt(dBody.days) || 7, 1), 35), null, tz)
         if (dBody.dryRun) { out.push({ estate, subject: d.subject, text: d.lines.join('\n') }); continue }
         await sendAlert(env, d.subject, d.lines, await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_weekly')
         out.push({ estate, sent: true })
@@ -3015,7 +3061,7 @@ export async function onRequest(ctx) {
       try { await refreshFeedsBeforeExport(DB, ctx, link.villa_id, link.channel) }
       catch (e) { console.warn('ical hub refresh:', e?.message || e) }   // serve what we have
 
-      const today = todayIst()
+      const today = await todayOf(link.villa_id)
       const [{ results: stayRows }, { results: blockRows }] = await Promise.all([
         // The same notion of "a real booking" as getVillaCalendar: anything not
         // cancelled or voided, whatever its source. (>=: a stay that leaves today
@@ -3508,6 +3554,8 @@ export async function onRequest(ctx) {
           // the host, and the sentence the confirmation email says about it (null: the script's own).
           partyLimit:    partyLimit(HOST_CONFIGS[tenantId]?.pricing),
           partyNote:     HOST_CONFIGS[tenantId]?.guestMessages?.checkinConfirmation?.partyNote || null,
+          // The property's time zone, for the Apps Script's file-name stamps (utils/tz.js; `timezone` in the host config).
+          timezone:      await zoneFor(DB, tenantId),
         }})
       }
 
@@ -3587,7 +3635,7 @@ export async function onRequest(ctx) {
       if (action === 'getStays') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const year    = url.searchParams.get('year') || new Date().getFullYear()
+        const year    = url.searchParams.get('year') || await yearOf(villaId)
         // Excludes cancelled/void — matches getVillaDashboard/getMonthlyNights,
         // which both filter the same way. This action didn't, so a cancelled
         // booking's nights still counted here (e.g. Aug 2026's Monthly Trend
@@ -3644,7 +3692,7 @@ export async function onRequest(ctx) {
            FROM stayvibe_stays WHERE villa_id = ?
            AND (
              status = 'ready_for_checkout'
-             OR (status IN ('checked_out', 'closed') AND checkout_date >= date('now', '-7 days'))
+             OR (status IN ('checked_out', 'closed') AND checkout_date >= date(${sqlDay(await todayOf(villaId))}, '-7 days'))
            )
            ORDER BY CASE status WHEN 'ready_for_checkout' THEN 0 ELSE 1 END, checkout_date DESC
            LIMIT 3`
@@ -3656,13 +3704,13 @@ export async function onRequest(ctx) {
       if (action === 'getActiveStay') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        // "Today" in IST — a stay is only live once its check-in date has arrived.
-        const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
+        // "Today" at the property (src/utils/tz.js) — a stay is only live once its check-in date has arrived.
+        const todayHere = await todayOf(villaId)
         const stay = await DB.prepare(
           `SELECT * FROM stayvibe_stays
              WHERE villa_id = ? AND status = 'checked_in' AND checkin_date <= ?
              ORDER BY checkin_date DESC LIMIT 1`
-        ).bind(villaId, todayIST).first()
+        ).bind(villaId, todayHere).first()
         if (!stay) return json({ success: true, data: null })
         await attachStayPrefs(DB, [stay])
         return json({ success: true, data: {
@@ -3735,7 +3783,7 @@ export async function onRequest(ctx) {
       if (action === 'getVillaDashboard') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const year    = url.searchParams.get('year') || new Date().getFullYear()
+        const year    = url.searchParams.get('year') || await yearOf(villaId)
         const isAllYears = year === 'all'
         const { results: stays } = isAllYears
           ? await DB.prepare(
@@ -3940,7 +3988,7 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const yearsBack = Math.min(Math.max(parseInt(url.searchParams.get('years')) || 3, 1), 10)
-        const curYear = new Date().getFullYear()
+        const curYear = await yearOf(villaId)
         const fromYear = curYear - yearsBack + 1
         const { results: stays } = await DB.prepare(
           `SELECT checkin_date, checkout_date, nights FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date >= ?`
@@ -3976,9 +4024,9 @@ export async function onRequest(ctx) {
       if (action === 'getChannelMixInsight') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const now2    = new Date()
-        const month   = url.searchParams.get('month') || String(now2.getMonth() + 1).padStart(2, '0')
-        const year    = url.searchParams.get('year')  || now2.getFullYear()
+        const todayHere = await todayOf(villaId)
+        const month   = url.searchParams.get('month') || todayHere.slice(5, 7)
+        const year    = url.searchParams.get('year')  || Number(todayHere.slice(0, 4))
         const { results: stays } = await DB.prepare(
           `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date LIKE ? AND status NOT IN ('cancelled','void')`
         ).bind(villaId, `${year}-${month}%`).all()
@@ -4024,13 +4072,14 @@ export async function onRequest(ctx) {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const windowDays = 60
+        const todayStr = await todayOf(villaId)   // the property's today, not the database's UTC date
         const { results: stays } = await DB.prepare(
           `SELECT stay_id, checkin_date, checkout_date, early_checkin_time, late_checkout_time FROM stayvibe_stays
             WHERE villa_id = ? AND status NOT IN ('cancelled','closed','checked_out','void')
-              AND checkin_date < date('now', '+' || ? || ' days') AND checkout_date >= date('now')`
+              AND checkin_date < date(${sqlDay(todayStr)}, '+' || ? || ' days') AND checkout_date >= ${sqlDay(todayStr)}`
         ).bind(villaId, windowDays).all()
 
-        const today = new Date(); today.setHours(0, 0, 0, 0)
+        const today = new Date(todayStr + 'T00:00:00Z')   // the property's today as a date
         const fmt = d => d.toISOString().slice(0, 10)
         // A night held by an agreed late check-out / early check-in is not for sale
         // either (src/utils/stayHolds.js), so it ends a gap the way a booking does.
@@ -4234,7 +4283,7 @@ export async function onRequest(ctx) {
 
       if (action === 'getRentalIncome') {
         const propId = url.searchParams.get('propId')
-        const year   = url.searchParams.get('year') || new Date().getFullYear()
+        const year   = url.searchParams.get('year') || await yearOf()
         const month  = url.searchParams.get('month')
         let query = `SELECT * FROM rev360_rental_income WHERE year = ?`
         const binds = [year]
@@ -4246,7 +4295,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRentalDashboard') {
-        const year = url.searchParams.get('year') || new Date().getFullYear()
+        const year = url.searchParams.get('year') || await yearOf()
         // Same migration as getRev360Dashboard: income from rent_transactions
         // (replaces rental_income's combined rent+car_parking), expense from
         // property_expenses (replaces rental_income's expense columns).
@@ -4529,7 +4578,7 @@ export async function onRequest(ctx) {
         const fo = villaScope(payload, url.searchParams.get('villaId'), 'stayvibe_stays.villa_id')
         const { results } = await DB.prepare(
           `SELECT stayvibe_stays.stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void')${fo.sql} ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
-        ).bind(`%${firstName}%`, ...fo.binds, checkInDate || new Date().toISOString().slice(0,10)).all()
+        ).bind(`%${firstName}%`, ...fo.binds, checkInDate || await todayOf(url.searchParams.get('villaId'))).all()
         if (results.length > 0) {
           const r = results[0]
           return json({ success: true, data: { stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, checkoutDate: r.checkout_date, nights: r.nights, adults: r.adults, children: r.children, phone: r.guest_phone, email: r.guest_email, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status, purposeOfVisit: r.purpose_of_visit, modeOfTransport: r.mode_of_transport, vehicleNumber: r.vehicle_number, eta: r.eta, nationality: r.nationality, city: r.city, state: r.state, country: r.country, requestEarlyCheckin: r.request_early_checkin, requestLateCheckout: r.request_late_checkout, requestBreakfast: r.request_breakfast, breakfastChoice: r.breakfast_choice, requestCab: r.request_cab, govtIdType: r.govt_id_type, govtIdNum: r.govt_id_num } })
@@ -4564,12 +4613,16 @@ export async function onRequest(ctx) {
         // from `new Date('2026-08-13')` (UTC midnight) and added 1 to
         // compensate — which drifts with the time of day and the server's
         // zone. Pure date arithmetic can't drift: today is 0, tomorrow is 1.
-        const DAYS_UNTIL = `CAST(julianday(checkin_date) - julianday(date('now')) AS INTEGER)`
-        const DAYS_OVER  = `CAST(julianday(date('now')) - julianday(checkout_date) AS INTEGER)`
-        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, ${DAYS_OVER} AS days_over FROM stayvibe_stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < date('now') ORDER BY checkout_date ASC`).bind(villaId).all()
+        // "Today" is the PROPERTY's (src/utils/tz.js), put into the statement as a literal: the database's
+        // date('now') is UTC, which is still yesterday in India until 05:30 and would call Raman's overdue
+        // list (and every "arrives today") wrong for those hours.
+        const TODAY_SQL  = sqlDay(await todayOf(villaId))
+        const DAYS_UNTIL = `CAST(julianday(checkin_date) - julianday(${TODAY_SQL}) AS INTEGER)`
+        const DAYS_OVER  = `CAST(julianday(${TODAY_SQL}) - julianday(checkout_date) AS INTEGER)`
+        const { results: overdueRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, ${DAYS_OVER} AS days_over FROM stayvibe_stays WHERE villa_id = ? AND status IN ('checked_in','ready_for_checkout','pending_review') AND checkout_date < ${TODAY_SQL} ORDER BY checkout_date ASC`).bind(villaId).all()
         // Next N arrivals rather than a 7-day window: on a quiet week Raman
         // saw an empty card and had no idea who was coming next.
-        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= date('now') ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
+        const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= ${TODAY_SQL} ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
         await attachStayPrefs(DB, overdueRows)
         await attachStayPrefs(DB, upcomingRows)
         const mapRow = r => ({
@@ -4673,7 +4726,7 @@ export async function onRequest(ctx) {
         // already treats it as occupied; this check used to call it available. Blocks come
         // from calendars that are switched on, as in the links handed to the platforms, and a
         // block that a booking listed above already explains is not listed twice.
-        const today = todayIst()
+        const today = await todayOf(villaId)
         const lo = addDays(checkIn, -45), hi = addDays(checkOut, 75)
         const blocks = await loadPlatformBlocks(DB, villaId, lo, hi)
         for (const b of blocks) {
@@ -4808,7 +4861,7 @@ export async function onRequest(ctx) {
            LEFT JOIN stayvibe_stay_ext se ON se.stay_id = stayvibe_stays.stay_id
            WHERE stayvibe_stays.villa_id = ?
              AND status NOT IN ('closed','cancelled','void')
-             AND (checkin_date >= date('now', '-1 day') OR status IN ('checked_in','ready_for_checkout'))
+             AND (checkin_date >= date(${sqlDay(await todayOf(villaId))}, '-1 day') OR status IN ('checked_in','ready_for_checkout'))
            ORDER BY checkin_date ASC`
         ).bind(villaId).all()
         // Cleaning-turnaround flag — only for stays that actually have an
@@ -4916,7 +4969,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'getRev360Dashboard') {
-        const year = new Date().getFullYear()
+        const year = await yearOf()
         const props = await DB.prepare(`SELECT * FROM rev360_rental_props ORDER BY prop_id`).all()
         // Income: rent_transactions (base_rent + maintenance + car_parking + late_fee,
         // i.e. total_due) is the new source of truth, replacing rental_income's
@@ -5080,14 +5133,14 @@ export async function onRequest(ctx) {
 
       if (action === 'getDuplicateBookings') {
         const months = parseInt(url.searchParams.get('months') || '2')
-        const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months)
+        const cutoffDay = addMonthsISO(await todayOf(url.searchParams.get('villaId')), -months)
         const { results } = await (() => {
           const sc = villaScope(payload, url.searchParams.get('villaId'))
           return DB.prepare(
             `SELECT * FROM stayvibe_duplicate_bookings
               WHERE detected_at >= ? AND (resolved IS NULL OR resolved = 0)${sc.sql}
               ORDER BY detected_at DESC`
-          ).bind(cutoff.toISOString().slice(0,10), ...sc.binds)
+          ).bind(cutoffDay, ...sc.binds)
         })().all()
         const byChannel = {}
         results.forEach(r => {
@@ -5103,7 +5156,7 @@ export async function onRequest(ctx) {
       if (action === 'getManagerQuickInfo') {
         const estateId   = actor === 'pradosh' ? 'pollachi' : (actor === 'raman' ? 'pavutumuri' : 'pollachi')
         const estateType = actor === 'raman' ? 'rubber' : 'coconut'
-        const today      = new Date().toISOString().slice(0, 10)
+        const today      = await todayOf()
 
         if (estateType === 'coconut') {
           const harvest = await ActiveDB.prepare(
@@ -5192,7 +5245,7 @@ export async function onRequest(ctx) {
       if (action === 'getIrrigationZoneHealth') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         assertEstateAccess(payload, estateId)
-        const today    = new Date().toISOString().slice(0, 10)
+        const today    = await todayOf()
 
         let zones = []
         try {
@@ -5349,9 +5402,8 @@ export async function onRequest(ctx) {
       if (action === 'getEstateHighlights') {
         const estateId  = url.searchParams.get('estate') || 'pollachi'
         assertEstateAccess(payload, estateId)
-        const cutoff    = new Date(); cutoff.setMonth(cutoff.getMonth() - 12)
-        const cutoffStr = cutoff.toISOString().slice(0, 10)
-        const today     = new Date().toISOString().slice(0, 10)
+        const today     = await todayOf()
+        const cutoffStr = addMonthsISO(today, -12)
 
         const { results: harvests } = await ActiveDB.prepare(
           `SELECT harvest_date, scheduled_harvest_date, total_nuts, total_weight_kg, harvester_name FROM estate360_coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
@@ -5421,10 +5473,10 @@ export async function onRequest(ctx) {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const estateId = url.searchParams.get('estate') || 'pollachi'
         assertEstateAccess(payload, estateId)
-        const today = new Date()
-        const curYear = today.getFullYear()
+        const todayStr  = await todayOf()
+        const today = new Date(todayStr + 'T00:00:00Z')   // the property's today as a date
+        const curYear = today.getUTCFullYear()
         const cutoffStr = `${curYear}-01-01`            // calendar year-to-date
-        const todayStr  = today.toISOString().slice(0, 10)
 
         const { results: harvests } = await ActiveDB.prepare(
           `SELECT harvest_date, total_earnings, total_expense, net_income, harvest_expense, dehusk_expense, tractor_expense, other_expense FROM estate360_coconut_harvests WHERE estate_id = ? AND harvest_date >= ? ORDER BY harvest_date DESC`
@@ -5612,7 +5664,10 @@ export async function onRequest(ctx) {
         const DEF_IN  = cfg.defaultCheckinTime  || '16:00'
         const DEF_OUT = cfg.defaultCheckoutTime || '11:00'
         const TURN_MS = (cfg.turnaroundHours != null ? cfg.turnaroundHours : 4) * 3600000
-        // Every stored time is naive villa wall-clock ("2026-08-08 11:00").
+        // The plan (expected_* and the agreed times) is naive villa wall-clock ("2026-08-08 11:00"); what
+        // ACTUALLY happened (actual_*) is a real UTC moment, so it is moved onto the property's wall clock
+        // (wallMs, src/utils/tz.js) to sit in the same frame, instead of being compared 5½ hours adrift.
+        const zone = await zoneFor(DB, villaId)
         // Anchored to UTC on the way in and read back with UTC getters, so
         // the arithmetic is identical wherever this runs. Mixing local
         // getters with toISOString() would silently shift everything by the
@@ -5620,13 +5675,17 @@ export async function onRequest(ctx) {
         const at = (dateStr, timeStr) => (dateStr ? new Date(`${dateStr}T${(timeStr || '00:00').slice(0, 5)}:00Z`) : null)
         const parseDt = v => {
           if (!v) return null
-          const s = String(v).trim().replace(' ', 'T')
-          const d = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(s) ? s : s + 'Z')
+          const s = String(v).trim()
+          if (/[Zz]$|[+-]\d{2}:?\d{2}$/.test(s)) { const ms = wallMs(s, zone); return Number.isFinite(ms) ? new Date(ms) : null }   // carries its own zone: a real moment
+          const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(s)
+          if (!m) return null
+          const d = new Date(`${m[1]}T${m[2]}:00Z`)
           return isNaN(d) ? null : d
         }
-        const arrivalOf = s => parseDt(s.actual_checkin_at) || parseDt(s.expected_arrival_at)
+        const actualDt = v => { const ms = wallMs(v, zone); return Number.isFinite(ms) ? new Date(ms) : null }
+        const arrivalOf = s => actualDt(s.actual_checkin_at) || parseDt(s.expected_arrival_at)
           || at(s.checkin_date, s.early_checkin_time || DEF_IN)
-        const departureOf = s => parseDt(s.actual_checkout_at) || parseDt(s.expected_departure_at)
+        const departureOf = s => actualDt(s.actual_checkout_at) || parseDt(s.expected_departure_at)
           || at(s.checkout_date, s.late_checkout_time || DEF_OUT)
         const dayTime = d => d ? d.toISOString().slice(0, 16).replace('T', ' ') : null
 
@@ -5802,7 +5861,7 @@ export async function onRequest(ctx) {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const rows = await loadDateBlocks(DB, villaId, todayIst(), '9999-12-31')
+        const rows = await loadDateBlocks(DB, villaId, await todayOf(villaId), '9999-12-31')
         const nightsBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000)
         return json({ success: true, data: rows.map(r => ({
           blockId: r.block_id, startDate: r.start_date, endDate: r.end_date,
@@ -5864,7 +5923,7 @@ export async function onRequest(ctx) {
         // other double booking (the next family arriving at 4 PM on the day a guest
         // leaves at 6 PM). Two holds on the same night are not a clash with each other.
         const rules = await holdRules(DB, villaId)
-        for (const h of heldNights(stays, rules, todayIst())) {
+        for (const h of heldNights(stays, rules, await todayOf(villaId))) {
           items.push({
             id: `hold:${h.stayId}:${h.kind}`, kind: 'hold', source: h.kind,
             label: `${h.guest || 'Guest'} · ${holdPhrase(h)}`,
@@ -5930,7 +5989,7 @@ export async function onRequest(ctx) {
                   request_early_checkin, request_late_checkout
            FROM stayvibe_stays
            WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))${pr1.sql}
+             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= ${sqlDay(await todayOf(url.searchParams.get('villaId')))})${pr1.sql}
            ORDER BY checkin_date ASC`
         ).bind(...pr1.binds).all()
         await attachStayPrefs(DB, results)
@@ -5971,15 +6030,15 @@ export async function onRequest(ctx) {
                   review_chased_at, review_chase_count
            FROM stayvibe_stays
            WHERE status = 'checked_out'
-             AND checkout_date <= date('now')
+             AND checkout_date <= ${sqlDay(await todayOf(url.searchParams.get('villaId')))}
              AND (review_rating IS NULL OR review_rating = 0)${rv.sql}
            ORDER BY checkout_date DESC
            LIMIT 100`
         ).bind(...rv.binds).all()
         const today = new Date()
+        const todayMs = Date.parse((await todayOf(url.searchParams.get('villaId'))) + 'T00:00:00Z')   // the property's today, as a date
         return json({ success: true, data: results.map(r => {
-          const checkout = new Date(r.checkout_date)
-          const daysOut  = Math.floor((today - checkout) / 86400000)
+          const daysOut  = Math.round((todayMs - Date.parse(r.checkout_date + 'T00:00:00Z')) / 86400000)
           const lastChased = r.review_chased_at ? new Date(r.review_chased_at) : null
           const daysSinceChase = lastChased ? Math.floor((today - lastChased) / 86400000) : null
           return {
@@ -6131,7 +6190,7 @@ export async function onRequest(ctx) {
       if (action === 'getEnquiryDashboard') {
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const year    = url.searchParams.get('year') || new Date().getFullYear()
+        const year    = url.searchParams.get('year') || await yearOf(villaId)
         const { results: rows } = await DB.prepare(
           `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? AND date_received LIKE ?`
         ).bind(villaId, `${year}%`).all()
@@ -6179,7 +6238,7 @@ export async function onRequest(ctx) {
         const { results } = await DB.prepare(`
           SELECT * FROM stayvibe_enquiries
           WHERE villa_id = ? AND status NOT IN ('confirmed','lost','cancelled')
-            AND follow_up_due IS NOT NULL AND follow_up_due <= date('now')
+            AND follow_up_due IS NOT NULL AND follow_up_due <= ${sqlDay(await todayOf(villaId))}
           ORDER BY follow_up_due ASC
         `).bind(villaId).all()
         return json({ success: true, data: results })
@@ -6588,7 +6647,7 @@ export async function onRequest(ctx) {
         if (!isDay(start) || !isDay(end)) return err('startDate and endDate (YYYY-MM-DD) are required')
         if (end <= start) return err('The villa must open again after the first closed night')
         if ((Date.parse(end + 'T00:00:00Z') - Date.parse(start + 'T00:00:00Z')) / 86400000 > 366) return err('A block can be at most 366 nights: make two')
-        if (end <= todayIst()) return err('Those nights have already passed')
+        if (end <= await todayOf(vId)) return err('Those nights have already passed')
         const reason = Object.prototype.hasOwnProperty.call(BLOCK_REASON_LABELS, body.reason) ? body.reason : 'other'
         const note = String(body.note || '').trim().slice(0, 300) || null
 
@@ -7698,9 +7757,10 @@ export async function onRequest(ctx) {
         // when it goes ahead. A check-in on or after the booked date is untouched.
         let dateWarn = null
         if (stayId) {
-          const due = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
-          if (due && checkinDateStatus(due.checkin_date) === 'early') {
-            dateWarn = { stayId, guestName: due.guest_name, bookedFor: due.checkin_date, bookedUntil: due.checkout_date, today: istToday() }
+          const due = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date, villa_id FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+          const todayHere = due ? await todayOf(due.villa_id) : null   // the PROPERTY's today (src/utils/tz.js)
+          if (due && checkinDateStatus(due.checkin_date, todayHere) === 'early') {
+            dateWarn = { stayId, guestName: due.guest_name, bookedFor: due.checkin_date, bookedUntil: due.checkout_date, today: todayHere }
             if (body.dateOverride !== true) {
               const guardVilla = body.villaId || DEFAULT_VILLA_ID
               ctx.waitUntil(sendAlert(env, `⚠️ bgIndia — Check-in attempted on the wrong date: ${due.guest_name}`, [
@@ -8508,8 +8568,10 @@ export async function onRequest(ctx) {
         if (body.to < body.from) return err('"To" date is before "From" date', 400)
         const span = diffDaysISO(body.from, body.to) + 1
         if (span > 62) return err('Pick a range of 62 days or less', 400)
-        if (body.to >= istToday()) return err('"To" date must be before today — today is not over yet', 400)
-        const d = await buildEstateWeeklyDigest(ActiveDB, estate, istToday(), span, body.to)
+        const tz = await zoneFor(DB, payload.tenantId || DEFAULT_VILLA_ID)
+        const todayHere = todayInZone(tz)
+        if (body.to >= todayHere) return err('"To" date must be before today — today is not over yet', 400)
+        const d = await buildEstateWeeklyDigest(ActiveDB, estate, todayHere, span, body.to, tz)
         const res = await sendAlert(env, d.subject, d.lines, await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_report')
         if (!res.ok) return err(`Email could not be sent (${res.statusCode || 'error'}): ${String(res.detail || '').slice(0, 160)}`, 502)
         return json({ success: true, data: { to: res.to, from: body.from, toDate: body.to, days: span } })
@@ -10497,7 +10559,7 @@ export async function onRequest(ctx) {
                   created_at, folder_created, folder_created_at
            FROM stayvibe_stays
            WHERE status = 'pending_review'
-             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= date('now'))${pr2.sql}
+             AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= ${sqlDay(await todayOf(url.searchParams.get('villaId')))})${pr2.sql}
            ORDER BY checkin_date ASC`
         ).bind(...pr2.binds).all()
         return json({ success: true, data: results.map(r => ({

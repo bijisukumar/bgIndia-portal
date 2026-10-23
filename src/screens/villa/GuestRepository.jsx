@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, propertyYear } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 
@@ -256,7 +256,7 @@ function GuestDetail({ guest, onClose }) {
 }
 
 // ── MARKETING TAB ──────────────────────────────────────────────────────────
-const CUR_YEAR_MKT = new Date().getFullYear()
+const CUR_YEAR_MKT = propertyYear()
 const YEARS_MKT = [null, CUR_YEAR_MKT, CUR_YEAR_MKT-1, CUR_YEAR_MKT-2, CUR_YEAR_MKT-3, CUR_YEAR_MKT-4]
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const STATE_COLORS = ['#C8903A','#34A853','#185FA5','#8B5CF6','#EC4899','#F59E0B','#06B6D4','#10B981']

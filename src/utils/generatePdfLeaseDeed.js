@@ -14,6 +14,7 @@
 import { loadLeaseOrNull } from './privateConfig'
 import { createPdfWithCursor, triggerPdfDownload, fmtLongDate } from './pdfGenHelpers'
 import { rgb } from 'pdf-lib'
+import { localTodayStr } from './dates'
 
 function fmtRupees(n) {
   const v = Math.round(Number(n) || 0)
@@ -150,7 +151,7 @@ export async function buildLeaseDeedPdf(agreement, property) {
     throw new Error('Lessor details are not set up for this account, so a lease deed cannot be drawn up.')
   }
   const { doc, cursor } = await createPdfWithCursor()
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = localTodayStr()
 
   const tenantName    = agreement.tenant_name || '[TENANT NAME]'
   const tenantAddress = agreement.tenant_address || '[TENANT ADDRESS]'

@@ -13,6 +13,8 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelsMatch, sourceStyle, sourcePill, colorAlpha, PARTNERS, DIRECT_STYLE, AGENT_STYLE } from '../../utils/channel'
 import CalendarExports from './CalendarExports'
 import BlockDates from './BlockDates'
+import { fmtStamp } from '../../utils/dates'
+import { instantMs } from '../../utils/tz'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -239,7 +241,7 @@ function SourceKey({ items, feeds, tally, onConnect }) {
     }
     const bad = f.last_sync_status === 'error'
     const status = bad ? <span style={{ color: '#EF4444' }}>⚠</span> : !f.is_active ? <span style={{ color: 'var(--text-dim)' }}>⏸</span> : <span style={{ color: '#34A853' }}>✓</span>
-    const when = bad ? 'last sync failed' : !f.is_active ? 'paused' : f.last_synced_at ? `synced ${f.last_synced_at.slice(0, 16)}` : 'not synced yet'
+    const when = bad ? 'last sync failed' : !f.is_active ? 'paused' : f.last_synced_at ? `synced ${fmtStamp(f.last_synced_at)}` : 'not synced yet'
     return <Chip key={st.key} st={st} status={status} title={`${st.label}'s calendar is connected · ${when}`} />
   }
 
@@ -370,7 +372,7 @@ export default function ChannelCalendar() {
     if (loading || autoSynced.current || feeds.length === 0) return
     autoSynced.current = true
     const stale = feeds.some(f => f.is_active && (!f.last_synced_at ||
-      Date.now() - new Date(f.last_synced_at.replace(' ', 'T') + 'Z').getTime() > 30 * 60 * 1000))
+      Date.now() - instantMs(f.last_synced_at) > 30 * 60 * 1000))
     if (stale) handleSyncNow({ quiet: true })
   }, [loading, feeds])
 
@@ -474,7 +476,7 @@ export default function ChannelCalendar() {
                   {f.last_sync_status === 'error'
                     ? <span style={{ color: '#EF4444' }}>⚠️ Last sync failed: {f.last_sync_error}</span>
                     : f.last_synced_at
-                      ? `Last synced ${f.last_synced_at} · ${f.last_sync_count ?? 0} block(s)`
+                      ? `Last synced ${fmtStamp(f.last_synced_at)} · ${f.last_sync_count ?? 0} block(s)`
                       : 'Not synced yet'}
                 </div>
               </div>

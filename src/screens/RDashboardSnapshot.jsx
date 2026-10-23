@@ -18,7 +18,7 @@
 import { useState, useEffect, Component } from 'react'
 import { useBack } from '../utils/navTrail'
 import { api } from '../api'
-import { parseLocalDate } from '../utils/dates'
+import { parseLocalDate, propertyYear } from '../utils/dates'
 
 class EB extends Component {
   constructor(p){super(p);this.state={err:null}}
@@ -97,7 +97,7 @@ function RDashboardSnapshotInner() {
     </div>
   )
 
-  const curYear = new Date().getFullYear()
+  const curYear = propertyYear()
   const curQ    = currentQuarter()
 
   const years = report.years || []

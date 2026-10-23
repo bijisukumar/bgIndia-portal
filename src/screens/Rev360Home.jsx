@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
+import { propertyYear } from '../utils/dates'
 
 const STATUS_COLOR = {
   'Signed Up':'#185FA5','Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
@@ -42,7 +43,7 @@ function KpiStrip({ props, income, losses, currency }) {
         <div style={{...styles.kpiVal, color: totalNOI >= 0 ? '#34A853' : '#EF4444'}}>
           {fmtCurrency(totalNOI, cur)}
         </div>
-        <div style={styles.kpiSub}>{new Date().getFullYear()} · {props.length} propert{props.length!==1?'ies':'y'}</div>
+        <div style={styles.kpiSub}>{propertyYear()} · {props.length} propert{props.length!==1?'ies':'y'}</div>
       </div>
       <div style={styles.kpiCard}>
         <div style={styles.kpiLabel}>ACTIVE LEASES</div>

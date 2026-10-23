@@ -2,6 +2,7 @@ import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { checkTime } from './scripts/vite-check-time.mjs'
 
 // Estate360 — Estate Management
 // Build: vite build --config vite.estate360.config.js
@@ -28,6 +29,7 @@ export default defineConfig({
     }
   },
   plugins: [
+    checkTime(),   // fails the build on a time shown or decided the old way (scripts/check-time.mjs)
     react(),
     VitePWA({
       registerType: 'autoUpdate',

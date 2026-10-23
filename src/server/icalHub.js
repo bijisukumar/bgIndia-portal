@@ -50,11 +50,7 @@ export function addDays(date, n) {
   return d.toISOString().slice(0, 10)
 }
 
-// Today in India, where the villas are — the server clock is UTC and would
-// still say "yesterday" for the first five and a half hours of an Indian day.
-export function todayIst(now = new Date()) {
-  return new Date(now.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
-}
+// ("Today" is the property's, not the server's: callers get it from todayInZone in src/utils/tz.js.)
 
 // ── what goes in the calendar ─────────────────────────────────────────────
 // stays:  [{ id, source, start, end, stamp }]      real bookings

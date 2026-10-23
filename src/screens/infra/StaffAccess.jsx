@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { useAuth } from '../../hooks/useAuth'
+import { fmtDate as fmtDay, stampDate } from '../../utils/dates'
 
 const COMP_TYPES = [
   { id: 'commission',              label: 'Commission only',       hint: 'Earns commission per stay, no fixed pay' },
@@ -21,10 +22,9 @@ function compLabel(c) {
   return COMP_TYPES.find(t => t.id === c)?.label || c || '—'
 }
 
+// created_at is a stored moment (UTC): the day it falls on is the day AT THE PROPERTY (utils/tz.js)
 function fmtDate(d) {
-  if (!d) return '—'
-  try { return new Date(String(d).replace(' ', 'T')).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) }
-  catch { return d }
+  return d ? fmtDay(stampDate(d)) : '—'
 }
 
 export default function StaffAccess() {

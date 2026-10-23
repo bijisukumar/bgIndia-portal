@@ -17,6 +17,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONTRACTS, REQUIRED_TABLES } from './schemaContracts'
+import { fmtClockSec } from '../../utils/dates'
 
 // ── COLOURS ──────────────────────────────────────────────────
 const C = {
@@ -214,7 +215,7 @@ export default function SchemaValidation() {
             </div>
             {lastRun && (
               <div style={{ fontSize: '0.72rem', color: C.dim, marginTop: '3px' }}>
-                Last checked {lastRun.toLocaleTimeString('en-IN')}
+                Last checked {fmtClockSec(lastRun)}
                 {snapshot && ` · ${Object.keys(snapshot).length} tables · ${CONTRACTS.length} contracts`}
               </div>
             )}

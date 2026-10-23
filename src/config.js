@@ -21,6 +21,7 @@
 // ============================================================
 
 import { CONFIG as BUNDLED } from '@host-config'
+import { setPropertyZone } from './utils/dates'
 
 const CACHE_KEY = 'sv_cfg_' + (typeof location !== 'undefined' ? location.hostname : 'unknown')
 const FETCH_TIMEOUT_MS = 4000
@@ -28,6 +29,7 @@ const FETCH_TIMEOUT_MS = 4000
 // Exported object identity never changes — importers hold this reference and
 // see whatever it contains once initConfig() has run.
 export const CONFIG = { ...BUNDLED }
+setPropertyZone(CONFIG.timezone)   // the property's time zone (utils/tz.js); India's if the config names none
 
 export let CONFIG_SOURCE = 'bundled'
 
@@ -66,6 +68,7 @@ async function fetchConfig() {
 function replaceConfig(next, source) {
   for (const k of Object.keys(CONFIG)) delete CONFIG[k]
   Object.assign(CONFIG, next)
+  setPropertyZone(CONFIG.timezone)
   CONFIG_SOURCE = source
 }
 

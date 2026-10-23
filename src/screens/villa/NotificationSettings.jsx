@@ -2,21 +2,10 @@ import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { fmtStampYear } from '../../utils/dates'
 
-// alert_log.created_at is stored as 'YYYY-MM-DD HH:MM:SS' in UTC (server
-// time), with no timezone marker. Browsers parse a bare string like that
-// as LOCAL time by default, which is wrong — explicitly mark it UTC first,
-// then let the browser render it in whatever timezone the viewer is in.
-function fmtLocalTime(utcStr) {
-  if (!utcStr) return '—'
-  try {
-    const d = new Date(utcStr.replace(' ', 'T') + 'Z')
-    return d.toLocaleString(undefined, {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-    })
-  } catch { return utcStr }
-}
+// alert_log.created_at is a stored moment ('YYYY-MM-DD HH:MM:SS' UTC): shown as the clock at the property.
+const fmtLocalTime = fmtStampYear
 
 // This screen edits rows in villa_settings - a generic key/value store.
 // To add a new configurable item later (for this villa or a newly onboarded

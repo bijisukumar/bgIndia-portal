@@ -17,12 +17,12 @@ import { useState, useEffect, useRef } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { buildReviewRequestWaLink } from '../../utils/guestMessages'
-import { parseLocalDate, formatTime12h } from '../../utils/dates'
+import { parseLocalDate, formatTime12h, localTodayStr, daysFromToday } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { stayTimes } from '../../utils/stayTimes'
 import { breakfastList, parseBreakfast } from '../../utils/breakfastSplit'
-import { istToday, checkinDateStatus } from '../../utils/checkinDate'
+import { checkinDateStatus } from '../../utils/checkinDate'
 import { villaTimeDefaults } from '../../utils/villaTimes'
 import StayTimesLine from '../../components/StayTimesLine'
 
@@ -173,11 +173,9 @@ export default function CheckIn() {
       // exactly what happened with a guest whose real check-in was in
       // October getting checked in during July, because there was no
       // date guardrail on this list at all).
-      const fourDaysOut = new Date()
-      fourDaysOut.setHours(23, 59, 59, 999)
-      fourDaysOut.setDate(fourDaysOut.getDate() + 4)
-      const nearTermReady = allReadyForCheckin.filter(s => parseLocalDate(s.checkin_date) <= fourDaysOut)
-      const farFutureReady = allReadyForCheckin.filter(s => parseLocalDate(s.checkin_date) > fourDaysOut)
+      // "within 4 days" is counted from the PROPERTY's today (utils/tz.js), not the phone's
+      const nearTermReady = allReadyForCheckin.filter(s => !(daysFromToday(s.checkin_date) > 4))
+      const farFutureReady = allReadyForCheckin.filter(s => daysFromToday(s.checkin_date) > 4)
 
       // Load all upcoming stays (any non-closed/cancelled status, checkin >= today)
       const active = await api.getUpcomingStays(DEFAULT_VILLA_ID)
@@ -210,7 +208,7 @@ export default function CheckIn() {
   const pendingList = stays.pending || []
   const inhouseList = stays.inhouse || []
   // The selected guest's booked date is LATER than today in India: shown in red, and not a one-tap check-in.
-  const earlyDate = !!selected && selected.status === 'ready_for_checkin' && checkinDateStatus(selected.checkin_date) === 'early'
+  const earlyDate = !!selected && selected.status === 'ready_for_checkin' && checkinDateStatus(selected.checkin_date, localTodayStr()) === 'early'
 
   const updateCar = (i, patch) => setCars(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c))
   const addCar = () => setCars(prev => prev.length < MAX_CARS ? [...prev, EMPTY_CAR()] : prev)
@@ -291,7 +289,7 @@ export default function CheckIn() {
       // The server refuses a guest booked for a later date until the red step has been confirmed: open that
       // step rather than a bare error (this is also what a screen that has not updated yet runs into).
       if (e.code === 'checkin_date_mismatch') {
-        setDateConfirm(e.conflict || { guestName: selected.guest_name, bookedFor: selected.checkin_date, today: istToday() })
+        setDateConfirm(e.conflict || { guestName: selected.guest_name, bookedFor: selected.checkin_date, today: localTodayStr() })
       } else {
         showToast('Failed: ' + e.message, 'error')
       }
@@ -553,7 +551,7 @@ export default function CheckIn() {
                         <div style={{color:'var(--text)', fontSize:'0.82rem', lineHeight:'1.55', marginTop:'4px'}}>
                           <strong>{selected.guest_name}</strong> is booked for{' '}
                           <strong style={{color:'#EF4444'}}>{formatDate(selected.checkin_date)}</strong>.
-                          Today is <strong>{formatDate(istToday())}</strong>. If the guest at the gate is someone else, pick them from the list instead.
+                          Today is <strong>{formatDate(localTodayStr())}</strong>. If the guest at the gate is someone else, pick them from the list instead.
                         </div>
                       </div>
                     )}
@@ -805,7 +803,7 @@ export default function CheckIn() {
                     )}
                     {earlyDate && !dateConfirm && (
                       <button className="btn" disabled={saving}
-                        onClick={() => setDateConfirm({ guestName: selected.guest_name, bookedFor: selected.checkin_date, today: istToday() })}
+                        onClick={() => setDateConfirm({ guestName: selected.guest_name, bookedFor: selected.checkin_date, today: localTodayStr() })}
                         style={{border:'1px solid rgba(239,68,68,0.6)', background:'rgba(239,68,68,0.12)',
                           color:'#EF4444', fontWeight:'800'}}>
                         ⚠️ Not due yet — check in anyway…

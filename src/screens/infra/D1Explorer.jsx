@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { CONFIG } from '../../config'
 import { useAuth } from '../../hooks/useAuth'
+import { fmtClock } from '../../utils/dates'
 
 // Manager name/estates/rental presence differ per host — a villa/Airbnb-only
 // host with no estates or passive rental business shouldn't see those report
@@ -595,7 +596,7 @@ export default function D1Explorer() {
             <div className="card-section-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>TABLES — tap to browse{schemaGeneratedAt && !schemaLoading && (
                 <span style={{ color: '#5C7080', fontWeight: 400, textTransform: 'none', marginLeft: '6px' }}>
-                  · live as of {new Date(schemaGeneratedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                  · live as of {fmtClock(schemaGeneratedAt)}
                 </span>
               )}</span>
               <button onClick={loadLiveSchema} disabled={schemaLoading}

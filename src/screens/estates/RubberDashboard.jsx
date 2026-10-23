@@ -3,9 +3,9 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
 import { useAuth } from '../../hooks/useAuth'
-import { parseLocalDate, localTodayStr } from '../../utils/dates'
+import { parseLocalDate, localTodayStr, propertyYear } from '../../utils/dates'
 
-const CUR_YEAR = new Date().getFullYear()
+const CUR_YEAR = propertyYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
 
 const PAVUTUMURI = CONFIG.estates.find(e => e.id === 'pavutumuri')

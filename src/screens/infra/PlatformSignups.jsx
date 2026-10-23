@@ -12,16 +12,12 @@ import { useEffect, useState, useMemo } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { whatsappDraft, waLink, fillTemplate } from './leadOutreach'
+import { fmtStamp } from '../../utils/dates'
 
 const RANGES = [7, 30, 90, 365]
 
-function fmtWhen(d) {
-  if (!d) return ''
-  try {
-    const dt = new Date(String(d).replace(' ', 'T') + 'Z')
-    return dt.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-  } catch { return d }
-}
+// created_at is a stored moment ('YYYY-MM-DD HH:MM:SS' UTC): shown as the clock at the property.
+const fmtWhen = d => (d ? fmtStamp(d) : '')
 
 export default function PlatformSignups() {
   const goBack = useBack('/owner/maintenance')

@@ -1,42 +1,39 @@
-// Local-time wording for the owner screens that show when something happened
-// (the Training Manual's banner and access screen, the Channel calendar's links).
-// Timestamps arrive as ISO strings WITH a zone
-// ("…Z") — the API adds it, because D1 stores UTC with none and a browser reads
-// a bare string as local time — and are shown in the viewer's own timezone.
+// Wording for the owner screens that show when something happened (the Training Manual's banner and
+// access screen, the Channel calendar's links). A stamp arrives either as an ISO string with a zone
+// ("…Z") or as D1's bare 'YYYY-MM-DD HH:MM:SS' (UTC); both are read as the moment they are and shown
+// as the clock at the PROPERTY (its `timezone` setting, utils/tz.js), not the viewer's device.
 //
 // Standalone functions with their options fixed inside, deliberately not
 // fmtDate(date, options): the production minifier has been seen dropping that
 // helper's second argument (see CompleteBooking), which would silently print the
 // wrong format.
+import { getPropertyZone } from './dates'
+import { instantMs, stampLong, stampShort } from './tz'
 
-function parse(iso) {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? null : d
+// Milliseconds since 1970 for the stamp, or null if it is not one.
+function moment(iso) {
+  const ms = instantMs(iso)
+  return Number.isFinite(ms) ? ms : null
 }
 
-// "Tue, 14 Oct 2026, 6:00 pm IST"
+// "Tue, 14 Oct 2026, 6:00 PM IST"
 export function whenLong(iso) {
   if (!iso) return ''
-  const d = parse(iso)
-  if (!d) return String(iso)
-  return d.toLocaleString('en-IN', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-  })
+  const ms = moment(iso)
+  return ms === null ? String(iso) : stampLong(ms, getPropertyZone())
 }
 
-// "14 Oct, 6:00 pm"
+// "14 Oct, 6:00 PM"
 export function whenShort(iso) {
   if (!iso) return ''
-  const d = parse(iso)
-  if (!d) return String(iso)
-  return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+  const ms = moment(iso)
+  return ms === null ? String(iso) : stampShort(ms, getPropertyZone())
 }
 
 // "45 min left" · "6 hours left" · "3 days left" · "expired"
 export function timeLeft(iso) {
-  const d = parse(iso)
-  const ms = d ? d.getTime() - Date.now() : 0
+  const at = moment(iso)
+  const ms = at === null ? 0 : at - Date.now()
   if (!(ms > 0)) return 'expired'
   const min = Math.round(ms / 60000)
   if (min < 60) return `${min} min left`
@@ -47,9 +44,9 @@ export function timeLeft(iso) {
 
 // "just now" · "12 min ago" · "5 hours ago" · "3 days ago"
 export function timeAgo(iso) {
-  const d = parse(iso)
-  if (!d) return ''
-  const min = Math.round((Date.now() - d.getTime()) / 60000)
+  const at = moment(iso)
+  if (at === null) return ''
+  const min = Math.round((Date.now() - at) / 60000)
   if (min < 1) return 'just now'
   if (min < 60) return `${min} min ago`
   const h = Math.round(min / 60)

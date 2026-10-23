@@ -2,17 +2,19 @@ import { useState } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { localTodayStr, propertyYear } from '../../utils/dates'
+import { addDays } from '../../utils/stayHolds'
 
-const TEST_PREFIX = 'TEST-' + new Date().toISOString().split('T')[0]
+const TEST_PREFIX = 'TEST-' + localTodayStr()
 const TEST_GUEST  = 'Test Guest (DELETE ME)'
-const TEST_DATE_IN  = new Date(Date.now() + 86400000).toISOString().split('T')[0] // tomorrow
-const TEST_DATE_OUT = new Date(Date.now() + 172800000).toISOString().split('T')[0] // +2 days
+const TEST_DATE_IN  = addDays(localTodayStr(), 1) // tomorrow
+const TEST_DATE_OUT = addDays(localTodayStr(), 2) // +2 days
 
 const TESTS = [
   {
     id: 1, name: 'API Connection', group: 'Infrastructure',
     fn: async () => {
-      const stays = await api.getStays(DEFAULT_VILLA_ID, new Date().getFullYear())
+      const stays = await api.getStays(DEFAULT_VILLA_ID, propertyYear())
       if (!Array.isArray(stays)) throw new Error('Invalid response from API')
       return 'API connected and responding ✓'
     }
@@ -105,7 +107,7 @@ const TESTS = [
   {
     id: 9, name: 'Get Stays (Dashboard data)', group: 'Owner Dashboard',
     fn: async () => {
-      const stays = await api.getStays(DEFAULT_VILLA_ID, new Date().getFullYear())
+      const stays = await api.getStays(DEFAULT_VILLA_ID, propertyYear())
       if (!Array.isArray(stays)) throw new Error('Not an array')
       return `${stays.length} stay(s) loaded for this year ✓`
     }
@@ -157,14 +159,14 @@ const TESTS = [
   {
     id: 15, name: 'Get Coconut Harvests', group: 'Estate',
     fn: async () => {
-      const d = await api.getCoconutHarvests(new Date().getFullYear())
+      const d = await api.getCoconutHarvests(propertyYear())
       return `${d?.totalHarvests || 0} harvest(s) this year ✓`
     }
   },
   {
     id: 16, name: 'Get Rubber Harvests', group: 'Estate',
     fn: async () => {
-      const d = await api.getRubberHarvests(new Date().getFullYear())
+      const d = await api.getRubberHarvests(propertyYear())
       return `${d?.totalHarvests || 0} rubber entry(s) this year ✓`
     }
   },

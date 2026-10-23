@@ -25,7 +25,7 @@ import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
-import { parseLocalDate } from '../../utils/dates'
+import { parseLocalDate, localTodayStr } from '../../utils/dates'
 import TenantProfileCard from './TenantProfileCard'
 import DocumentEngineCard from './DocumentEngineCard'
 import FinancialsReceiptCard from './FinancialsReceiptCard'
@@ -45,7 +45,7 @@ const DRIVE_FOLDER_TEMPLATE = (tenantName, propName) =>
 
 function daysUntil(dateStr) {
   if (!dateStr) return null
-  const today = new Date(); today.setHours(0,0,0,0)
+  const today = parseLocalDate(localTodayStr())
   const parsed = parseLocalDate(dateStr)
   if (!parsed) return null
   return Math.round((parsed - today) / (1000*60*60*24))

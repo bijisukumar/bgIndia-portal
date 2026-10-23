@@ -18,6 +18,13 @@
 // ============================================================
 
 export const CONFIG = {
+  // The time zone this property keeps (an IANA name: 'Asia/Kolkata', 'America/New_York',
+  // 'Asia/Dubai'...). EVERY time the app shows or decides on, a check-in stamp, "today", what is
+  // overdue, an email's date, is read in this zone, whatever the phone, the server or the owner's
+  // computer says (src/utils/tz.js). A property in another country sets its own; one that leaves it
+  // out is India's. Nothing else in the code names a zone.
+  timezone: 'Asia/Kolkata',
+
   // Branding
   brandName:  'Guruvayur Estates',
   brandShort: 'GE Portal',

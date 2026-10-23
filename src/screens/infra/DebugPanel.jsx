@@ -3,6 +3,7 @@ import { useBack } from '../../utils/navTrail'
 import { logger } from '../../utils/logger'
 import { CONFIG } from '../../config'
 import { api } from '../../api'
+import { fmtClockSec } from '../../utils/dates'
 
 const LEVEL_COLORS = {
   error: '#EF9A9A',
@@ -32,7 +33,7 @@ export default function DebugPanel() {
 
   const handleCopy = () => {
     const text = logs.map(log =>
-      `[${log.level.toUpperCase()}] ${new Date(log.time).toLocaleTimeString('en-IN')} | ${log.context} | ${log.message}${log.stack ? ' | ' + log.stack : ''}`
+      `[${log.level.toUpperCase()}] ${fmtClockSec(log.time)} | ${log.context} | ${log.message}${log.stack ? ' | ' + log.stack : ''}`
     ).join('\n')
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
@@ -175,7 +176,7 @@ export default function DebugPanel() {
                   {log.level}
                 </span>
                 <span style={{color:'var(--text-dim)',fontSize:'0.7rem'}}>
-                  {new Date(log.time).toLocaleTimeString('en-IN')}
+                  {fmtClockSec(log.time)}
                 </span>
               </div>
               <div style={{color:'var(--text)',fontSize:'0.85rem',fontWeight:'500',marginBottom:'2px'}}>

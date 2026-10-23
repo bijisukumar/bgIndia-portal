@@ -9100,6 +9100,12 @@ export async function onRequest(ctx) {
         if (src.villa_id !== tgt.villa_id) return err('Source and target belong to different tenants — refusing to merge across tenants')
         if (['cancelled','void','closed'].includes(tgt.status)) return err('Target stay is not active')
         if (src.status === 'void') return err('Source stay is already void')
+        // The source is VOIDED by this action. A stay that is already in the villa (or has left) is the one
+        // running, so it must never be the one retired: keep it and void the empty duplicate instead
+        // (2026-10-23: Karthik Sasta, checked in, was offered as the "duplicate" of his own empty form record).
+        if (['checked_in', 'ready_for_checkout', 'checked_out'].includes(src.status)) {
+          return err('That stay is already checked in, so it cannot be the one that is voided. Keep it, and void the empty duplicate record instead.')
+        }
         if ((src.gross || 0) <= 0 && (src.net || 0) <= 0) return err('Source stay has no financials to absorb')
         if ((tgt.gross || 0) > 0 || (tgt.net || 0) > 0) {
           return err('Target already has financials — refusing to overwrite. Clear one side first to avoid double counting.')

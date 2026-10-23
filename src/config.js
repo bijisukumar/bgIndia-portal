@@ -22,6 +22,7 @@
 
 import { CONFIG as BUNDLED } from '@host-config'
 import { setPropertyZone } from './utils/dates'
+import { reloadWhenUpdated } from './utils/swUpdate'
 
 const CACHE_KEY = 'sv_cfg_' + (typeof location !== 'undefined' ? location.hostname : 'unknown')
 const FETCH_TIMEOUT_MS = 4000
@@ -76,6 +77,8 @@ let started = null
 
 export function initConfig() {
   if (started) return started
+  // Every app starts here: make a new deploy appear after ONE load instead of two (utils/swUpdate.js).
+  reloadWhenUpdated()
   const cached = readCache()
   if (cached) {
     // Repeat visit: render straight from cache and refresh in the background,

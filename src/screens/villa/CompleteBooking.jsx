@@ -714,6 +714,22 @@ export default function CompleteBooking() {
     setAbsorbBusy(false)
   }
 
+  // The money row is already in the villa (checked in), so it stays exactly as it is; the EMPTY second record
+  // (the one the guest's check-in form made) is the one voided. Same void as the "Void stay" button.
+  async function handleVoidTwin(pair) {
+    if (!pair) return
+    setAbsorbBusy(true)
+    try {
+      await api.resolveStay({
+        stayId: pair.target.stay_id,
+        reason: `second record of the same stay as ${pair.source.stay_id} (${pair.source.guest_name}), made by the check-in form with no money`,
+      })
+      showToast(`${pair.target.guest_name}'s empty record voided ✓`)
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    setAbsorbBusy(false)
+  }
+
   // Nest an agent/booker's own placeholder stay under the real guest's stay
   // in the list — same exact-name-match rule as the villa dashboard's
   // BOOKINGS BY MONTH view, so the same duplicate isn't listed twice here.
@@ -792,18 +808,35 @@ export default function CompleteBooking() {
                 <div style={{fontSize:'0.85rem',fontWeight:'600',marginBottom:'4px'}}>
                   Same guest, two records?
                 </div>
-                <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:'10px',lineHeight:1.5}}>
-                  <b>{p.source.guest_name}</b> ({fmtDate(p.source.checkin_date)} → {fmtDate(p.source.checkout_date)}) holds
-                  the money (₹{(p.source.net || 0).toLocaleString('en-IN')} net), and <b>{p.target.guest_name}</b> is the
-                  same dates with none: the record the guest's check-in form made, with their ID. If this is one stay,
-                  this moves ALL the money onto {p.target.guest_name}'s record and voids {p.source.guest_name}'s as a
-                  duplicate, so nothing is lost and nothing is counted twice.
-                </div>
+                {p.kind === 'void' ? (
+                  <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:'10px',lineHeight:1.5}}>
+                    <b>{p.source.guest_name}</b> ({fmtDate(p.source.checkin_date)} → {fmtDate(p.source.checkout_date)}) is
+                    checked in and holds the money (₹{(p.source.net || 0).toLocaleString('en-IN')} net). <b>{p.target.guest_name}</b> is
+                    a second record for the same dates with none: the one the guest's check-in form made, with their ID.
+                    If it is the same stay, void the empty record so it stops showing as an arrival.
+                    {' '}{p.source.guest_name}'s stay and its money are not touched.
+                  </div>
+                ) : (
+                  <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:'10px',lineHeight:1.5}}>
+                    <b>{p.source.guest_name}</b> ({fmtDate(p.source.checkin_date)} → {fmtDate(p.source.checkout_date)}) holds
+                    the money (₹{(p.source.net || 0).toLocaleString('en-IN')} net), and <b>{p.target.guest_name}</b> is the
+                    same dates with none: the record the guest's check-in form made, with their ID. If this is one stay,
+                    this moves ALL the money onto {p.target.guest_name}'s record and voids {p.source.guest_name}'s as a
+                    duplicate, so nothing is lost and nothing is counted twice.
+                  </div>
+                )}
                 <div style={{display:'flex',gap:'8px'}}>
-                  <button className="btn btn-gold" style={{flex:1}} disabled={absorbBusy}
-                    onClick={() => handleAbsorb(p)}>
-                    {absorbBusy ? 'Moving…' : '💰 Move the money & void the duplicate'}
-                  </button>
+                  {p.kind === 'void' ? (
+                    <button className="btn btn-gold" style={{flex:1}} disabled={absorbBusy}
+                      onClick={() => handleVoidTwin(p)}>
+                      {absorbBusy ? 'Voiding…' : '🚫 Void the empty record'}
+                    </button>
+                  ) : (
+                    <button className="btn btn-gold" style={{flex:1}} disabled={absorbBusy}
+                      onClick={() => handleAbsorb(p)}>
+                      {absorbBusy ? 'Moving…' : '💰 Move the money & void the duplicate'}
+                    </button>
+                  )}
                   <button className="btn" style={{flex:1}} disabled={absorbBusy}
                     onClick={() => setTwinSkipped(prev => [...prev, p.target.stay_id])}>
                     Keep both

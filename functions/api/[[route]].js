@@ -67,6 +67,8 @@ import { partyLimit, partyOf } from '../../src/utils/partySize.js'
 import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.js'
 // A guest booked for a LATER date than today (India) needs a deliberate yes at check-in.
 import { checkinDateStatus } from '../../src/utils/checkinDate.js'
+// One guest's name written two ways ("Achala Kaushik" / "Achala A Kaushik"): the check-in form uses it to find its own booking.
+import { namesAlike } from '../../src/utils/guestNames.js'
 // The property's time zone and every way of reading a stored time in it. Nothing in this file reads
 // the server's clock for a business decision: see zoneFor below.
 import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr } from '../../src/utils/tz.js'
@@ -1531,7 +1533,7 @@ function extractRequestedTimesFromExtraLines(extraLinesJson) {
 //                  (an extension / re-submit of THEIR booking, not a dup)
 //   otherOverlap — an overlapping stay for a DIFFERENT guest (double booking)
 //   backToBack   — stays that only touch on a turnover day (valid, info only)
-async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, excludeStayId = null, guestId = null, phone = null, email = null, guestName = null }) {
+async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, excludeStayId = null, guestId = null, phone = null, email = null, guestName = null, looseName = false }) {
   const co = checkoutDate || checkinDate
   const { results } = await DB.prepare(
     `SELECT stayvibe_stays.stay_id, guest_name, guest_phone, guest_email, checkin_date, checkout_date, status, source, stayvibe_stays.created_at, guest_id
@@ -1549,11 +1551,17 @@ async function classifyStayConflicts(DB, { villaId, checkinDate, checkoutDate, e
   // silently merging two different guests is worse than a false alarm, so any
   // ambiguous overlap falls through to otherOverlap and gets flagged for a
   // human to resolve rather than auto-merged.
+  // The GUEST'S OWN check-in form (looseName) also accepts the same name written two ways, "Achala Kaushik"
+  // / "Achala A Kaushik" (namesAlike: every word of the shorter name, two at least, in the longer, in order),
+  // because an Airbnb booking has no phone or email to match on and the form otherwise made a second stay
+  // with no money (2026-10-22). On overlapping dates at one villa that is the same party, and the form
+  // says so in the stay's notes so the owner can check. A lone first name still never matches.
   const sameGuest = s =>
     (guestId && s.guest_id && s.guest_id === guestId) ||
     (!!normP && !!s.guest_phone && s.guest_phone.replace(/[\s\-]/g, '').replace(/^\+?91/, '') === normP) ||
     (!!normE && !!s.guest_email && s.guest_email.trim().toLowerCase() === normE) ||
-    (!!guestName && !!s.guest_name && fullName(s.guest_name) === fullName(guestName))
+    (!!guestName && !!s.guest_name && fullName(s.guest_name) === fullName(guestName)) ||
+    (looseName && !!guestName && !!s.guest_name && namesAlike(s.guest_name, guestName))
 
   const overlaps = [], backToBack = []
   for (const s of (results || [])) {
@@ -2000,13 +2008,19 @@ export async function onRequest(ctx) {
         // update it rather than inserting a second stay.
         const cls = await classifyStayConflicts(DB, {
           villaId, checkinDate: checkInDate, checkoutDate: checkOutDate,
-          guestId, phone, email, guestName: safeGuestName,
+          guestId, phone, email, guestName: safeGuestName, looseName: true,
         })
         if (cls.ownOverlap) {
           stayId = cls.ownOverlap.stay_id
           const co = checkOutDate || ''
           if (cls.ownOverlap.checkin_date !== checkInDate || (co && cls.ownOverlap.checkout_date !== co)) {
             reviewNote = `Check-in form dates ${checkInDate}→${checkOutDate || '?'} differ from booked ${cls.ownOverlap.checkin_date}→${cls.ownOverlap.checkout_date} — verify (possible extension).`
+          }
+          // Found by name alone (a booking with no phone or email to prove it): say so, so the owner can check.
+          const bookedAs = String(cls.ownOverlap.guest_name || '').trim()
+          if (bookedAs && bookedAs.toLowerCase() !== String(safeGuestName || '').trim().toLowerCase() && !(guestId && cls.ownOverlap.guest_id === guestId)) {
+            const nm = `Matched to the booking by name: booked as "${bookedAs}", the form says "${safeGuestName}" — verify.`
+            reviewNote = reviewNote ? `${reviewNote} ${nm}` : nm
           }
         } else if (cls.otherOverlap) {
           dupOtherStay = cls.otherOverlap

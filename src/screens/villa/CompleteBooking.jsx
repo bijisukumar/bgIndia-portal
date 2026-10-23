@@ -35,6 +35,7 @@ const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agod
 // (shared with EnquiryDetail quotes) so the two dropdowns can never drift.
 import { EXTRA_ITEMS } from '../../utils/villaPricing'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { findTwinPairs } from '../../utils/twinStays'
 
 // Airbnb-specific fee structure (from confirmation email)
 const EMPTY_AIRBNB = {
@@ -170,6 +171,7 @@ export default function CompleteBooking() {
   const [mergePromptOpen, setMergePromptOpen] = useState(false)
   const [mergeContactId,  setMergeContactId]  = useState(null) // which checked stay_id is the "booked by" contact
   const [mergeGuestMatches, setMergeGuestMatches] = useState({}) // stay_id -> {guest_id, name} | null (not found) | undefined (loading)
+  const [twinSkipped, setTwinSkipped] = useState([]) // "Same guest, two records?" cards the owner chose to keep as two
   const [absorbPrompt, setAbsorbPrompt] = useState(null) // { source, target } — offer to move financials off the duplicate
   const [absorbBusy, setAbsorbBusy] = useState(false)
   const [checkoutEmailBusy, setCheckoutEmailBusy] = useState(null) // stay_id currently sending, or null
@@ -695,15 +697,17 @@ export default function CompleteBooking() {
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
   }
 
-  async function handleAbsorb() {
-    if (!absorbPrompt) return
+  // pair = { source: the booking that holds the money, target: the record that keeps it }. Called with no
+  // argument from the "Move the money to the real guest?" prompt, with a pair from a "Same guest, two records?" card.
+  async function handleAbsorb(pair = absorbPrompt) {
+    if (!pair) return
     setAbsorbBusy(true)
     try {
       const res = await api.absorbDuplicateStay({
-        sourceStayId: absorbPrompt.source.stay_id,
-        targetStayId: absorbPrompt.target.stay_id,
+        sourceStayId: pair.source.stay_id,
+        targetStayId: pair.target.stay_id,
       })
-      showToast(`Moved ₹${(res?.movedNet || 0).toLocaleString('en-IN')} net to ${absorbPrompt.target.guest_name} — duplicate voided ✓`)
+      showToast(`Moved ₹${(res?.movedNet || 0).toLocaleString('en-IN')} net to ${pair.target.guest_name} — duplicate voided ✓`)
       setAbsorbPrompt(null)
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
@@ -727,6 +731,9 @@ export default function CompleteBooking() {
   })
   // In merge mode both stays must stay selectable/tickable as top-level rows.
   const visibleStays = mergeMode ? stays : stays.filter(s => !absorbedIds.has(s.stay_id))
+  // One visit, two records: the Airbnb booking with the money and the record the guest's check-in form made
+  // with none (utils/twinStays.js). Offered as a one-tap merge, never done on its own.
+  const twinPairs = mergeMode ? [] : findTwinPairs(stays).filter(p => !twinSkipped.includes(p.target.stay_id))
 
   const s = selected
   const meta = s
@@ -779,6 +786,31 @@ export default function CompleteBooking() {
 
         {!loading && stays.length > 0 && (
           <>
+            {twinPairs.map(p => (
+              <div key={p.target.stay_id} style={{background:'var(--dark-card)',border:'1px solid rgba(200,144,58,0.45)',
+                borderRadius:'12px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'0.85rem',fontWeight:'600',marginBottom:'4px'}}>
+                  Same guest, two records?
+                </div>
+                <div style={{fontSize:'0.74rem',color:'var(--text-dim)',marginBottom:'10px',lineHeight:1.5}}>
+                  <b>{p.source.guest_name}</b> ({fmtDate(p.source.checkin_date)} → {fmtDate(p.source.checkout_date)}) holds
+                  the money (₹{(p.source.net || 0).toLocaleString('en-IN')} net), and <b>{p.target.guest_name}</b> is the
+                  same dates with none: the record the guest's check-in form made, with their ID. If this is one stay,
+                  this moves ALL the money onto {p.target.guest_name}'s record and voids {p.source.guest_name}'s as a
+                  duplicate, so nothing is lost and nothing is counted twice.
+                </div>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <button className="btn btn-gold" style={{flex:1}} disabled={absorbBusy}
+                    onClick={() => handleAbsorb(p)}>
+                    {absorbBusy ? 'Moving…' : '💰 Move the money & void the duplicate'}
+                  </button>
+                  <button className="btn" style={{flex:1}} disabled={absorbBusy}
+                    onClick={() => setTwinSkipped(prev => [...prev, p.target.stay_id])}>
+                    Keep both
+                  </button>
+                </div>
+              </div>
+            ))}
             {/* Checked-in guests — comfort-check message any time during the
                 stay, plus a manual backup for the checkout-day email (the
                 6am autosend is the primary path — see runCheckoutEmailAutosend
@@ -991,7 +1023,7 @@ export default function CompleteBooking() {
                 </div>
                 <div style={{display:'flex',gap:'8px'}}>
                   <button className="btn btn-gold" style={{flex:1}} disabled={absorbBusy}
-                    onClick={handleAbsorb}>
+                    onClick={() => handleAbsorb()}>
                     {absorbBusy ? 'Moving…' : '💰 Move & void duplicate'}
                   </button>
                   <button className="btn" style={{flex:1}} disabled={absorbBusy}

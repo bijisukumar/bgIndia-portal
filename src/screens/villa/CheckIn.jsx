@@ -22,6 +22,7 @@ import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { stayTimes } from '../../utils/stayTimes'
 import { breakfastList, parseBreakfast } from '../../utils/breakfastSplit'
+import { istToday, checkinDateStatus } from '../../utils/checkinDate'
 import { villaTimeDefaults } from '../../utils/villaTimes'
 import StayTimesLine from '../../components/StayTimesLine'
 
@@ -130,6 +131,10 @@ export default function CheckIn() {
   // has been pressed against the wrong guest. An inline panel rather than
   // window.confirm so the guest's name can actually be shown in bold.
   const [confirmingCheckout, setConfirmingCheckout] = useState(false)
+  // A guest booked for a LATER date than today (India's date) is almost always the wrong guest picked from
+  // the list. Their date shows in red and checking them in takes a deliberate second step (the server asks
+  // for it too, and emails the owner). Holds the details while that step is open.
+  const [dateConfirm, setDateConfirm] = useState(null)
   const [loading, setLoading]   = useState(true)
   const [toast,   setToast]     = useState(null)
   // Per-car file input refs, indexed by car position (up to MAX_CARS).
@@ -143,7 +148,7 @@ export default function CheckIn() {
   useEffect(() => { loadStays() }, [])
 
   // Never carry an open check-out confirmation across to a different guest
-  useEffect(() => { setConfirmingCheckout(false) }, [selected?.stay_id])
+  useEffect(() => { setConfirmingCheckout(false); setDateConfirm(null) }, [selected?.stay_id])
 
   async function loadStays() {
 
@@ -204,6 +209,8 @@ export default function CheckIn() {
 
   const pendingList = stays.pending || []
   const inhouseList = stays.inhouse || []
+  // The selected guest's booked date is LATER than today in India: shown in red, and not a one-tap check-in.
+  const earlyDate = !!selected && selected.status === 'ready_for_checkin' && checkinDateStatus(selected.checkin_date) === 'early'
 
   const updateCar = (i, patch) => setCars(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c))
   const addCar = () => setCars(prev => prev.length < MAX_CARS ? [...prev, EMPTY_CAR()] : prev)
@@ -252,7 +259,7 @@ export default function CheckIn() {
   }
 
   // Confirm check-in (ready_for_checkin → checked_in)
-  async function handleConfirmCheckIn() {
+  async function handleConfirmCheckIn(dateOverride) {
     if (!selected) { showToast('No guest selected','error'); return }
     setSaving(true)
     try {
@@ -273,12 +280,21 @@ export default function CheckIn() {
         adultsCount:  selected.adults || 1,
         childrenCount: selected.children || 0,
         cars: carsPayload,
+        // True only from the red confirmation step (a guest booked for a later date than today).
+        dateOverride: dateOverride === true,
       })
       showToast('✅ Check-in confirmed! ' + selected.stay_id)
       setCars([EMPTY_CAR()])
+      setDateConfirm(null)
       await loadStays()
     } catch(e) {
-      showToast('Failed: ' + e.message, 'error')
+      // The server refuses a guest booked for a later date until the red step has been confirmed: open that
+      // step rather than a bare error (this is also what a screen that has not updated yet runs into).
+      if (e.code === 'checkin_date_mismatch') {
+        setDateConfirm(e.conflict || { guestName: selected.guest_name, bookedFor: selected.checkin_date, today: istToday() })
+      } else {
+        showToast('Failed: ' + e.message, 'error')
+      }
     } finally { setSaving(false) }
   }
 
@@ -526,6 +542,22 @@ export default function CheckIn() {
 
                 {selected && (
                   <>
+                    {/* A guest booked for a LATER date than today: first thing Raman sees, in red,
+                        before anything else on the screen. */}
+                    {earlyDate && (
+                      <div style={{marginBottom:'12px', padding:'12px 14px', borderRadius:'10px',
+                        background:'rgba(239,68,68,0.12)', border:'1px solid rgba(239,68,68,0.6)'}}>
+                        <div style={{color:'#EF4444', fontWeight:'800', fontSize:'0.85rem', letterSpacing:'0.3px'}}>
+                          ⚠️ NOT DUE YET — CHECK THE NAME
+                        </div>
+                        <div style={{color:'var(--text)', fontSize:'0.82rem', lineHeight:'1.55', marginTop:'4px'}}>
+                          <strong>{selected.guest_name}</strong> is booked for{' '}
+                          <strong style={{color:'#EF4444'}}>{formatDate(selected.checkin_date)}</strong>.
+                          Today is <strong>{formatDate(istToday())}</strong>. If the guest at the gate is someone else, pick them from the list instead.
+                        </div>
+                      </div>
+                    )}
+
                     {/* Early check-in / late check-out — called out ABOVE the
                         booking summary, first thing Raman sees, since these
                         change what time he should actually expect the guest
@@ -588,7 +620,14 @@ export default function CheckIn() {
                         </div>
                         <div className="field">
                           <div className="field-label">Check-in</div>
-                          <div className="field-input gold">{formatDate(selected.checkin_date)}</div>
+                          {earlyDate ? (
+                            <div className="field-input" style={{color:'#EF4444',fontWeight:'800',
+                              background:'rgba(239,68,68,0.12)',border:'1px solid rgba(239,68,68,0.6)'}}>
+                              {formatDate(selected.checkin_date)} · NOT TODAY
+                            </div>
+                          ) : (
+                            <div className="field-input gold">{formatDate(selected.checkin_date)}</div>
+                          )}
                         </div>
                         <div className="field">
                           <div className="field-label">Check-out</div>
@@ -759,9 +798,52 @@ export default function CheckIn() {
                       <button className="btn" onClick={addCar} style={{ marginBottom:'12px' }}>+ Add another car</button>
                     )}
 
-                    <button className="btn btn-gold" onClick={handleConfirmCheckIn} disabled={saving}>
-                      {saving?'Confirming…':'✅ Confirm check-in'}
-                    </button>
+                    {!earlyDate && !dateConfirm && (
+                      <button className="btn btn-gold" onClick={() => handleConfirmCheckIn(false)} disabled={saving}>
+                        {saving?'Confirming…':'✅ Confirm check-in'}
+                      </button>
+                    )}
+                    {earlyDate && !dateConfirm && (
+                      <button className="btn" disabled={saving}
+                        onClick={() => setDateConfirm({ guestName: selected.guest_name, bookedFor: selected.checkin_date, today: istToday() })}
+                        style={{border:'1px solid rgba(239,68,68,0.6)', background:'rgba(239,68,68,0.12)',
+                          color:'#EF4444', fontWeight:'800'}}>
+                        ⚠️ Not due yet — check in anyway…
+                      </button>
+                    )}
+                    {dateConfirm && (
+                      <div style={{padding:'14px', borderRadius:'10px',
+                        border:'1px solid rgba(239,68,68,0.6)', background:'rgba(239,68,68,0.10)'}}>
+                        <div style={{color:'var(--text)', fontSize:'0.95rem', lineHeight:'1.55', marginBottom:'10px'}}>
+                          Check in{' '}
+                          <strong style={{color:'#EF4444', fontWeight:'800', textTransform:'uppercase', letterSpacing:'0.02em'}}>
+                            {dateConfirm.guestName || selected.guest_name}
+                          </strong>{' '}today?
+                        </div>
+                        <div style={{color:'var(--text)', fontSize:'0.8rem', lineHeight:'1.6', marginBottom:'12px'}}>
+                          Booked for <strong style={{color:'#EF4444'}}>{formatDate(dateConfirm.bookedFor)}</strong>. Today is{' '}
+                          <strong>{formatDate(dateConfirm.today)}</strong>. A guest is checked in on their booked date, or after it.
+                          If the person in front of you has a different name, tap No and pick them from the list.
+                        </div>
+                        <div style={{display:'flex', gap:'8px'}}>
+                          <button onClick={() => handleConfirmCheckIn(true)} disabled={saving}
+                            style={{flex:1, padding:'12px', borderRadius:'10px',
+                              border:'1px solid rgba(239,68,68,0.6)', background:'rgba(239,68,68,0.18)',
+                              color:'#EF4444', fontWeight:'800', fontSize:'0.88rem', cursor:'pointer'}}>
+                            {saving?'…':'Yes, check in anyway'}
+                          </button>
+                          <button onClick={() => setDateConfirm(null)} disabled={saving}
+                            style={{flex:1, padding:'12px', borderRadius:'10px',
+                              border:'1px solid rgba(255,255,255,0.18)', background:'transparent',
+                              color:'var(--text-muted)', fontWeight:'700', fontSize:'0.88rem', cursor:'pointer'}}>
+                            No, go back
+                          </button>
+                        </div>
+                        <div style={{marginTop:'8px', fontSize:'0.7rem', color:'var(--text-dim)'}}>
+                          📧 The owner is emailed about this.
+                        </div>
+                      </div>
+                    )}
                     <p className="btn-email-note">📧 Owner notified on check-in</p>
                   </>
                 )}

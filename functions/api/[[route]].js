@@ -65,6 +65,8 @@ import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '.
 import { partyLimit, partyOf } from '../../src/utils/partySize.js'
 // How a breakfast split is written down and checked (Guest info's editor).
 import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.js'
+// A guest booked for a LATER date than today (India) needs a deliberate yes at check-in.
+import { checkinDateStatus } from '../../src/utils/checkinDate.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -7689,6 +7691,37 @@ export async function onRequest(ctx) {
           const found = await DB.prepare(`SELECT stay_id FROM stayvibe_stays WHERE guest_name = ? AND status IN ('confirmed','booked')${cf2.sql} ORDER BY checkin_date DESC LIMIT 1`).bind(body.guestName || body.bookerName, ...cf2.binds).first()
           stayId = found?.stay_id
         }
+        // A guest may arrive ON the booked date or AFTER it (past midnight, or late); one booked for a LATER
+        // date is almost always the wrong guest picked from the list (2026-10-23: the next day's guest was
+        // checked in, and wrong check-outs followed). Nothing is written until Raman has confirmed it on
+        // screen (the date in red, then dateOverride); the owner is emailed on the attempt and again, flagged,
+        // when it goes ahead. A check-in on or after the booked date is untouched.
+        let dateWarn = null
+        if (stayId) {
+          const due = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+          if (due && checkinDateStatus(due.checkin_date) === 'early') {
+            dateWarn = { stayId, guestName: due.guest_name, bookedFor: due.checkin_date, bookedUntil: due.checkout_date, today: istToday() }
+            if (body.dateOverride !== true) {
+              const guardVilla = body.villaId || DEFAULT_VILLA_ID
+              ctx.waitUntil(sendAlert(env, `⚠️ bgIndia — Check-in attempted on the wrong date: ${due.guest_name}`, [
+                `Source: Raman > Check-in screen`,
+                `Action: Check-in ATTEMPTED for a guest who is not due yet. Nothing was changed.`,
+                '',
+                `Guest:       ${due.guest_name || '—'}`,
+                `Booked for:  ${due.checkin_date} to ${due.checkout_date || '—'}`,
+                `Today:       ${dateWarn.today} (India)`,
+                `Stay ID:     ${stayId}`,
+                '',
+                `${actor} was asked to confirm on screen. If he goes ahead you get a second email.`,
+                `Time: ${now()}`,
+              ], await getOwnerAlertEmail(DB, env, guardVilla), DB, guardVilla))
+              return json({
+                success: false, code: 'checkin_date_mismatch', conflict: dateWarn,
+                error: `${due.guest_name} is booked for ${due.checkin_date}, but today is ${dateWarn.today}. Check the name, then confirm on screen.`,
+              }, 409)
+            }
+          }
+        }
         if (!stayId) {
           assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
           stayId = genStayId(body.villaId || DEFAULT_VILLA_ID)
@@ -7754,9 +7787,14 @@ export async function onRequest(ctx) {
         }
 
         const alertVillaId = body.villaId || DEFAULT_VILLA_ID
-        ctx.waitUntil(sendAlert(env, `🔑 bgIndia — Guest checked in: ${body.guestName || body.bookerName || 'Guest'}`, [
+        ctx.waitUntil(sendAlert(env, `${dateWarn ? '⚠️ ' : ''}🔑 bgIndia — Guest checked in${dateWarn ? ' BEFORE their booking date' : ''}: ${body.guestName || body.bookerName || 'Guest'}`, [
           `Source: Raman > Check-in screen`,
           `Action: Guest checked in`,
+          ...(dateWarn ? [
+            '',
+            `⚠️ DATE MISMATCH: booked for ${dateWarn.bookedFor}, checked in on ${dateWarn.today} (India).`,
+            `${actor} confirmed on screen that this is the right guest. If it was a mistake, set the stay back to Ready for check-in in Complete booking.`,
+          ] : []),
           '',
           `Guest:      ${body.guestName || body.bookerName || '—'}`,
           `Check-in:   ${body.checkInDate || '—'}`,

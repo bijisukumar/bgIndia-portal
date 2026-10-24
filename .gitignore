@@ -21,3 +21,5 @@ dist/
 "scripts/export-irrigation.sql"
 "scripts/export-rubber.sql"
 scripts/demo-data/generated-demo-stays.sql
+# Guest data: never commit it (2026-10-24)
+guests-missing-city.json

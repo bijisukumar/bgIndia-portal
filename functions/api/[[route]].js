@@ -73,7 +73,7 @@ import { namesAlike } from '../../src/utils/guestNames.js'
 import { withRegistrationFromTwins } from '../../src/utils/twinStays.js'
 // The property's time zone and every way of reading a stored time in it. Nothing in this file reads
 // the server's clock for a business decision: see zoneFor below.
-import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong } from '../../src/utils/tz.js'
+import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong, localiseStamps } from '../../src/utils/tz.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -383,9 +383,13 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
   let ok = false, statusCode = null, detail = ''
   try {
     const apiKey = await getResendApiKey(DB, env)
-    if (!apiKey) {
+    if (!apiKey && !env.ALERT_DRY_RUN) {
       throw new Error(`RESEND_API_KEY not configured (checked env and DB fallback). Run: wrangler pages secret put RESEND_API_KEY, or save it to villa_settings key '_resend_api_key'.`)
     }
+    // Every time an alert prints is the PROPERTY's, labelled (src/utils/tz.js localiseStamps): they are written all over
+    // this file as `${now()}` (a stored UTC time) or an ISO string, so they are converted here, once, for every alert
+    // (2026-10-24: the owner read "Time: 2026-10-23 17:30:07" as India's). No property known (a platform-level lead): India's.
+    const tz = await zoneFor(DB, villaId)
     const body = {
       // fromOverride is for platform-level leads (demo/invite/host
       // registration) — these aren't any one tenant's alert, so they
@@ -394,8 +398,8 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
       // receive security alerts from this villa's brand.
       from: fromOverride || getHostConfig(villaId)?.email?.alertFrom || 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
       to: [recipient],
-      subject,
-      text: lines.join('\n'),
+      subject: localiseStamps(subject, tz),
+      text: lines.map(l => localiseStamps(l, tz)).join('\n'),
     }
     // Only for the platform sender, whose domain has no inbox behind it.
     // Tenant alerts already come from a domain that can receive.
@@ -405,7 +409,10 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
     // Skipped when it would copy the recipient to themselves.
     if (bccEmail && bccEmail !== recipient) body.bcc = [bccEmail]
 
-    const res = await fetch('https://api.resend.com/emails', {
+    // Local tests only (ALERT_DRY_RUN is never set in production): nothing is sent, and the END of the finished text is
+    // kept in the delivery log so a test can read what the alert would say.
+    if (env.ALERT_DRY_RUN) detail = '[dry run] ' + `${body.subject} || ${body.text}`.slice(-470)
+    const res = env.ALERT_DRY_RUN ? { ok: true, status: 200, statusText: 'dry run' } : await fetch('https://api.resend.com/emails', {
       method:  'POST',
       headers: {
         'Content-Type':  'application/json',
@@ -613,6 +620,7 @@ const stampIn = (utc, tz) => ({ date: dateInZone(utc, tz) || null, time: clock24
 const ZONE_CACHE = new Map()
 const ZONE_TTL   = 5 * 60 * 1000
 async function zoneFor(DB, villaId) {
+  if (!DB) return DEFAULT_TIMEZONE
   const key = villaId || ''
   const hit = ZONE_CACHE.get(key)
   if (hit && Date.now() - hit.at < ZONE_TTL) return hit.tz

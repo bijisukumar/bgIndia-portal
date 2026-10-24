@@ -147,6 +147,26 @@ export function stampLong(value, tz) {
   return `${wd}, ${p.d} ${MONTHS[p.mo - 1]} ${p.y}, ${clock12(value, tz)} ${zoneAbbr(tz, instantMs(value))}`
 }
 
+// '2026-10-23 23:00:07': the stored shape of a time, read in the zone (for emails and logs that print one)
+export function stampSec(value, tz) {
+  const p = partsInZone(value, tz)
+  return p ? `${p.y}-${p2(p.mo)}-${p2(p.d)} ${p2(p.h)}:${p2(p.mi)}:${p2(p.s)}` : ''
+}
+
+// Rewrites every stored-format UTC time inside a piece of text as the same moment in the zone, with the zone's name:
+//   '2026-10-23 17:30:07'  /  '2026-10-23 17:30:07 UTC'  /  '2026-10-23T17:30:07.123Z'  ->  '2026-10-23 23:00:07 IST'
+// For alert emails, which print times from ~25 places as `${now()}` (a stored UTC time) or an ISO string, and so showed
+// the raw UTC clock with no label (the same bug as "Checked in 5:30 PM", 2026-10-24). Done once, in sendAlert, so no
+// call site has to remember. Nothing else is touched: a wall-clock '2026-10-28 11:00' (no seconds), a date alone, an
+// ISO time with no Z, a time followed by fractions of a second that is not a stored stamp - all stay as written.
+export function localiseStamps(text, tz) {
+  const s = String(text == null ? '' : text)
+  const conv = (ms, original) => (Number.isFinite(ms) ? `${stampSec(ms, tz)} ${zoneAbbr(tz, ms)}` : original)
+  return s
+    .replace(/\b(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})(?: UTC)?\b(?!\.\d)/g, (m, d, t) => conv(instantMs(`${d} ${t}`), m))
+    .replace(/\b(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?Z\b/g, (m, d, t) => conv(Date.parse(`${d}T${t}Z`), m))
+}
+
 // 'IST', 'CDT', 'GMT+4' - the short name of the zone at that moment.
 const NAMES = { 'Asia/Kolkata': 'IST', 'Asia/Calcutta': 'IST' }
 export function zoneAbbr(tz, at = Date.now()) {

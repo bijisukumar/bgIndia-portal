@@ -771,7 +771,7 @@ function ReviewChaseBlock() {
     return buildReviewRequestWaLink({ guest_phone: phone, guest_name: guestName, source }) || null
   }
 
-  const autoCloseable = items.filter(i => i.autoCloseReady)
+  const autoCloseable = items.filter(i => i.autoCloseReady && i.status !== 'closed')
 
   async function handleChased(stayId) {
     setSaving(p => ({ ...p, [stayId + '_wa']: true }))
@@ -783,11 +783,11 @@ function ReviewChaseBlock() {
     finally { setSaving(p => ({ ...p, [stayId + '_wa']: false })) }
   }
 
-  async function handleClose(stayId, rating, reason) {
+  async function handleClose(stayId, rating, reason, wasClosed) {
     setSaving(p => ({ ...p, [stayId + '_close']: true }))
     try {
       await api.closeStayWithReview({ stayId, rating: rating || 0, closedReason: reason || 'manual' })
-      showToast(rating ? `✅ Closed with ${rating}★` : '✅ Closed — no review')
+      showToast(wasClosed ? (rating ? `✅ Saved ${rating}★` : '✅ Chase ended') : rating ? `✅ Closed with ${rating}★` : '✅ Closed — no review')
       setExpanded(p => ({ ...p, [stayId]: false }))
       load()
     } catch { showToast('Failed to close stay', 'error') }
@@ -796,7 +796,7 @@ function ReviewChaseBlock() {
 
   async function handleAutoCloseAll() {
     for (const item of autoCloseable) {
-      await handleClose(item.stayId, 0, 'no_review')
+      await handleClose(item.stayId, 0, 'no_review', item.status === 'closed')
     }
   }
 
@@ -851,7 +851,14 @@ function ReviewChaseBlock() {
                     )}
                   </div>
                 </div>
-                {item.autoCloseReady && (
+                {item.status === 'closed' && (
+                  <span style={{ fontSize: '0.62rem', fontWeight: '700', padding: '2px 7px',
+                    borderRadius: '8px', background: 'rgba(52,168,83,0.15)', color: '#34A853',
+                    flexShrink: 0 }}>
+                    Closed
+                  </span>
+                )}
+                {item.autoCloseReady && item.status !== 'closed' && (
                   <span style={{ fontSize: '0.62rem', fontWeight: '700', padding: '2px 7px',
                     borderRadius: '8px', background: 'rgba(92,112,128,0.2)', color: 'var(--text-dim)',
                     flexShrink: 0 }}>
@@ -885,7 +892,7 @@ function ReviewChaseBlock() {
                   <div style={{ marginTop: '12px' }}>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)',
                       letterSpacing: '0.8px', marginBottom: '8px' }}>
-                      CLOSE WITH RATING
+                      {item.status === 'closed' ? 'SAVE THE REVIEW RATING' : 'CLOSE WITH RATING'}
                     </div>
                     <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
                       {[1,2,3,4,5].map(n => (
@@ -900,7 +907,7 @@ function ReviewChaseBlock() {
                       ))}
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => handleClose(item.stayId, starRating, 'manual')}
+                      <button onClick={() => handleClose(item.stayId, starRating, 'manual', item.status === 'closed')}
                         disabled={saving[item.stayId + '_close'] || starRating === 0}
                         style={{ flex: 2, padding: '10px', borderRadius: '9px',
                           border: '1px solid rgba(52,168,83,0.4)',
@@ -908,14 +915,14 @@ function ReviewChaseBlock() {
                           color: starRating > 0 ? '#34A853' : 'var(--text-dim)',
                           fontWeight: '700', fontSize: '0.82rem', cursor: 'pointer',
                           opacity: starRating === 0 ? 0.4 : 1 }}>
-                        {saving[item.stayId + '_close'] ? '…' : `✅ Close ${starRating ? `with ${starRating}★` : '(select stars)'}`}
+                        {saving[item.stayId + '_close'] ? '…' : item.status === 'closed' ? `Save ${starRating ? `${starRating}★` : '(select stars)'}` : `✅ Close ${starRating ? `with ${starRating}★` : '(select stars)'}`}
                       </button>
-                      <button onClick={() => handleClose(item.stayId, 0, 'no_review')}
+                      <button onClick={() => handleClose(item.stayId, 0, 'no_review', item.status === 'closed')}
                         disabled={saving[item.stayId + '_close']}
                         style={{ flex: 1, padding: '10px', borderRadius: '9px',
                           border: '1px solid rgba(92,112,128,0.25)', background: 'transparent',
                           color: 'var(--text-dim)', fontSize: '0.78rem', cursor: 'pointer' }}>
-                        No review
+                        {item.status === 'closed' ? 'Stop chasing' : 'No review'}
                       </button>
                     </div>
                   </div>

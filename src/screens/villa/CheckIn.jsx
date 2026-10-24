@@ -114,6 +114,7 @@ export default function CheckIn() {
   // drops off the list. The best review is written in the car, not the next
   // day — this is the only moment staff still have their attention.
   const [justCheckedOut, setJustCheckedOut] = useState(null)
+  const [closing, setClosing] = useState(false)   // the "Ready to close?" answer is being saved
   // Everyone who left in the last few days, so a review can still be
   // requested after the post-checkout panel is gone. Without this a guest
   // checked out in an earlier session was unreachable from this screen.
@@ -256,9 +257,8 @@ export default function CheckIn() {
   }
 
   // Complete checkout (ready_for_checkout → checked_out)
-  // Records what the guest consumed and marks the stay settled. Does not
-  // close it — the owner does that after the review, and closing here would
-  // drop the stay out of their review chase list.
+  // Records what the guest consumed and marks the stay settled. It does not close
+  // the stay: that is the "Ready to close?" question below.
   async function handleSettle() {
     if (!justCheckedOut) return
     const lines = settleLines
@@ -276,6 +276,25 @@ export default function CheckIn() {
     finally { setSettling(false) }
   }
   
+
+  // READY TO CLOSE? Closing is the last step for a guest who has checked out. It is asked of Raman right after the
+  // check-out (the panel) and, if he says "not yet", the stay waits on his Home to-do list under "Ready to close?"
+  // (2026-10-24: the owner no longer has to review and close). Charges typed but not saved are saved first, because
+  // a closed stay can no longer be settled. The owner's review chase still lists a closed stay for 30 days.
+  async function handleCloseStay(stay) {
+    if (!stay) return
+    if (!settled && settleLines.some(l => (l.label || '').trim() && (parseFloat(l.amount) || 0) > 0)) {
+      showToast('Save the charges first, then close', 'error'); return
+    }
+    setClosing(true)
+    try {
+      await api.closeStayWithReview({ stayId: stay.stay_id, closedReason: 'raman' })
+      showToast(`✅ ${(stay.guest_name || 'Guest').split(' ')[0]}'s stay is closed`)
+      setJustCheckedOut(null)
+      await loadStays()
+    } catch (e) { showToast('Could not close: ' + e.message, 'error') }
+    finally { setClosing(false) }
+  }
 
   async function handleCompleteCheckout() {
     if (!selected) return
@@ -356,7 +375,7 @@ export default function CheckIn() {
             )}
             {settled && (
               <div style={{marginBottom:12,fontSize:'0.82rem',color:'#58C07C',fontWeight:600}}>
-                Settled — the owner will close this stay.
+                Settled.
               </div>
             )}
             <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -372,11 +391,27 @@ export default function CheckIn() {
                   No WhatsApp number on this booking.
                 </div>
               )}
-              <button onClick={() => setJustCheckedOut(null)}
-                style={{padding:'11px 16px',borderRadius:10,background:'transparent',
-                  border:'1px solid var(--border-dim)',color:'var(--text-dim)',fontSize:'0.85rem',cursor:'pointer'}}>
-                Done
-              </button>
+            </div>
+            <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+              <div style={{fontSize:'0.78rem',fontWeight:700,color:'var(--text-dim)',marginBottom:6}}>
+                READY TO CLOSE {first.toUpperCase()}'S STAY?
+              </div>
+              <div style={{fontSize:'0.8rem',color:'var(--text-dim)',lineHeight:1.55,marginBottom:10}}>
+                Close it when there is nothing more to do for this guest. If not yet, it waits on your Home list under
+                "Ready to close?".
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={() => handleCloseStay(justCheckedOut)} disabled={closing}
+                  style={{flex:2,padding:'11px',borderRadius:10,fontWeight:800,fontSize:'0.9rem',cursor:closing?'default':'pointer',
+                    background:'rgba(52,168,83,0.18)',border:'1px solid rgba(52,168,83,0.5)',color:'#34A853'}}>
+                  {closing ? 'Closing…' : '✅ Yes, close it'}
+                </button>
+                <button onClick={() => setJustCheckedOut(null)} disabled={closing}
+                  style={{flex:1,padding:'11px 12px',borderRadius:10,background:'transparent',
+                    border:'1px solid var(--border-dim)',color:'var(--text-dim)',fontSize:'0.85rem',cursor:'pointer'}}>
+                  Not yet
+                </button>
+              </div>
             </div>
           </div>
         )
@@ -385,14 +420,14 @@ export default function CheckIn() {
       {/* Recent check-outs still awaiting a review request. Persistent, unlike
            the panel above which only survives the session that did the
            check-out. */}
-      {recentOuts.filter(s => s.status === 'checked_out' && !s.review_rating).length > 0 && (
+      {recentOuts.filter(s => (s.status === 'checked_out' || s.status === 'closed') && !s.review_rating).length > 0 && (
         <div style={{margin:'0 14px 12px',padding:'12px 14px',borderRadius:12,
           background:'var(--dark-card)',border:'1px solid var(--border-dim)'}}>
           <div style={{fontSize:'0.72rem',fontWeight:700,letterSpacing:'0.08em',
             color:'var(--text-dim)',marginBottom:10}}>
             RECENTLY CHECKED OUT · ASK FOR A REVIEW
           </div>
-          {recentOuts.filter(s => s.status === 'checked_out' && !s.review_rating).map(s => {
+          {recentOuts.filter(s => (s.status === 'checked_out' || s.status === 'closed') && !s.review_rating).map(s => {
             const wa = buildReviewRequestWaLink(s)
             return (
               <div key={s.stay_id} style={{display:'flex',alignItems:'center',gap:10,

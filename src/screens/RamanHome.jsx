@@ -131,7 +131,78 @@ function OverdueBlock({ overdue }) {
 
       <div style={{ padding: '8px 14px', borderTop: '1px solid rgba(239,68,68,0.1)' }}>
         <div style={{ fontSize: '0.7rem', color: 'rgba(239,68,68,0.7)' }}>
-          Please close these stays so the owner can settle commissions
+          Tap a guest to check them out. Once checked out they wait below, ready to close.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── READY TO CLOSE BLOCK ──────────────────────────────────────────────────
+// Guests who have checked out but are not closed yet. Raman closes a stay himself when there is nothing more to do
+// for that guest (2026-10-24: the owner no longer has to review and close); until he does it waits here.
+function ToCloseBlock({ toClose, onClosed }) {
+  const [busy, setBusy] = useState(null)
+  const [note, setNote] = useState('')
+  if ((!toClose || toClose.length === 0) && !note) return null
+
+  async function close(s) {
+    if (!window.confirm(`Close ${s.guestName}'s stay?\n\nDo this when there is nothing more to do for this guest.`)) return
+    setBusy(s.stayId); setNote('')
+    try {
+      await api.closeStayWithReview({ stayId: s.stayId, closedReason: 'raman' })
+      onClosed(s.stayId)
+      setNote(`✅ ${s.guestName} closed`)
+      setTimeout(() => setNote(''), 4000)
+    } catch (e) { setNote('Could not close: ' + (e.message || 'try again')) }
+    finally { setBusy(null) }
+  }
+
+  return (
+    <div style={{ marginBottom: '14px', background: 'rgba(52,168,83,0.06)',
+      border: '1px solid rgba(52,168,83,0.3)', borderRadius: '12px', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(52,168,83,0.15)',
+        display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span>✅</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: '700', color: '#34A853', letterSpacing: '1.5px' }}>
+          READY TO CLOSE?
+        </span>
+        <span style={{ marginLeft: 'auto', background: 'rgba(52,168,83,0.2)', color: '#34A853',
+          fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
+          {(toClose || []).length}
+        </span>
+      </div>
+      {(toClose || []).map((s, i) => (
+        <div key={s.stayId || i}
+          style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: '10px',
+            borderBottom: i < toClose.length - 1 ? '1px solid rgba(52,168,83,0.1)' : 'none' }}>
+          <span style={{ fontSize: '1.1rem' }}>{sourceIcon(s.source)}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: '600', color: '#F0F0F0',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {s.guestName}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+              Checked out {fmtDate(s.checkOutDate)} ·{' '}
+              {s.daysSince === 0 ? 'today' : `${s.daysSince} day${s.daysSince > 1 ? 's' : ''} ago`}
+              {' · '}{s.nights} night{s.nights > 1 ? 's' : ''}
+            </div>
+          </div>
+          <button onClick={() => close(s)} disabled={busy === s.stayId}
+            style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid rgba(52,168,83,0.5)',
+              background: 'rgba(52,168,83,0.15)', color: '#34A853', fontWeight: '700',
+              fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            {busy === s.stayId ? '…' : 'Close'}
+          </button>
+        </div>
+      ))}
+      {note && (
+        <div style={{ padding: '8px 14px', fontSize: '0.75rem', color: note.startsWith('Could not') ? '#EF9A9A' : '#58C07C',
+          borderTop: '1px solid rgba(52,168,83,0.1)' }}>{note}</div>
+      )}
+      <div style={{ padding: '8px 14px', borderTop: '1px solid rgba(52,168,83,0.1)' }}>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
+          Close a stay when there is nothing more to do for that guest. Until you do, it waits here.
         </div>
       </div>
     </div>
@@ -262,7 +333,7 @@ export default function RamanHome() {
   const showEarnings = (user?.compType || 'commission') !== 'salary'
   const [activeStay,  setActiveStay]  = useState(null)
   const [readyCount,  setReadyCount]  = useState(0)
-  const [todo,        setTodo]        = useState({ overdue: [], upcoming: [] })
+  const [todo,        setTodo]        = useState({ overdue: [], upcoming: [], toClose: [] })
   const [loadingStay, setLoadingStay] = useState(true)
 
   useEffect(() => {
@@ -276,6 +347,7 @@ export default function RamanHome() {
       setTodo({
         overdue:  todoData?.overdue  || [],
         upcoming: todoData?.upcoming || [],
+        toClose:  todoData?.toClose  || [],
       })
       setLoadingStay(false)
     }).catch(() => setLoadingStay(false))
@@ -422,6 +494,8 @@ export default function RamanHome() {
         {!loadingStay && (
           <>
             <OverdueBlock  overdue={todo.overdue} />
+            <ToCloseBlock  toClose={todo.toClose}
+              onClosed={id => setTodo(t => ({ ...t, toClose: (t.toClose || []).filter(x => x.stayId !== id) }))} />
             <UpcomingBlock upcoming={todo.upcoming} turnaroundHours={todo.turnaroundHours} />
           </>
         )}

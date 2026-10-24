@@ -4663,6 +4663,16 @@ export async function onRequest(ctx) {
         const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= ${TODAY_SQL} ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
         await attachStayPrefs(DB, overdueRows)
         await attachStayPrefs(DB, upcomingRows)
+        // Guests who have CHECKED OUT but are not closed yet. Raman closes a stay himself when he is ready (the owner no
+        // longer has to), so whatever he has not closed waits on his to-do list. The last 30 days only, so an old
+        // leftover does not bury today's list.
+        const { results: toCloseRows } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, actual_checkout_at
+             FROM stayvibe_stays
+            WHERE villa_id = ? AND status = 'checked_out' AND checkout_date >= date(${TODAY_SQL}, '-30 days')
+            ORDER BY checkout_date DESC, actual_checkout_at DESC LIMIT 20`
+        ).bind(villaId).all()
+        const todayHere = await todayOf(villaId)
         const mapRow = r => ({
           stayId: r.stay_id, guestName: r.guest_name,
           checkInDate: r.checkin_date, checkOutDate: r.checkout_date,
@@ -4698,6 +4708,11 @@ export async function onRequest(ctx) {
         return json({ success: true, data: {
           turnaroundHours,
           overdue:  overdueRows.map(r => ({ ...mapRow(r), daysOver: r.days_over })),
+          toClose:  (toCloseRows || []).map(r => ({
+            ...mapRow(r),
+            checkedOutAt: r.actual_checkout_at || null,
+            daysSince: Math.max(0, Math.round((Date.parse(todayHere + 'T00:00:00Z') - Date.parse(r.checkout_date + 'T00:00:00Z')) / 86400000)),
+          })),
           upcoming: upcomingRows.map(r => {
             const sameDay = (departuresByDate[r.checkin_date] || []).filter(d => d.stay_id !== r.stay_id)
             return {
@@ -6065,10 +6080,12 @@ export async function onRequest(ctx) {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults,
                   source, guest_phone, review_rating, review_date,
-                  review_chased_at, review_chase_count
+                  review_chased_at, review_chase_count, status
            FROM stayvibe_stays
-           WHERE status = 'checked_out'
+           WHERE (status = 'checked_out'
+                  OR (status = 'closed' AND checkout_date >= date(${sqlDay(await todayOf(url.searchParams.get('villaId')))}, '-30 days')))
              AND checkout_date <= ${sqlDay(await todayOf(url.searchParams.get('villaId')))}
+             AND COALESCE(review_source, '') != 'none'
              AND (review_rating IS NULL OR review_rating = 0)${rv.sql}
            ORDER BY checkout_date DESC
            LIMIT 100`
@@ -6088,6 +6105,8 @@ export async function onRequest(ctx) {
             adults:        r.adults,
             source:        r.source,
             phone:         r.guest_phone,
+            // 'closed' once Raman (or the owner) has closed the stay: it stays in the chase for 30 days so the review can still be asked for
+            status:        r.status,
             reviewRating:  r.review_rating || 0,
             reviewDate:    r.review_date || null,
             chasedAt:      r.review_chased_at || null,
@@ -9416,15 +9435,34 @@ export async function onRequest(ctx) {
         // that does not exist yet, leaving the handler's own checks in charge.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
+        // CLOSING is the last step, and it belongs to whoever is ready to say the stay is finished: Raman, right after
+        // check-out or from his to-do list (2026-10-24), or the owner from the review chase. Only a guest who has
+        // CHECKED OUT can be closed: closing one still to arrive or in the villa would take them off every list.
+        // A stay already closed is not an error, and can still be given its review rating or have its chase ended.
+        const cur = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!cur) return err('Stay not found', 404)
+        const rated = Number(rating) > 0
+        const endsChase = !rated && closedReason === 'no_review'
+        if (cur.status === 'closed' && !rated && !endsChase) return json({ success: true, data: { stayId, status: 'closed', rating: 0, alreadyClosed: true } })
+        if (cur.status !== 'checked_out' && cur.status !== 'closed') return err('Only a guest who has checked out can be closed', 409)
         const updates = [`status = 'closed'`, `updated_by = ?`, `updated_at = ?`]
         const binds = [actor, now()]
-        if (rating && rating > 0) {
+        if (rated) {
           updates.push(`review_rating = ?`, `review_source = 'direct'`, `review_date = ?`)
-          binds.push(rating, now().slice(0, 10))
+          binds.push(Number(rating), now().slice(0, 10))
+        } else if (endsChase) {
+          // "No review": the owner will not chase this guest, so the review chase list lets them go
+          updates.push(`review_source = 'none'`, `review_date = ?`)
+          binds.push(now().slice(0, 10))
         }
         binds.push(stayId)
-        await DB.prepare(`UPDATE stayvibe_stays SET ${updates.join(', ')} WHERE stay_id = ?`).bind(...binds).run()
-        return json({ success: true, data: { stayId, status: 'closed', rating: rating || 0 } })
+        const what = cur.status === 'closed' ? (rated ? 'Rating recorded on a closed stay' : 'Review chase ended on a closed stay') : 'Closed'
+        await DB.batch([
+          DB.prepare(`UPDATE stayvibe_stays SET ${updates.join(', ')} WHERE stay_id = ?`).bind(...binds),
+          DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'stay_closed', ?, ?, ?)`)
+            .bind(genId('LOG'), stayId, `${what} by ${actor}${closedReason ? ' (' + String(closedReason).slice(0, 40) + ')' : ''}${rated ? ', rating ' + Number(rating) : ''}`, now()),
+        ])
+        return json({ success: true, data: { stayId, status: 'closed', rating: rated ? Number(rating) : 0 } })
       }
 
       if (action === 'saveBreakfastEntry') {

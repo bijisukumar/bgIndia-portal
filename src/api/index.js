@@ -139,6 +139,7 @@ export const api = {
   ocrReceipt:           (data)   => post('ocrReceipt', data),
   confirmCheckIn:       (data)   => post('confirmCheckIn', data),
   addStayCars:          (data)   => post('addStayCars', data),
+  setExtraLinePaid:     (data)   => post('setExtraLinePaid', data),
   resolveStay:          (data)   => post('resolveStay', data),
   deleteStay:           (data)   => post('deleteStay', data),
   resolveDuplicate:     (data)   => post('resolveDuplicate', data),

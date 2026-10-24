@@ -17,7 +17,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { parseLocalDate, formatTime12h, fmtClockZ } from '../../utils/dates'
+import { parseLocalDate, formatTime12h, fmtClockZ, fmtStampZ } from '../../utils/dates'
 import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '../../utils/stayTimes'
 import { stayHolds, dayMonth, heldSummary } from '../../utils/stayHolds'
 import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
@@ -171,6 +171,7 @@ export default function CompleteBooking() {
   const [mergePromptOpen, setMergePromptOpen] = useState(false)
   const [mergeContactId,  setMergeContactId]  = useState(null) // which checked stay_id is the "booked by" contact
   const [mergeGuestMatches, setMergeGuestMatches] = useState({}) // stay_id -> {guest_id, name} | null (not found) | undefined (loading)
+  const [paidBusy, setPaidBusy] = useState(null) // index of the extra line whose Paid tick is being saved
   const [twinSkipped, setTwinSkipped] = useState([]) // "Same guest, two records?" cards the owner chose to keep as two
   const [absorbPrompt, setAbsorbPrompt] = useState(null) // { source, target } — offer to move financials off the duplicate
   const [absorbBusy, setAbsorbBusy] = useState(false)
@@ -279,6 +280,11 @@ export default function CompleteBooking() {
     : 0
   const tariff     = parseFloat(form.tariffPerNight)||0
   const extraTotal = extraLines.reduce((s,l) => s + (parseFloat(l.amount)||0), 0)
+  // What has actually come in: the lines ticked Paid, at the amount they were ticked at (a tick changes no total)
+  const extraReceived = extraLines.reduce((s,l) => s + (l.paid ? (parseFloat(l.paidAmount ?? l.amount)||0) : 0), 0)
+  // Is this extra line already saved on the stay exactly as shown? The Paid tick is recorded on a saved line.
+  const savedExtraLines = (() => { try { const p = JSON.parse((selected && (selected.extra_lines || selected.extraLines)) || '[]'); return Array.isArray(p) ? p : [] } catch { return [] } })()
+  const savedLine = (line, i) => { const sv = savedExtraLines[i]; return !!sv && String(sv.label || '') === String(line.label || '') && Number(sv.amount) === Number(line.amount) }
   // The agreed check-in / check-out time, shown beside the early / late check-out charge it
   // is for, so the charge and the time are read together. With no time recorded the line
   // says so and takes the owner to the place that sets it (Guest info).
@@ -341,6 +347,23 @@ export default function CompleteBooking() {
   const net        = isAirbnb
     ? youEarnAmt + extraTotal          // youEarn already has 3% deducted
     : gross - commAmt
+
+  // "Paid" on an extra charge: records that the money was received (the server stamps the time). It changes no
+  // total: an extra is revenue from the booking and is already inside gross; this is the record that it came in.
+  async function handleToggleExtraPaid(i, checked) {
+    if (!selected) return
+    const line = extraLines[i]
+    if (!line) return
+    if (!checked && !window.confirm(`Mark "${line.label}" as NOT paid? The time it was received is cleared.`)) return
+    setPaidBusy(i)
+    try {
+      const res = await api.setExtraLinePaid({ stayId: selected.stay_id, index: i, label: line.label, paid: checked })
+      if (Array.isArray(res?.lines)) setExtraLines(res.lines)
+      showToast(checked ? `${line.label}: marked paid ✓` : `${line.label}: marked not paid`)
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setPaidBusy(null) }
+  }
 
   // Save financial details (updates stay record)
   async function handleSaveFinancials() {
@@ -1714,6 +1737,7 @@ export default function CompleteBooking() {
                   <div className="card" style={{padding:'10px 14px',marginBottom:'8px'}}>
                     <div className="card-section-label" style={{marginBottom:'8px'}}>EXTRA CHARGES</div>
                     {extraLines.map((line, i) => (
+                      <div key={'extra-' + i} style={{marginBottom:'8px'}}>
                       <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
                         <span style={{flex:1,fontSize:'0.85rem',color:'var(--text)'}}>{line.label}{feeNote(line.label)}</span>
                         <input type="number" value={line.amount} placeholder="0"
@@ -1724,10 +1748,19 @@ export default function CompleteBooking() {
                         <button onClick={() => setExtraLines(prev => prev.filter((_,j) => j!==i))}
                           style={{background:'none',border:'none',color:'#c62828',cursor:'pointer',fontSize:'1rem'}}>✕</button>
                       </div>
+                      <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'0.72rem',marginTop:'2px',
+                        color: line.paid ? '#34A853' : 'var(--text-dim)', cursor: savedLine(line, i) ? 'pointer' : 'default'}}>
+                        <input type="checkbox" checked={!!line.paid} disabled={!savedLine(line, i) || paidBusy === i}
+                          onChange={e => handleToggleExtraPaid(i, e.target.checked)} />
+                        {line.paid
+                          ? `Paid${line.paidAmount != null ? ` ₹${Number(line.paidAmount).toLocaleString('en-IN')}` : ''} · ${fmtStampZ(line.paidAt)}${line.paidBy ? ` · ${fmtActor(line.paidBy)}` : ''}`
+                          : (savedLine(line, i) ? 'Paid? tick when the money has been received' : 'Save the financials first, then tick Paid')}
+                      </label>
+                      </div>
                     ))}
                     <div style={{borderTop:'1px solid var(--border-dim)',paddingTop:'6px',marginTop:'4px',
                       display:'flex',justifyContent:'space-between',fontSize:'0.82rem'}}>
-                      <span style={{color:'var(--text-dim)'}}>Total extras</span>
+                      <span style={{color:'var(--text-dim)'}}>Total extras{extraReceived > 0 && <span style={{color:'#34A853'}}> · received ₹{extraReceived.toLocaleString('en-IN')}{extraReceived < extraTotal ? ` · pending ₹${(extraTotal - extraReceived).toLocaleString('en-IN')}` : ''}</span>}</span>
                       <span style={{color:'var(--gold)',fontWeight:'700'}}>₹{extraTotal.toLocaleString('en-IN')}</span>
                     </div>
                   </div>

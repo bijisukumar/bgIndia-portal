@@ -577,6 +577,28 @@ const addMonthsISO = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCM
 const addDaysISO  = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10)
 const diffDaysISO = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)
 const dayLabel    = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+// A screen that has not seen a "Paid" tick yet (another device, an old tab) must not erase it when it saves the extra
+// lines back. Carry the paid marks of the STORED lines onto the incoming ones that lack them, matching by position AND
+// label; an incoming line that carries its own marks (an up-to-date screen) is left exactly as sent.
+async function keepPaidMarks(DB, stayId, incomingJson) {
+  if (!incomingJson) return incomingJson || null
+  try {
+    // tenant-scope-exempt: only reads the stored extra lines of the stay this same save is about to write (the caller's own
+    // UPDATE of that stay_id runs through the same central tenant guard); nothing is returned to the caller.
+    const row = await DB.prepare(`SELECT extra_lines FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+    const stored = JSON.parse(row?.extra_lines || '[]')
+    const incoming = JSON.parse(incomingJson)
+    if (!Array.isArray(stored) || !Array.isArray(incoming)) return incomingJson
+    incoming.forEach((l, i) => {
+      const s = stored[i]
+      if (l && s && s.paid && l.paid === undefined && String(l.label || '').trim() === String(s.label || '').trim()) {
+        l.paid = s.paid; l.paidAt = s.paidAt; l.paidBy = s.paidBy; l.paidAmount = s.paidAmount
+      }
+    })
+    return JSON.stringify(incoming)
+  } catch (e) { return incomingJson }
+}
+
 // created_at is stored UTC ("YYYY-MM-DD HH:MM:SS"); the date and clock it was logged at, in the property's zone.
 const stampIn = (utc, tz) => ({ date: dateInZone(utc, tz) || null, time: clock24(utc, tz) })
 
@@ -8288,7 +8310,7 @@ export async function onRequest(ctx) {
 
       if (action === 'saveVillaRentalIncome') {
         if (body.stayId) {
-          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, body.extraLines || null, body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, await keepPaidMarks(DB, body.stayId, body.extraLines), body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
           await syncStayLedger(DB, body.stayId)
           return json({ success: true, data: { stayId: body.stayId, updated: true } })
         }
@@ -9337,6 +9359,52 @@ export async function onRequest(ctx) {
         return json({ success: true, data: {
           stayId, linesAdded: clean.length, extraCharges: Math.round(total * 100) / 100,
         }})
+      }
+
+      // A "PAID" TICK ON AN EXTRA CHARGE (2026-10-24). An extra on a booking (floor bed, additional guest, late
+      // check-out ...) is revenue from that booking and is already inside gross (extra_charges). The tick records that
+      // the money was RECEIVED: it stamps when (UTC, like every stored time) and who, so the owner knows the extra came
+      // in without tallying it against the bank. Ticking changes no total. The stamp is made HERE, never by the phone's
+      // clock; ticking a paid line again changes nothing (the first stamp stays); unticking clears it and leaves an
+      // audit line. A line is named by its position AND its label, so a stale screen cannot tick a different line.
+      if (action === 'setExtraLinePaid') {
+        const { stayId, index, label } = body
+        const paid = body.paid === true
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT stay_id, villa_id, status, extra_lines FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        if (['void', 'cancelled'].includes(stay.status)) return err('This stay is not active', 409)
+        let lines = []
+        try { lines = JSON.parse(stay.extra_lines || '[]') } catch { lines = [] }
+        if (!Array.isArray(lines)) lines = []
+        const i = Number(index)
+        const line = Number.isInteger(i) ? lines[i] : null
+        if (!line || String(line.label || '').trim() !== String(label || '').trim()) {
+          return err('That extra charge is not on the booking any more: reload the screen and try again', 409)
+        }
+        let changed = false
+        if (paid && !line.paid) {
+          line.paid = true
+          line.paidAt = now()
+          line.paidBy = actor
+          line.paidAmount = Math.round((Number(line.amount) || 0) * 100) / 100
+          changed = true
+        } else if (!paid && line.paid) {
+          delete line.paid; delete line.paidAt; delete line.paidBy; delete line.paidAmount
+          changed = true
+        }
+        if (changed) {
+          await DB.batch([
+            DB.prepare(`UPDATE stayvibe_stays SET extra_lines = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
+              .bind(JSON.stringify(lines), actor, now(), stayId),
+            DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'extra_paid', ?, ?, ?)`)
+              .bind(genId('LOG'), stayId, `${paid ? 'Marked PAID' : 'Marked NOT paid'}: ${String(line.label || '').trim()} ${Math.round((Number(line.amount) || 0) * 100) / 100} by ${actor}`, now()),
+          ])
+        }
+        const total = lines.reduce((n, l) => n + (Number(l && l.amount) || 0), 0)
+        const received = lines.reduce((n, l) => n + (l && l.paid ? (Number(l.paidAmount != null ? l.paidAmount : l.amount) || 0) : 0), 0)
+        return json({ success: true, data: { stayId, lines, changed, extraTotal: Math.round(total * 100) / 100, received: Math.round(received * 100) / 100 } })
       }
 
       if (action === 'closeStayWithReview') {

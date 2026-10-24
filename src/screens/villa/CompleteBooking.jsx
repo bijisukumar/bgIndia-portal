@@ -901,6 +901,10 @@ export default function CompleteBooking() {
                               {stay.checked_in_by && ` · by ${fmtActor(stay.checked_in_by)}`}
                             </div>
                           )}
+                          {/* The stay's id, nights and dates: the old green "Checked In" box further down said this too */}
+                          <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginBottom:'6px'}}>
+                            {stay.stay_id} · {stay.nights || 1} night{(stay.nights || 1) !== 1 ? 's' : ''} · {fmtDate(stay.checkin_date)} → {fmtDate(stay.checkout_date)}
+                          </div>
                           {stay.vehicle_number && (
                             <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginBottom:'6px'}}>
                               🚗 {stay.vehicle_number}
@@ -1151,7 +1155,9 @@ export default function CompleteBooking() {
 
             {s && (
               <>
-                {/* Status banner */}
+                {/* Status banner. A checked-in guest's id, nights and dates now sit in the CHECKED-IN GUESTS card at the
+                    top, so the green "Checked In" box is not repeated for them. */}
+                {s.status !== 'checked_in' && (
                 <div style={{
                   background:meta.bg, border:`1px solid ${meta.color}55`,
                   borderRadius:'10px', padding:'10px 14px', marginBottom:'14px',
@@ -1172,6 +1178,7 @@ export default function CompleteBooking() {
                      s.status==='checked_in'?'🏠':'📄'}
                   </div>
                 </div>
+                )}
 
                 {Number(s.refund_amount) > 0 && (
                   <div style={{

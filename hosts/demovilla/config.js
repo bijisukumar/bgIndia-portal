@@ -176,8 +176,15 @@ export const CONFIG = {
 If you have a moment, a short review on {reviewPlatform} would mean a lot.
 
 {reviewLink}Thank you.`,
-      platforms: { airbnb: 'Airbnb', default: 'Google' },
-      links: { default: '' },
+      platforms: { airbnb: 'Airbnb', booking: 'Booking.com', agoda: 'Agoda', vrbo: 'Vrbo', default: 'Google' },
+      links: {
+        airbnb:  { url: 'https://www.airbnb.com/trips', label: 'Please leave your review in the Airbnb app:' },
+        booking: { url: '', label: 'Booking.com will send you a review link after checkout.' },
+        agoda:   { url: '', label: 'Agoda will email you a review link after checkout.' },
+        vrbo:    { url: '', label: 'Please leave your review in the Vrbo app.' },
+        // The demo has no Google page of its own: the sentence, without a link.
+        default: { url: '', label: 'Please leave us a Google review.' },
+      },
     },
     hostIntro: {
       template:
@@ -259,14 +266,18 @@ Warm regards,
       template:
 `Namaskaram {guestName}! 🙏
 
-As your time with us at {villaName} comes to a close, I wanted to personally thank you for staying with us.
+As your time with us at {villaName} comes to a close, I wanted to personally thank you for staying with us, and for trusting us with your family's time.
 
-It would mean a lot to know — how was your stay? We do hope our team was able to look after you and your family well, and that {villaName} gave you some truly memorable moments.
+We do hope our team looked after you and your family well, and that the villa gave you some truly memorable moments together.
 
-Wishing you a very safe journey ahead, whether you're headed home or on to your next destination. It would be our honour to welcome you back again soon.
+One small favor before you go — would you share a few words about your stay? It means the world to a family-run home like ours:
+
+{reviewLink}Wishing you a very safe journey ahead, whether you're headed home or on to your next destination.
+
+It would be our honor to welcome you back again soon.
 
 Warm regards,
-{managerName} | Demo Villa`,
+{villaName}`,
     },
   },
 

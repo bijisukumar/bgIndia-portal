@@ -3732,9 +3732,10 @@ export async function onRequest(ctx) {
         // a stale one from a slow period doesn't linger as "recent".
         const { results } = await DB.prepare(
          // source drives which platform the request names; review_rating lets
-         // the caller hide guests who have already left one.
+         // the caller hide guests who have already left one; review_chased_at says who has already been asked
+         // (by the owner's farewell message or an earlier tap), so the same ask is not sent twice.
           `SELECT stay_id, guest_name, guest_phone, checkin_date, checkout_date, status, adults, nights,
-                  source, review_rating, airbnb_conf
+                  source, review_rating, airbnb_conf, review_chased_at, review_chase_count
            FROM stayvibe_stays WHERE villa_id = ?
            AND (
              status = 'ready_for_checkout'
@@ -4907,6 +4908,9 @@ export async function onRequest(ctx) {
                   booked_by_guest_id, booked_by_name, checkout_email_sent_at,
                   vehicle_number, actual_checkin_at, actual_checkout_at,
                   checked_in_by, checked_out_by, no_show,
+                  -- Whether the review has been asked for already (the farewell message logs it, so does the
+                  -- review chase): the Checked-in guests card says so.
+                  review_chased_at, review_chase_count,
                   -- Preferences moved to their own table; LEFT JOIN so a stay
                   -- with no prefs row still comes back, with zeros rather than
                   -- disappearing from the list.
@@ -5249,7 +5253,7 @@ export async function onRequest(ctx) {
           `SELECT harvest_date, price_per_kg FROM estate360_rubber_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
         ).bind(estateId).first()
         return json({ success: true, data: {
-          managerName: 'RamananKutty', estateId, estateType,
+          managerName: 'RamanKutty', estateId, estateType,
           lastPricePerKg:  harvest?.price_per_kg || null,
           lastHarvestDate: harvest?.harvest_date || null,
           irrigationAlert: false,

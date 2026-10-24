@@ -32,6 +32,7 @@ export const CONTRACTS = [
       'nationality','purpose_of_visit','mode_of_transport','eta',
       'vehicle_number','actual_checkin_at','actual_checkout_at',
       'checked_in_by','checked_out_by',
+      'review_chased_at','review_chase_count',
     ],
   },
   {

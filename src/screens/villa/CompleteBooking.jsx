@@ -26,7 +26,7 @@ import StayTimesLine from '../../components/StayTimesLine'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
-import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink, greetingName } from '../../utils/guestMessages'
+import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink, greetingName, reviewPlatformFor } from '../../utils/guestMessages'
 import { breakfastDraft, breakfastItems, breakfastTypesFor, formatBreakfast } from '../../utils/breakfastSplit'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Agent','Other']
@@ -176,6 +176,7 @@ export default function CompleteBooking() {
   const [absorbPrompt, setAbsorbPrompt] = useState(null) // { source, target } — offer to move financials off the duplicate
   const [absorbBusy, setAbsorbBusy] = useState(false)
   const [checkoutEmailBusy, setCheckoutEmailBusy] = useState(null) // stay_id currently sending, or null
+  const [farewellAsked, setFarewellAsked] = useState({}) // stay_id -> when "Send farewell message" was tapped this session
 
   const showToast = (msg, type='success') => {
     setToast({msg,type}); setTimeout(()=>setToast(null),3500)
@@ -646,6 +647,14 @@ export default function CompleteBooking() {
     finally { setCheckoutEmailBusy(null) }
   }
 
+  // The farewell carries the review ask (it goes out on the way home, when a review gets written), so tapping it counts
+  // as asking: logged the way the Review chase logs a WhatsApp, which keeps that list, and the manager's check-out list,
+  // from asking again a guest who is already on the road. Fire and forget: WhatsApp opens regardless.
+  function handleFarewellTap(stayId) {
+    setFarewellAsked(prev => ({ ...prev, [stayId]: new Date().toISOString() }))
+    api.markReviewChased({ stayId }).catch(() => {})
+  }
+
   function toggleMergeCheck(stayId) {
     setMergeChecked(prev =>
       prev.includes(stayId) ? prev.filter(id => id !== stayId)
@@ -881,6 +890,8 @@ export default function CompleteBooking() {
                     {checkedIn.map((stay, i) => {
                       const waLink = buildComfortCheckWaLink(stay)
                       const farewellLink = buildFarewellWaLink(stay)
+                      const reviewOn = reviewPlatformFor(stay)
+                      const askedAt = farewellAsked[stay.stay_id] || stay.review_chased_at || null
                       const emailSending = checkoutEmailBusy === stay.stay_id
                       const emailSent = !!stay.checkout_email_sent_at
                       return (
@@ -936,6 +947,7 @@ export default function CompleteBooking() {
                             )}
                             {farewellLink && (
                               <a href={farewellLink} target="_blank" rel="noreferrer"
+                                onClick={() => handleFarewellTap(stay.stay_id)}
                                 style={{fontSize:'0.76rem',fontWeight:'700',padding:'8px 12px',borderRadius:'8px',
                                   background:'rgba(200,144,58,0.1)',border:'1px solid rgba(200,144,58,0.3)',
                                   color:'var(--gold)',textDecoration:'none'}}>
@@ -943,6 +955,11 @@ export default function CompleteBooking() {
                               </a>
                             )}
                           </div>
+                          {farewellLink && (
+                            <div style={{fontSize:'0.68rem',marginTop:'8px',color: askedAt ? '#5FD0AE' : 'var(--text-dim)'}}>
+                              {askedAt ? `Review asked ${fmtStampZ(askedAt)} · ` : ''}The farewell asks for a review on {reviewOn}.
+                            </div>
+                          )}
                         </div>
                       )
                     })}

@@ -17,7 +17,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { buildReviewRequestWaLink } from '../../utils/guestMessages'
-import { parseLocalDate, formatTime12h, localTodayStr, daysFromToday } from '../../utils/dates'
+import { parseLocalDate, formatTime12h, localTodayStr, daysFromToday, fmtStampZ } from '../../utils/dates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { stayTimes } from '../../utils/stayTimes'
@@ -429,6 +429,9 @@ export default function CheckIn() {
           </div>
           {recentOuts.filter(s => (s.status === 'checked_out' || s.status === 'closed') && !s.review_rating).map(s => {
             const wa = buildReviewRequestWaLink(s)
+            // Already asked (here, in the review chase, or by the owner's farewell message, which asks too): say so,
+            // and keep the button for a deliberate second ask rather than inviting a duplicate.
+            const asked = !!s.review_chased_at
             return (
               <div key={s.stay_id} style={{display:'flex',alignItems:'center',gap:10,
                 padding:'8px 0',borderTop:'1px solid rgba(255,255,255,0.05)'}}>
@@ -437,14 +440,22 @@ export default function CheckIn() {
                   <div style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>
                     Out {s.checkout_date}
                   </div>
+                  {asked && (
+                    <div style={{fontSize:'0.7rem',color:'#5FD0AE'}}>
+                      Review asked {fmtStampZ(s.review_chased_at)}
+                    </div>
+                  )}
                 </div>
                 {wa ? (
                   <a href={wa} target="_blank" rel="noreferrer"
                     onClick={() => { api.markReviewChased({ stayId: s.stay_id }).catch(() => {}) }}
-                    style={{padding:'8px 12px',borderRadius:8,background:'#25D366',
-                      color:'#062b13',fontWeight:700,fontSize:'0.78rem',textDecoration:'none',
+                    style={{padding:'8px 12px',borderRadius:8,
+                      background: asked ? 'rgba(37,211,102,0.12)' : '#25D366',
+                      border: asked ? '1px solid rgba(37,211,102,0.35)' : 'none',
+                      color: asked ? '#25D366' : '#062b13',
+                      fontWeight:700,fontSize:'0.78rem',textDecoration:'none',
                       whiteSpace:'nowrap'}}>
-                    Ask for review
+                    {asked ? 'Ask again' : 'Ask for review'}
                   </a>
                 ) : (
                   <span style={{fontSize:'0.72rem',color:'var(--text-dim)'}}>no number</span>

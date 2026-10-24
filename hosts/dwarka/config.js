@@ -119,7 +119,7 @@ export const CONFIG = {
       // On-site manager whose name shows on the owner's "Staff Perks"
       // commission tile and the New Booking checklist — configurable per
       // host so a white-label tenant sees their own manager's name.
-      managerName: 'RamananKutty',
+      managerName: 'RamanKutty',
       // Commission payout UPI id — genuinely host-specific, not cosmetic:
       // a new host's "Pay now" button must never default to someone
       // else's bank account.
@@ -332,12 +332,18 @@ export const CONFIG = {
 Unlike a typical online booking, our team makes a genuine effort to speak with each guest and see how we can make your stay even better. That same care goes into asking for your review — if you have a few minutes while it's still fresh, a review on {reviewPlatform} means a great deal to us and helps other families find us.
 
 {reviewLink}Thank you, and we hope to host you again.`,
-      // Where each channel's guests should leave the review.
+      // Where each channel's guests should leave the review. Keys are stays.source after src/utils/guestMessages.js
+      // reviewKey(): 'booking_com' and 'booking.com' both read as 'booking'. Direct, website, WhatsApp and agent
+      // bookings are not listed and take `default` (our Google page). The farewell message asks through these too.
       platforms: {
-        airbnb:  'Airbnb',
-        booking: 'Booking.com',
-        agoda:   'Agoda',
-        default: 'Google',
+        airbnb:     'Airbnb',
+        booking:    'Booking.com',
+        agoda:      'Agoda',
+        makemytrip: 'MakeMyTrip',
+        goibibo:    'Goibibo',
+        expedia:    'Expedia',
+        vrbo:       'Vrbo',
+        default:    'Google',
       },
       // Optional direct link per channel, blank when the app's own flow is
       // easier than a URL (Airbnb prompts inside its app anyway).
@@ -345,21 +351,30 @@ Unlike a typical online booking, our team makes a genuine effort to speak with e
       // guest to Google asks them to review a place they have no booking with.
       // An entry set to '' means "name the platform but offer no link".
       links: {
-        // Universal link: opens the Airbnb app straight to Trips if it is
-        // installed, and the website if it is not. Airbnb has no public URL
-        // that opens the review form for a specific reservation.
+        // What the guest is told, by how they booked (Biji's wording, 2026-10-24). `label` is the sentence, `url` the
+        // link under it; the platforms that email the guest their own review link after check-out have no `url`.
+        //
+        // Airbnb: a universal link, so with the app installed it opens straight to Trips and the guest is already
+        // logged in; without the app it opens the website. Airbnb has no public link that opens ONE stay's review form.
         airbnb: {
           url:   'https://www.airbnb.com/trips',
-          label: 'Open your Airbnb app and find this stay under Trips:',
+          label: 'Please leave your review in the Airbnb app:',
         },
-        // Direct and website guests review on Google.
+        // Direct, website, WhatsApp and agent bookings, and any channel not listed here, review on Google.
         default: {
           url:   'https://g.page/r/CW1511SVNE2IEAE/review',
-          label: 'You can leave it here:',
+          label: 'Please leave us a Google review:',
         },
-        // No usable deep link — the message still names the platform.
-        booking: { url: '', label: '' },
-        agoda:   { url: '', label: '' },
+        // Booking.com and Agoda email the guest a review link after check-out, so we say that instead of sending them
+        // to a generic page.
+        booking: { url: '', label: 'Booking.com will send you a review link after checkout.' },
+        agoda:   { url: '', label: 'Agoda will email you a review link after checkout.' },
+        // Vrbo: reviews are written in its app, under My Trips (no public link opens that page).
+        vrbo:    { url: '', label: 'Please leave your review in the Vrbo app.' },
+        // Not on Biji's list: worded like Vrbo's (each has an app with a My Trips page).
+        makemytrip: { url: '', label: 'Please leave your review in the MakeMyTrip app.' },
+        goibibo:    { url: '', label: 'Please leave your review in the Goibibo app.' },
+        expedia:    { url: '', label: 'Please leave your review in the Expedia app.' },
       },
     },
     // Owner's personal welcome, sent any time before check-in. Villa/owner
@@ -420,21 +435,17 @@ If you haven't completed your online check-in registration yet, please take a mo
     },
     comfortCheck: {
       template:
-`Namaskaram {guestName}!
+`Namaskaram {guestName}! 🙏
 
-I hope you had a comfortable travel to Guruvayur and that our team took great care of your check-in!
+Welcome home to {villaName}! We hope the journey was comfortable and check-in was smooth.
 
-We want to make sure your stay at {villaName} is fantastic right from day one. How are things looking?
+Just wanted to check in personally — are you and the family all settled in? And is there anything you'd like for tomorrow — darshan timings, breakfast, anything at all?
 
-1. Awesome so far!
-2. All good, just relaxing.
-3. Could use a quick fix/help.
+{managerName} is right here for you at {managerPhone}, any time. Just message us here — we read every reply.
 
-Just reply 1, 2, or 3 — that's all we need!
+Have a wonderful stay!
 
-If you need absolutely anything during your stay, {managerName} is right at hand at {managerPhone}.
-
-Have a wonderful time!`,
+Just tap ❤️ if everything's perfect — or type "help" and we'll be there to assist.`,
     },
     checkoutDay: {
       subject: 'Checkout day today — {villaName}',
@@ -505,20 +516,26 @@ Warm regards,
 {villaName}
 {hostPhone}  |  {guestContact}`,
     },
-    // Manual WhatsApp send, any time during/after checkout — asks how the
-    // stay was and closes the relationship warmly, hotel-front-desk style.
+    // Manual WhatsApp send on departure day, while the guest is on the road home — the moment a review gets written, so
+    // we ask then and do not chase later. Thanks them and asks for the review where THEY booked: {reviewLink} (the
+    // sentence and link for that channel, from reviewRequest.links above) is the only part that changes by channel.
+    // Wording by Biji, 2026-10-24.
     farewell: {
       template:
 `Namaskaram {guestName}! 🙏
 
-As your time with us at {villaName} comes to a close, I wanted to personally thank you for staying with us.
+As your time with us at {villaName} comes to a close, I wanted to personally thank you for staying with us, and for trusting us with your family's time in Guruvayur.
 
-It would mean a lot to know — how was your stay? We do hope our team was able to look after you and your family well, and that {villaName} gave you some truly memorable moments.
+We do hope our team looked after you and your family well, and that the villa gave you some truly memorable moments together.
 
-Wishing you a very safe journey ahead, whether you're headed home or on to your next destination. It would be our honour to welcome you back again soon.
+One small favor before you go — would you share a few words about your stay? It means the world to a family-run home like ours:
+
+{reviewLink}Wishing you a very safe journey ahead, whether you're headed home or on to your next destination.
+
+It would be our honor to welcome you back again soon.
 
 Snehapoorvam (സ്നേഹപൂർവ്വം),
-{managerName} | Guruvayur Villa (Dwarka)`,
+{villaName}`,
     },
   },
 
@@ -558,7 +575,7 @@ Snehapoorvam (സ്നേഹപൂർവ്വം),
         'Housing expenses', 'Soil evaluation & testing', 'Tree / plant purchase', 'Maintenance & repairs', 'Other expense'],
     },
     {
-      id: 'pavutumuri', name: 'Pavutumuri Estate', type: 'rubber', manager: 'RamananKutty', active: true,
+      id: 'pavutumuri', name: 'Pavutumuri Estate', type: 'rubber', manager: 'RamanKutty', active: true,
       // Paper-register defaults (owner-supplied); rate changes over time so
       // the actual value tapped/stamped per row lives in rubber_production —
       // these are only the pre-filled defaults for a new entry.

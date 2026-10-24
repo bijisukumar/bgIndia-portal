@@ -3,6 +3,7 @@
 // per-host CONFIG.guestMessages templates:
 //   • hostIntro    — personal welcome, any time before check-in
 //   • comfortCheck — "hope you settled in", during the stay
+//   • farewell     — thank-you on departure day; asks for the review where the guest booked
 //
 // The checkout-day email is deliberately NOT here — see
 // functions/api/[[route]].js (sendCheckoutEmailNow / the 6am
@@ -17,6 +18,12 @@ import { dayMonth } from './stayHolds'
 import { bedroomsNeeded } from './villaPricing'
 
 const villa = CONFIG.villas[0]
+
+// The name a guest knows the villa by ("Dvaraka - Luxury Villas of Guruvayur"), not the internal label ("Dwarka — GVR
+// Villa"): the arrival message, the review request, the comfort check and the farewell all say this one.
+function guestFacingName() {
+  return villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || ''
+}
 
 function renderTemplate(template, vars) {
   return String(template).replace(/\{(\w+)\}/g, (m, key) => (vars[key] != null ? vars[key] : m))
@@ -207,7 +214,7 @@ export function buildComfortCheckMessage(stay = {}) {
   if (!tpl) return null   // see buildCheckinLinkMessage — same runtime-config fragility
   return renderTemplate(tpl, {
     guestName: (stay.guest_name || '').trim() || 'there',
-    villaName: villa.full,
+    villaName: guestFacingName(),
     managerName: villa.managerName,
     managerPhone: villa.managerPhone,
   })
@@ -224,11 +231,17 @@ export function buildComfortCheckWaLink(stay = {}) {
 export function buildFarewellMessage(stay = {}) {
   const tpl = CONFIG.guestMessages?.farewell?.template
   if (!tpl) return null   // see buildCheckinLinkMessage — same runtime-config fragility
+  // The farewell goes out on the way home, which is when a review gets written, so it carries the ask: {reviewPlatform}
+  // and {reviewLink} name the place THIS guest booked (reviewTarget below). A host whose template does not use them
+  // sends the plain thank-you, as before.
+  const review = reviewTarget(stay)
   return renderTemplate(tpl, {
     guestName: (stay.guest_name || '').trim() || 'there',
-    villaName: villa.full,
+    villaName: guestFacingName(),
     managerName: villa.managerName,
     managerPhone: villa.managerPhone,
+    reviewPlatform: review.platform,
+    reviewLink: reviewLinkBlock(review),
   })
 }
 
@@ -238,6 +251,54 @@ export function buildFarewellWaLink(stay = {}) {
   const msg = buildFarewellMessage(stay)
   if (!msg) return null
   return waLink(phone, msg)
+}
+
+// ── WHERE A GUEST'S REVIEW BELONGS ────────────────────────────────────────
+// A guest reviews where they booked: an Airbnb guest on Airbnb, a Booking.com guest on Booking.com, a direct / website /
+// WhatsApp / agent guest on our Google page. The farewell and the review request both ask through this, so they always
+// agree (CONFIG.guestMessages.reviewRequest.platforms / .links).
+//
+// stays.source is not tidy: the data holds 'booking_com' (the Booking.com sync) and 'booking.com' (typed by hand) as
+// well as 'booking', but the config is written under 'booking' alone, so every Booking.com guest was being asked for a
+// Google review. Normalised here, once; any other source keeps its own lower-cased name, so a host can add a channel to
+// the config without a code change.
+const REVIEW_KEYS = { booking_com: 'booking', 'booking.com': 'booking', bookingcom: 'booking', mmt: 'makemytrip' }
+function reviewKey(source) {
+  const s = String(source || '').trim().toLowerCase()
+  return REVIEW_KEYS[s] || s
+}
+
+// { platform, url, label } for this stay: the platform's name, the link to its trips / bookings page (blank when we
+// have none we trust) and the sentence that introduces it. A source the config does not list gets the `default`
+// (Google).
+export function reviewTarget(stay = {}) {
+  const cfg       = CONFIG.guestMessages?.reviewRequest || {}
+  const platforms = cfg.platforms || {}
+  const links     = cfg.links || {}
+  const key = reviewKey(stay.source)
+  const has = (o) => Object.prototype.hasOwnProperty.call(o, key)
+  const platform = (has(platforms) ? platforms[key] : platforms.default) || 'Google'
+  // hasOwnProperty, not ||: a channel deliberately set to blank must mean "no link for this platform", not "fall
+  // through to the default". Otherwise a Booking.com guest is told to review on Booking.com and handed a Google link.
+  const entry = has(links) ? links[key] : links.default
+  return {
+    platform,
+    url:   typeof entry === 'string' ? entry : (entry?.url || ''),
+    label: typeof entry === 'string' ? '' : (entry?.label || ''),
+  }
+}
+
+// The lines that carry the link: the sentence, then the URL on its own line so WhatsApp makes it tappable, then a
+// blank line. A platform with a sentence but no link we trust gets the sentence alone; with neither, nothing, so a
+// message never ends on a dangling label.
+function reviewLinkBlock({ url, label }) {
+  if (url) return `${label ? label + '\n' : ''}${url}\n\n`
+  return label ? `${label}\n\n` : ''
+}
+
+// "Airbnb", "Booking.com", "Google"...: the owner's screen says which platform the farewell will ask for before the tap.
+export function reviewPlatformFor(stay = {}) {
+  return reviewTarget(stay).platform
 }
 
 // ── REVIEW REQUEST ────────────────────────────────────────────────────────
@@ -252,28 +313,16 @@ export function buildReviewRequestMessage(stay = {}) {
   const cfg = CONFIG.guestMessages?.reviewRequest
   if (!cfg?.template) return null   // same runtime-config fragility as the rest
 
-  const src = String(stay.source || '').toLowerCase()
-  const platforms = cfg.platforms || {}
-  const links     = cfg.links || {}
-  const reviewPlatform = platforms[src] || platforms.default || 'Google'
-  // hasOwnProperty, not ||: a channel deliberately set to blank must mean
-  // "no link for this platform", not "fall through to the default". Otherwise
-  // a Booking.com guest is told to review on Booking.com and handed a Google
-  // link.
-  const entry = Object.prototype.hasOwnProperty.call(links, src) ? links[src] : links.default
-  const linkUrl   = typeof entry === 'string' ? entry : (entry?.url || '')
-  const linkLabel = typeof entry === 'string' ? '' : (entry?.label || '')
+  const review = reviewTarget(stay)
 
   return renderTemplate(cfg.template, {
     firstName: greetingName(stay.guest_name),
     // The villa's guest-facing name, not CONFIG.brandName — that is the
     // internal portal brand ("Guruvayur Estates") which no guest recognises.
-    villaName: villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || '',
-    reviewPlatform,
-    // Blank when unset so the message never ends on a dangling label.
-    // Label then URL on its own line, so WhatsApp makes the URL tappable.
-    // Blank when the platform has no usable link, leaving no dangling text.
-    reviewLink: linkUrl ? `${linkLabel ? linkLabel + '\n' : ''}${linkUrl}\n\n` : '',
+    villaName: guestFacingName(),
+    reviewPlatform: review.platform,
+    // Blank when the platform has no link or sentence, so the message never ends on a dangling label.
+    reviewLink: reviewLinkBlock(review),
   })
 }
 
@@ -390,7 +439,7 @@ export function buildNoAvailabilityMessage({ guestName, checkIn, checkOut, alter
   const template = CONFIG.guestMessages?.noAvailability?.template || DEFAULT_NO_AVAILABILITY
   const text = renderTemplate(template, {
     firstName: greetingName(guestName),
-    villaName: villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || '',
+    villaName: guestFacingName(),
     requestedDates: dayLabelYear(checkIn) + ' to ' + dayLabelYear(checkOut) + ' (' + nightsWord + ')',
     nights: String(nights),
     options,

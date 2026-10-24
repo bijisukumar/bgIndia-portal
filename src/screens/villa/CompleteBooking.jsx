@@ -26,7 +26,7 @@ import StayTimesLine from '../../components/StayTimesLine'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
-import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink } from '../../utils/guestMessages'
+import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink, greetingName } from '../../utils/guestMessages'
 import { breakfastDraft, breakfastItems, breakfastTypesFor, formatBreakfast } from '../../utils/breakfastSplit'
 
 const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Agent','Other']
@@ -1963,7 +1963,7 @@ export default function CompleteBooking() {
                 {/* WhatsApp host intro — show for all pre-checkin states */}
                 {s && !['checked_in','checked_out','closed','cancelled'].includes(s.status) && (() => {
                   const phone = selected?.guest_phone || selected?.phone
-                  const name  = (selected?.guest_name || '').split(' ')[0]
+                  const name  = greetingName(selected?.guest_name)
                   if (!phone) return (
                     <button
                       onClick={() => {

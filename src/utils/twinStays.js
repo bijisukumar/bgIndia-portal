@@ -20,6 +20,27 @@ const LIVE = s => !['void', 'cancelled', 'closed', 'checked_out'].includes(s.sta
 const IN_VILLA = s => ['checked_in', 'ready_for_checkout'].includes(s.status)
 const hasMoney = s => (Number(s.gross) || 0) > 0 || (Number(s.net) || 0) > 0
 
+// A guest who registered on the check-in form through the form's OTHER record of the same visit has registered:
+// the booking row (which the owner and the WhatsApp intro look at) must say so too, or the intro asks them to
+// register again ("If you haven't completed your online check-in registration yet", 2026-10-24, Dimple, whose form
+// was filed under "P. B Krishnan"). Read-time and reversible: a live stay without the flag takes it from a live stay
+// WITH it on exactly the same dates, when either one's notes name the other ("Overlaps existing stay <id>"), the
+// names are alike, or one is recorded as booked by the other. `registered_via` says which record vouched for it.
+export function withRegistrationFromTwins(stays) {
+  const rows = stays || []
+  const flagged = rows.filter(s => LIVE(s) && s.checkin_form_submitted)
+  if (!flagged.length) return rows
+  return rows.map(s => {
+    if (!LIVE(s) || s.checkin_form_submitted) return s
+    const twin = flagged.find(f =>
+      f.stay_id !== s.stay_id && f.checkin_date === s.checkin_date && f.checkout_date === s.checkout_date &&
+      (String(f.notes || '').includes(s.stay_id) || String(s.notes || '').includes(f.stay_id) ||
+       namesAlike(f.guest_name, s.guest_name) ||
+       (!!s.booked_by_name && s.booked_by_name === f.guest_name) || (!!f.booked_by_name && f.booked_by_name === s.guest_name)))
+    return twin ? { ...s, checkin_form_submitted: 1, registered_via: twin.stay_id } : s
+  })
+}
+
 // [{ kind: 'merge' | 'void', source: the stay that holds the money, target: the no-money record }]
 export function findTwinPairs(stays) {
   const live = (stays || []).filter(LIVE)

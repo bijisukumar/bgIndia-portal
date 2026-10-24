@@ -143,7 +143,7 @@ export function buildHostIntroMessage(stay = {}) {
   // re-seeded config) is needed.
   const gt = guestFacingTimes(stay, { checkin: villa.checkinTime, checkout: villa.checkoutTime })
   return renderTemplate(cfg.template, {
-    firstName: ((stay.guest_name || '').trim().split(/\s+/)[0]) || 'there',
+    firstName: greetingName(stay.guest_name),
     checkinDateShort: fmtShort(ci),
     checkinDateFull:  fmtFull(ci),
     checkoutDateFull: fmtFull(co),
@@ -265,7 +265,7 @@ export function buildReviewRequestMessage(stay = {}) {
   const linkLabel = typeof entry === 'string' ? '' : (entry?.label || '')
 
   return renderTemplate(cfg.template, {
-    firstName: ((stay.guest_name || '').trim().split(/\s+/)[0]) || 'there',
+    firstName: greetingName(stay.guest_name),
     // The villa's guest-facing name, not CONFIG.brandName — that is the
     // internal portal brand ("Guruvayur Estates") which no guest recognises.
     villaName: villa.arrivalFullName || villa.full || villa.name || CONFIG.brandName || '',
@@ -344,9 +344,16 @@ function windowLine(w, year) {
     : '* ' + dayLabel(w.checkIn) + ' to ' + dayLabel(w.checkOut)
 }
 
-// Enquiries are often typed in capitals ("VIGNESH M"), and a greeting in capitals shouts.
+// The word to greet a guest by. Enquiries are often typed in capitals ("VIGNESH M"), and a greeting in capitals
+// shouts; and many names put initials first ("P. B Krishnan"), where the first WORD is no name at all
+// ("Namaskaram P.!", 2026-10-24). So: the first word of two or more letters that is not a title (Mr, Dr, Shri...).
+const GREETING_TITLES = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'shri', 'sri', 'smt', 'sreemati'])
 export function greetingName(fullName) {
-  const first = String(fullName || '').trim().split(/\s+/)[0] || ''
+  const words = String(fullName || '').trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return 'there'
+  const letters = w => w.replace(/[^\p{L}]/gu, '')
+  const pick = words.find(w => letters(w).length >= 2 && !GREETING_TITLES.has(letters(w).toLowerCase())) || words[0]
+  const first = pick.replace(/[.,;:]+$/, '')
   if (!first) return 'there'
   const shouting = first === first.toUpperCase() && first !== first.toLowerCase()
   return shouting ? first.charAt(0) + first.slice(1).toLowerCase() : first

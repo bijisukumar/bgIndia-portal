@@ -69,6 +69,8 @@ import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.
 import { checkinDateStatus } from '../../src/utils/checkinDate.js'
 // One guest's name written two ways ("Achala Kaushik" / "Achala A Kaushik"): the check-in form uses it to find its own booking.
 import { namesAlike } from '../../src/utils/guestNames.js'
+// A guest who registered through the form's other record of the same visit has registered (the WhatsApp intro thanks them).
+import { withRegistrationFromTwins } from '../../src/utils/twinStays.js'
 // The property's time zone and every way of reading a stored time in it. Nothing in this file reads
 // the server's clock for a business decision: see zoneFor below.
 import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong } from '../../src/utils/tz.js'
@@ -4919,7 +4921,7 @@ export async function onRequest(ctx) {
           const rules = await holdRules(DB, villaId)
           for (const r of withTimes) r.holds = stayHolds(r, rules)
         }
-        return json({ success: true, data: results })
+        return json({ success: true, data: withRegistrationFromTwins(results) })
       }
 
       if (action === 'getRentalAgreements') {

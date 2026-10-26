@@ -9224,6 +9224,15 @@ export async function onRequest(ctx) {
         if ((tgt.gross || 0) > 0 || (tgt.net || 0) > 0) {
           return err('Target already has financials — refusing to overwrite. Clear one side first to avoid double counting.')
         }
+        // The name the booking was made under, when it is a different person from the one who checked in, is kept on
+        // the surviving record as "booked by": the duplicate is voided, and with it the only place that name lived
+        // (2026-10-25: Airbnb booking "Dimple Pk", guest checked in as "P. B Krishnan" - the owner's list showed only
+        // the second). The same name written another way ("Achala Kaushik" / "Achala A Kaushik") is not another person,
+        // and an existing "booked by" is never replaced.
+        const srcName = (src.guest_name || '').trim()
+        const tgtName = (tgt.guest_name || '').trim()
+        const bookedAs = (srcName && !String(tgt.booked_by_name || '').trim()
+          && srcName.toLowerCase() !== tgtName.toLowerCase() && !namesAlike(srcName, tgtName)) ? srcName : null
         // Move (not delete) the source's ledger line items to the target —
         // the detailed P&L card joins on stayvibe_booking_line_items
         // separately from the stay's own gross/net columns, so dropping
@@ -9246,6 +9255,7 @@ export async function onRequest(ctx) {
               night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?,
               guest_service_fee = ?, guest_paid_total = ?,
               notes = TRIM(COALESCE(notes,'') || ' | Financials absorbed from duplicate ' || ?),
+              booked_by_name = COALESCE(NULLIF(booked_by_name,''), ?),
               updated_by = ?, updated_at = datetime('now')
             WHERE stay_id = ?`).bind(
             src.source || tgt.source, src.airbnb_conf || null,
@@ -9253,7 +9263,7 @@ export async function onRequest(ctx) {
             src.extra_charges || 0, src.extra_lines || null,
             src.night_fee || 0, src.cleaning_fee || 0, src.host_service_fee || 0, src.you_earn || 0,
             src.guest_service_fee || 0, src.guest_paid_total || 0,
-            sourceStayId, actor, targetStayId),
+            sourceStayId, bookedAs, actor, targetStayId),
           DB.prepare(`UPDATE stayvibe_stays SET status = 'void', airbnb_conf = NULL,
               notes = TRIM(COALESCE(notes,'') || ' | Voided as duplicate — financials moved to ' || ?),
               updated_by = ?, updated_at = datetime('now')
@@ -9262,10 +9272,10 @@ export async function onRequest(ctx) {
           DB.prepare(`DELETE FROM stayvibe_booking_line_items WHERE stay_id = ?`).bind(sourceStayId),
           DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'merge', ?, ?, datetime('now'))`)
             .bind(genId('LOG'), targetStayId,
-              `Absorbed financials from duplicate ${sourceStayId} (${src.guest_name}) into ${targetStayId} (${tgt.guest_name}); duplicate voided. Net moved: ${src.net || 0}.`),
+              `Absorbed financials from duplicate ${sourceStayId} (${src.guest_name}) into ${targetStayId} (${tgt.guest_name}); duplicate voided. Net moved: ${src.net || 0}.${bookedAs ? ` Booked by "${bookedAs}" kept on the stay.` : ''}`),
         ])
         await syncStayLedger(DB, targetStayId)
-        return json({ success: true, data: { targetStayId, sourceStayId, movedNet: src.net || 0, movedGross: src.gross || 0 } })
+        return json({ success: true, data: { targetStayId, sourceStayId, movedNet: src.net || 0, movedGross: src.gross || 0, bookedBy: bookedAs } })
       }
 
       if (action === 'linkBookedBy') {

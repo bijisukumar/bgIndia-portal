@@ -516,6 +516,9 @@ export default function CheckIn() {
                               {selected?.stay_id===stay.stay_id && <span style={{color:'var(--gold)',marginRight:'6px'}}>✓</span>}
                               {stay.guest_name}
                             </div>
+                            {stay.booked_by_name && (
+                              <div style={{fontSize:'0.68rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
+                            )}
                             <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                               {formatDate(stay.checkin_date)} · {calcNights(stay.checkin_date,stay.checkout_date)}N
                             </div>
@@ -805,6 +808,9 @@ export default function CheckIn() {
                         display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                         <div>
                           <div style={{fontWeight:'600',fontSize:'0.85rem'}}>{stay.guest_name}</div>
+                          {stay.booked_by_name && (
+                            <div style={{fontSize:'0.66rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
+                          )}
                           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'2px'}}>
                             {formatDate(stay.checkin_date)}
                             {d !== null && d > 0 && <span> · in {d} day{d!==1?'s':''}</span>}
@@ -863,6 +869,9 @@ export default function CheckIn() {
                                 {selected?.stay_id===stay.stay_id && <span style={{color:'var(--gold)',marginRight:'6px'}}>✓</span>}
                                 {stay.guest_name}
                               </div>
+                              {stay.booked_by_name && (
+                                <div style={{fontSize:'0.68rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
+                              )}
                               <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                                 Out: {formatDate(stay.checkout_date)}
                               </div>

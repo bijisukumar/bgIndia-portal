@@ -739,7 +739,7 @@ export default function CompleteBooking() {
         sourceStayId: pair.source.stay_id,
         targetStayId: pair.target.stay_id,
       })
-      showToast(`Moved ₹${(res?.movedNet || 0).toLocaleString('en-IN')} net to ${pair.target.guest_name} — duplicate voided ✓`)
+      showToast(`Moved ₹${(res?.movedNet || 0).toLocaleString('en-IN')} net to ${pair.target.guest_name} — duplicate voided ✓${res?.bookedBy ? ` · booked by ${res.bookedBy} kept` : ''}`)
       setAbsorbPrompt(null)
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }

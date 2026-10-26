@@ -337,12 +337,13 @@ Thank you so much for staying with us at {villaName}. {managerName} had such lov
 
 Snehapoorvam,
 Biji & the Dwarka family`,
-      // {reviewAsk} in the template. The host also reviews the guest back on Airbnb and Vrbo, so those guests are told
-      // "we're writing yours"; on every other channel that would not be true, so they get the plain ask.
-      reciprocal: ['airbnb', 'vrbo'],
+      // {reviewAsk} in the template: the same ask for every guest, and it names FIVE stars (Biji, 2026-10-25: a guest
+      // thinking of small things gives a 4). It briefly told Airbnb and Vrbo guests "we're writing your 5-star review,
+      // reciprocate", but Airbnb treats a swap of 5-star reviews as an incentivised review, so Biji dropped that the
+      // same day. `reciprocal` lists the channels that would get an `asks.reciprocal` sentence instead; none do.
+      reciprocal: [],
       asks: {
-        reciprocal: `We're writing your 5-star review shortly, and we'd be so grateful if you could spare 2 minutes to reciprocate a 5 star and share a few kind words about your stay too.`,
-        plain:      `We'd be so grateful if you could spare 2 minutes to share a few kind words about your stay.`,
+        plain: `If you enjoyed your stay, we'd be so grateful if you could spare 2 minutes to leave us a 5-star review and a few kind words.`,
       },
       // Where each channel's guests should leave the review. Keys are stays.source after src/utils/guestMessages.js
       // reviewKey(): 'booking_com' and 'booking.com' both read as 'booking'. Direct, website, WhatsApp and agent
@@ -542,7 +543,7 @@ As your time with us at {villaName} comes to a close, I wanted to personally tha
 
 We do hope our team looked after you and your family well, and that the villa gave you some truly memorable moments together.
 
-One small favor before you go — would you share a few words about your stay? It means the world to a family-run home like ours:
+One small favor before you go — if you enjoyed your stay, would you leave us a 5-star review and share a few words about it? It means the world to a family-run home like ours:
 
 {reviewLink}Wishing you a very safe journey ahead, whether you're headed home or on to your next destination.
 

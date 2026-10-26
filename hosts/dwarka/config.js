@@ -327,11 +327,23 @@ export const CONFIG = {
     // because an Airbnb guest reviews on Airbnb and a direct guest on Google.
     reviewRequest: {
       template:
-`Hi {firstName}, we loved hosting your family at {villaName} and hope to welcome you back again soon to seek blessings from Guruvayurappan. 🙏
+`Namaskaram {firstName}! 🙏
 
-Unlike a typical online booking, our team makes a genuine effort to speak with each guest and see how we can make your stay even better. That same care goes into asking for your review — if you have a few minutes while it's still fresh, a review on {reviewPlatform} means a great deal to us and helps other families find us.
+Thank you so much for staying with us at {villaName}. {managerName} had such lovely things to say about your family — it truly was our pleasure hosting you.
 
-{reviewLink}Thank you, and we hope to host you again.`,
+{reviewAsk} It means the world to a family-run home like ours.
+
+{reviewLink}Thank you again, and we hope to welcome you back to Guruvayur soon!
+
+Snehapoorvam,
+Biji & the Dwarka family`,
+      // {reviewAsk} in the template. The host also reviews the guest back on Airbnb and Vrbo, so those guests are told
+      // "we're writing yours"; on every other channel that would not be true, so they get the plain ask.
+      reciprocal: ['airbnb', 'vrbo'],
+      asks: {
+        reciprocal: `We're writing your 5-star review shortly, and we'd be so grateful if you could spare 2 minutes to reciprocate a 5 star and share a few kind words about your stay too.`,
+        plain:      `We'd be so grateful if you could spare 2 minutes to share a few kind words about your stay.`,
+      },
       // Where each channel's guests should leave the review. Keys are stays.source after src/utils/guestMessages.js
       // reviewKey(): 'booking_com' and 'booking.com' both read as 'booking'. Direct, website, WhatsApp and agent
       // bookings are not listed and take `default` (our Google page). The farewell message asks through these too.
@@ -359,11 +371,13 @@ Unlike a typical online booking, our team makes a genuine effort to speak with e
         airbnb: {
           url:   'https://www.airbnb.com/trips',
           label: 'Please leave your review in the Airbnb app:',
+          requestLabel: 'You can leave your review here:',   // the review request's own line (one line with the link)
         },
         // Direct, website, WhatsApp and agent bookings, and any channel not listed here, review on Google.
         default: {
           url:   'https://g.page/r/CW1511SVNE2IEAE/review',
           label: 'Please leave us a Google review:',
+          requestLabel: 'You can leave your review here:',
         },
         // Booking.com and Agoda email the guest a review link after check-out, so we say that instead of sending them
         // to a generic page.

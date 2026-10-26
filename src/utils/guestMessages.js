@@ -285,13 +285,18 @@ export function reviewTarget(stay = {}) {
     platform,
     url:   typeof entry === 'string' ? entry : (entry?.url || ''),
     label: typeof entry === 'string' ? '' : (entry?.label || ''),
+    // How the review REQUEST words the link line where there is a link ("You can leave your review here: <link>")
+    requestLabel: typeof entry === 'string' ? '' : (entry?.requestLabel || ''),
   }
 }
 
 // The lines that carry the link: the sentence, then the URL on its own line so WhatsApp makes it tappable, then a
 // blank line. A platform with a sentence but no link we trust gets the sentence alone; with neither, nothing, so a
 // message never ends on a dangling label.
-function reviewLinkBlock({ url, label }) {
+function reviewLinkBlock({ url, label, requestLabel }, asRequest = false) {
+  // The review request (the chase, Raman's "Ask for review") puts the sentence and the link on ONE line, as Biji wrote it
+  // on 2026-10-25; a platform with no link keeps its own sentence (it will email the guest the link).
+  if (asRequest && url && requestLabel) return `${requestLabel} ${url}\n\n`
   if (url) return `${label ? label + '\n' : ''}${url}\n\n`
   return label ? `${label}\n\n` : ''
 }
@@ -314,15 +319,21 @@ export function buildReviewRequestMessage(stay = {}) {
   if (!cfg?.template) return null   // same runtime-config fragility as the rest
 
   const review = reviewTarget(stay)
+  // "We're writing your 5-star review too" is only true where the host reviews the guest back (Airbnb, Vrbo: Biji,
+  // 2026-10-25); every other channel gets the plain ask. cfg.reciprocal lists the channels, cfg.asks holds the two sentences.
+  const asks = cfg.asks || {}
+  const reciprocal = Array.isArray(cfg.reciprocal) && cfg.reciprocal.includes(reviewKey(stay.source))
 
   return renderTemplate(cfg.template, {
     firstName: greetingName(stay.guest_name),
+    reviewAsk: (reciprocal ? asks.reciprocal : asks.plain) || '',
     // The villa's guest-facing name, not CONFIG.brandName — that is the
     // internal portal brand ("Guruvayur Estates") which no guest recognises.
     villaName: guestFacingName(),
+    managerName: villa.managerName,
     reviewPlatform: review.platform,
     // Blank when the platform has no link or sentence, so the message never ends on a dangling label.
-    reviewLink: reviewLinkBlock(review),
+    reviewLink: reviewLinkBlock(review, true),
   })
 }
 

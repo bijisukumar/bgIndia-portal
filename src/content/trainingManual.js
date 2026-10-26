@@ -146,7 +146,7 @@ export const BLOCKS = [
       `A list of guests who have left but not yet reviewed you, each with the platform they booked through, how many days ago they left and how many times you have already chased. Tap a guest to open their actions:`,
     ],
     bullets: [
-      `[[💬 Send WhatsApp review request]] — opens WhatsApp with a ready-written message to that guest. The chase is logged, so you can see how often you have asked; the farewell message on Complete booking counts as the first ask.`,
+      `[[💬 Send WhatsApp review request]] — opens WhatsApp with a ready-written message to that guest: a thank-you, a note that you are writing their 5-star review and would love one back, and the review link for how they booked (the same lines as the farewell message). The chase is logged, so you can see how often you have asked; the farewell message on Complete booking counts as the first ask.`,
       `**Close with a rating** — tap 1 to 5 stars and [[Close]] once the review appears. This closes the stay. Your manager is asked "Ready to close?" right after each check-out and closes it himself, so you no longer have to; a stay he has closed stays on this list for 30 days so you can still ask for the review, and then the button reads [[Save]] and only records the rating.`,
       `[[No review]] — close it without a rating (on a stay already closed it reads [[Stop chasing]]).`,
       `[[Auto-close N old →]] — once guests have been gone 20 days or more, clears all of them in one tap.`,

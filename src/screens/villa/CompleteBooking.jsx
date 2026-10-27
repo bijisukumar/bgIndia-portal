@@ -36,6 +36,7 @@ const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agod
 import { EXTRA_ITEMS } from '../../utils/villaPricing'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { findTwinPairs } from '../../utils/twinStays'
+import ChangeRequestCard from '../../components/ChangeRequestCard'
 
 // Airbnb-specific fee structure (from confirmation email)
 const EMPTY_AIRBNB = {
@@ -175,6 +176,8 @@ export default function CompleteBooking() {
   const [twinSkipped, setTwinSkipped] = useState([]) // "Same guest, two records?" cards the owner chose to keep as two
   const [absorbPrompt, setAbsorbPrompt] = useState(null) // { source, target } — offer to move financials off the duplicate
   const [absorbBusy, setAbsorbBusy] = useState(false)
+  // The "Guest names & ages" list under Guests (Guest info): fetched when it is opened, for one stay at a time.
+  const [guestNames, setGuestNames] = useState({ stayId: null, open: false, loading: false, data: null, error: '' })
   const [checkoutEmailBusy, setCheckoutEmailBusy] = useState(null) // stay_id currently sending, or null
   const [farewellAsked, setFarewellAsked] = useState({}) // stay_id -> when "Send farewell message" was tapped this session
 
@@ -460,6 +463,10 @@ export default function CompleteBooking() {
 
   async function handleStatusChange(newStatus) {
     if (!selected) return
+    if (newStatus === 'ready_for_checkin' && selected.pendingChange) {
+      showToast('Decide the change to the guests first', 'error')
+      return
+    }
     // The guest may have asked, on the check-in form, to arrive before check-in or
     // leave after check-out. Marking them ready without deciding is allowed, but
     // not silently.
@@ -653,6 +660,18 @@ export default function CompleteBooking() {
   function handleFarewellTap(stayId) {
     setFarewellAsked(prev => ({ ...prev, [stayId]: new Date().toISOString() }))
     api.markReviewChased({ stayId }).catch(() => {})
+  }
+
+  // Opens / closes the names-and-ages list under Guests, loading it the first time it is opened for a stay.
+  async function toggleGuestNames(stayId) {
+    if (guestNames.open && guestNames.stayId === stayId) { setGuestNames(g => ({ ...g, open: false })); return }
+    setGuestNames({ stayId, open: true, loading: true, data: null, error: '' })
+    try {
+      const data = await api.getStayGuests(stayId)
+      setGuestNames(g => (g.stayId === stayId ? { ...g, loading: false, data } : g))
+    } catch (e) {
+      setGuestNames(g => (g.stayId === stayId ? { ...g, loading: false, error: e.message || 'Could not load the names' } : g))
+    }
   }
 
   function toggleMergeCheck(stayId) {
@@ -1034,6 +1053,11 @@ export default function CompleteBooking() {
                             🔗 booked by {stay.booked_by_name}
                           </div>
                         )}
+                        {stay.pendingChange && (
+                          <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginBottom:'3px'}}>
+                            ✋ guests {stay.pendingChange.originalGuests ?? '?'} → {stay.pendingChange.requestedGuests ?? '?'}: your decision
+                          </div>
+                        )}
                         <div style={{fontSize:'0.73rem',color:'var(--text-dim)'}}>
                           {fmtDate(stay.checkin_date)} → {fmtDate(stay.checkout_date)}
                           {d !== null && (
@@ -1279,6 +1303,13 @@ export default function CompleteBooking() {
                   )
                 })()}
 
+                {/* A change to the guests that is waiting for the owner (Airbnb email, or a check-in form with another count). */}
+                {s.pendingChange && (
+                  <ChangeRequestCard
+                    request={{ ...s.pendingChange, stayId: s.stay_id, stayAdults: s.adults, stayChildren: s.children, checkIn: s.checkin_date, checkOut: s.checkout_date }}
+                    onDone={async (decision) => { showToast(decision === 'approved' ? 'Booking updated ✓' : 'Kept as booked ✓'); await loadStays() }}
+                    onError={m => showToast('Failed: ' + m, 'error')} />
+                )}
                 {/* Guest Info */}
                 <div className="card-section-label" ref={guestInfoRef}
                   style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px'}}>
@@ -1630,11 +1661,48 @@ export default function CompleteBooking() {
                               </span></>
                             ) : <span style={{color:'var(--text-dim)'}}>—</span>}
                           </div>
+                          <button type="button" onClick={() => toggleGuestNames(s.stay_id)}
+                            style={{background:'none',border:'none',padding:'3px 0 0',cursor:'pointer',fontSize:'0.72rem',color:'#85B7EB',textDecoration:'underline'}}>
+                            {guestNames.open && guestNames.stayId === s.stay_id ? '▾ Hide names & ages' : '▸ Names & ages'}
+                          </button>
                         </div>
                         <div>
                           <div style={infoLabel}>Nights</div>
                           <div style={infoVal}>{nights} night{nights!==1?'s':''}</div>
                         </div>
+                        {guestNames.open && guestNames.stayId === s.stay_id && (
+                          <div style={{gridColumn:'1 / -1'}}>
+                            <div style={infoLabel}>Guest names &amp; ages</div>
+                            {guestNames.loading ? (
+                              <div style={{fontSize:'0.8rem',color:'var(--text-dim)'}}>Loading…</div>
+                            ) : guestNames.error ? (
+                              <div style={{fontSize:'0.8rem',color:'#EF4444'}}>{guestNames.error}</div>
+                            ) : (
+                              <div style={{display:'flex',flexDirection:'column',gap:'4px'}}>
+                                {(guestNames.data?.guests || []).map((g, gi) => (
+                                  <div key={gi} style={{display:'flex',justifyContent:'space-between',gap:'10px',fontSize:'0.85rem'}}>
+                                    <span style={{fontWeight:'600'}}>{gi + 1}. {g.name}</span>
+                                    <span style={{color:'var(--text-dim)',whiteSpace:'nowrap'}}>{g.ageLabel ? `age ${g.ageLabel}` : 'age not given'}</span>
+                                  </div>
+                                ))}
+                                {(guestNames.data?.guests || []).length === 0 && (
+                                  <div style={{fontSize:'0.8rem',color:'var(--text-dim)'}}>No names on record yet.</div>
+                                )}
+                                <div style={{fontSize:'0.7rem',marginTop:'2px',color: (guestNames.data?.listed || 0) < (guestNames.data?.booked || 0) ? '#E8A33D' : 'var(--text-dim)'}}>
+                                  {guestNames.data?.listed || 0} of {guestNames.data?.booked || 0} guests listed
+                                  {(guestNames.data?.listed || 0) < (guestNames.data?.booked || 0) ? ' — ask the guest for the rest' : ''}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* What the guest said the visit is for, on the check-in form: shown once they have filled it in. */}
+                        {!!String(s.purpose_of_visit || '').trim() && (
+                          <div style={{gridColumn:'1 / -1'}}>
+                            <div style={infoLabel}>Purpose of visit</div>
+                            <div style={infoVal}>{s.purpose_of_visit}</div>
+                          </div>
+                        )}
                       </div>
                     )
                   })()}
@@ -2052,10 +2120,15 @@ export default function CompleteBooking() {
 
                   {canMarkReadyForCheckin && (
                     <button onClick={()=>handleStatusChange('ready_for_checkin')}
-                      disabled={transitioning}
-                      style={actionBtn('#34A853')}>
+                      disabled={transitioning || !!s.pendingChange}
+                      style={{ ...actionBtn('#34A853'), ...(s.pendingChange ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}>
                       {transitioning?'…':'🔑 Mark ready for check-in → Notify Raman'}
                     </button>
+                  )}
+                  {canMarkReadyForCheckin && s.pendingChange && (
+                    <div style={{fontSize:'0.74rem',color:'#E8A33D',lineHeight:1.5}}>
+                      ✋ Decide the change to the guests first (the amber box above Guest info).
+                    </div>
                   )}
 
                   {canCancel && (

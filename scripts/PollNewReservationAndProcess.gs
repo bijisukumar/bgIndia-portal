@@ -32,6 +32,13 @@
 // ============================================================
 
 // ── CHANGELOG (newest first — this file is the source of truth for live) ────
+// v1.3  2026-10-27
+//   • pollAirbnbChangeRequests(): reads Airbnb "<guest> wants to change their reservation" emails (a guest asking to change the
+//     number of guests, or the dates) and hands them to the Worker (recordChangeRequest), which flags the stay for the owner: it
+//     cannot be marked ready for check-in until the owner has approved or declined the change in the portal. The portal cannot
+//     accept or decline in Airbnb itself: the owner does that there (the email has the buttons) and records it in the portal.
+//     Wired into pollNewReservations(). Dedupe is the Gmail label portal-change-request-done (not read state), only emails from
+//     the last 3 days are looked at, and the Worker is idempotent on the Gmail message id.
 // v1.2  2026-07-12
 //   • Unified email log: sendAlert() now routes through the Worker's
 //     sendGuestEmail action (Resend + infra_alert_log) instead of
@@ -139,6 +146,11 @@ function pollNewReservations() {
       Logger.log('pollAirbnbCancellations ERROR: ' + e.message);
     }
     try {
+      pollAirbnbChangeRequests();
+    } catch(e) {
+      Logger.log('pollAirbnbChangeRequests ERROR: ' + e.message);
+    }
+    try {
       pollAirbnbReviews();
     } catch(e) {
       Logger.log('pollAirbnbReviews ERROR: ' + e.message);
@@ -203,6 +215,75 @@ function pollAirbnbCancellations() {
     } catch(e) {
       Logger.log('Error processing cancellation "' + subject + '": ' + e.message);
     }
+  });
+}
+
+// ── AIRBNB GUEST-CHANGE REQUEST POLLER ──────────────────────────────────────────
+// Airbnb emails "<Guest> wants to change their reservation" when a guest asks to change the number of guests (or the dates).
+// The email shows "Original Guests / 3 guests" and "Requested Guests / 6 guests" and tells the host to accept or decline IN Airbnb.
+// This hands each one to the Worker, which opens a request the owner must decide before the stay can be marked ready for check-in.
+// Dedupe: a label we own (read state is no marker: the owner reads this mailbox too, see REVIEW_DONE_LABEL), and the Worker is
+// idempotent on the Gmail message id. Only the last 3 days are searched: an older request was decided long ago.
+var CHANGE_REQUEST_DONE_LABEL = 'portal-change-request-done';
+
+// Pure (no Gmail, no network) so it can be tested on its own: the subject and the plain-text body in, what the Worker needs out.
+// null when it is not a change-request email.
+function parseChangeRequestEmail(subject, body) {
+  var subj = String(subject || '');
+  var text = String(body || '');
+  var nameMatch = subj.match(/^\s*(?:(?:re|fwd?):\s*)*(.+?)\s+wants to change (?:their|his|her) reservation/i);
+  if (!nameMatch) return null;
+  var orig = text.match(/Original\s+Guests?\W{0,40}?(\d{1,3})\s*guest/i);
+  var req  = text.match(/Requested\s+Guests?\W{0,40}?(\d{1,3})\s*guest/i);
+  var conf = subj.match(/\b(HM[A-Z0-9]{6,12})\b/) || text.match(/\b(HM[A-Z0-9]{6,12})\b/);
+  return {
+    guestName:        nameMatch[1].trim(),
+    originalGuests:   orig ? parseInt(orig[1], 10) : null,
+    requestedGuests:  req  ? parseInt(req[1], 10)  : null,
+    confirmationCode: conf ? conf[1] : null,
+    // the email's own words, so the owner can read what is asked even when the numbers above are not found (dates, say)
+    detail:           text.replace(/\s+/g, ' ').trim().slice(0, 1500),
+  };
+}
+
+function pollAirbnbChangeRequests() {
+  var label = GmailApp.getUserLabelByName(CHANGE_REQUEST_DONE_LABEL) || GmailApp.createLabel(CHANGE_REQUEST_DONE_LABEL);
+  var threads = GmailApp.search(
+    'from:automated@airbnb.com subject:"wants to change their reservation" -label:' + CHANGE_REQUEST_DONE_LABEL + ' newer_than:3d',
+    0, 20
+  );
+  Logger.log('Airbnb change-request threads: ' + threads.length);
+  if (threads.length === 0) return;
+
+  threads.forEach(function(thread) {
+    var allDone = true;
+    thread.getMessages().forEach(function(msg) {
+      var subject = msg.getSubject();
+      var parsed  = parseChangeRequestEmail(subject, msg.getPlainBody());
+      if (!parsed) return;   // another message in the thread (a reply, a receipt)
+      try {
+        var resp = callWorker('POST', 'recordChangeRequest', {
+          villaId:          getClient().villaId,
+          guestName:        parsed.guestName,
+          confirmationCode: parsed.confirmationCode,
+          originalGuests:   parsed.originalGuests,
+          requestedGuests:  parsed.requestedGuests,
+          detail:           parsed.detail,
+          emailId:          msg.getId(),
+        });
+        if (resp && resp.success) {
+          var d = resp.data || {};
+          Logger.log('Change request recorded for ' + parsed.guestName + ': ' + JSON.stringify(d));
+        } else {
+          allDone = false;   // no label: tried again on the next run
+          Logger.log('recordChangeRequest failed: ' + JSON.stringify(resp));
+        }
+      } catch(e) {
+        allDone = false;
+        Logger.log('Error recording change request "' + subject + '": ' + e.message);
+      }
+    });
+    if (allDone) thread.addLabel(label);
   });
 }
 

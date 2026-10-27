@@ -74,6 +74,7 @@ import { withRegistrationFromTwins } from '../../src/utils/twinStays.js'
 // The property's time zone and every way of reading a stored time in it. Nothing in this file reads
 // the server's clock for a business decision: see zoneFor below.
 import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong, localiseStamps } from '../../src/utils/tz.js'
+import { parseGuestList, ageFromDob, ageLabelFromDob } from '../../src/utils/guestList.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -1294,6 +1295,115 @@ async function attachStayPrefs(DB, rows) {
   return rows
 }
 
+// ── BOOKING CHANGES WAITING FOR THE OWNER (2026-10-27) ──────────────────────────────────────────────────────────
+// A guest who asks to change how many people are coming (Airbnb's "<name> wants to change their reservation" email, or a
+// check-in form whose count is not the booked one) is parked in stayvibe_change_requests until the owner approves or declines
+// it, and while one is pending the stay cannot be marked ready for check-in. The table comes from
+// scripts/migrate-change-requests.sql; every read here is wrapped so a database without it still serves every screen.
+function publicChange(c) {
+  return c ? {
+    requestId: c.request_id, kind: c.kind, guestName: c.guest_name || null,
+    originalGuests: c.original_guests ?? null, requestedGuests: c.requested_guests ?? null,
+    requestedAdults: c.requested_adults ?? null, requestedChildren: c.requested_children ?? null,
+    createdAt: c.created_at || null,
+  } : null
+}
+
+async function pendingChangeFor(DB, stayId) {
+  try {
+    if (!stayId) return null
+    return (await DB.prepare(
+      `SELECT request_id, stay_id, kind, guest_name, original_guests, requested_guests, requested_adults, requested_children, created_at
+         FROM stayvibe_change_requests WHERE stay_id = ? AND status = 'pending' ORDER BY created_at ASC LIMIT 1`
+    ).bind(stayId).first()) || null
+  } catch (e) { console.error('pendingChangeFor:', e?.message || e); return null }
+}
+
+function changeBlockedMessage(c) {
+  return `${c.guest_name || 'This guest'} has a change to the guests waiting for your decision (${c.original_guests ?? '?'} → ${c.requested_guests ?? '?'}). Approve or decline it first.`
+}
+
+// Puts `pendingChange` on every stay row that has a request waiting.
+async function attachPendingChanges(DB, rows) {
+  try {
+    const ids = [...new Set((rows || []).map(r => r.stay_id).filter(Boolean))]
+    if (!ids.length) return rows
+    const byId = {}
+    for (let i = 0; i < ids.length; i += 90) {
+      const part = ids.slice(i, i + 90)
+      // tenant-scope-exempt: only ever given ids of stays the caller has just read under villaScope.
+      const { results } = await DB.prepare(
+        `SELECT request_id, stay_id, kind, guest_name, original_guests, requested_guests, requested_adults, requested_children, created_at
+           FROM stayvibe_change_requests WHERE status = 'pending' AND stay_id IN (${part.map(() => '?').join(',')}) ORDER BY created_at ASC`
+      ).bind(...part).all()
+      for (const c of (results || [])) if (!byId[c.stay_id]) byId[c.stay_id] = c
+    }
+    for (const r of rows) r.pendingChange = publicChange(byId[r.stay_id])
+  } catch (e) { console.error('attachPendingChanges:', e?.message || e) }
+  return rows
+}
+
+// One pending request per stay and kind: a form submitted twice, or an email seen twice, refreshes it instead of piling up.
+// A form count the owner has already declined is not re-opened for the same number.
+async function openChangeRequest(DB, r) {
+  try {
+    // The same email seen again (whatever has become of its request since) is a no-op.
+    if (r.emailId) {
+      const dup = await DB.prepare(`SELECT request_id FROM stayvibe_change_requests WHERE email_id = ? LIMIT 1`).bind(r.emailId).first()
+      if (dup) return { requestId: dup.request_id, created: false, changed: false, duplicate: true }
+    }
+    if (r.stayId) {
+      const open = await DB.prepare(
+        `SELECT request_id, requested_guests, requested_adults, requested_children FROM stayvibe_change_requests WHERE stay_id = ? AND kind = ? AND status = 'pending' LIMIT 1`
+      ).bind(r.stayId, r.kind).first()
+      if (open) {
+        const same = open.requested_guests === r.requestedGuests
+          && (open.requested_adults ?? null) === (r.requestedAdults ?? null) && (open.requested_children ?? null) === (r.requestedChildren ?? null)
+        if (!same) {
+          await DB.prepare(
+            `UPDATE stayvibe_change_requests SET requested_guests = ?, requested_adults = ?, requested_children = ?, detail = COALESCE(?, detail), updated_at = datetime('now') WHERE request_id = ?`
+          ).bind(r.requestedGuests, r.requestedAdults ?? null, r.requestedChildren ?? null, r.detail || null, open.request_id).run()
+        }
+        return { requestId: open.request_id, created: false, changed: !same }
+      }
+      if (r.kind === 'checkin_form') {
+        const declined = await DB.prepare(
+          `SELECT request_id FROM stayvibe_change_requests WHERE stay_id = ? AND kind = ? AND status = 'declined' AND requested_guests = ? LIMIT 1`
+        ).bind(r.stayId, r.kind, r.requestedGuests).first()
+        if (declined) return { requestId: declined.request_id, created: false, changed: false, alreadyDeclined: true }
+      }
+    }
+    const requestId = genId('CHG')
+    await DB.prepare(
+      `INSERT INTO stayvibe_change_requests (request_id, villa_id, stay_id, kind, guest_name, confirmation_code, original_guests, requested_guests, requested_adults, requested_children, detail, email_id, status, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'pending', datetime('now'))`
+    ).bind(requestId, r.villaId, r.stayId || null, r.kind, r.guestName || null, r.confirmationCode || null,
+      r.originalGuests ?? null, r.requestedGuests, r.requestedAdults ?? null, r.requestedChildren ?? null, r.detail || null, r.emailId || null).run()
+    return { requestId, created: true, changed: true }
+  } catch (e) {
+    if (/UNIQUE/i.test(String(e?.message || ''))) return { requestId: null, created: false, changed: false, duplicate: true }
+    throw e
+  }
+}
+
+// The owner's email when a change request opens or changes.
+async function alertChangeRequest(env, DB, villaId, c) {
+  try {
+    await sendAlert(env, `✋ ${c.guestName || 'A guest'}: guests ${c.original ?? '?'} → ${c.requested ?? '?'} — decide before check-in`, [
+      `Guest:        ${c.guestName || '?'}${c.stayId ? ` (${c.stayId})` : ''}`,
+      ...(c.checkin ? [`Dates:        ${c.checkin} → ${c.checkout || '?'}`] : []),
+      c.requested == null ? 'Asks:         a change to the reservation (see the email for what)' : `Guests:       booked ${c.original ?? '?'}, now ${c.requested}`,
+      `Raised by:    ${c.kind === 'airbnb_email' ? 'an Airbnb "wants to change their reservation" email' : "the guest's own check-in form"}`,
+      ...(c.matched === false ? ['', 'It could not be matched to a booking in the portal: look at it in Airbnb.'] : []),
+      '',
+      c.kind === 'airbnb_email'
+        ? 'Accept or decline it in Airbnb (the email has the buttons), then record your decision in the portal.'
+        : 'Check the count with the guest, then approve or decline it in the portal.',
+      'The stay cannot be marked ready for check-in until you decide.',
+    ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId)
+  } catch (e) { console.error('change-request alert:', e?.message || e) }
+}
+
 async function syncStayLedger(DB, stayId) {
   try {
     if (!stayId) return
@@ -2059,6 +2169,25 @@ export async function onRequest(ctx) {
         }
       }
 
+      // The booking's own guest count against the one the guest gives on the form (2026-10-27: a booking for 3 whose guest then
+      // asked Airbnb for 6). When the TOTAL differs, the stay keeps the BOOKED count, a request is opened for the owner (below),
+      // and the stay goes back in front of the owner: they approve or decline before it can be marked ready for check-in. The
+      // same total with another adults/children split is just the guest being more exact, and is taken as written.
+      let useAdults = parseInt(adults) || 1, useChildren = parseInt(children) || 0
+      let countFlag = null
+      if (stayId) {
+        const cur = await DB.prepare(`SELECT adults, children, status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const booked = (parseInt(cur?.adults) || 0) + (parseInt(cur?.children) || 0)
+        if (cur && booked > 0 && (useAdults + useChildren) !== booked
+            && !['checked_in', 'ready_for_checkout', 'checked_out', 'closed', 'cancelled', 'void'].includes(cur.status)) {
+          countFlag = {
+            booked, bookedAdults: parseInt(cur.adults) || 0, bookedChildren: parseInt(cur.children) || 0,
+            asked: useAdults + useChildren, askedAdults: useAdults, askedChildren: useChildren,
+          }
+          useAdults = countFlag.bookedAdults; useChildren = countFlag.bookedChildren
+        }
+      }
+
       if (stayId) {
         await DB.prepare(`
           UPDATE stayvibe_stays SET
@@ -2083,7 +2212,7 @@ export async function onRequest(ctx) {
           dob||null, gender||null, nationality,
           homeAddress||null, homeAddressLine2||null, city||null, state||null, country, fromCity||city||null, pincode||null,
           checkOutDate||null, parseInt(nights)||1,
-          parseInt(adults)||1, parseInt(children)||0,
+          useAdults, useChildren,
           guestList||null, purposeOfVisit||null,
           modeOfTransport||null, vehicleNumber||null, eta||null,
           govtIdType||null, govtIdNum||null,
@@ -2233,6 +2362,44 @@ export async function onRequest(ctx) {
       // stays.guest_id for the check-in-form path, which never wrote it before.
       if (guestId) {
         await DB.prepare(`UPDATE stayvibe_stays SET guest_id = COALESCE(guest_id, ?) WHERE stay_id = ?`).bind(guestId, stayId).run()
+      }
+
+      // The guest's count is not the booked one: the booked count was kept above, so open a request for the owner, put the stay
+      // back in front of them, say so on the stay and by email. If the request cannot be recorded, fall back to what this form
+      // always did (take the guest's numbers) so a count is never lost, with the difference on the stay.
+      if (countFlag) {
+        const line = `Guest count: booked ${countFlag.booked}, the check-in form says ${countFlag.asked}: decide before check-in.`
+        try {
+          const opened = await openChangeRequest(DB, {
+            villaId, stayId, kind: 'checkin_form', guestName: safeGuestName,
+            originalGuests: countFlag.booked, requestedGuests: countFlag.asked,
+            requestedAdults: countFlag.askedAdults, requestedChildren: countFlag.askedChildren,
+            detail: `Booked for ${countFlag.booked} (${countFlag.bookedAdults} adults + ${countFlag.bookedChildren} children); the check-in form says ${countFlag.asked} (${countFlag.askedAdults} adults + ${countFlag.askedChildren} children).`,
+          })
+          if (!opened.alreadyDeclined) {
+            await DB.prepare(
+              `UPDATE stayvibe_stays SET
+                 status = CASE WHEN status IN ('confirmed','booked','pending_review','docs_uploaded','ready_for_checkin') THEN 'pending_review' ELSE status END,
+                 notes = CASE WHEN COALESCE(notes,'') = '' THEN ? WHEN instr(notes, ?) > 0 THEN notes ELSE notes || ' | ' || ? END,
+                 updated_at = datetime('now') WHERE stay_id = ?`
+            ).bind(line, line, line, stayId).run()
+          }
+          if (opened.created || opened.changed) {
+            const st = await DB.prepare(`SELECT guest_name, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+            await alertChangeRequest(env, DB, villaId, {
+              kind: 'checkin_form', guestName: st?.guest_name || safeGuestName, stayId, checkin: st?.checkin_date, checkout: st?.checkout_date,
+              original: countFlag.booked, requested: countFlag.asked,
+            })
+          }
+        } catch (e) {
+          console.error('guest-count flag (check-in form):', e?.message || e)
+          try {
+            await DB.prepare(
+              `UPDATE stayvibe_stays SET adults = ?, children = ?,
+                 notes = CASE WHEN COALESCE(notes,'') = '' THEN ? ELSE notes || ' | ' || ? END, updated_at = datetime('now') WHERE stay_id = ?`
+            ).bind(countFlag.askedAdults, countFlag.askedChildren, line, line, stayId).run()
+          } catch (e2) { console.error('guest-count fallback (check-in form):', e2?.message || e2) }
+        }
       }
 
       // Extension / date-change on the guest's own booking → flag for review
@@ -3780,6 +3947,7 @@ export async function onRequest(ctx) {
           ).bind(...sc.binds)
         })().all()
         await attachStayPrefs(DB, results)
+        await attachPendingChanges(DB, results)
         return json({ success: true, data: results })
       }
 
@@ -4948,6 +5116,7 @@ export async function onRequest(ctx) {
           const rules = await holdRules(DB, villaId)
           for (const r of withTimes) r.holds = stayHolds(r, rules)
         }
+        await attachPendingChanges(DB, results)
         return json({ success: true, data: withRegistrationFromTwins(results) })
       }
 
@@ -6051,13 +6220,15 @@ export async function onRequest(ctx) {
                   guest_phone, guest_email, drive_folder_url, created_at,
                   folder_created, folder_created_at, booked_by_name,
                   eta, early_checkin_time, late_checkout_time,
-                  request_early_checkin, request_late_checkout
+                  request_early_checkin, request_late_checkout,
+                  adults, children, purpose_of_visit
            FROM stayvibe_stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= ${sqlDay(await todayOf(url.searchParams.get('villaId')))})${pr1.sql}
            ORDER BY checkin_date ASC`
         ).bind(...pr1.binds).all()
         await attachStayPrefs(DB, results)
+        await attachPendingChanges(DB, results)
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
           guestName:       r.guest_name,
@@ -6071,6 +6242,10 @@ export async function onRequest(ctx) {
           folderCreated:   r.folder_created || 0,
           folderCreatedAt: r.folder_created_at || null,
           bookedByName:    r.booked_by_name || null,
+          adults:          r.adults || 0,
+          children:        r.children || 0,
+          purposeOfVisit:  r.purpose_of_visit || null,
+          pendingChange:   r.pendingChange || null,
           status:               'pending_review',
           eta:                  r.eta || null,
           etd:                  r.etd || null,
@@ -6078,6 +6253,32 @@ export async function onRequest(ctx) {
           lateCheckoutTime:     r.late_checkout_time || null,
           requestEarlyCheckin:  !!r.request_early_checkin,
           requestLateCheckout:  !!r.request_late_checkout,
+        })) })
+      }
+
+      // BOOKING CHANGES WAITING FOR THE OWNER (2026-10-27): pending requests by default (?status=all adds the decided ones),
+      // each with the stay it belongs to. A database without the table answers an empty list.
+      if (action === 'getChangeRequests') {
+        const cr = villaScope(payload, url.searchParams.get('villaId'), 'c.villa_id')
+        const statusSql = url.searchParams.get('status') === 'all' ? '' : " AND c.status = 'pending'"
+        let rows = []
+        try {
+          const { results } = await DB.prepare(
+            `SELECT c.request_id, c.villa_id, c.stay_id, c.kind, c.guest_name, c.confirmation_code, c.original_guests, c.requested_guests,
+                    c.requested_adults, c.requested_children, c.detail, c.status, c.decided_at, c.created_at,
+                    s.guest_name AS stay_guest, s.checkin_date, s.checkout_date, s.adults AS stay_adults, s.children AS stay_children,
+                    s.status AS stay_status, s.source AS stay_source
+               FROM stayvibe_change_requests c LEFT JOIN stayvibe_stays s ON s.stay_id = c.stay_id
+              WHERE 1 = 1${statusSql}${cr.sql}
+              ORDER BY c.created_at ASC LIMIT 100`
+          ).bind(...cr.binds).all()
+          rows = results || []
+        } catch (e) { console.error('getChangeRequests:', e?.message || e) }
+        return json({ success: true, data: rows.map(c => ({
+          ...publicChange(c), villaId: c.villa_id, stayId: c.stay_id || null, confirmationCode: c.confirmation_code || null,
+          detail: c.detail || null, status: c.status, decidedAt: c.decided_at || null,
+          stayGuest: c.stay_guest || null, checkIn: c.checkin_date || null, checkOut: c.checkout_date || null,
+          stayAdults: c.stay_adults ?? null, stayChildren: c.stay_children ?? null, stayStatus: c.stay_status || null, source: c.stay_source || null,
         })) })
       }
 
@@ -6130,6 +6331,33 @@ export async function onRequest(ctx) {
         }) })
       }
 
+
+      // The guests of one stay as names and ages, for the "Guest names & ages" section of Guest info: the booking's name plus
+      // whatever the guest listed on the check-in form (the free-text box; for a foreign party the per-person passport blocks).
+      // Fetched on demand, so no date of birth travels in the stay lists.
+      if (action === 'getStayGuests') {
+        const stayId = url.searchParams.get('stayId') || ''
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(
+          `SELECT stay_id, villa_id, guest_name, dob, adults, children, guest_list FROM stayvibe_stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        const today = await todayOf(stay.villa_id)
+        const { results: kyc } = await DB.prepare(
+          `SELECT guest_seq, guest_name, nationality, dob FROM stayvibe_stay_kyc WHERE stay_id = ? ORDER BY guest_seq`
+        ).bind(stayId).all()
+        const seen = new Set(), guests = []
+        const keyOf = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+        const add = g => { const k = keyOf(g.name); if (!k || seen.has(k)) return; seen.add(k); guests.push(g) }
+        if (kyc && kyc.length) {
+          for (const k of kyc) add({ name: k.guest_name, age: ageFromDob(k.dob, today), ageLabel: ageLabelFromDob(k.dob, today), nationality: k.nationality || null })
+        } else {
+          add({ name: stay.guest_name, age: ageFromDob(stay.dob, today), ageLabel: ageLabelFromDob(stay.dob, today) })
+        }
+        for (const g of parseGuestList(stay.guest_list)) add(g)
+        return json({ success: true, data: { stayId, booked: (parseInt(stay.adults) || 0) + (parseInt(stay.children) || 0), listed: guests.length, guests } })
+      }
 
       // GET DOCUMENT STATUS — returns doc rows for a stay (all statuses)
       if (action === 'getDocumentStatus') {
@@ -9007,6 +9235,9 @@ export async function onRequest(ctx) {
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         const stay = await DB.prepare(`SELECT status FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return json({ success: true, data: { changed: false, reason: 'stay not found' }})
+        // A change to the guests that the owner has not decided yet: not ready for check-in until it is (2026-10-27).
+        const pendingChange = await pendingChangeFor(DB, stayId)
+        if (pendingChange) return json({ success: false, error: changeBlockedMessage(pendingChange), data: { pendingChange: publicChange(pendingChange) } }, 409)
         if (!['booked','confirmed','docs_uploaded','pending_review'].includes(stay.status)) return json({ success: true, data: { changed: false, reason: 'already at ' + stay.status }})
         await DB.prepare(`UPDATE stayvibe_stays SET status = 'ready_for_checkin', updated_by = 'auto', updated_at = ? WHERE stay_id = ?`).bind(now(), stayId).run()
         return json({ success: true, data: { changed: true, stayId, status: 'ready_for_checkin' }})
@@ -9020,6 +9251,11 @@ export async function onRequest(ctx) {
         // there are two.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!['booked','confirmed','docs_uploaded','ready_for_checkin','checked_in','ready_for_checkout','checked_out','closed','cancelled'].includes(status)) return err(`Invalid status: ${status}`)
+        // Not ready for check-in while a change to the guests is waiting for the owner's decision (2026-10-27).
+        if (status === 'ready_for_checkin') {
+          const pendingChange = await pendingChangeFor(DB, stayId)
+          if (pendingChange) return json({ success: false, error: changeBlockedMessage(pendingChange), data: { pendingChange: publicChange(pendingChange) } }, 409)
+        }
         await DB.prepare(`UPDATE stayvibe_stays SET status = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(status, actor, now(), stayId).run()
 
         // Stamp when the guest ACTUALLY arrived/left, off the status change
@@ -9164,6 +9400,123 @@ export async function onRequest(ctx) {
             refunded_at = excluded.refunded_at, refunded_by = excluded.refunded_by, updated_at = excluded.updated_at
         `).bind(stayId, stay.villa_id, amt, reason || null, now(), actor, now()).run()
         return json({ success: true, data: { stayId, amount: amt } })
+      }
+
+      // Called by the Gmail poller when an Airbnb "<guest> wants to change their reservation" email arrives (system token), 2026-10-27.
+      // Finds the stay (by Airbnb code, else by the guest's first name among the villa's live stays, narrowed by dates), opens a
+      // pending request for the owner and emails them. Idempotent on the email id; a request that cannot be matched to exactly
+      // one stay is still recorded (stay_id NULL) and the owner is told to look at it in Airbnb.
+      if (action === 'recordChangeRequest') {
+        const villaId = String(body.villaId || '').trim() || hostVillaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const guestName = String(body.guestName || '').trim()
+        const conf = String(body.confirmationCode || '').trim()
+        const requested = parseInt(body.requestedGuests)
+        const original = parseInt(body.originalGuests)
+        if (!guestName && !conf) return err('guestName or confirmationCode required')
+        // A change that is not about the guest count (dates, say) has no number: it is still recorded, with the email's own
+        // words in `detail`, and still holds the stay until the owner decides.
+        const askedGuests = Number.isFinite(requested) && requested >= 1 ? requested : null
+        let stay = null
+        if (conf) {
+          stay = await DB.prepare(
+            `SELECT stay_id, guest_name, checkin_date, checkout_date, adults, children, status, source FROM stayvibe_stays WHERE airbnb_conf = ? AND villa_id = ? LIMIT 1`
+          ).bind(conf, villaId).first()
+        }
+        if (!stay && guestName) {
+          const first = guestName.toLowerCase().split(/\s+/)[0]
+          const { results: cands } = await DB.prepare(
+            `SELECT stay_id, guest_name, checkin_date, checkout_date, adults, children, status, source FROM stayvibe_stays
+              WHERE villa_id = ? AND status NOT IN ('cancelled','void','closed','checked_out')
+                AND (checkout_date IS NULL OR checkout_date >= ${sqlDay(await todayOf(villaId))}) ORDER BY checkin_date ASC LIMIT 300`
+          ).bind(villaId).all()
+          let hits = (cands || []).filter(s => String(s.guest_name || '').toLowerCase().split(/\s+/)[0] === first)
+          const ci = String(body.checkIn || '').trim()
+          if (ci && hits.some(s => s.checkin_date === ci)) hits = hits.filter(s => s.checkin_date === ci)
+          if (hits.length > 1) { const a = hits.filter(s => s.source === 'airbnb'); if (a.length) hits = a }
+          if (hits.length === 1) stay = hits[0]
+        }
+        const booked = stay ? (parseInt(stay.adults) || 0) + (parseInt(stay.children) || 0) : null
+        const opened = await openChangeRequest(DB, {
+          villaId, stayId: stay ? stay.stay_id : null, kind: 'airbnb_email', guestName: stay ? stay.guest_name : guestName,
+          confirmationCode: conf || null, originalGuests: Number.isFinite(original) ? original : booked, requestedGuests: askedGuests,
+          detail: String(body.detail || '').slice(0, 2000), emailId: String(body.emailId || '').trim() || null,
+        })
+        if (opened.duplicate) return json({ success: true, data: { duplicate: true, matched: !!stay, stayId: stay ? stay.stay_id : null } })
+        if (stay && opened.created) {
+          const line = askedGuests == null
+            ? 'A change to the reservation was asked on Airbnb: decide before check-in.'
+            : `Guest change asked on Airbnb: ${Number.isFinite(original) ? original : booked} → ${askedGuests} guests: decide before check-in.`
+          await DB.prepare(
+            `UPDATE stayvibe_stays SET
+               status = CASE WHEN status IN ('docs_uploaded','ready_for_checkin') THEN 'pending_review' ELSE status END,
+               notes = CASE WHEN COALESCE(notes,'') = '' THEN ? WHEN instr(notes, ?) > 0 THEN notes ELSE notes || ' | ' || ? END,
+               updated_at = datetime('now') WHERE stay_id = ?`
+          ).bind(line, line, line, stay.stay_id).run()
+        }
+        if (opened.created || opened.changed) {
+          await alertChangeRequest(env, DB, villaId, {
+            kind: 'airbnb_email', guestName: stay ? stay.guest_name : guestName, stayId: stay ? stay.stay_id : null,
+            checkin: stay?.checkin_date, checkout: stay?.checkout_date,
+            original: Number.isFinite(original) ? original : booked, requested: askedGuests, matched: !!stay,
+          })
+        }
+        return json({ success: true, data: { matched: !!stay, stayId: stay ? stay.stay_id : null, requestId: opened.requestId, created: opened.created } })
+      }
+
+      // The owner's decision on a pending change (2026-10-27). Approving applies the new party to the stay (adults + children must
+      // add up to what was asked for) and lifts the block on "ready for check-in"; declining keeps the booked party. The portal
+      // cannot accept or decline anything IN Airbnb: for an Airbnb request the owner does that there first and records it here.
+      if (action === 'resolveChangeRequest') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { requestId, decision } = body
+        if (!requestId) return err('requestId required')
+        if (!['approved', 'declined'].includes(decision)) return err('decision must be approved or declined')
+        const cr = await DB.prepare(`SELECT * FROM stayvibe_change_requests WHERE request_id = ?`).bind(requestId).first()
+        if (!cr) return err('Request not found', 404)
+        assertPropertyAccess(payload, cr.villa_id)
+        if (cr.status !== 'pending') return err(`That request is already ${cr.status}`, 409)
+        const note = String(body.note || '').trim().slice(0, 500) || null
+        const stamp = now()
+        const via = cr.kind === 'airbnb_email' ? 'Airbnb change request' : 'check-in form'
+        const stmts = []
+        let adults = null, children = null
+        if (decision === 'approved' && cr.requested_guests == null && !Number.isFinite(parseInt(body.adults))) {
+          // nothing about the party was asked (dates, say): approving just records it and lifts the block
+          if (cr.stay_id) {
+            stmts.push(DB.prepare(
+              `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
+            ).bind(`A change to the reservation (${via}) was approved by the owner.`, actor, stamp, cr.stay_id))
+          }
+        } else if (decision === 'approved') {
+          if (!cr.stay_id) return err('This request is not matched to a booking, so there is nothing to update: dismiss it instead', 409)
+          const st = await DB.prepare(`SELECT adults, children FROM stayvibe_stays WHERE stay_id = ?`).bind(cr.stay_id).first()
+          children = parseInt(body.children)
+          if (!Number.isFinite(children)) children = cr.requested_children ?? (parseInt(st?.children) || 0)
+          adults = parseInt(body.adults)
+          if (!Number.isFinite(adults)) adults = cr.requested_adults ?? Math.max(0, (cr.requested_guests || 0) - children)
+          if (adults < 1 || children < 0 || adults > 60 || children > 60) return err('Enter the adults and children the booking now has')
+          if (cr.requested_guests != null && adults + children !== cr.requested_guests) {
+            return err(`Adults + children must add up to the ${cr.requested_guests} guests asked for`)
+          }
+          // (a request with no guest count in it, a change of dates say, is approved without touching the party)
+          stmts.push(DB.prepare(
+            `UPDATE stayvibe_stays SET adults = ?, children = ?,
+               notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          ).bind(adults, children, `Guests ${cr.original_guests ?? '?'} → ${adults + children} (${adults} adults + ${children} children): approved by the owner (${via}).`, actor, stamp, cr.stay_id))
+        } else if (cr.stay_id) {
+          stmts.push(DB.prepare(
+            `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
+          ).bind(`Guests change to ${cr.requested_guests ?? '?'} declined by the owner (${via}): kept at ${cr.original_guests ?? '?'}.`, actor, stamp, cr.stay_id))
+        }
+        stmts.push(DB.prepare(
+          `UPDATE stayvibe_change_requests SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, applied_adults = ?, applied_children = ?, updated_at = ? WHERE request_id = ?`
+        ).bind(decision, actor, stamp, note, adults, children, stamp, requestId))
+        stmts.push(DB.prepare(
+          `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'change_request', ?, ?, datetime('now'))`
+        ).bind(genId('LOG'), cr.stay_id || null, `Guest change ${cr.original_guests ?? '?'} → ${cr.requested_guests ?? '?'} (${via}) ${decision} by ${actor}${note ? ': ' + note : ''}.`))
+        await DB.batch(stmts)
+        return json({ success: true, data: { requestId, decision, stayId: cr.stay_id || null, adults, children } })
       }
 
       if (action === 'markReviewChased') {

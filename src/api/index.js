@@ -154,6 +154,9 @@ export const api = {
   getActiveStay:        (villaId)=> get('getActiveStay', { villaId }),
   getUpcomingStays:     (villaId)=> get('getUpcomingStays', { villaId }),
   getFormCGuests:       (stayId) => get('getFormCGuests', { stayId }),
+  getStayGuests:        (stayId) => get('getStayGuests', { stayId }),
+  getChangeRequests:    ()       => get('getChangeRequests'),
+  resolveChangeRequest: (data)   => post('resolveChangeRequest', data),
 
   // ── VILLA INCOME ─────────────────────────────────────────
   saveVillaRentalIncome:(data)   => post('saveVillaRentalIncome', data),

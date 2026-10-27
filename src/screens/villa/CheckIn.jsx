@@ -519,6 +519,9 @@ export default function CheckIn() {
                             {stay.booked_by_name && (
                               <div style={{fontSize:'0.68rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
                             )}
+                            {stay.pendingChange && (
+                              <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ guest count not settled: ask the owner</div>
+                            )}
                             <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                               {formatDate(stay.checkin_date)} · {calcNights(stay.checkin_date,stay.checkout_date)}N
                             </div>
@@ -536,6 +539,20 @@ export default function CheckIn() {
 
                 {selected && (
                   <>
+                    {/* A change to the guests the owner has not decided yet (more guests asked for, or a different count on the form). */}
+                    {selected.pendingChange && (
+                      <div style={{marginBottom:'12px', padding:'12px 14px', borderRadius:'10px',
+                        background:'rgba(232,163,61,0.12)', border:'1px solid rgba(232,163,61,0.6)'}}>
+                        <div style={{color:'#E8A33D', fontWeight:'800', fontSize:'0.85rem', letterSpacing:'0.3px'}}>
+                          ✋ GUEST COUNT NOT SETTLED
+                        </div>
+                        <div style={{color:'var(--text)', fontSize:'0.82rem', lineHeight:'1.55', marginTop:'4px'}}>
+                          {selected.guest_name} was booked for {selected.pendingChange.originalGuests ?? '?'} but{' '}
+                          {selected.pendingChange.kind === 'airbnb_email' ? 'has asked Airbnb for' : 'says on the form'}{' '}
+                          {selected.pendingChange.requestedGuests ?? 'a different number'}. The owner has not decided yet: check with the owner before checking them in.
+                        </div>
+                      </div>
+                    )}
                     {/* A guest booked for a LATER date than today: first thing Raman sees, in red,
                         before anything else on the screen. */}
                     {earlyDate && (
@@ -811,6 +828,9 @@ export default function CheckIn() {
                           {stay.booked_by_name && (
                             <div style={{fontSize:'0.66rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
                           )}
+                          {stay.pendingChange && (
+                            <div style={{fontSize:'0.66rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ guest count not settled</div>
+                          )}
                           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'2px'}}>
                             {formatDate(stay.checkin_date)}
                             {d !== null && d > 0 && <span> · in {d} day{d!==1?'s':''}</span>}
@@ -871,6 +891,9 @@ export default function CheckIn() {
                               </div>
                               {stay.booked_by_name && (
                                 <div style={{fontSize:'0.68rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
+                              )}
+                              {stay.pendingChange && (
+                                <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ guest count not settled</div>
                               )}
                               <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                                 Out: {formatDate(stay.checkout_date)}

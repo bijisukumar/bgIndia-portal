@@ -12,6 +12,7 @@ import { heldSummary } from '../utils/stayHolds'
 import GuestTimesReview from '../components/GuestTimesReview'
 import StayTimesLine from '../components/StayTimesLine'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
+import ChangeRequestCard from '../components/ChangeRequestCard'
 
 // Manager name shown on the "Staff Perks" tile and elsewhere — configurable
 // per host so a white-label tenant sees their own on-site manager's name
@@ -255,6 +256,12 @@ function NeedsAttentionBlock() {
   }).catch(() => setPending(prev => prev || []))
 
   useEffect(() => { load() }, [])
+  // The booking-change box above decided something: a guest here may just have been freed to onboard.
+  useEffect(() => {
+    const again = () => { load() }
+    window.addEventListener('gvr-booking-changed', again)
+    return () => window.removeEventListener('gvr-booking-changed', again)
+  }, [])
 
   if (pending === null) return null
   // Nothing left to show — but stay mounted while a confirmation toast is up,
@@ -369,6 +376,19 @@ function NeedsAttentionBlock() {
                     🔗 Booked by {p.bookedByName}
                   </div>
                 )}
+                {/* The party and what the visit is for, as the guest wrote them on the form: what the owner is approving. */}
+                {((p.adults || 0) + (p.children || 0) > 0 || p.purposeOfVisit) && (
+                  <div style={{ fontSize: '0.72rem', color: '#9AA5B4', marginTop: '2px' }}>
+                    {(p.adults || 0) + (p.children || 0) > 0 && `${(p.adults || 0) + (p.children || 0)} guest${(p.adults || 0) + (p.children || 0) !== 1 ? 's' : ''}`}
+                    {(p.adults || 0) + (p.children || 0) > 0 && p.purposeOfVisit ? ' · ' : ''}
+                    {p.purposeOfVisit || ''}
+                  </div>
+                )}
+                {p.pendingChange && (
+                  <div style={{ fontSize: '0.72rem', color: '#E8A33D', marginTop: '2px', fontWeight: 600 }}>
+                    ✋ Guests {p.pendingChange.originalGuests ?? '?'} → {p.pendingChange.requestedGuests ?? '?'}: waiting for your decision
+                  </div>
+                )}
                 <StayTimesLine stay={p} dim="#9AA5B4" />
               </div>
               <span style={{ fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px',
@@ -384,8 +404,14 @@ function NeedsAttentionBlock() {
           <GuestTimesReview stay={selected} compact
             onDone={async (_which, res) => { showToast('Time approved ✓' + heldSummary(res && res.holds)); await load(selected.stayId) }}
             onError={m => showToast('Failed: ' + m, 'error')} />
-          <button onClick={handleApprove} disabled={saving}
-            style={{ padding: '12px', borderRadius: '10px', cursor: 'pointer',
+          {selected.pendingChange && (
+            <div style={{ fontSize: '0.76rem', color: '#E8A33D', lineHeight: 1.5 }}>
+              ✋ A change to the guests ({selected.pendingChange.originalGuests ?? '?'} → {selected.pendingChange.requestedGuests ?? '?'}) is waiting for your decision.
+              Decide it first (the amber box above), then you can onboard {selected.guestName}.
+            </div>
+          )}
+          <button onClick={handleApprove} disabled={saving || !!selected.pendingChange}
+            style={{ padding: '12px', borderRadius: '10px', cursor: selected.pendingChange ? 'not-allowed' : 'pointer', opacity: selected.pendingChange ? 0.45 : 1,
               border: '1px solid rgba(52,168,83,0.4)', background: 'rgba(52,168,83,0.12)',
               color: '#34A853', fontWeight: '700', fontSize: '0.88rem' }}>
             {saving ? '…' : '✅ Onboard Guest'}
@@ -411,6 +437,48 @@ function NeedsAttentionBlock() {
           </div>
         </div>
       )}
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+    </div>
+  )
+}
+
+// ── BOOKING CHANGES TO DECIDE ──────────────────────────────────────────
+// A guest asked to change a booking (more guests, say): an Airbnb "wants to change their reservation" email, or a check-in form
+// whose head count is not the booked one. Each waits here for the owner's Approve / Decline, and until it is decided that booking
+// cannot be marked ready for check-in. Hidden when there is nothing to decide.
+function ChangeRequestsBlock() {
+  const navigate = useNavigate()
+  const [list, setList] = useState(null)      // null = still loading
+  const [toast, setToast] = useState(null)
+  const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000) }
+  const load = () => api.getChangeRequests().then(d => setList(Array.isArray(d) ? d : [])).catch(() => setList(prev => prev || []))
+  useEffect(() => { load() }, [])
+
+  if (list === null) return null
+  if (list.length === 0) return toast ? <div className={`toast ${toast.type}`}>{toast.msg}</div> : null
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{ fontSize: '0.68rem', fontWeight: '700', color: '#E8A33D', letterSpacing: '1.5px', margin: '0 2px 8px' }}>
+        ✋ BOOKING CHANGES TO DECIDE ({list.length})
+      </div>
+      {list.map(r => (
+        <ChangeRequestCard key={r.requestId} request={r}
+          onDone={(decision, res) => {
+            showToast(decision === 'approved'
+              ? (res && res.adults != null ? `✅ ${r.guestName || 'Booking'} updated: ${res.adults + res.children} guests` : '✅ Recorded')
+              : 'Kept as booked')
+            load()
+            window.dispatchEvent(new Event('gvr-booking-changed'))
+          }}
+          onError={m => showToast('Failed: ' + m, 'error')}>
+          {r.stayId && (
+            <button type="button" onClick={() => navigate(`/owner/villa/income?stayId=${encodeURIComponent(r.stayId)}`)}
+              style={{ marginTop: '8px', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: '0.74rem', color: '#85B7EB', textDecoration: 'underline' }}>
+              📂 Open the booking
+            </button>
+          )}
+        </ChangeRequestCard>
+      ))}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   )
@@ -1285,6 +1353,7 @@ export default function OwnerHome({ sections }) {
 
         {showVillaBlocks && <>
           {/* Needs Attention — guests awaiting approval, urgent items at top of page */}
+          <ChangeRequestsBlock />
           <NeedsAttentionBlock />
 
           {/* Duplicate Bookings — channel sync health check */}

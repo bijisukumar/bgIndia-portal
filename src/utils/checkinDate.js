@@ -15,3 +15,16 @@ export function checkinDateStatus(checkinDate, today) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{4}-\d{2}-\d{2}$/.test(t)) return 'unknown'
   return d > t ? 'early' : d === t ? 'today' : 'late'
 }
+
+// How many days AHEAD of today the booked date is: 0 when it is today or already past, null when either date is unusable.
+export function daysEarly(checkinDate, today) {
+  const a = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(checkinDate || ''))
+  const b = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(today || ''))
+  if (!a || !b) return null
+  return Math.max(0, Math.round((Date.UTC(+a[1], +a[2] - 1, +a[3]) - Date.UTC(+b[1], +b[2] - 1, +b[3])) / 86400000))
+}
+
+// The most days early the MANAGER can check a guest in at all. A day early happens (a family that arrives overnight); two or more is a
+// wrong guest or a wrong date, and the owner settles that first by changing the booking's date. 2026-10-28: a guest booked for the 30th
+// was checked in on the 28th, 26 seconds after the right guest, by tapping through the red "check in anyway" step.
+export const MAX_DAYS_EARLY = 1

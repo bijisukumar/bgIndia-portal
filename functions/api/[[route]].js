@@ -66,7 +66,7 @@ import { partyLimit, partyOf } from '../../src/utils/partySize.js'
 // How a breakfast split is written down and checked (Guest info's editor).
 import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.js'
 // A guest booked for a LATER date than today (India) needs a deliberate yes at check-in.
-import { checkinDateStatus } from '../../src/utils/checkinDate.js'
+import { checkinDateStatus, daysEarly, MAX_DAYS_EARLY } from '../../src/utils/checkinDate.js'
 // One guest's name written two ways ("Achala Kaushik" / "Achala A Kaushik"): the check-in form uses it to find its own booking.
 import { namesAlike } from '../../src/utils/guestNames.js'
 // A guest who registered through the form's other record of the same visit has registered (the WhatsApp intro thanks them).
@@ -8190,6 +8190,28 @@ export async function onRequest(ctx) {
               return json({
                 success: false, code: 'checkin_date_mismatch', conflict: dateWarn,
                 error: `${due.guest_name} is booked for ${due.checkin_date}, but today is ${dateWarn.today}. Check the name, then confirm on screen.`,
+              }, 409)
+            }
+            // Even WITH the override a manager cannot check a guest in more than MAX_DAYS_EARLY days early: that is a wrong guest or a
+            // wrong date, and the owner settles it first (changes the booking date). The owner is not held to this.
+            const ahead = daysEarly(due.checkin_date, todayHere)
+            if (ahead > MAX_DAYS_EARLY && payload.role !== 'owner' && payload.role !== 'master_owner') {
+              const guardVilla = body.villaId || DEFAULT_VILLA_ID
+              ctx.waitUntil(sendAlert(env, `⚠️ bgIndia — Check-in refused, guest not due for ${ahead} days: ${due.guest_name}`, [
+                `Source: ${actor} > Check-in screen`,
+                `Action: Check-in REFUSED for a guest booked ${ahead} days from today, even after the on-screen confirmation. Nothing was changed.`,
+                '',
+                `Guest:       ${due.guest_name || '—'}`,
+                `Booked for:  ${due.checkin_date} to ${due.checkout_date || '—'}`,
+                `Today:       ${dateWarn.today} (India)`,
+                `Stay ID:     ${stayId}`,
+                '',
+                `If the guest really has arrived, change the booking's dates in Complete booking and they can be checked in.`,
+                `Time: ${now()}`,
+              ], await getOwnerAlertEmail(DB, env, guardVilla), DB, guardVilla))
+              return json({
+                success: false, code: 'checkin_date_too_early', conflict: { ...dateWarn, daysEarly: ahead },
+                error: `${due.guest_name} is booked for ${due.checkin_date}, ${ahead} days from today. Only the owner can check a guest in more than ${MAX_DAYS_EARLY} day early: ask the owner to change the booking date first.`,
               }, 409)
             }
           }

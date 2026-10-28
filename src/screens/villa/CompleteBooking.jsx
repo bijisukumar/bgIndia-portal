@@ -17,7 +17,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { parseLocalDate, formatTime12h, fmtClockZ, fmtStampZ } from '../../utils/dates'
+import { parseLocalDate, formatTime12h, fmtClockZ, fmtStampZ, getPropertyZone } from '../../utils/dates'
+import { dateInZone } from '../../utils/tz'
 import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '../../utils/stayTimes'
 import { stayHolds, dayMonth, heldSummary } from '../../utils/stayHolds'
 import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
@@ -494,15 +495,15 @@ export default function CompleteBooking() {
   // actual check-in/check-out stamps the stay no longer qualifies for and
   // removes the auto-created staff commission — but only while it's unpaid,
   // so a commission already settled is never silently erased.
-  async function handleRevert(newStatus, label) {
-    if (!selected) return
+  async function handleRevert(newStatus, label, stay = selected) {
+    if (!stay) return
     if (!window.confirm(
-      `Move ${selected.guest_name} back to "${label}"?\n\n` +
+      `Move ${stay.guest_name} (booked ${fmtDate(stay.checkin_date)} → ${fmtDate(stay.checkout_date)}) back to "${label}"?\n\n` +
       `Use this only to correct a mistake. The recorded actual check-in / check-out times are cleared, and the staff commission created by the check-out is removed if it hasn't been paid yet.`
     )) return
     setTransitioning(true)
     try {
-      const res = await api.updateStayStatus({ stayId: selected.stay_id, status: newStatus })
+      const res = await api.updateStayStatus({ stayId: stay.stay_id, status: newStatus })
       showToast(
         res?.paidCommissionKept ? `Back to ${label} — paid commission kept ✓`
         : res?.commissionRemoved ? `Back to ${label} — commission removed ✓`
@@ -914,6 +915,9 @@ export default function CompleteBooking() {
                       const askedAt = farewellAsked[stay.stay_id] || stay.review_chased_at || null
                       const emailSending = checkoutEmailBusy === stay.stay_id
                       const emailSent = !!stay.checkout_email_sent_at
+                      // checked in on a day BEFORE the booked date (the property's own date): almost always the wrong guest
+                      const arrivedOn = stay.actual_checkin_at ? dateInZone(stay.actual_checkin_at, getPropertyZone()) : ''
+                      const arrivedEarly = !!arrivedOn && !!stay.checkin_date && arrivedOn < String(stay.checkin_date).slice(0, 10)
                       return (
                         <div key={stay.stay_id} style={{padding:'14px 16px',
                           borderBottom: i < checkedIn.length-1 ? '1px solid var(--border-dim)' : 'none'}}>
@@ -939,6 +943,11 @@ export default function CompleteBooking() {
                           {stay.vehicle_number && (
                             <div style={{fontSize:'0.68rem',color:'var(--text-dim)',marginBottom:'6px'}}>
                               🚗 {stay.vehicle_number}
+                            </div>
+                          )}
+                          {arrivedEarly && (
+                            <div style={{fontSize:'0.76rem',color:'#EF4444',fontWeight:'700',marginBottom:'6px',lineHeight:1.5}}>
+                              ⚠️ Checked in before the booked date ({fmtDate(stay.checkin_date)}). If that was a mistake, undo it below.
                             </div>
                           )}
                           <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginTop:'6px'}}>
@@ -980,6 +989,15 @@ export default function CompleteBooking() {
                               {askedAt ? `Review asked ${fmtStampZ(askedAt)} · ` : ''}The farewell asks for a review on {reviewOn}.
                             </div>
                           )}
+                          {/* Undo for THIS guest, from the list of everyone checked in (the button further down acts on whoever is selected) */}
+                          <div style={{marginTop:'10px'}}>
+                            <button onClick={() => handleRevert('ready_for_checkin', 'Ready for check-in', stay)} disabled={transitioning}
+                              style={{fontSize:'0.72rem',fontWeight:'700',padding:'6px 10px',borderRadius:'8px',background:'transparent',cursor:'pointer',
+                                border: arrivedEarly ? '1px solid rgba(239,68,68,0.6)' : '1px solid var(--border-dim)',
+                                color: arrivedEarly ? '#EF4444' : 'var(--text-dim)'}}>
+                              ↩️ Undo check-in{arrivedEarly ? ' (checked in too early)' : ''}
+                            </button>
+                          </div>
                         </div>
                       )
                     })}
@@ -2193,7 +2211,7 @@ export default function CompleteBooking() {
                         <button onClick={()=>handleRevert('ready_for_checkin','Ready for check-in')}
                           disabled={transitioning}
                           style={actionBtn('#38BDF8')}>
-                          {transitioning?'…':'↩️ Undo check-in → Ready for check-in'}
+                          {transitioning?'…':`↩️ Undo check-in for ${selected.guest_name} → Ready for check-in`}
                         </button>
                       )}
                     </div>

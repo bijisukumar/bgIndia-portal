@@ -3,7 +3,7 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { localTodayStr } from '../../utils/dates'
-import { estimateStay, validateSeason, validateRateCardRows, seasonPriceLabel, seasonDatesLabel } from '../../utils/seasonRates'
+import { estimateStay, nightlyRate, validateSeason, validateRateCardRows, seasonPriceLabel, seasonDatesLabel } from '../../utils/seasonRates'
 import { describeEstimate } from '../../utils/villaPricing'
 
 // Rates & seasons (2026-10-28), owner only: the villa's nightly rate by party size, and busy seasons that change the price for a range
@@ -199,15 +199,20 @@ export default function Rates() {
                     <div style={dim}>{seasonDatesLabel(s)}</div>
                   </div>
                   <span style={{ flexShrink: 0, padding: '3px 10px', borderRadius: '10px', fontSize: '0.74rem', fontWeight: 700,
-                    background: s.active ? 'rgba(200,144,58,0.15)' : 'rgba(92,112,128,0.18)', color: s.active ? '#C8903A' : '#9AA5B4' }}>
+                    background: !s.active ? 'rgba(92,112,128,0.18)' : (s.mode === 'percent' && s.upliftPct < 0 ? 'rgba(52,168,83,0.16)' : 'rgba(200,144,58,0.15)'),
+                    color: !s.active ? '#9AA5B4' : (s.mode === 'percent' && s.upliftPct < 0 ? '#34A853' : '#C8903A') }}>
                     {s.active ? seasonPriceLabel(s) : 'OFF'}
                   </span>
                 </div>
-                {(s.minNights || s.notes) && (
-                  <div style={{ ...dim, marginTop: '6px', lineHeight: 1.5 }}>
-                    {s.minNights ? `Minimum ${s.minNights} nights. ` : ''}{s.notes}
-                  </div>
-                )}
+                <div style={{ ...dim, marginTop: '6px', lineHeight: 1.6 }}>
+                  Per night, now → in this season:{' '}
+                  {[2, 6, 10, 12].filter(g => g <= plan.maxGuests).map(g => (
+                    <span key={g} style={{ whiteSpace: 'nowrap', marginRight: '10px' }}>
+                      {g} guests {rupees(nightlyRate(null, plan.rateCard, g, plan.overflowPerGuest))} → <b style={{ color: 'var(--text)' }}>{rupees(nightlyRate(s, plan.rateCard, g, plan.overflowPerGuest))}</b>
+                    </span>
+                  ))}
+                </div>
+                {s.notes && <div style={{ ...dim, marginTop: '4px', lineHeight: 1.5 }}>{s.notes}</div>}
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                   <button style={smallBtn} onClick={() => openEdit(s)}>Edit</button>
                   <button style={smallBtn} onClick={() => toggleActive(s)}>{s.active ? 'Switch off' : 'Switch on'}</button>
@@ -264,7 +269,7 @@ export default function Rates() {
                 {form.mode === 'percent' ? (
                   <>
                     <div className="field">
-                      <label className="field-label" htmlFor="season-pct">Change on the base rate (%) <span style={dim}>+30 = 30% more, −20 = a low season</span></label>
+                      <label className="field-label" htmlFor="season-pct">Change on the base rate (%) <span style={dim}>+30 = 30% more for a busy season, −20 = 20% off for an off-season</span></label>
                       <input id="season-pct" className="field-input" inputMode="decimal" value={form.upliftPct} placeholder="+30"
                         onChange={e => setF('upliftPct', e.target.value.replace(/[^\d.+-]/g, ''))} />
                     </div>
@@ -280,25 +285,23 @@ export default function Rates() {
                   </>
                 ) : (
                   <>
-                    <div style={{ ...dim, marginBottom: '6px', lineHeight: 1.5 }}>Filled in from the base rates; change what you need. Floor-bed guests above {plan.maxGuests} are added at {rupees(plan.overflowPerGuest)} each.</div>
+                    <div style={{ ...dim, marginBottom: '6px', lineHeight: 1.5 }}>Filled in from the current rates; change what you need. Floor-bed guests above {plan.maxGuests} are added at {rupees(plan.overflowPerGuest)} each.</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: '10px' }}>
                       {Array.from({ length: plan.maxGuests }, (_, i) => i + 1).map(g => (
-                        <label key={g} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem' }}>
-                          <span style={{ width: '64px', color: 'var(--text-dim)' }}>{g} guest{g === 1 ? '' : 's'}</span>
-                          <input className="field-input" inputMode="numeric" aria-label={`Season rate for ${g} guests`} style={{ flex: 1, minWidth: 0, padding: '7px 9px' }}
-                            value={form.cardDraft[g] ?? ''} placeholder="₹"
-                            onChange={e => setForm(f => ({ ...f, cardDraft: { ...f.cardDraft, [g]: e.target.value.replace(/[^\d.]/g, '') } }))} />
-                        </label>
+                        <div key={g}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem' }}>
+                            <span style={{ width: '64px', color: 'var(--text-dim)' }}>{g} guest{g === 1 ? '' : 's'}</span>
+                            <input className="field-input" inputMode="numeric" aria-label={`Season rate for ${g} guests`} style={{ flex: 1, minWidth: 0, padding: '7px 9px' }}
+                              value={form.cardDraft[g] ?? ''} placeholder="₹"
+                              onChange={e => setForm(f => ({ ...f, cardDraft: { ...f.cardDraft, [g]: e.target.value.replace(/[^\d.]/g, '') } }))} />
+                          </label>
+                          <div style={{ ...dim, fontSize: '0.68rem', marginLeft: '72px', marginTop: '2px' }}>now {rupees(nightlyRate(null, plan.rateCard, g, plan.overflowPerGuest))}</div>
+                        </div>
                       ))}
                     </div>
                   </>
                 )}
 
-                <div className="field">
-                  <label className="field-label" htmlFor="season-min">Minimum stay in this season (nights, optional)</label>
-                  <input id="season-min" className="field-input" inputMode="numeric" value={form.minNights} placeholder="3"
-                    onChange={e => setF('minNights', e.target.value.replace(/\D/g, ''))} />
-                </div>
                 <div className="field">
                   <label className="field-label" htmlFor="season-notes">Note (only you see it)</label>
                   <input id="season-notes" className="field-input" value={form.notes} onChange={e => setF('notes', e.target.value)} />
@@ -344,7 +347,7 @@ export default function Rates() {
                 <div data-testid="try-result" style={{ fontSize: '0.84rem', lineHeight: 1.6 }}>
                   <div><b style={{ fontSize: '1.05rem' }}>{rupees(est.total)}</b> for {est.nights} night{est.nights === 1 ? '' : 's'} <span style={dim}>(about {rupees(est.tariffPerNight)} a night)</span></div>
                   <div style={dim}>{describeEstimate(est)}</div>
-                  {est.minNightsNotes.map((n, i) => <div key={i} style={{ color: '#F59E0B', fontSize: '0.76rem', marginTop: '4px' }}>⚠️ {n}</div>)}
+
                 </div>
               ) : (
                 <div style={dim}>Pick dates to see what a stay would cost, night by night.</div>

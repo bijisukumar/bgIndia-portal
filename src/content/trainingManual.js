@@ -11,7 +11,7 @@
 // Deliberately generic: no villa, manager or town names, because the same
 // manual is served on every host (dwarka, demo, and each customer's own).
 
-export const UPDATED = '7 October 2026'
+export const UPDATED = '28 October 2026'
 
 export const TITLE = 'Owner Training Manual'
 export const TAGLINE = 'Run your villa from one screen.'
@@ -146,7 +146,7 @@ export const BLOCKS = [
       `A list of guests who have left but not yet reviewed you, each with the platform they booked through, how many days ago they left and how many times you have already chased. Tap a guest to open their actions:`,
     ],
     bullets: [
-      `[[💬 Send WhatsApp review request]] — opens WhatsApp with a ready-written message to that guest: a thank-you, a note that you are writing their 5-star review and would love one back, and the review link for how they booked (the same lines as the farewell message). The chase is logged, so you can see how often you have asked; the farewell message on Complete booking counts as the first ask.`,
+      `[[💬 Send WhatsApp review request]] — opens WhatsApp with a ready-written message to that guest: a thank-you that asks for a 5-star review, and the review link for how they booked (the same lines as the farewell message). The chase is logged, so you can see how often you have asked; the farewell message on Complete booking counts as the first ask.`,
       `**Close with a rating** — tap 1 to 5 stars and [[Close]] once the review appears. This closes the stay. Your manager is asked "Ready to close?" right after each check-out and closes it himself, so you no longer have to; a stay he has closed stays on this list for 30 days so you can still ask for the review, and then the button reads [[Save]] and only records the rating.`,
       `[[No review]] — close it without a rating (on a stay already closed it reads [[Stop chasing]]).`,
       `[[Auto-close N old →]] — once guests have been gone 20 days or more, clears all of them in one tap.`,
@@ -386,8 +386,8 @@ export const TILES = [
         insideLabel: 'On the screen',
         inside: [
           { name: 'The rate for each party size', text: `One price per night for each party size, adults and children together (infants are free). Change a number and tap [[Save base rates]]; a note warns if a bigger party would cost less than a smaller one. Above the largest party on the card, each extra guest adds a flat floor-bed charge per night.` },
-          { name: 'Adding a season', text: `[[＋ Add a season]] takes a name, the first and last night, and whether it **repeats every year** (leave that off for a festival whose dates move, and add it again each year). Then choose the price: **a percentage on the base rates** (+30 means 30% more; a negative number makes a low season), with every price shown beside the base one, or **prices of their own** for each party size. You can also set a **minimum stay**: a quote for fewer nights is told, in amber, but never blocked. [[Switch off]] keeps a season without using it; [[Delete]] removes it.` },
-          { name: 'How a stay is priced', text: `Night by night: a stay that runs into a season pays the season's price for those nights and the base rate for the others. If two seasons cover a night, one you set for a single year beats one that repeats every year; otherwise the higher price applies. Floor-bed guests above the card are a flat charge, not changed by the percentage.` },
+          { name: 'Adding a season', text: `[[＋ Add a season]] takes a name, the first and last night, and whether it **repeats every year** (leave that off for a festival whose dates move, and add it again each year). Then choose the price: **a percentage on the base rates** (+30 means 30% more for a busy season; −20 means 20% off for an off-season, so a discount is just a season with a minus sign), with every price shown beside the current one, or **prices of their own** for each party size, each shown beside today's price. Each season on the list shows today's price and the season's price for a few party sizes. [[Switch off]] keeps a season without using it; [[Delete]] removes it.` },
+          { name: 'How a stay is priced', text: `Night by night: a stay that runs into a season pays the season's price for those nights and the base rate for the others. If two seasons cover a night, one you set for a single year beats one that repeats every year; otherwise the higher price applies. Floor-bed guests above the card are a flat charge, not changed by the percentage. Wherever the price is shown, the regular price sits beside the season's (for example "Christmas / New Year: ₹18,233/night × 2 nights (regular ₹14,025)"), so a busy-season price or an off-season discount is never a surprise, to you or to the guest reading the quote.` },
           { name: 'Checking a price', text: `Pick dates and a party to see the total, the average per night and which seasons the stay touches, before a guest asks.` },
         ],
         note: `This is for what you quote yourself: {{guest-enquiries|Guest enquiries}}, {{agent-links|Agent quote links}} and the quotes you send on WhatsApp. What Airbnb, Booking.com and Agoda charge is set on each platform, and calendar links never carry prices.`,
@@ -417,7 +417,7 @@ export const TILES = [
       },
       {
         id: 'notification-settings', icon: '🔔', name: 'Notification settings', opens: 'Serviced Villas',
-        does: [`Tells the app which email address receives your alerts — check-ins, check-outs, kitchen incidentals and villa expenses — and shows the most recent email attempts so you can see that they are being sent.`],
+        does: [`Tells the app which email address receives your alerts — check-ins, check-outs, kitchen incidentals and villa expenses — and shows the most recent email attempts so you can see that they are being sent. Every time in those emails, and on every screen, is shown at your property's own local time with the time zone named (for example 11:00 PM IST), wherever you are reading it.`],
         why: `Alerts only help if they reach you. This is the one place to point them at the right inbox.`,
         gain: `Every important event lands in your inbox, and you can check that it did.`,
       },
@@ -545,7 +545,7 @@ export const GUEST_PAGES = [
     id: 'quote-page', icon: '🧮', name: 'Partner quote page', path: '/quote/…',
     who: 'Travel agents and sales partners',
     text: [
-      `A public calculator: the partner enters dates and guests and sees nights, bedrooms needed, rate and total. It shows only the answer for that query, never your rate card (a stay that runs into one of your busy seasons is priced night by night, and the page names the season, never its percentage). You make the links in {{agent-links|Agent quote links}}.`,
+      `A public calculator: the partner enters dates and guests and sees nights, bedrooms needed, rate and total. It shows only the answer for that query, never your rate card (a stay that runs into one of your seasons is priced night by night, with the regular price shown beside the season's; the percentage is never shown). You make the links in {{agent-links|Agent quote links}}.`,
     ],
   },
   {

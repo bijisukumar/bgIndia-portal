@@ -9,6 +9,7 @@ import DatePicker from '../../components/DatePicker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { addDays } from '../../utils/stayHolds'
 import AvailabilityNote from '../../components/AvailabilityNote'
+import { groupNights } from '../../utils/seasonRates'
 import {
   getSeasonalEstimate, estimateNotes, describeEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   getBedroomEstimate,
@@ -91,8 +92,18 @@ function quoteCore(e) {
     firstName: (e.guest_name || '').trim().split(' ')[0] || 'there',
     fullName: (e.guest_name || '').trim() || 'there',
     guestCount: e.guests_count || billableGuests || 1,
+    seasonGroups: e._seasonGroups || null,   // the nights in runs of the same season and price, when the quote is the seasonal estimate
     nightsLabel: nights === 1 ? 'the night' : `${nights} nights`,
   }
+}
+
+// "• ₹14,025/night × 2 nights" then "• Christmas / New Year: ₹18,233/night × 2 nights (regular ₹14,025)"
+function seasonRateLines(groups) {
+  return groups.map(g => `• ${g.name || 'Regular'}: ${fmt(g.rate)}/night × ${g.nights} night${g.nights !== 1 ? 's' : ''}${g.name && g.rate !== g.regular ? ` (regular ${fmt(g.regular)})` : ''}`)
+}
+// the same nights as a block of their own, for the discount variants (which then show the discount on the total)
+function seasonLines(c, ic) {
+  return c.seasonGroups ? [`${ic.money}Pricing night by night:`, ...seasonRateLines(c.seasonGroups), ``] : []
 }
 
 // Pricing block lines shared by all 3 quote variants — per-night rate ×
@@ -100,9 +111,11 @@ function quoteCore(e) {
 // the guest sees the per-night rate first, not one big lump number).
 // iconPrefix already includes the trailing space (e.g. ic.money, ic.sparkle).
 function pricingLines(c, iconPrefix, rateLabel) {
-  const lines = [
-    `${iconPrefix}${rateLabel}: ${fmt(c.perNight)}/night × ${c.nights} night${c.nights !== 1 ? 's' : ''} = ${fmt(c.roomOnlyTotal)}`,
-  ]
+  // A stay that runs into a season (a busy one, or an off-season offer) is shown night by night with the regular price beside the
+  // season's. With a discount on top the nights are shown higher up (seasonLines) and this keeps its one summary line.
+  const lines = c.seasonGroups && !c.discountAmount
+    ? [`${iconPrefix}${rateLabel}:`, ...seasonRateLines(c.seasonGroups), `Room total: ${fmt(c.roomOnlyTotal)}`]
+    : [`${iconPrefix}${rateLabel}: ${fmt(c.perNight)}/night × ${c.nights} night${c.nights !== 1 ? 's' : ''} = ${fmt(c.roomOnlyTotal)}`]
   for (const l of c.extraLines) {
     lines.push(`+ ${l.label}: ${fmt(l.amount)}`)
   }
@@ -247,6 +260,7 @@ function buildQuoteRepeatDiscount(e, rich) {
     `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `${ic.guests}Guests: ${c.guestCount}`,
     ``,
+    ...seasonLines(c, ic),
     `${ic.gift}As a ${label}, we're delighted to offer you a special discounted rate this time!`,
     `${ic.money}Regular Tariff: ${fmt(c.quoteAmount)}`,
     `${ic.gift}${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
@@ -281,6 +295,7 @@ function buildQuoteB2B(e, rich) {
     `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
     `${ic.guests}Guests: ${c.guestCount}`,
     ``,
+    ...seasonLines(c, ic),
     `${ic.handshake}As our valued ${label}, here's your special partner pricing:`,
     `${ic.money}Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
     `${ic.handshake}Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
@@ -628,9 +643,17 @@ export default function EnquiryDetail() {
     finally { setStatusBusy(false) }
   }
 
+  // The saved quote with its season breakdown, when that quote IS the seasonal estimate for these dates and party (an amount typed by
+  // hand has no breakdown to show, so it is quoted as a plain rate like before).
+  const withSeasons = (en) => {
+    if (!en || !seasons.length) return en
+    const est = getSeasonalEstimate(rateCard, seasons, { adults: en.adults, children: en.children, checkIn: en.checkin_date, checkOut: en.checkout_date })
+    return est.seasonal && Math.round(Number(en.quote_amount) || 0) === est.total ? { ...en, _seasonGroups: groupNights(est.perNight) } : en
+  }
+
   const handleCopyQuote = () => {
     if (!e) return
-    navigator.clipboard.writeText(buildQuote(e)).then(() => showToast('Quote copied — paste into WhatsApp ✓'))
+    navigator.clipboard.writeText(buildQuote(withSeasons(e))).then(() => showToast('Quote copied — paste into WhatsApp ✓'))
   }
 
   const handleGetPricing = async () => {
@@ -881,7 +904,7 @@ export default function EnquiryDetail() {
             📋 Generate & copy WhatsApp quote
           </button>
           {e.phone ? (
-            <a href={buildQuoteWaLink(e)} target="_blank" rel="noreferrer"
+            <a href={buildQuoteWaLink(withSeasons(e))} target="_blank" rel="noreferrer"
               className="btn"
               style={{
                 marginTop: '8px', display: 'block', textAlign: 'center', textDecoration: 'none',

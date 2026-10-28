@@ -76,7 +76,7 @@ import { withRegistrationFromTwins } from '../../src/utils/twinStays.js'
 import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong, localiseStamps } from '../../src/utils/tz.js'
 import { collectGuests } from '../../src/utils/guestList.js'
 import { buildGuestInfoText } from '../../src/utils/guestInfoText.js'
-import { estimateStay, validateSeason, validateRateCardRows, DEFAULT_OVERFLOW_PER_GUEST, DEFAULT_OVERFLOW_MAX, isYmd } from '../../src/utils/seasonRates.js'
+import { estimateStay, groupNights, validateSeason, validateRateCardRows, DEFAULT_OVERFLOW_PER_GUEST, DEFAULT_OVERFLOW_MAX, isYmd } from '../../src/utils/seasonRates.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -2938,7 +2938,9 @@ export async function onRequest(ctx) {
       agentName: link.agent_name, nights, billableGuests, bedroomEstimate,
       tariffPerNight, subtotal, discountPct, total,
       overflowGuests, withinRecommended,
-      seasons: est.seasons.map(s => ({ name: s.name, nights: s.nights })), minNightsNotes: est.minNightsNotes,
+      seasons: est.seasons.map(s => ({ name: s.name, nights: s.nights })),
+      // the nights in runs of the same season and price, so the page can show the regular price beside a season's (empty when no season applies)
+      breakdown: est.seasonal ? groupNights(est.perNight).map(g => ({ name: g.name, nights: g.nights, rate: g.rate, regularRate: g.regular })) : [],
     } })
   }
 

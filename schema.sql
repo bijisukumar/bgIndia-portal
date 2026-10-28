@@ -268,6 +268,59 @@ CREATE TABLE IF NOT EXISTS stayvibe_villa_rate_cards (
   PRIMARY KEY (villa_id, guest_count)
 );
 
+-- Busy-season rates (2026-10-28): a season changes the price for a range of dates, as a percentage on the rate card (mode 'percent',
+-- negative for an off-season discount) or a card of its own (mode 'card', card_json). start_date / end_date are the first and last NIGHT,
+-- inclusive; yearly = 1 ignores the year. See src/utils/seasonRates.js. An existing database gets it from scripts/migrate-rate-seasons.sql.
+CREATE TABLE IF NOT EXISTS stayvibe_rate_seasons (
+  season_id   TEXT PRIMARY KEY,
+  villa_id    TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  start_date  TEXT NOT NULL,
+  end_date    TEXT NOT NULL,
+  yearly      INTEGER NOT NULL DEFAULT 0,
+  mode        TEXT NOT NULL DEFAULT 'percent',
+  uplift_pct  REAL,
+  card_json   TEXT,
+  min_nights  INTEGER,
+  active      INTEGER NOT NULL DEFAULT 1,
+  notes       TEXT,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by  TEXT,
+  updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rate_seasons_villa ON stayvibe_rate_seasons(villa_id, active);
+
+-- Booking changes waiting for the owner's decision (2026-10-27): a guest who asks to change how many people are coming (Airbnb's
+-- "wants to change their reservation" email, or a check-in form whose head count is not the booked one) is parked here until the owner
+-- approves or declines it; while one is pending the stay cannot be marked ready for check-in. An existing database gets it from
+-- scripts/migrate-change-requests.sql.
+CREATE TABLE IF NOT EXISTS stayvibe_change_requests (
+  request_id          TEXT PRIMARY KEY,
+  villa_id            TEXT NOT NULL,
+  stay_id             TEXT,
+  kind                TEXT NOT NULL,
+  guest_name          TEXT,
+  confirmation_code   TEXT,
+  original_guests     INTEGER,
+  requested_guests    INTEGER,
+  requested_adults    INTEGER,
+  requested_children  INTEGER,
+  detail              TEXT,
+  email_id            TEXT,
+  status              TEXT NOT NULL DEFAULT 'pending',
+  decided_by          TEXT,
+  decided_at          TEXT,
+  decision_note       TEXT,
+  applied_adults      INTEGER,
+  applied_children    INTEGER,
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at          TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_change_requests_email ON stayvibe_change_requests(email_id) WHERE email_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_change_requests_stay  ON stayvibe_change_requests(stay_id, status);
+CREATE INDEX IF NOT EXISTS idx_change_requests_villa ON stayvibe_change_requests(villa_id, status);
+
 CREATE TABLE IF NOT EXISTS stayvibe_marketing_campaigns (
   id            TEXT PRIMARY KEY,
   campaign_name TEXT NOT NULL,

@@ -81,6 +81,24 @@ function priceUnder(season, baseCard, billable, overflowPer) {
   return { rate: Math.round(c.rate * (1 + pct / 100)) + c.overflowGuests * overflowPer, overflowGuests: c.overflowGuests }
 }
 
+// One night's price for a party under a season (null = the base card): the figure the screens show beside the current price.
+export function nightlyRate(season, baseCard, billable, overflowPer = DEFAULT_OVERFLOW_PER_GUEST) {
+  return priceUnder(season, baseCard, billable, overflowPer).rate
+}
+
+// The nights of a priced stay in runs of the same season and price, for the quote lines:
+//   [{ name: '' (regular) | 'Christmas / New Year', season: { id, name } | null, nights, rate, regular }]
+export function groupNights(perNight) {
+  const groups = []
+  for (const n of perNight || []) {
+    const key = `${n.season ? n.season.id : ''}|${n.rate}`
+    const last = groups[groups.length - 1]
+    if (last && last.key === key) last.nights++
+    else groups.push({ key, name: n.season ? n.season.name : '', season: n.season || null, nights: 1, rate: n.rate, regular: n.regular })
+  }
+  return groups.map(({ key, ...g }) => g)
+}
+
 // The season that prices a night, or null: a one-year season beats a yearly one, then the higher price wins, then the id.
 export function seasonForNight(seasons, night, baseCard, billable, overflowPer = DEFAULT_OVERFLOW_PER_GUEST) {
   let best = null, bestKey = null
@@ -101,17 +119,17 @@ export function estimateStay({ rateCard, seasons, adults = 0, children = 0, chec
   const billable = (Number(adults) || 0) + (Number(children) || 0)
   const nightDates = nightsBetween(checkIn, checkOut)
   const base = cardRate(rateCard, billable)
+  const baseRate = base.rate + base.overflowGuests * overflowPerGuest   // the regular price of a night for this party
   const perNight = nightDates.map(night => {
     const season = seasonForNight(seasons, night, rateCard, billable, overflowPerGuest)
     const rate = priceUnder(season, rateCard, billable, overflowPerGuest).rate
-    return { night, rate, season: season ? { id: season.id, name: season.name } : null, minNights: season ? season.minNights : null }
+    return { night, rate, regular: baseRate, season: season ? { id: season.id, name: season.name } : null, minNights: season ? season.minNights : null }
   })
   const total = perNight.reduce((s, n) => s + n.rate, 0)
-  const baseRate = base.rate + base.overflowGuests * overflowPerGuest
   const byId = new Map()
   for (const n of perNight) {
     if (!n.season) continue
-    const cur = byId.get(n.season.id) || { id: n.season.id, name: n.season.name, nights: 0 }
+    const cur = byId.get(n.season.id) || { id: n.season.id, name: n.season.name, nights: 0, rate: n.rate, regular: baseRate }
     cur.nights++
     byId.set(n.season.id, cur)
   }

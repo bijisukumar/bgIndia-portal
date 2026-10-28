@@ -37,7 +37,10 @@ by frontend routing.
 6. Address · Google Maps link · bedrooms (+ bed type note)
 7. Check-in time · check-out time · max guests
 8. Rate card (nightly tariff bands) · cleaning fee · extra-charge menu with
-   default prices (early check-in, floor bed, etc.)
+   default prices (early check-in, floor bed, etc.) · busy seasons and
+   off-season discounts, if any (dates, and a percentage or their own
+   prices; the host can add and change these later on the Rates & seasons
+   page)
 9. Booking channels used (Airbnb / Booking.com / direct…) + commission %
 
 **Operations**
@@ -79,6 +82,13 @@ by frontend routing.
      to the frontend, what `GuestFormScript.gs` reads on first use, and
      what the login action checks PINs against.
    - Run channel/expense-category seeds as before.
+   - `schema.sql` also defines `stayvibe_rate_seasons` (busy-season rates,
+     the Rates & seasons page) and `stayvibe_change_requests` (a guest asking
+     to change the number of guests, which the owner approves or declines),
+     so a new host has both. An EXISTING host's database gets them from
+     `scripts/migrate-rate-seasons.sql` and
+     `scripts/migrate-change-requests.sql` (additive, safe to run twice);
+     without them the features stay switched off and nothing else breaks.
 3. Create Pages project `<hostId>-portal`; bind DB/DB_ESTATES/AI; set
    `[vars] DEFAULT_VILLA_ID = "<the villa id from step 1>"` in that
    project's wrangler.toml (or Pages dashboard env var) — **easy to
@@ -98,6 +108,15 @@ by frontend routing.
    so a change of words is a deploy, not a paste into Google. The script
    keeps only a fallback copy (`DEFAULT_CHECKIN_EMAIL`), used when a host
    has no such block.
+   The poller (`PollNewReservationAndProcess.gs`, v1.3 or later) also reads
+   Airbnb's "wants to change their reservation" emails for the change
+   requests above: inside the same 5-minute `pollNewReservations` run, no new
+   trigger; its Gmail label `portal-change-request-done` is created on the
+   first run. In `GuestFormScript.gs` (v2.7) the guest's Drive record
+   (`GuestInfo-<stay>.txt`) is built by the Worker; for a host with guests
+   already in Drive, run `refreshGuestInfoFiles` once from the editor to bring
+   their existing files up to date (the other GuestInfo functions are private
+   and do not appear in the Run list).
    In the check-in **Form editor** (not the responses sheet — that setting
    lives on the Form itself, not in any script), mark the ID/passport
    upload question **Required** — easy to forget per-host, and without it
@@ -118,7 +137,8 @@ by frontend routing.
    touching the real deployment is cheap insurance — see the Release 2.1
    demo-onboarding simulation for the exact recipe (login → create a
    booking → confirm isolation from any other host's data → SchemaValidation).
-7. Walk host through: New Booking, Check-in flow, Expenses, Dashboard P&L.
+7. Walk host through: New Booking, Check-in flow, Expenses, Dashboard P&L,
+   Rates & seasons (their rate card, and a first busy season).
 
 ## C. Per-property go-live (adding property #2, #3 to an existing tenant)
 Same tenant, same login — the property picker (shown right after login)

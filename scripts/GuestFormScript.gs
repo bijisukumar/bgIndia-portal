@@ -1,5 +1,5 @@
 // ============================================================
-// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.6
+// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.7
 // ============================================================
 // Paste into Apps Script editor of:
 //   "GVR Registration-Check-In form (Responses)"
@@ -9,6 +9,14 @@
 // via getTenantConfig (see v2.1 below).
 //
 // ── VERSION HISTORY (newest first) — bump on every change ──
+// v2.7  2026-10-28  The GuestInfo helpers (fetchGuestInfo_, saveGuestInfo_,
+//                    refreshGuestInfo_, guestInfoFallback_) end in an
+//                    underscore, which Apps Script treats as private: they
+//                    no longer appear in the editor's Run list. The list had
+//                    refreshGuestInfo next to refreshGuestInfoFiles, and the
+//                    helper (it needs a stay to work on) was run by hand by
+//                    mistake. Run refreshGuestInfoFiles; nothing else
+//                    changes. Pasting this is optional.
 // v2.6  2026-10-27  GuestInfo-<stayId>.txt records EVERYTHING the guest
 //                    filled in on the check-in form: the names and ages of
 //                    the party, the head count the form gave next to the
@@ -19,7 +27,7 @@
 //                    (getGuestInfoText, src/utils/guestInfoText.js), so its
 //                    wording is a deploy, not a paste into Google; if the
 //                    Worker cannot answer, the shorter text this script
-//                    always built is written (guestInfoFallback). The file
+//                    always built is written (guestInfoFallback_). The file
 //                    is UPDATED IN PLACE rather than copied, and rewritten
 //                    when the guest sends the form again. findOpenStay is
 //                    now asked for the stay by id (two guests with the same
@@ -413,7 +421,7 @@ function processPendingCheckInForms() {
     var docsResp = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
     var hasPendingDocs = docsResp && docsResp.success && docsResp.data && docsResp.data.length > 0;
     if (stay.folderCreated && !hasPendingDocs) {
-      refreshGuestInfo(stay);
+      refreshGuestInfo_(stay);
       Logger.log('Stay ' + stay.stayId + ' fully processed, skipping'); return;
     }
     Logger.log('Processing: ' + stay.stayId + ' for ' + stay.guestName);
@@ -438,9 +446,9 @@ function processPendingCheckInForms() {
 
       // GuestInfo-<stayId>.txt: the Worker writes the text (every answer on the check-in form, names and ages included);
       // if it cannot, the shorter text this script always built.
-      var info = fetchGuestInfo(stay.stayId);
-      var infoText = info ? info.text : guestInfoFallback(stay, s, CLIENT);
-      Logger.log('GuestInfo ' + saveGuestInfo(folder, stay.stayId, infoText) + ' for ' + stay.stayId +
+      var info = fetchGuestInfo_(stay.stayId);
+      var infoText = info ? info.text : guestInfoFallback_(stay, s, CLIENT);
+      Logger.log('GuestInfo ' + saveGuestInfo_(folder, stay.stayId, infoText) + ' for ' + stay.stayId +
         (info ? '' : ' (the Worker could not build it: the short text was written)'));
 
       // Upload ID docs from D1
@@ -538,8 +546,10 @@ function processPendingCheckInForms() {
 }
 
 // ── GUESTINFO FILE (v2.6) ──────────────────────────────────
+// Functions ending in an underscore are private to Apps Script and are not offered in the editor's Run list: these four are
+// helpers that need arguments, so only refreshGuestInfoFiles (below) is meant to be run by hand.
 // The Worker builds the text of GuestInfo-<stayId>.txt from the check-in form (getGuestInfoText). Null when it cannot answer.
-function fetchGuestInfo(stayId) {
+function fetchGuestInfo_(stayId) {
   try {
     var r = callWorker('GET', 'getGuestInfoText', { stayId: stayId });
     if (r && r.success && r.data && r.data.text) return r.data;
@@ -550,7 +560,7 @@ function fetchGuestInfo(stayId) {
 
 // Saves GuestInfo-<stayId>.txt in the guest's folder. A file of that name already there (an earlier run, or an older and shorter
 // text) is updated in place instead of copied. Returns 'created', 'updated' or 'unchanged'.
-function saveGuestInfo(folder, stayId, text) {
+function saveGuestInfo_(folder, stayId, text) {
   var name = 'GuestInfo-' + stayId + '.txt';
   var it = folder.getFilesByName(name), found = 0, wrote = 0;
   while (it.hasNext()) {
@@ -565,7 +575,7 @@ function saveGuestInfo(folder, stayId, text) {
 // them, so this is the one place their GuestInfo file can be brought up to date. The Worker says when the form was last sent
 // (formSubmittedAt); the file carries the time of the submission it records ("Form recorded"). Only when the two differ, or the
 // file is missing, is the text fetched again: a stay that is simply waiting for the owner costs a few Drive reads and no Worker call.
-function refreshGuestInfo(stay) {
+function refreshGuestInfo_(stay) {
   try {
     if (!stay.formSubmittedAt || !stay.driveFolderUrl) return;
     var m = stay.driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
@@ -578,14 +588,14 @@ function refreshGuestInfo(stay) {
       if (it.next().getBlob().getDataAsString().indexOf(needle) < 0) stale = true;
     }
     if (found && !stale) return;
-    var info = fetchGuestInfo(stay.stayId);
+    var info = fetchGuestInfo_(stay.stayId);
     if (!info) return;
-    Logger.log('GuestInfo ' + saveGuestInfo(folder, stay.stayId, info.text) + ' for ' + stay.stayId + ' (the form was sent again)');
-  } catch (e) { Logger.log('GuestInfo refresh error for ' + stay.stayId + ': ' + e.message); }
+    Logger.log('GuestInfo ' + saveGuestInfo_(folder, stay.stayId, info.text) + ' for ' + stay.stayId + ' (the form was sent again)');
+  } catch (e) { Logger.log('GuestInfo refresh error for ' + (stay && stay.stayId) + ': ' + e.message); }
 }
 
 // The text this script built itself before the Worker took it over: written only when getGuestInfoText cannot answer.
-function guestInfoFallback(stay, s, CLIENT) {
+function guestInfoFallback_(stay, s, CLIENT) {
   var adults   = parseInt(s.adults)   || 1;
   var children = parseInt(s.children) || 0;
   var lines = [
@@ -631,7 +641,8 @@ function guestInfoFallback(stay, s, CLIENT) {
   return lines.join('\n');
 }
 
-// Run ONCE from the editor after pasting v2.6: brings the GuestInfo file of every guest who is still to arrive (or is in the villa)
+// THE ONE TO RUN BY HAND: pick refreshGuestInfoFiles in the editor's function list.
+// Run it ONCE after pasting v2.6 or later: brings the GuestInfo file of every guest who is still to arrive (or is in the villa)
 // and has sent the check-in form up to the current format, in place. A stay with no form or no Drive folder is skipped; a file that
 // already holds the same text is left alone, so running it again is harmless. The log ends with the counts.
 function refreshGuestInfoFiles() {
@@ -643,9 +654,9 @@ function refreshGuestInfoFiles() {
     var m = (s.checkin_form_submitted && s.drive_folder_url) ? String(s.drive_folder_url).match(/folders\/([a-zA-Z0-9_-]+)/) : null;
     if (!m) { counts.skipped++; return; }
     try {
-      var info = fetchGuestInfo(s.stay_id);
+      var info = fetchGuestInfo_(s.stay_id);
       if (!info) { counts.failed++; return; }
-      var res = saveGuestInfo(DriveApp.getFolderById(m[1]), s.stay_id, info.text);
+      var res = saveGuestInfo_(DriveApp.getFolderById(m[1]), s.stay_id, info.text);
       counts[res]++;
       Logger.log(s.guest_name + ' (' + s.stay_id + '): ' + res);
     } catch (e) {

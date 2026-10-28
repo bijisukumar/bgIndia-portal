@@ -58,7 +58,7 @@ const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, addDays } from '../../src/server/icalHub.js'
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
-import { stayHolds, holdPhrase } from '../../src/utils/stayHolds.js'
+import { stayHolds, stayFlags, holdPhrase } from '../../src/utils/stayHolds.js'
 import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 // The biggest party the check-in form takes without asking the guest to confirm the number with the host.
@@ -1586,6 +1586,18 @@ function heldNights(rows, rules, from) {
   for (const r of rows || []) {
     for (const h of stayHolds(r, rules)) {
       if (!from || h.night >= from) out.push({ ...h, guest: r.guest_name || null })
+    }
+  }
+  return out
+}
+
+// The agreed times that hold NOTHING (stayFlags in src/utils/stayHolds.js): the calendar flags them, no night is closed
+// and nothing is published to a platform for them. Days before `from` are left out.
+function flaggedDays(rows, rules, from) {
+  const out = []
+  for (const r of rows || []) {
+    for (const f of stayFlags(r, rules)) {
+      if (!from || f.day >= from) out.push({ ...f, guest: r.guest_name || null })
     }
   }
   return out
@@ -6220,6 +6232,15 @@ export async function onRequest(ctx) {
             checkinDate: h.night, checkoutDate: addDays(h.night, 1), holdFor: h.stayId, time: h.time,
           })
         }
+        // An agreed late check-out / early check-in that still leaves the villa its turnaround hours holds nothing: it is
+        // only FLAGGED on the grid (kind 'flag'), the night stays open. Never a clash with anything, never counted as booked.
+        for (const f of flaggedDays(stays, rules, await todayOf(villaId))) {
+          items.push({
+            id: `flag:${f.stayId}:${f.kind}`, kind: 'flag', source: f.kind,
+            label: `${f.guest || 'Guest'} · ${holdPhrase(f)}`,
+            checkinDate: f.day, checkoutDate: addDays(f.day, 1), flagFor: f.stayId, time: f.time,
+          })
+        }
         // Dates the owner closed by hand (Block dates): a range of closed nights, no guest. They
         // go out on every platform's link, so the grid shows them like any other taken night. The
         // note is the owner's own, so it goes only to an owner's screen.
@@ -6241,8 +6262,8 @@ export async function onRequest(ctx) {
         const isMarker = o => o.kind === 'block' && /not available|unavailable|blocked|closed/i.test(o.label || '')
         const isClosure = o => o.kind === 'ownerblock' || isMarker(o)
         for (const item of items) {
-          item.conflict = items.some(o =>
-            o !== item && !(item.kind === 'hold' && o.kind === 'hold') &&
+          item.conflict = item.kind !== 'flag' && items.some(o =>
+            o !== item && o.kind !== 'flag' && !(item.kind === 'hold' && o.kind === 'hold') &&
             !(item.kind === 'hold' && isClosure(o)) && !(o.kind === 'hold' && isClosure(item)) &&
             !(item.kind === 'ownerblock' && isClosure(o)) && !(o.kind === 'ownerblock' && isClosure(item)) &&
             (o.source || '').toLowerCase() !== (item.source || '').toLowerCase() &&

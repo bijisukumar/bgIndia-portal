@@ -36,29 +36,54 @@ export function addDays(date, n) {
   return d.toISOString().slice(0, 10)
 }
 
-export function stayHolds(stay, rules) {
+// What every rule here reads from a stay and from the villa's numbers, in minutes after midnight
+// (null when the villa's standard times cannot be read).
+function agreedTimes(stay, rules) {
   const s = stay || {}
   const r = rules || {}
   const stdIn  = toMinutes(r.stdIn  || '16:00')
   const stdOut = toMinutes(r.stdOut || '11:00')
   const hours  = r.turnaroundHours > 0 ? r.turnaroundHours : 6
-  const need   = hours * 60
-  if (stdIn === null || stdOut === null) return []
-
-  const stayId   = s.stay_id || s.stayId || null
-  const checkin  = s.checkin_date  || s.checkIn  || ''
-  const checkout = s.checkout_date || s.checkOut || ''
-  const late  = toMinutes(s.late_checkout_time !== undefined && s.late_checkout_time !== null ? s.late_checkout_time : s.lateCheckoutTime)
-  const early = toMinutes(s.early_checkin_time !== undefined && s.early_checkin_time !== null ? s.early_checkin_time : s.earlyCheckinTime)
-
-  const holds = []
-  if (checkout && late !== null && late > stdOut && stdIn - late < need) {
-    holds.push({ kind: 'late_checkout', night: checkout, time: clock(late), stayId })
+  if (stdIn === null || stdOut === null) return null
+  return {
+    stdIn, stdOut, need: hours * 60,
+    stayId:   s.stay_id || s.stayId || null,
+    checkin:  s.checkin_date  || s.checkIn  || '',
+    checkout: s.checkout_date || s.checkOut || '',
+    late:  toMinutes(s.late_checkout_time !== undefined && s.late_checkout_time !== null ? s.late_checkout_time : s.lateCheckoutTime),
+    early: toMinutes(s.early_checkin_time !== undefined && s.early_checkin_time !== null ? s.early_checkin_time : s.earlyCheckinTime),
   }
-  if (checkin && early !== null && early < stdIn && early - stdOut < need) {
-    holds.push({ kind: 'early_checkin', night: addDays(checkin, -1), time: clock(early), stayId })
+}
+
+export function stayHolds(stay, rules) {
+  const a = agreedTimes(stay, rules)
+  if (!a) return []
+  const holds = []
+  if (a.checkout && a.late !== null && a.late > a.stdOut && a.stdIn - a.late < a.need) {
+    holds.push({ kind: 'late_checkout', night: a.checkout, time: clock(a.late), stayId: a.stayId })
+  }
+  if (a.checkin && a.early !== null && a.early < a.stdIn && a.early - a.stdOut < a.need) {
+    holds.push({ kind: 'early_checkin', night: addDays(a.checkin, -1), time: clock(a.early), stayId: a.stayId })
   }
   return holds
+}
+
+// The agreed times that hold NOTHING: a late check-out that still leaves the villa its turnaround hours before the
+// standard check-in (or an early check-in that comes that long after the standard check-out). No night is closed,
+// but they are worth seeing, so the calendar flags them. (2026-10-28, Biji, about a check-out agreed for 11:30: "up
+// to noon it is ok: flag it in the app, but do not block that night".) Together with stayHolds() this covers every
+// agreed time that is not the standard one. `day` is the day it happens: the check-out day, or the check-in day.
+export function stayFlags(stay, rules) {
+  const a = agreedTimes(stay, rules)
+  if (!a) return []
+  const flags = []
+  if (a.checkout && a.late !== null && a.late > a.stdOut && !(a.stdIn - a.late < a.need)) {
+    flags.push({ kind: 'late_checkout', day: a.checkout, time: clock(a.late), stayId: a.stayId })
+  }
+  if (a.checkin && a.early !== null && a.early < a.stdIn && !(a.early - a.stdOut < a.need)) {
+    flags.push({ kind: 'early_checkin', day: a.checkin, time: clock(a.early), stayId: a.stayId })
+  }
+  return flags
 }
 
 // minutes after midnight -> '18:00' (whatever form the time was stored in)

@@ -80,11 +80,13 @@ function monthNightsTally(items, year, month) {
   const startISO = toISO(new Date(year, month, 1))
   const endISO = toISO(new Date(year, month + 1, 1))
   const byKey = {}
-  let total = 0, held = 0, closed = 0
+  let total = 0, held = 0, closed = 0, lateFlags = 0, earlyFlags = 0
   for (const item of items) {
     if (item.checkoutDate <= startISO || item.checkinDate >= endISO) continue
     // A held night is kept back, not booked: counted on its own, never as a source's.
     if (item.kind === 'hold') { held += 1; continue }
+    // An agreed late check-out / early check-in that holds NO night (a flag): a note, counted on its own too.
+    if (item.kind === 'flag') { if (item.source === 'early_checkin') earlyFlags += 1; else lateFlags += 1; continue }
     const clipStart = item.checkinDate > startISO ? item.checkinDate : startISO
     const clipEnd = item.checkoutDate < endISO ? item.checkoutDate : endISO
     const nights = Math.round((new Date(clipEnd) - new Date(clipStart)) / 86400000)
@@ -95,7 +97,7 @@ function monthNightsTally(items, year, month) {
     byKey[key] = (byKey[key] || 0) + nights
     total += nights
   }
-  return { byKey, total, held, closed }
+  return { byKey, total, held, closed, lateFlags, earlyFlags }
 }
 
 // `onPick` makes every bar tappable (the staff view: a phone cuts a long name short) and `picked` is the item on show;
@@ -122,6 +124,8 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday, onPi
         <span style={{ color: 'var(--text)', fontWeight: '700' }}>{tally.total} night{tally.total === 1 ? '' : 's'} booked</span>
         {tally.held > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🔒 {tally.held} held night{tally.held === 1 ? '' : 's'}</span>}
         {tally.closed > 0 && <span style={{ color: CLOSED_TEXT }}>  ·  ⛔ {tally.closed} closed by {staff ? 'the owner' : 'you'}</span>}
+        {tally.lateFlags > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🕛 {tally.lateFlags} late check-out{tally.lateFlags === 1 ? '' : 's'}</span>}
+        {tally.earlyFlags > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🕛 {tally.earlyFlags} early check-in{tally.earlyFlags === 1 ? '' : 's'}</span>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
@@ -158,8 +162,10 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday, onPi
                   const isHold = seg.item.kind === 'hold'
                   // Nights the owner closed by hand: slate and hatched too, "closed", not a booking.
                   const isClosed = seg.item.kind === 'ownerblock'
+                  // An agreed late check-out / early check-in that holds no night: only FLAGGED, outlined, not filled.
+                  const isFlag = seg.item.kind === 'flag'
                   return (
-                    <div key={si} title={isHold ? 'Held night · ' + (seg.item.label || '') : isClosed ? (seg.item.label || 'Closed by you') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
+                    <div key={si} title={isFlag ? 'Agreed time, the night stays open · ' + (seg.item.label || '') : isHold ? 'Held night · ' + (seg.item.label || '') : isClosed ? (seg.item.label || 'Closed by you') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
                       onClick={onPick ? () => onPick(seg.item) : undefined}
                       role={onPick ? 'button' : undefined}
                       tabIndex={onPick ? 0 : undefined}
@@ -167,10 +173,11 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday, onPi
                       style={{
                         cursor: onPick ? 'pointer' : 'default',
                         gridColumn: `${seg.startCol} / ${seg.endCol}`,
-                        background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)'
+                        background: isFlag ? 'transparent'
+                          : isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)'
                           : isClosed ? 'repeating-linear-gradient(135deg, rgba(100,116,139,0.55) 0 5px, rgba(100,116,139,0.28) 5px 10px)' : st.color,
-                        color: isHold ? HOLD_COLOR : isClosed ? CLOSED_TEXT : st.text,
-                        border: isHold ? '1px dashed rgba(245,158,11,0.7)' : isClosed ? '1px dashed rgba(148,163,184,0.8)' : 'none',
+                        color: isFlag || isHold ? HOLD_COLOR : isClosed ? CLOSED_TEXT : st.text,
+                        border: isFlag ? '1px dashed rgba(245,158,11,0.55)' : isHold ? '1px dashed rgba(245,158,11,0.7)' : isClosed ? '1px dashed rgba(148,163,184,0.8)' : 'none',
                         boxSizing: 'border-box',
                         borderRadius: '5px',
                         padding: '3px 6px',
@@ -182,7 +189,7 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday, onPi
                         outline: seg.item.conflict ? '2px solid #EF4444' : picked && picked.id === seg.item.id ? '2px solid var(--gold)' : 'none',
                         outlineOffset: '1px',
                       }}>
-                      {seg.item.conflict && '⚠️ '}{isHold ? '🔒 ' + (seg.item.label || 'Held night') : isClosed ? '⛔ ' + (seg.item.label || 'Closed by you') : channelLabel(seg.item.source) + (seg.item.label ? ' · ' + seg.item.label : '')}
+                      {seg.item.conflict && '⚠️ '}{isFlag ? '🕛 ' + (seg.item.label || 'Agreed time') : isHold ? '🔒 ' + (seg.item.label || 'Held night') : isClosed ? '⛔ ' + (seg.item.label || 'Closed by you') : channelLabel(seg.item.source) + (seg.item.label ? ' · ' + seg.item.label : '')}
                     </div>
                   )
                 })}
@@ -210,11 +217,12 @@ function SourceKey({ items, feeds, tally, onConnect }) {
       if (st.group === 'channel' && !PARTNERS.some(p => p.key === st.key) && !seen.has(st.key)) seen.set(st.key, st)
     }
     feeds.forEach(f => note(f.channel))
-    items.forEach(it => { if (it.kind !== 'hold' && it.kind !== 'ownerblock') note(it.source) })
+    items.forEach(it => { if (it.kind !== 'hold' && it.kind !== 'ownerblock' && it.kind !== 'flag') note(it.source) })
     return [...seen.values()]
   }, [items, feeds])
-  const hasOther = items.some(it => it.kind !== 'hold' && it.kind !== 'ownerblock' && sourceStyle(it.source).group === 'other')
+  const hasOther = items.some(it => it.kind !== 'hold' && it.kind !== 'ownerblock' && it.kind !== 'flag' && sourceStyle(it.source).group === 'other')
   const hasHolds = items.some(it => it.kind === 'hold')
+  const hasFlags = items.some(it => it.kind === 'flag')
   const hasClosed = items.some(it => it.kind === 'ownerblock')
 
   const label = { fontSize: '0.62rem', color: 'var(--text-dim)', fontWeight: '700', letterSpacing: '0.08em', marginBottom: '6px' }
@@ -277,6 +285,13 @@ function SourceKey({ items, feeds, tally, onConnect }) {
             style={{ color: HOLD_COLOR }}>
             <span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', border: `1px dashed ${HOLD_COLOR}`, background: 'rgba(245,158,11,0.3)', boxSizing: 'border-box', marginRight: '4px', verticalAlign: '-1px' }} />
             held night
+          </span>
+        )}
+        {hasFlags && (
+          <span title="A guest's agreed late check-out (or early check-in) that still leaves the villa its turnaround hours: it is flagged here, but the night stays open for sale."
+            style={{ color: HOLD_COLOR }}>
+            <span style={{ display: 'inline-block', width: '9px', height: '9px', borderRadius: '3px', border: `1px dashed ${HOLD_COLOR}`, boxSizing: 'border-box', marginRight: '4px', verticalAlign: '-1px' }} />
+            🕛 agreed time, night still open
           </span>
         )}
         {hasClosed && (
@@ -537,22 +552,45 @@ export default function ChannelCalendar() {
 function HeldNotes({ items, monthCursor }) {
   const startISO = toISO(new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1))
   const endISO = toISO(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))
-  const holds = items.filter(it => it.kind === 'hold' && it.checkinDate >= startISO && it.checkinDate < endISO)
-  if (holds.length === 0) return null
+  const inMonth = it => it.checkinDate >= startISO && it.checkinDate < endISO
+  const holds = items.filter(it => it.kind === 'hold' && inMonth(it))
+  const flags = items.filter(it => it.kind === 'flag' && inMonth(it))
+  if (holds.length === 0 && flags.length === 0) return null
+  const head = { fontSize: '0.62rem', color: HOLD_COLOR, fontWeight: '700', letterSpacing: '0.08em', marginBottom: '6px' }
+  const line = { fontSize: '0.8rem', color: 'var(--text)', marginBottom: '4px', overflowWrap: 'anywhere' }
+  const small = { fontSize: '0.7rem', color: 'var(--text-dim)', lineHeight: 1.5, marginTop: '6px' }
   return (
-    <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px dashed rgba(245,158,11,0.45)', borderRadius: '12px', padding: '12px 14px', marginTop: '14px' }}>
-      <div style={{ fontSize: '0.62rem', color: HOLD_COLOR, fontWeight: '700', letterSpacing: '0.08em', marginBottom: '6px' }}>🔒 HELD NIGHTS THIS MONTH</div>
-      {holds.map(h => (
-        <div key={h.id} style={{ fontSize: '0.8rem', color: 'var(--text)', marginBottom: '4px', overflowWrap: 'anywhere' }}>
-          <strong>{dayLabel(h.checkinDate)}</strong> · {h.label}
+    <>
+      {holds.length > 0 && (
+        <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px dashed rgba(245,158,11,0.45)', borderRadius: '12px', padding: '12px 14px', marginTop: '14px' }}>
+          <div style={head}>🔒 HELD NIGHTS THIS MONTH</div>
+          {holds.map(h => (
+            <div key={h.id} style={line}>
+              <strong>{dayLabel(h.checkinDate)}</strong> · {h.label}
+            </div>
+          ))}
+          <div style={small}>
+            A held night has no booking, but it is not for sale: a guest who leaves late (or arrives early the night before) is still
+            in the villa when the next family would arrive, so there is no time to get it ready. It is closed here and on every
+            platform's calendar.
+          </div>
         </div>
-      ))}
-      <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', lineHeight: 1.5, marginTop: '6px' }}>
-        A held night has no booking, but it is not for sale: a guest who leaves late (or arrives early the night before) is still
-        in the villa when the next family would arrive, so there is no time to get it ready. It is closed here and on every
-        platform's calendar.
-      </div>
-    </div>
+      )}
+      {flags.length > 0 && (
+        <div style={{ background: 'rgba(245,158,11,0.04)', border: '1px dashed rgba(245,158,11,0.3)', borderRadius: '12px', padding: '12px 14px', marginTop: '14px' }}>
+          <div style={head}>🕛 AGREED TIMES THAT KEEP THE NIGHT OPEN</div>
+          {flags.map(f => (
+            <div key={f.id} style={line}>
+              <strong>{dayLabel(f.checkinDate)}</strong> · {f.label}
+            </div>
+          ))}
+          <div style={small}>
+            These times still leave the villa enough hours to be made ready before the next arrival, so they close nothing: the
+            night stays open to book, here and on every platform. They are flagged so nobody is surprised.
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -573,7 +611,7 @@ function StaffKey({ items }) {
   const seen = useMemo(() => {
     const m = new Map()
     for (const it of items) {
-      if (it.kind === 'hold' || it.kind === 'ownerblock') continue
+      if (it.kind === 'hold' || it.kind === 'ownerblock' || it.kind === 'flag') continue
       const st = sourceStyle(it.source)
       if (!m.has(st.key)) m.set(st.key, st)
     }
@@ -590,6 +628,9 @@ function StaffKey({ items }) {
       {items.some(it => it.kind === 'hold') && (
         <span style={{ ...chip, color: HOLD_COLOR, border: '1px dashed rgba(245,158,11,0.7)', background: 'rgba(245,158,11,0.12)' }}>🔒 held night</span>
       )}
+      {items.some(it => it.kind === 'flag') && (
+        <span style={{ ...chip, color: HOLD_COLOR, border: '1px dashed rgba(245,158,11,0.55)' }}>🕛 agreed time, night open</span>
+      )}
       {items.some(it => it.kind === 'ownerblock') && (
         <span style={{ ...chip, color: CLOSED_TEXT, border: '1px dashed rgba(148,163,184,0.8)', background: 'rgba(100,116,139,0.3)' }}>⛔ closed by the owner</span>
       )}
@@ -603,28 +644,31 @@ function PickedCard({ item, onClose }) {
   const isHold = item.kind === 'hold'
   const isClosed = item.kind === 'ownerblock'
   const isBlock = item.kind === 'block'
+  const isFlag = item.kind === 'flag'
   const nights = Math.max(1, Math.round((parseLocalDate(item.checkoutDate) - parseLocalDate(item.checkinDate)) / 86400000))
-  const title = isHold ? 'Held night' : isClosed ? (item.label || 'Closed by the owner') : isBlock ? `${channelLabel(item.source)} · ${item.label || 'blocked'}` : (item.label || 'Guest')
+  const title = isHold ? 'Held night' : isFlag ? (item.source === 'early_checkin' ? 'Early check-in' : 'Late check-out') : isClosed ? (item.label || 'Closed by the owner') : isBlock ? `${channelLabel(item.source)} · ${item.label || 'blocked'}` : (item.label || 'Guest')
   const when = isHold
     ? `The night of ${dayLabel(item.checkinDate)}`
+    : isFlag ? dayLabel(item.checkinDate)
     : `${dayLabel(item.checkinDate)} → ${dayLabel(item.checkoutDate)} · ${nights} night${nights === 1 ? '' : 's'}`
-  const accent = isHold ? HOLD_COLOR : isClosed ? CLOSED_COLOR : st.color
+  const accent = isHold || isFlag ? HOLD_COLOR : isClosed ? CLOSED_COLOR : st.color
   const small = { fontSize: '0.78rem', color: 'var(--text)', lineHeight: 1.5, marginTop: '8px' }
   return (
     <div style={{ background: 'var(--dark-card)', border: `1px solid ${colorAlpha(accent, 0.6)}`, borderLeft: `4px solid ${accent}`, borderRadius: '12px', padding: '12px 14px', marginTop: '14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text)', overflowWrap: 'anywhere' }}>{isHold ? '🔒 ' : isClosed ? '⛔ ' : ''}{title}</div>
+          <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text)', overflowWrap: 'anywhere' }}>{isHold ? '🔒 ' : isFlag ? '🕛 ' : isClosed ? '⛔ ' : ''}{title}</div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '4px' }}>{when}</div>
         </div>
         <button onClick={onClose} aria-label="Close" style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', fontSize: '1rem', cursor: 'pointer', padding: '2px 6px', flexShrink: 0 }}>✕</button>
       </div>
-      {!isHold && !isClosed && (
+      {!isHold && !isClosed && !isFlag && (
         <div style={{ marginTop: '8px' }}>
           <span style={{ ...sourcePill(item.source), fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>{channelLabel(item.source)}</span>
         </div>
       )}
       {isHold && <div style={small}>{item.label}. Nobody can book this night: the villa needs the time to be made ready before the next family arrives.</div>}
+      {isFlag && <div style={small}>{item.label}. The night stays open for sale: there is still time to get the villa ready for the next arrival.</div>}
       {isClosed && <div style={small}>The owner closed these nights. They are not for sale.</div>}
       {isBlock && <div style={small}>Blocked on the platform's own calendar. No guest is recorded here.</div>}
       {item.conflict && <div style={{ ...small, color: '#EF4444', fontWeight: '700' }}>⚠️ Two bookings claim a night here. Tell the owner.</div>}

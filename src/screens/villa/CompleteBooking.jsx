@@ -37,6 +37,7 @@ import { EXTRA_ITEMS } from '../../utils/villaPricing'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { findTwinPairs } from '../../utils/twinStays'
 import ChangeRequestCard from '../../components/ChangeRequestCard'
+import { PhoneCountry } from '../../components/CountryFlag'
 
 // Airbnb-specific fee structure (from confirmation email)
 const EMPTY_AIRBNB = {
@@ -1537,8 +1538,9 @@ export default function CompleteBooking() {
                         <div ref={phoneFieldRef}>
                           <div style={infoLabel}>Phone</div>
                           {s.guest_phone ? (
-                            <div style={infoVal}>
+                            <div style={{...infoVal, display:'flex', flexWrap:'wrap', alignItems:'center', columnGap:'10px', rowGap:'3px'}}>
                               <a href={`tel:${s.guest_phone}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_phone}</a>
+                              <PhoneCountry phone={s.guest_phone} />
                             </div>
                           ) : !addingPhone ? (
                             <button onClick={()=>{setAddingPhone(true);setPhoneDraft('+91')}}

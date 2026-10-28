@@ -13,7 +13,7 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { channelLabel, channelsMatch, sourceStyle, sourcePill, colorAlpha, PARTNERS, DIRECT_STYLE, AGENT_STYLE } from '../../utils/channel'
 import CalendarExports from './CalendarExports'
 import BlockDates from './BlockDates'
-import { fmtStamp } from '../../utils/dates'
+import { fmtStamp, parseLocalDate } from '../../utils/dates'
 import { instantMs } from '../../utils/tz'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -98,7 +98,9 @@ function monthNightsTally(items, year, month) {
   return { byKey, total, held, closed }
 }
 
-function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
+// `onPick` makes every bar tappable (the staff view: a phone cuts a long name short) and `picked` is the item on show;
+// `staff` words the owner's closed nights as "the owner's" rather than "yours".
+function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday, onPick, picked, staff }) {
   const year = monthCursor.getFullYear()
   const month = monthCursor.getMonth()
   const weeks = useMemo(() => buildMonthWeeks(year, month), [year, month])
@@ -118,8 +120,8 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
 
       <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '10px' }}>
         <span style={{ color: 'var(--text)', fontWeight: '700' }}>{tally.total} night{tally.total === 1 ? '' : 's'} booked</span>
-        {tally.held > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🔒 {tally.held} held</span>}
-        {tally.closed > 0 && <span style={{ color: CLOSED_TEXT }}>  ·  ⛔ {tally.closed} closed by you</span>}
+        {tally.held > 0 && <span style={{ color: HOLD_COLOR }}>  ·  🔒 {tally.held} held night{tally.held === 1 ? '' : 's'}</span>}
+        {tally.closed > 0 && <span style={{ color: CLOSED_TEXT }}>  ·  ⛔ {tally.closed} closed by {staff ? 'the owner' : 'you'}</span>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
@@ -158,7 +160,12 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
                   const isClosed = seg.item.kind === 'ownerblock'
                   return (
                     <div key={si} title={isHold ? 'Held night · ' + (seg.item.label || '') : isClosed ? (seg.item.label || 'Closed by you') : `${channelLabel(seg.item.source)}${seg.item.label ? ' · ' + seg.item.label : ''}`}
+                      onClick={onPick ? () => onPick(seg.item) : undefined}
+                      role={onPick ? 'button' : undefined}
+                      tabIndex={onPick ? 0 : undefined}
+                      onKeyDown={onPick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(seg.item) } } : undefined}
                       style={{
+                        cursor: onPick ? 'pointer' : 'default',
                         gridColumn: `${seg.startCol} / ${seg.endCol}`,
                         background: isHold ? 'repeating-linear-gradient(45deg, rgba(245,158,11,0.32) 0 5px, rgba(245,158,11,0.12) 5px 10px)'
                           : isClosed ? 'repeating-linear-gradient(135deg, rgba(100,116,139,0.55) 0 5px, rgba(100,116,139,0.28) 5px 10px)' : st.color,
@@ -172,7 +179,7 @@ function CalendarGrid({ items, tally, monthCursor, onPrev, onNext, onToday }) {
                         overflow: 'hidden',
                         whiteSpace: 'nowrap',
                         textOverflow: 'ellipsis',
-                        outline: seg.item.conflict ? '2px solid #EF4444' : 'none',
+                        outline: seg.item.conflict ? '2px solid #EF4444' : picked && picked.id === seg.item.id ? '2px solid var(--gold)' : 'none',
                         outlineOffset: '1px',
                       }}>
                       {seg.item.conflict && '⚠️ '}{isHold ? '🔒 ' + (seg.item.label || 'Held night') : isClosed ? '⛔ ' + (seg.item.label || 'Closed by you') : channelLabel(seg.item.source) + (seg.item.label ? ' · ' + seg.item.label : '')}
@@ -515,9 +522,170 @@ export default function ChannelCalendar() {
           />
         )}
 
+        {!loading && <HeldNotes items={calItems} monthCursor={monthCursor} />}
+
         <div style={{ height: '20px' }} />
       </div>
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+    </div>
+  )
+}
+
+// What the amber hatched bars ARE, in words: one line per held night in the month on show, and why. (Asked 2026-10-28:
+// "why does one say 1 held": the guest in the villa had agreed a late check-out of 11:30, the villa's 6-hour turnaround
+// does not fit before a 4 PM arrival, so that night is kept back.)
+function HeldNotes({ items, monthCursor }) {
+  const startISO = toISO(new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1))
+  const endISO = toISO(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))
+  const holds = items.filter(it => it.kind === 'hold' && it.checkinDate >= startISO && it.checkinDate < endISO)
+  if (holds.length === 0) return null
+  return (
+    <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px dashed rgba(245,158,11,0.45)', borderRadius: '12px', padding: '12px 14px', marginTop: '14px' }}>
+      <div style={{ fontSize: '0.62rem', color: HOLD_COLOR, fontWeight: '700', letterSpacing: '0.08em', marginBottom: '6px' }}>🔒 HELD NIGHTS THIS MONTH</div>
+      {holds.map(h => (
+        <div key={h.id} style={{ fontSize: '0.8rem', color: 'var(--text)', marginBottom: '4px', overflowWrap: 'anywhere' }}>
+          <strong>{dayLabel(h.checkinDate)}</strong> · {h.label}
+        </div>
+      ))}
+      <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', lineHeight: 1.5, marginTop: '6px' }}>
+        A held night has no booking, but it is not for sale: a guest who leaves late (or arrives early the night before) is still
+        in the villa when the next family would arrive, so there is no time to get it ready. It is closed here and on every
+        platform's calendar.
+      </div>
+    </div>
+  )
+}
+
+// ── The same calendar for the on-site manager and other staff: VIEW ONLY (/raman/calendar) ─────────────────────
+// Every booking on every platform, the nights held back and the nights the owner closed. It reads the one data call the
+// owner's calendar reads (getVillaCalendar, which already keeps the owner's own notes off anyone else's screen) and
+// nothing else: no feed addresses, no sync, no block dates, no links to the platforms. The write actions behind the
+// owner's screen refuse a manager's login as well (see getIcalFeeds and friends in the Worker).
+const SHORT_MONTHS = MONTH_NAMES.map(m => m.slice(0, 3))
+// 'Thu 29 Oct' (no Intl options on purpose: the production minifier has been seen dropping a helper's second argument)
+function dayLabel(iso) {
+  const d = parseLocalDate(iso)
+  return d ? `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}` : '—'
+}
+
+// The key: a colour for each platform that has a booking, and the two kinds of night that are not a booking.
+function StaffKey({ items }) {
+  const seen = useMemo(() => {
+    const m = new Map()
+    for (const it of items) {
+      if (it.kind === 'hold' || it.kind === 'ownerblock') continue
+      const st = sourceStyle(it.source)
+      if (!m.has(st.key)) m.set(st.key, st)
+    }
+    return [...m.values()]
+  }, [items])
+  const chip = { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px 4px 8px', borderRadius: '999px', fontSize: '0.7rem', color: 'var(--text)' }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+      {seen.map(st => (
+        <span key={st.key} style={{ ...chip, background: colorAlpha(st.color, 0.16), border: `1px solid ${colorAlpha(st.color, 0.55)}` }}>
+          <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: st.color, flexShrink: 0 }} />{st.label}
+        </span>
+      ))}
+      {items.some(it => it.kind === 'hold') && (
+        <span style={{ ...chip, color: HOLD_COLOR, border: '1px dashed rgba(245,158,11,0.7)', background: 'rgba(245,158,11,0.12)' }}>🔒 held night</span>
+      )}
+      {items.some(it => it.kind === 'ownerblock') && (
+        <span style={{ ...chip, color: CLOSED_TEXT, border: '1px dashed rgba(148,163,184,0.8)', background: 'rgba(100,116,139,0.3)' }}>⛔ closed by the owner</span>
+      )}
+    </div>
+  )
+}
+
+// A tapped bar in full: on a phone the bars cut a long name short.
+function PickedCard({ item, onClose }) {
+  const st = sourceStyle(item.source)
+  const isHold = item.kind === 'hold'
+  const isClosed = item.kind === 'ownerblock'
+  const isBlock = item.kind === 'block'
+  const nights = Math.max(1, Math.round((parseLocalDate(item.checkoutDate) - parseLocalDate(item.checkinDate)) / 86400000))
+  const title = isHold ? 'Held night' : isClosed ? (item.label || 'Closed by the owner') : isBlock ? `${channelLabel(item.source)} · ${item.label || 'blocked'}` : (item.label || 'Guest')
+  const when = isHold
+    ? `The night of ${dayLabel(item.checkinDate)}`
+    : `${dayLabel(item.checkinDate)} → ${dayLabel(item.checkoutDate)} · ${nights} night${nights === 1 ? '' : 's'}`
+  const accent = isHold ? HOLD_COLOR : isClosed ? CLOSED_COLOR : st.color
+  const small = { fontSize: '0.78rem', color: 'var(--text)', lineHeight: 1.5, marginTop: '8px' }
+  return (
+    <div style={{ background: 'var(--dark-card)', border: `1px solid ${colorAlpha(accent, 0.6)}`, borderLeft: `4px solid ${accent}`, borderRadius: '12px', padding: '12px 14px', marginTop: '14px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text)', overflowWrap: 'anywhere' }}>{isHold ? '🔒 ' : isClosed ? '⛔ ' : ''}{title}</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '4px' }}>{when}</div>
+        </div>
+        <button onClick={onClose} aria-label="Close" style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', fontSize: '1rem', cursor: 'pointer', padding: '2px 6px', flexShrink: 0 }}>✕</button>
+      </div>
+      {!isHold && !isClosed && (
+        <div style={{ marginTop: '8px' }}>
+          <span style={{ ...sourcePill(item.source), fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>{channelLabel(item.source)}</span>
+        </div>
+      )}
+      {isHold && <div style={small}>{item.label}. Nobody can book this night: the villa needs the time to be made ready before the next family arrives.</div>}
+      {isClosed && <div style={small}>The owner closed these nights. They are not for sale.</div>}
+      {isBlock && <div style={small}>Blocked on the platform's own calendar. No guest is recorded here.</div>}
+      {item.conflict && <div style={{ ...small, color: '#EF4444', fontWeight: '700' }}>⚠️ Two bookings claim a night here. Tell the owner.</div>}
+    </div>
+  )
+}
+
+export function StaffCalendar() {
+  const goBack = useBack()
+  const [calItems, setCalItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [picked, setPicked] = useState(null)
+  const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); d.setDate(1); return d })
+
+  useEffect(() => {
+    api.getVillaCalendar(DEFAULT_VILLA_ID)
+      .then(c => setCalItems(Array.isArray(c) ? c : []))
+      .catch(e => setError(e.message || 'Could not load the calendar'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const tally = useMemo(() => monthNightsTally(calItems, monthCursor.getFullYear(), monthCursor.getMonth()), [calItems, monthCursor])
+  const goMonth = n => { setPicked(null); setMonthCursor(c => { const d = new Date(c); d.setMonth(d.getMonth() + n); return d }) }
+
+  return (
+    <div className="screen">
+      <div className="topbar">
+        <button className="back-btn" onClick={goBack}>‹</button>
+        <div>
+          <div className="topbar-title">Calendar</div>
+          <div className="topbar-sub">VIEW ONLY</div>
+        </div>
+        <div style={{ width: 34 }} />
+      </div>
+      <div className="screen-body">
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '12px', lineHeight: 1.5 }}>
+          Every booking, on every platform. Tap a booking to read the guest's full name and dates. Changes are made by the owner.
+        </div>
+        {loading && <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '24px', fontSize: '0.85rem' }}>Loading…</div>}
+        {!loading && error && <div style={{ textAlign: 'center', color: '#EF4444', padding: '24px', fontSize: '0.85rem' }}>{error}</div>}
+        {!loading && !error && (
+          <>
+            <StaffKey items={calItems} />
+            <CalendarGrid
+              items={calItems}
+              tally={tally}
+              monthCursor={monthCursor}
+              onPrev={() => goMonth(-1)}
+              onNext={() => goMonth(1)}
+              onToday={() => { setPicked(null); const d = new Date(); d.setDate(1); setMonthCursor(d) }}
+              onPick={setPicked}
+              picked={picked}
+              staff
+            />
+            {picked && <PickedCard item={picked} onClose={() => setPicked(null)} />}
+            <HeldNotes items={calItems} monthCursor={monthCursor} />
+          </>
+        )}
+        <div style={{ height: '20px' }} />
+      </div>
     </div>
   )
 }

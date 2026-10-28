@@ -38,7 +38,7 @@ import EnquiryConversionDashboard from '../../screens/villa/EnquiryConversionDas
 import MarketingCampaigns from '../../screens/villa/MarketingCampaigns'
 import AgentLinks     from '../../screens/villa/AgentLinks'
 import FlexRequests   from '../../screens/villa/FlexRequests'
-import ChannelCalendar from '../../screens/villa/ChannelCalendar'
+import ChannelCalendar, { StaffCalendar } from '../../screens/villa/ChannelCalendar'
 import AgentQuote     from '../../screens/villa/AgentQuote'
 import GuestCheckIn   from '../../screens/GuestCheckIn'
 import Flexibility    from '../../screens/Flexibility'
@@ -122,6 +122,8 @@ function ProtectedRoutes() {
       {role === 'manager' && <>
         <Route path="/"                       element={<RamanHome />} />
         <Route path="/raman/checkin"          element={<CheckIn />} />
+        {/* View only: the same calendar the owner has, without the feeds, the links or the editing. */}
+        <Route path="/raman/calendar"         element={<StaffCalendar />} />
         <Route path="/raman/kitchen"          element={<KitchenIncidentals />} />
         <Route path="/raman/breakfast"        element={<BreakfastEntry />} />
         <Route path="/raman/carrental"        element={<CarRentalEntry />} />

@@ -1600,10 +1600,11 @@ function heldNights(rows, rules, from) {
 // morning it opens again (exclusive), as for a booking's checkout.
 const BLOCK_REASON_LABELS = { owner_use: 'owner use', maintenance: 'maintenance', festival: 'festival / event', other: '' }
 
-// "Closed by you (maintenance)": how a closure reads on the owner's own screens.
-function blockPhrase(reason) {
+// "Closed by you (maintenance)": how a closure reads on the owner's own screens. `by` names the owner for a screen
+// that is not the owner's (the manager's read-only Calendar says "Closed by the owner").
+function blockPhrase(reason, by = 'you') {
   const label = Object.prototype.hasOwnProperty.call(BLOCK_REASON_LABELS, reason) ? BLOCK_REASON_LABELS[reason] : ''
-  return label ? `Closed by you (${label})` : 'Closed by you'
+  return label ? `Closed by ${by} (${label})` : `Closed by ${by}`
 }
 
 // The blocks overlapping [from, to) ('YYYY-MM-DD', half-open like every range here). A database
@@ -6115,6 +6116,9 @@ export async function onRequest(ctx) {
 
       // ── CHANNEL CALENDAR (iCal sync) ─────────────────────────────────
       if (action === 'getIcalFeeds') {
+        // Owner only: a feed's address is the platform's own private calendar link, and staff have no use for it
+        // (the manager's read-only Calendar uses getVillaCalendar, which carries no addresses).
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const { results } = await DB.prepare(`
@@ -6223,7 +6227,7 @@ export async function onRequest(ctx) {
         for (const o of await loadDateBlocks(DB, villaId, '0000-01-01', '9999-12-31')) {
           items.push({
             id: o.block_id, kind: 'ownerblock', source: 'owner',
-            label: blockPhrase(o.reason) + (ownerSees && o.note ? ` · ${o.note}` : ''),
+            label: blockPhrase(o.reason, ownerSees ? 'you' : 'the owner') + (ownerSees && o.note ? ` · ${o.note}` : ''),
             checkinDate: o.start_date, checkoutDate: o.end_date,
             reason: o.reason, note: ownerSees ? (o.note || null) : null,
           })
@@ -7007,6 +7011,7 @@ export async function onRequest(ctx) {
 
       // ════════════════ CHANNEL CALENDAR (iCal sync) — POST ════════════════
       if (action === 'addIcalFeed') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const { villaId, channel, label, icsUrl } = body
         const vId = villaId || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, vId)
@@ -7021,6 +7026,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'toggleIcalFeed') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const { feedId } = body
         if (!feedId) return err('feedId required')
         const feed = await DB.prepare(`SELECT villa_id FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).first()
@@ -7033,6 +7039,7 @@ export async function onRequest(ctx) {
       }
 
       if (action === 'deleteIcalFeed') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const { feedId } = body
         if (!feedId) return err('feedId required')
         const feed = await DB.prepare(`SELECT villa_id FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).first()
@@ -7154,6 +7161,7 @@ export async function onRequest(ctx) {
       // the "Sync now" button show fresh results immediately instead of
       // waiting for the next scheduled run.
       if (action === 'runIcalSyncNow') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const villaId = body.villaId || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
         const results = await syncIcalFeedsForVillas(DB, villaId)

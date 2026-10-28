@@ -205,9 +205,12 @@ export default function CheckIn() {
 
       setStays({ pending: nearTermReady, inhouse })
       setFutureGuests(future)
-      // After a check-in NOBODY is picked for Raman. The next guest used to be selected at once, so the next tap landed on them
-      // (22 Oct, and again 28 Oct, when the red "not due yet" step was tapped through 26 seconds after the right guest).
+      // After a check-in or a check-out NOBODY is picked for Raman. The next guest used to be selected at once, so the next tap
+      // landed on them (22 Oct, and again 28 Oct, when the red "not due yet" step was tapped through 26 seconds after the right
+      // guest; 23 Oct the same happened at check-out). An action on the guest on screen that leaves them in their list (ready
+      // for check-out, settle, close) keeps that same guest, or nobody: never somebody else.
       if (opts.noAutoSelect) setSelected(null)
+      else if (opts.keepCurrent) setSelected(prev => (prev && [...nearTermReady, ...inhouse].find(s => s.stay_id === prev.stay_id)) || null)
       else if (nearTermReady.length > 0) setSelected(nearTermReady[0])
       else if (inhouse.length > 0) { setSelected(inhouse[0]); setTab('inhouse') }
     } catch(e) {
@@ -264,7 +267,7 @@ export default function CheckIn() {
     try {
       await api.updateStayStatus({ stayId: selected.stay_id, status: 'ready_for_checkout' })
       showToast('Marked ready for check-out ✓')
-      await loadStays()
+      await loadStays({ keepCurrent: true })
     } catch(e) { showToast('Failed: '+e.message,'error') }
     finally { setSaving(false) }
   }
@@ -284,7 +287,7 @@ export default function CheckIn() {
       showToast(lines.length
         ? `Settled — ${lines.length} charge${lines.length === 1 ? '' : 's'} added, extras now ₹${res.extraCharges}`
         : 'Settled — no extra charges')
-      await loadStays()
+      await loadStays({ keepCurrent: true })
     } catch (e) { showToast('Could not settle: ' + e.message, 'error') }
     finally { setSettling(false) }
   }
@@ -304,7 +307,7 @@ export default function CheckIn() {
       await api.closeStayWithReview({ stayId: stay.stay_id, closedReason: 'raman' })
       showToast(`✅ ${(stay.guest_name || 'Guest').split(' ')[0]}'s stay is closed`)
       setJustCheckedOut(null)
-      await loadStays()
+      await loadStays({ keepCurrent: true })
     } catch (e) { showToast('Could not close: ' + e.message, 'error') }
     finally { setClosing(false) }
   }
@@ -319,7 +322,7 @@ export default function CheckIn() {
       setJustCheckedOut(selected)   // keep it on screen for the review prompt
       setSettleLines([{ label: '', amount: '' }]); setSettleNote(''); setSettled(false)
       setSelected(null)
-      await loadStays()
+      await loadStays({ noAutoSelect: true })
     } catch(e) { showToast('Failed: '+e.message,'error') }
     finally { setSaving(false) }
   }
@@ -926,7 +929,7 @@ export default function CheckIn() {
               </div>
             ) : (
               <>
-                {inhouseList.length > 1 && (
+                {(inhouseList.length > 1 || (inhouseList.length === 1 && !selected)) && (
                   <>
                     <div className="card-section-label">SELECT GUEST</div>
                     <div style={{background:'var(--dark-card)',borderRadius:'12px',
@@ -963,6 +966,11 @@ export default function CheckIn() {
                         )
                       })}
                     </div>
+                    {!['checked_in','ready_for_checkout'].includes(selected?.status) && (
+                      <div style={{fontSize:'0.8rem',color:'var(--text-dim)',margin:'-6px 0 14px'}}>
+                        Tap the guest you mean. Nobody is picked for you.
+                      </div>
+                    )}
                   </>
                 )}
 

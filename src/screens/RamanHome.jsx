@@ -382,6 +382,13 @@ export default function RamanHome() {
       badge: readyCount > 0 ? readyCount : null,
     },
     {
+      icon: '📅', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
+      title: 'Calendar',
+      sub: 'Every booking, every platform · view only',
+      path: '/raman/calendar',
+      disabled: false,
+    },
+    {
       icon: '🛒', bg: 'rgba(200,144,58,0.08)', arrow: '#C8903A',
       title: 'Kitchen incidentals',
       sub: activeStay ? activeLabel : 'Log for active stay or a recent checkout',

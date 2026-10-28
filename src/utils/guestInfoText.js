@@ -48,7 +48,8 @@ export function formStamp(submittedAt) {
 //         phone, email, checkin, checkout, nights,
 //         adults, children, dob, gender, nationality, homeAddress, homeAddressLine2, city, state, country, fromCity, pincode,
 //         guestList, purposeOfVisit, modeOfTransport, vehicleNumber, eta, govtIdType, govtIdNum, requestEarlyCheckin,
-//         requestLateCheckout, submittedAt (checkin_form_submitted_at, a stored UTC time)
+//         requestLateCheckout, formSubmitted (the checkin_form_submitted flag), submittedAt (checkin_form_submitted_at, a stored UTC
+//         time: some rows have the flag and no time)
 // prefs:  requestBreakfast, breakfastChoice, requestCab, requestExtraBeds, extraBedsCount, etd (expected departure, 'HH:MM')
 // kyc:    one entry per foreign guest (stayvibe_stay_kyc): seq, name, nationality, dob, gender, passportNumber, passportIssueDate,
 //         passportIssuePlace, passportExpiry, visaNumber, visaType, visaIssueDate, visaIssuePlace, arrivalDateIndia,
@@ -81,7 +82,10 @@ export function buildGuestInfoText({ villaName, checkinTime, checkoutTime, tz, s
   out.push(`  GUEST REGISTRATION — ${text(villaName) || 'the property'}`)
   out.push('============================================================')
   head('Stay ID', text(s.stayId))
-  head('Form submitted', s.submittedAt ? (stampLong(text(s.submittedAt), tz) || text(s.submittedAt)) : 'no check-in form on record')
+  // A stay can carry the "form sent" flag with no time: older rows, and a record a merge filled in (2026-10-28: Achala's and
+  // P. B Krishnan's, whose files first said "no check-in form on record" above their own date of birth and address).
+  head('Form submitted', s.submittedAt ? (stampLong(text(s.submittedAt), tz) || text(s.submittedAt))
+    : s.formSubmitted ? 'yes (the time was not recorded)' : 'no check-in form on record')
   if (stamp) out.push(stamp)
 
   section('STAY DETAILS')

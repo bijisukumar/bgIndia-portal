@@ -6385,6 +6385,7 @@ export async function onRequest(ctx) {
             modeOfTransport: st.mode_of_transport, vehicleNumber: st.vehicle_number, eta: st.eta,
             govtIdType: st.govt_id_type, govtIdNum: st.govt_id_num,
             requestEarlyCheckin: st.request_early_checkin, requestLateCheckout: st.request_late_checkout,
+            formSubmitted: !!st.checkin_form_submitted,
             submittedAt: st.checkin_form_submitted ? st.checkin_form_submitted_at : null,
           },
           prefs: pf ? {

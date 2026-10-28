@@ -146,14 +146,20 @@ export const CONFIG = {
   turnaround: {
     defaultCheckinTime:  '16:00',
     defaultCheckoutTime: '11:00',
-    // 6 hours per the owner (2026-08-26) — the actual cleaning-window need,
+    // 4 hours per the owner (2026-10-28; it was 6 from 2026-08-26): the villa is
+    // ready 4 hours after a check-out, so a check-out up to noon holds no night
+    // (it is only flagged, see src/utils/stayHolds.js). The actual cleaning-window need,
     // not to be confused with the 4h/8h early-checkin/late-checkout PRICING
     // blocks (see EXTRA_ITEMS / Complete Booking's "Extended Stay
     // Reference"). Kept in sync with the D1 stayvibe_villa_settings
     // 'turnaround_hours' value the new checkTurnaroundGap action reads —
     // this static value still separately feeds checkAvailability and
-    // getFlexRequests, which weren't migrated to the D1 setting.
-    turnaroundHours: 6,
+    // getFlexRequests, which weren't migrated to the D1 setting. The stored copy
+    // of this config (platform_tenant_config, what the screens read) is a third
+    // place: all three were changed together on 2026-10-28
+    // (scripts/set-turnaround-hours.sql), and syncTenantConfig copies THIS file
+    // into it, so this number must stay the live one.
+    turnaroundHours: 4,
   },
 
   // Public check-in form. Token-based route on the React app

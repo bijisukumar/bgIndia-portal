@@ -74,7 +74,8 @@ import { withRegistrationFromTwins } from '../../src/utils/twinStays.js'
 // The property's time zone and every way of reading a stored time in it. Nothing in this file reads
 // the server's clock for a business decision: see zoneFor below.
 import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong, localiseStamps } from '../../src/utils/tz.js'
-import { parseGuestList, ageFromDob, ageLabelFromDob } from '../../src/utils/guestList.js'
+import { collectGuests } from '../../src/utils/guestList.js'
+import { buildGuestInfoText } from '../../src/utils/guestInfoText.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -4790,13 +4791,16 @@ export async function onRequest(ctx) {
         const guestName   = url.searchParams.get('guestName')   || ''
         const checkInDate = url.searchParams.get('checkInDate')  || ''
         const firstName   = guestName.split(' ')[0]
+        // The Apps Script knows WHICH stay it is processing: with ?stayId= that stay is returned, not whichever stay with the
+        // same first name has the nearest check-in (two Karthiks, a form-made twin and its booking).
+        const wantStayId  = url.searchParams.get('stayId') || ''
         const fo = villaScope(payload, url.searchParams.get('villaId'), 'stayvibe_stays.villa_id')
         const { results } = await DB.prepare(
-          `SELECT stayvibe_stays.stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void')${fo.sql} ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
-        ).bind(`%${firstName}%`, ...fo.binds, checkInDate || await todayOf(url.searchParams.get('villaId'))).all()
+          `SELECT stayvibe_stays.stay_id, guest_name, checkin_date, checkout_date, nights, adults, children, guest_phone, guest_email, drive_folder_id, drive_folder_url, status, purpose_of_visit, mode_of_transport, vehicle_number, eta, nationality, city, state, country, request_early_checkin, request_late_checkout, COALESCE(p.request_breakfast,0) AS request_breakfast, p.breakfast_choice AS breakfast_choice, COALESCE(p.request_cab,0) AS request_cab, COALESCE(p.request_extra_beds,0) AS request_extra_beds, COALESCE(p.extra_beds_count,0) AS extra_beds_count, govt_id_type, govt_id_num FROM stayvibe_stays LEFT JOIN stayvibe_stay_prefs p ON p.stay_id = stayvibe_stays.stay_id WHERE ${wantStayId ? 'stayvibe_stays.stay_id = ?' : "guest_name LIKE ? AND status NOT IN ('cancelled','closed','checked_out','void')"}${fo.sql} ORDER BY ABS(JULIANDAY(checkin_date) - JULIANDAY(?)) ASC LIMIT 1`
+        ).bind(wantStayId || `%${firstName}%`, ...fo.binds, checkInDate || await todayOf(url.searchParams.get('villaId'))).all()
         if (results.length > 0) {
           const r = results[0]
-          return json({ success: true, data: { stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, checkoutDate: r.checkout_date, nights: r.nights, adults: r.adults, children: r.children, phone: r.guest_phone, email: r.guest_email, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status, purposeOfVisit: r.purpose_of_visit, modeOfTransport: r.mode_of_transport, vehicleNumber: r.vehicle_number, eta: r.eta, nationality: r.nationality, city: r.city, state: r.state, country: r.country, requestEarlyCheckin: r.request_early_checkin, requestLateCheckout: r.request_late_checkout, requestBreakfast: r.request_breakfast, breakfastChoice: r.breakfast_choice, requestCab: r.request_cab, govtIdType: r.govt_id_type, govtIdNum: r.govt_id_num } })
+          return json({ success: true, data: { stayId: r.stay_id, guestName: r.guest_name, checkinDate: r.checkin_date, checkoutDate: r.checkout_date, nights: r.nights, adults: r.adults, children: r.children, phone: r.guest_phone, email: r.guest_email, driveFolderId: r.drive_folder_id, driveFolderUrl: r.drive_folder_url, status: r.status, purposeOfVisit: r.purpose_of_visit, modeOfTransport: r.mode_of_transport, vehicleNumber: r.vehicle_number, eta: r.eta, nationality: r.nationality, city: r.city, state: r.state, country: r.country, requestEarlyCheckin: r.request_early_checkin, requestLateCheckout: r.request_late_checkout, requestBreakfast: r.request_breakfast, breakfastChoice: r.breakfast_choice, requestCab: r.request_cab, requestExtraBeds: r.request_extra_beds, extraBedsCount: r.extra_beds_count, govtIdType: r.govt_id_type, govtIdNum: r.govt_id_num } })
         }
         return json({ success: true, data: null })
       }
@@ -6332,6 +6336,73 @@ export async function onRequest(ctx) {
       }
 
 
+      // The guest's check-in form as plain text (2026-10-27), for the GuestInfo-<stay>.txt file the Apps Script keeps in the
+      // guest's Drive folder: every answer the guest gave, names and ages included, "(not given)" for what they left blank, and
+      // the head count the form gave next to the booked one. Built here (src/utils/guestInfoText.js) so a change of wording is a
+      // deploy, not a paste into Google. `stamp` is the line in the text that says which submission it records.
+      if (action === 'getGuestInfoText') {
+        const stayId = url.searchParams.get('stayId') || ''
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const st = await DB.prepare(
+          `SELECT stay_id, villa_id, source, guest_name, booked_by_name, guest_phone, guest_email, checkin_date, checkout_date, nights,
+                  adults, children, dob, gender, nationality, home_address, home_address_line2, city, state, country, from_city, pincode,
+                  guest_list, purpose_of_visit, mode_of_transport, vehicle_number, eta, govt_id_type, govt_id_num,
+                  request_early_checkin, request_late_checkout, checkin_form_submitted, checkin_form_submitted_at
+             FROM stayvibe_stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!st) return err('Stay not found', 404)
+        const pf = await DB.prepare(
+          `SELECT request_breakfast, breakfast_choice, request_cab, request_extra_beds, extra_beds_count, expected_departure_time
+             FROM stayvibe_stay_prefs WHERE stay_id = ?`
+        ).bind(stayId).first()
+        const { results: kycRows } = await DB.prepare(
+          `SELECT guest_seq, guest_name, nationality, dob, gender, passport_number, passport_issue_date, passport_issue_place, passport_expiry,
+                  visa_number, visa_type, visa_issue_date, visa_issue_place, arrival_date_india, port_of_arrival, next_destination,
+                  home_country, home_country_address, docs_later
+             FROM stayvibe_stay_kyc WHERE stay_id = ? ORDER BY guest_seq`
+        ).bind(stayId).all()
+        // What the form's head count was when it was not the booked one (a database without the table has none to give).
+        let formCount = null
+        try {
+          const cr = await DB.prepare(
+            `SELECT requested_adults, requested_children, status FROM stayvibe_change_requests
+              WHERE stay_id = ? AND kind = 'checkin_form' ORDER BY created_at DESC LIMIT 1`
+          ).bind(stayId).first()
+          if (cr && cr.requested_adults != null) formCount = { adults: cr.requested_adults, children: cr.requested_children, status: cr.status }
+        } catch (e) { console.warn('getGuestInfoText: change request lookup failed:', e?.message || e) }
+        const tenant = await DB.prepare(`SELECT villa_name, checkin_time, checkout_time FROM platform_tenants WHERE tenant_id = ?`).bind(st.villa_id).first()
+        const built = buildGuestInfoText({
+          villaName: tenant?.villa_name || HOST_CONFIGS[st.villa_id]?.villas?.[0]?.full || '',
+          checkinTime: tenant?.checkin_time || '16:00', checkoutTime: tenant?.checkout_time || '11:00',
+          tz: await zoneFor(DB, st.villa_id),
+          stay: {
+            stayId: st.stay_id, bookedVia: st.source ? sourceLabel(st.source) : '', guestName: st.guest_name, bookedByName: st.booked_by_name,
+            phone: st.guest_phone, email: st.guest_email, checkin: st.checkin_date, checkout: st.checkout_date, nights: st.nights,
+            adults: st.adults, children: st.children, dob: st.dob, gender: st.gender, nationality: st.nationality,
+            homeAddress: st.home_address, homeAddressLine2: st.home_address_line2, city: st.city, state: st.state, country: st.country,
+            fromCity: st.from_city, pincode: st.pincode, guestList: st.guest_list, purposeOfVisit: st.purpose_of_visit,
+            modeOfTransport: st.mode_of_transport, vehicleNumber: st.vehicle_number, eta: st.eta,
+            govtIdType: st.govt_id_type, govtIdNum: st.govt_id_num,
+            requestEarlyCheckin: st.request_early_checkin, requestLateCheckout: st.request_late_checkout,
+            submittedAt: st.checkin_form_submitted ? st.checkin_form_submitted_at : null,
+          },
+          prefs: pf ? {
+            requestBreakfast: pf.request_breakfast, breakfastChoice: pf.breakfast_choice, requestCab: pf.request_cab,
+            requestExtraBeds: pf.request_extra_beds, extraBedsCount: pf.extra_beds_count, etd: pf.expected_departure_time,
+          } : null,
+          kyc: (kycRows || []).map(k => ({
+            seq: k.guest_seq, name: k.guest_name, nationality: k.nationality, dob: k.dob, gender: k.gender,
+            passportNumber: k.passport_number, passportIssueDate: k.passport_issue_date, passportIssuePlace: k.passport_issue_place, passportExpiry: k.passport_expiry,
+            visaNumber: k.visa_number, visaType: k.visa_type, visaIssueDate: k.visa_issue_date, visaIssuePlace: k.visa_issue_place,
+            arrivalDateIndia: k.arrival_date_india, portOfArrival: k.port_of_arrival, nextDestination: k.next_destination,
+            homeCountry: k.home_country, homeCountryAddress: k.home_country_address, docsLater: k.docs_later,
+          })),
+          formCount,
+        })
+        return json({ success: true, data: { stayId, text: built.text, stamp: built.stamp, namesListed: built.namesListed, partyOnForm: built.partyOnForm, partyBooked: built.partyBooked } })
+      }
+
       // The guests of one stay as names and ages, for the "Guest names & ages" section of Guest info: the booking's name plus
       // whatever the guest listed on the check-in form (the free-text box; for a foreign party the per-person passport blocks).
       // Fetched on demand, so no date of birth travels in the stay lists.
@@ -6347,15 +6418,10 @@ export async function onRequest(ctx) {
         const { results: kyc } = await DB.prepare(
           `SELECT guest_seq, guest_name, nationality, dob FROM stayvibe_stay_kyc WHERE stay_id = ? ORDER BY guest_seq`
         ).bind(stayId).all()
-        const seen = new Set(), guests = []
-        const keyOf = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-        const add = g => { const k = keyOf(g.name); if (!k || seen.has(k)) return; seen.add(k); guests.push(g) }
-        if (kyc && kyc.length) {
-          for (const k of kyc) add({ name: k.guest_name, age: ageFromDob(k.dob, today), ageLabel: ageLabelFromDob(k.dob, today), nationality: k.nationality || null })
-        } else {
-          add({ name: stay.guest_name, age: ageFromDob(stay.dob, today), ageLabel: ageLabelFromDob(stay.dob, today) })
-        }
-        for (const g of parseGuestList(stay.guest_list)) add(g)
+        const guests = collectGuests({
+          name: stay.guest_name, dob: stay.dob, guestList: stay.guest_list, onDate: today,
+          kyc: (kyc || []).map(k => ({ name: k.guest_name, nationality: k.nationality, dob: k.dob })),
+        })
         return json({ success: true, data: { stayId, booked: (parseInt(stay.adults) || 0) + (parseInt(stay.children) || 0), listed: guests.length, guests } })
       }
 
@@ -11118,7 +11184,7 @@ export async function onRequest(ctx) {
         const { results } = await DB.prepare(
           `SELECT stay_id, guest_name, checkin_date, checkout_date, nights,
                   guest_phone, guest_email, drive_folder_url, drive_folder_id,
-                  created_at, folder_created, folder_created_at
+                  created_at, folder_created, folder_created_at, checkin_form_submitted, checkin_form_submitted_at
            FROM stayvibe_stays
            WHERE status = 'pending_review'
              AND (checkout_date IS NULL OR checkout_date = '' OR checkout_date >= ${sqlDay(await todayOf(url.searchParams.get('villaId')))})${pr2.sql}
@@ -11137,6 +11203,9 @@ export async function onRequest(ctx) {
           createdAt:       r.created_at,
           folderCreated:   r.folder_created || 0,
           folderCreatedAt: r.folder_created_at || null,
+          // When the guest last sent the check-in form (a stored UTC time), so the Apps Script can tell whether the
+          // GuestInfo file in the folder records that submission or an earlier one.
+          formSubmittedAt: r.checkin_form_submitted ? (r.checkin_form_submitted_at || null) : null,
         })) })
       }
 

@@ -59,3 +59,19 @@ export function parseGuestList(text) {
   }
   return out
 }
+
+// The people a check-in form names, each once: a foreign party's passport blocks when there are any (`kyc`: { name, nationality,
+// dob }), otherwise the booking's guest, then whoever the free-text box lists. Ages are read on `onDate`: today for the owner's
+// screen, the check-in date for the Drive record. The same person written twice ("Priya Nair" / "priya  nair") counts once.
+export function collectGuests({ name, dob, kyc, guestList, onDate }) {
+  const seen = new Set(), guests = []
+  const keyOf = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const add = g => { const k = keyOf(g.name); if (!k || seen.has(k)) return; seen.add(k); guests.push(g) }
+  if (kyc && kyc.length) {
+    for (const k of kyc) add({ name: k.name, age: ageFromDob(k.dob, onDate), ageLabel: ageLabelFromDob(k.dob, onDate), nationality: k.nationality || null })
+  } else {
+    add({ name, age: ageFromDob(dob, onDate), ageLabel: ageLabelFromDob(dob, onDate) })
+  }
+  for (const g of parseGuestList(guestList)) add(g)
+  return guests
+}

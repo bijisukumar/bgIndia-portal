@@ -1,5 +1,5 @@
 // ============================================================
-// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.4
+// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.6
 // ============================================================
 // Paste into Apps Script editor of:
 //   "GVR Registration-Check-In form (Responses)"
@@ -9,6 +9,24 @@
 // via getTenantConfig (see v2.1 below).
 //
 // ── VERSION HISTORY (newest first) — bump on every change ──
+// v2.6  2026-10-27  GuestInfo-<stayId>.txt records EVERYTHING the guest
+//                    filled in on the check-in form: the names and ages of
+//                    the party, the head count the form gave next to the
+//                    booked one, date of birth, gender, address, ID type
+//                    (number masked to its last four), travel, expected
+//                    departure, every request, and "(not given)" for each
+//                    answer left blank. The Worker builds the text
+//                    (getGuestInfoText, src/utils/guestInfoText.js), so its
+//                    wording is a deploy, not a paste into Google; if the
+//                    Worker cannot answer, the shorter text this script
+//                    always built is written (guestInfoFallback). The file
+//                    is UPDATED IN PLACE rather than copied, and rewritten
+//                    when the guest sends the form again. findOpenStay is
+//                    now asked for the stay by id (two guests with the same
+//                    first name could be mixed up), and the extra floor beds
+//                    a guest asked for now reach this file and the guest's
+//                    confirmation email (the Worker never returned them).
+//                    The old Google-Form marker file lists the guests too.
 // —     2026-10-23  The time stamped into a Drive file name (CarPhoto-…, ID-…)
 //                    is the property's time zone (CLIENT.timezone, from
 //                    `timezone` in hosts/<id>/config.js via getTenantConfig),
@@ -331,6 +349,7 @@ function onGuestFormSubmit(e) {
         'Check-in:    ' + checkInDate + ' to ' + checkOutDate,
         'Submitted:   ' + new Date().toISOString(),
         'Adults:      ' + adults + (children ? ' | Children: ' + children : ''),
+        'Guests:      ' + (guestList || '(not given)'),
         'Citizenship: ' + citizenship,
         'ETA:         ' + eta,
         'Purpose:     ' + purpose,
@@ -390,6 +409,7 @@ function processPendingCheckInForms() {
     var docsResp = callWorker('GET', 'getGuestDocuments', { stayId: stay.stayId });
     var hasPendingDocs = docsResp && docsResp.success && docsResp.data && docsResp.data.length > 0;
     if (stay.folderCreated && !hasPendingDocs) {
+      refreshGuestInfo(stay);
       Logger.log('Stay ' + stay.stayId + ' fully processed, skipping'); return;
     }
     Logger.log('Processing: ' + stay.stayId + ' for ' + stay.guestName);
@@ -409,52 +429,15 @@ function processPendingCheckInForms() {
           return;
         }
       }
-      var fullStay = callWorker('GET', 'findOpenStay', { guestName: stay.guestName, checkInDate: stay.checkIn });
+      var fullStay = callWorker('GET', 'findOpenStay', { guestName: stay.guestName, checkInDate: stay.checkIn, stayId: stay.stayId });
       var s = (fullStay && fullStay.data) ? fullStay.data : {};
-      var adults   = parseInt(s.adults)   || 1;
-      var children = parseInt(s.children) || 0;
-      var lines = [
-        '============================================================',
-        '  GUEST REGISTRATION — ' + CLIENT.villaName,
-        '============================================================',
-        '',
-        'STAY DETAILS',
-        '  Check-in :  ' + stay.checkIn + ' (after ' + CLIENT.checkinTime + ')',
-        '  Check-out:  ' + (s.checkoutDate || stay.checkOut || 'TBD') + ' (by ' + CLIENT.checkoutTime + ')',
-        '  Nights   :  ' + (s.nights || stay.nights || 1),
-        '',
-        'GUEST DETAILS',
-        '  Name     :  ' + stay.guestName,
-        '  Nationality: ' + (s.nationality || 'Indian'),
-        '  Adults   :  ' + adults,
-      ];
-      if (children > 0) lines.push('  Children :  ' + children);
-      lines.push('  Total    :  ' + (adults + children) + ' guest(s)');
-      if (s.phone || stay.phone) lines.push('  Phone    :  ' + (s.phone || stay.phone));
-      if (s.email || stay.email) lines.push('  Email    :  ' + (s.email || stay.email));
-      lines.push('');
-      var hasTravel = s.purposeOfVisit || s.modeOfTransport || s.eta;
-      if (hasTravel) {
-        lines.push('TRAVEL');
-        if (s.purposeOfVisit)  lines.push('  Purpose  :  ' + s.purposeOfVisit);
-        if (s.modeOfTransport) lines.push('  Transport:  ' + s.modeOfTransport);
-        if (s.vehicleNumber)   lines.push('  Vehicle  :  ' + s.vehicleNumber);
-        if (s.eta)             lines.push('  ETA      :  ' + s.eta);
-        lines.push('');
-      }
-      var hasRequests = s.requestBreakfast || s.requestCab || s.requestEarlyCheckin || s.requestLateCheckout || s.requestExtraBeds;
-      lines.push('ADDITIONAL REQUESTS');
-      if (hasRequests) {
-        if (s.requestBreakfast)    lines.push('  ✓  Breakfast — ' + (s.breakfastChoice || 'Idli'));
-        if (s.requestCab)          lines.push('  ✓  Cab service');
-        if (s.requestEarlyCheckin) lines.push('  ✓  Early check-in');
-        if (s.requestLateCheckout) lines.push('  ✓  Late check-out');
-        if (s.requestExtraBeds)    lines.push('  ✓  Extra floor beds — ' + (s.extraBedsCount || 1) + ' bed(s)');
-      } else { lines.push('  None requested'); }
-      lines.push('');
-      lines.push('============================================================');
 
-      folder.createFile('GuestInfo-' + stay.stayId + '.txt', lines.join('\n'), 'text/plain');
+      // GuestInfo-<stayId>.txt: the Worker writes the text (every answer on the check-in form, names and ages included);
+      // if it cannot, the shorter text this script always built.
+      var info = fetchGuestInfo(stay.stayId);
+      var infoText = info ? info.text : guestInfoFallback(stay, s, CLIENT);
+      Logger.log('GuestInfo ' + saveGuestInfo(folder, stay.stayId, infoText) + ' for ' + stay.stayId +
+        (info ? '' : ' (the Worker could not build it: the short text was written)'));
 
       // Upload ID docs from D1
       var docUploadedCount = 0;
@@ -521,7 +504,7 @@ function processPendingCheckInForms() {
         Logger.log('Skipping D1 delete and status update for ' + stay.stayId + ' — pending docs remain');
       }
 
-      sendCheckinConfirmationEmails(stay, folder.getUrl(), lines.join('\n'), s, CLIENT);
+      sendCheckinConfirmationEmails(stay, folder.getUrl(), infoText, s, CLIENT);
 
     } catch(e) {
       Logger.log('Error processing ' + stay.stayId + ': ' + e.message);
@@ -548,6 +531,100 @@ function processPendingCheckInForms() {
   } catch(e) { Logger.log('Cleanup error: ' + e.message); }
 
   Logger.log('=== processPendingCheckInForms END ===');
+}
+
+// ── GUESTINFO FILE (v2.6) ──────────────────────────────────
+// The Worker builds the text of GuestInfo-<stayId>.txt from the check-in form (getGuestInfoText). Null when it cannot answer.
+function fetchGuestInfo(stayId) {
+  try {
+    var r = callWorker('GET', 'getGuestInfoText', { stayId: stayId });
+    if (r && r.success && r.data && r.data.text) return r.data;
+    Logger.log('getGuestInfoText gave no text for ' + stayId + ': ' + JSON.stringify(r));
+  } catch (e) { Logger.log('getGuestInfoText error for ' + stayId + ': ' + e.message); }
+  return null;
+}
+
+// Saves GuestInfo-<stayId>.txt in the guest's folder. A file of that name already there (an earlier run, or an older and shorter
+// text) is updated in place instead of copied. Returns 'created', 'updated' or 'unchanged'.
+function saveGuestInfo(folder, stayId, text) {
+  var name = 'GuestInfo-' + stayId + '.txt';
+  var it = folder.getFilesByName(name), found = 0, wrote = 0;
+  while (it.hasNext()) {
+    var f = it.next(); found++;
+    if (f.getBlob().getDataAsString() !== text) { f.setContent(text); wrote++; }
+  }
+  if (!found) { folder.createFile(name, text, 'text/plain'); return 'created'; }
+  return wrote ? 'updated' : 'unchanged';
+}
+
+// A guest who sends the check-in form AGAIN after their folder was made has new answers, and nothing else is left to do for
+// them, so this is the one place their GuestInfo file can be brought up to date. The Worker says when the form was last sent
+// (formSubmittedAt); the file carries the time of the submission it records ("Form recorded"). Only when the two differ, or the
+// file is missing, is the text fetched again: a stay that is simply waiting for the owner costs a few Drive reads and no Worker call.
+function refreshGuestInfo(stay) {
+  try {
+    if (!stay.formSubmittedAt || !stay.driveFolderUrl) return;
+    var m = stay.driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
+    if (!m) return;
+    var folder = DriveApp.getFolderById(m[1]);
+    var needle = ': ' + stay.formSubmittedAt + ' UTC';
+    var it = folder.getFilesByName('GuestInfo-' + stay.stayId + '.txt'), found = false, stale = false;
+    while (it.hasNext()) {
+      found = true;
+      if (it.next().getBlob().getDataAsString().indexOf(needle) < 0) stale = true;
+    }
+    if (found && !stale) return;
+    var info = fetchGuestInfo(stay.stayId);
+    if (!info) return;
+    Logger.log('GuestInfo ' + saveGuestInfo(folder, stay.stayId, info.text) + ' for ' + stay.stayId + ' (the form was sent again)');
+  } catch (e) { Logger.log('GuestInfo refresh error for ' + stay.stayId + ': ' + e.message); }
+}
+
+// The text this script built itself before the Worker took it over: written only when getGuestInfoText cannot answer.
+function guestInfoFallback(stay, s, CLIENT) {
+  var adults   = parseInt(s.adults)   || 1;
+  var children = parseInt(s.children) || 0;
+  var lines = [
+    '============================================================',
+    '  GUEST REGISTRATION — ' + CLIENT.villaName,
+    '============================================================',
+    '',
+    'STAY DETAILS',
+    '  Check-in :  ' + stay.checkIn + ' (after ' + CLIENT.checkinTime + ')',
+    '  Check-out:  ' + (s.checkoutDate || stay.checkOut || 'TBD') + ' (by ' + CLIENT.checkoutTime + ')',
+    '  Nights   :  ' + (s.nights || stay.nights || 1),
+    '',
+    'GUEST DETAILS',
+    '  Name     :  ' + stay.guestName,
+    '  Nationality: ' + (s.nationality || 'Indian'),
+    '  Adults   :  ' + adults,
+  ];
+  if (children > 0) lines.push('  Children :  ' + children);
+  lines.push('  Total    :  ' + (adults + children) + ' guest(s)');
+  if (s.phone || stay.phone) lines.push('  Phone    :  ' + (s.phone || stay.phone));
+  if (s.email || stay.email) lines.push('  Email    :  ' + (s.email || stay.email));
+  lines.push('');
+  var hasTravel = s.purposeOfVisit || s.modeOfTransport || s.eta;
+  if (hasTravel) {
+    lines.push('TRAVEL');
+    if (s.purposeOfVisit)  lines.push('  Purpose  :  ' + s.purposeOfVisit);
+    if (s.modeOfTransport) lines.push('  Transport:  ' + s.modeOfTransport);
+    if (s.vehicleNumber)   lines.push('  Vehicle  :  ' + s.vehicleNumber);
+    if (s.eta)             lines.push('  ETA      :  ' + s.eta);
+    lines.push('');
+  }
+  var hasRequests = s.requestBreakfast || s.requestCab || s.requestEarlyCheckin || s.requestLateCheckout || s.requestExtraBeds;
+  lines.push('ADDITIONAL REQUESTS');
+  if (hasRequests) {
+    if (s.requestBreakfast)    lines.push('  ✓  Breakfast — ' + (s.breakfastChoice || 'Idli'));
+    if (s.requestCab)          lines.push('  ✓  Cab service');
+    if (s.requestEarlyCheckin) lines.push('  ✓  Early check-in');
+    if (s.requestLateCheckout) lines.push('  ✓  Late check-out');
+    if (s.requestExtraBeds)    lines.push('  ✓  Extra floor beds — ' + (s.extraBedsCount || 1) + ' bed(s)');
+  } else { lines.push('  None requested'); }
+  lines.push('');
+  lines.push('============================================================');
+  return lines.join('\n');
 }
 
 // ── PROCESS PENDING DOCUMENT UPLOADS (car/plate photos, etc.) ──────────

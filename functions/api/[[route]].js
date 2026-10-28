@@ -58,7 +58,7 @@ const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, addDays } from '../../src/server/icalHub.js'
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
-import { stayHolds, stayFlags, holdPhrase } from '../../src/utils/stayHolds.js'
+import { stayHolds, stayFlags, holdPhrase, dayMonth } from '../../src/utils/stayHolds.js'
 import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 // The biggest party the check-in form takes without asking the guest to confirm the number with the host.
@@ -994,6 +994,10 @@ async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
     // up for sale there.
     if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('The link did not return an iCal calendar')
     const events = parseIcsEvents(text)
+    // Every UID this feed has EVER listed (live, or removed since): anything else is new to us, which for a platform with no email
+    // feed into StayVibe is the only sign of a booking (see notifyNewPlatformBookings).
+    const { results: knownRows } = await DB.prepare(`SELECT uid FROM stayvibe_ical_blocks WHERE feed_id = ?`).bind(feed.feed_id).all()
+    const known = new Set((knownRows || []).map(r => r.uid))
     const statements = events.map(ev => DB.prepare(`
       INSERT INTO stayvibe_ical_blocks
         (block_id, feed_id, villa_id, channel, uid, checkin_date, checkout_date, summary, first_seen_at, last_seen_at, removed_at)
@@ -1021,7 +1025,12 @@ async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
       `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'ok', last_sync_error = NULL, last_sync_count = ? WHERE feed_id = ?`
     ).bind(nowStr, events.length, feed.feed_id))
     for (let i = 0; i < statements.length; i += 50) await DB.batch(statements.slice(i, i + 50))
-    return { feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length }
+    return {
+      feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length,
+      // for notifyNewPlatformBookings: the first read of a feed is its baseline, everything already there is not "new"
+      villaId: feed.villa_id, baseline: !feed.last_synced_at,
+      newBlocks: events.filter(ev => !known.has(ev.uid)).map(ev => ({ uid: ev.uid, checkin: ev.checkin, checkout: ev.checkout, summary: ev.summary || '' })),
+    }
   } catch (e) {
     await DB.prepare(
       `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'error', last_sync_error = ? WHERE feed_id = ?`
@@ -1032,7 +1041,7 @@ async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
 
 // Shared by the cron-triggered sync and the owner's manual "Sync now" button
 // - one code path, two callers.
-async function syncIcalFeedsForVillas(DB, villaIdFilter) {
+async function syncIcalFeedsForVillas(DB, villaIdFilter, env) {
   const { results: feeds } = await (villaIdFilter
     ? DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE is_active = 1 AND villa_id = ?`).bind(villaIdFilter)
     // tenant-scope-exempt: the cron caller passes no filter on purpose - it
@@ -1041,6 +1050,7 @@ async function syncIcalFeedsForVillas(DB, villaIdFilter) {
   ).all()
   const summary = []
   for (const feed of (feeds || [])) summary.push(await syncOneIcalFeed(DB, feed))
+  if (env) await notifyNewPlatformBookings(env, DB, summary)
   return summary
 }
 
@@ -1069,9 +1079,99 @@ async function refreshFeedsBeforeExport(DB, ctx, villaId, targetChannel, { maxAg
     if (claim.meta?.changes === 1) jobs.push(syncOneIcalFeed(DB, feed, { timeoutMs: perFeedTimeoutMs }))
   }
   if (!jobs.length) return
-  const settled = Promise.allSettled(jobs)
+  const settled = Promise.allSettled(jobs).then(async rs => {
+    // a booking that has just appeared on a platform's calendar is told to the owner (never delays the importer: this runs after the reply)
+    try { await notifyNewPlatformBookings(ctx?.env, DB, rs.map(x => (x.status === 'fulfilled' ? x.value : null))) }
+    catch (e) { console.warn('new platform booking alert:', e?.message || e) }
+    return rs
+  })
   ctx?.waitUntil?.(settled)
   await Promise.race([settled, new Promise(resolve => setTimeout(resolve, budgetMs))])
+}
+
+// ── A BOOKING THAT ARRIVES ONLY AS BLOCKED DATES ──────────────────────────
+// Airbnb's bookings reach StayVibe as emails and become stays within minutes. A platform with no such feed (Agoda, Booking.com,
+// Vrbo ...) shows up only as a NEW block of dates in its calendar: no guest, no check-in link, nothing on the manager's list, and
+// nobody told. So when a feed we read lists a block we have never seen, the owner is emailed at once (2026-10-28, Agoda being
+// opened for sale). The first read of a newly added feed is its baseline, so what is already there is not "new". The email also
+// says whether those nights are ALREADY taken here (a stay, a night the owner closed, a held night, another platform's block):
+// then it is a double booking to sort out today, not just a record to add. Dated the same, same platform, once in 7 days.
+async function notifyNewPlatformBookings(env, DB, results) {
+  if (!env) return
+  for (const r of results || []) {
+    if (!r || !r.ok || r.baseline || !r.newBlocks?.length) continue
+    if (channelsMatch(r.channel, 'airbnb')) continue            // its bookings arrive as emails and become stays
+    const today = todayInZone(await zoneFor(DB, r.villaId))
+    for (const b of r.newBlocks) {
+      if (!b.checkout || b.checkout <= today) continue          // already over
+      try { await alertNewPlatformBooking(env, DB, r, b) }
+      catch (e) { console.warn('new platform booking alert:', e?.message || e) }
+    }
+  }
+}
+
+async function alertNewPlatformBooking(env, DB, feedResult, block) {
+  const villaId = feedResult.villaId
+  const platform = sourceLabel(feedResult.channel)
+  const nights = Math.max(1, Math.round((Date.parse(block.checkout + 'T00:00:00Z') - Date.parse(block.checkin + 'T00:00:00Z')) / 86400000))
+  const range = `${dayMonth(block.checkin)} to ${dayMonth(block.checkout)}`
+  const overlaps = (aS, aE, bS, bE) => aS < bE && aE > bS
+
+  // What already holds those nights here.
+  const clashes = []
+  const { results: stayRows } = await DB.prepare(
+    `SELECT stay_id, guest_name, source, checkin_date, checkout_date FROM stayvibe_stays
+      WHERE villa_id = ? AND status NOT IN ('cancelled', 'void') AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
+        AND checkin_date < ? AND checkout_date > ?`
+  ).bind(villaId, block.checkout, block.checkin).all()
+  for (const s of stayRows || []) clashes.push(`${s.guest_name || 'A guest'} (${sourceLabel(s.source || 'direct')}), ${dayMonth(s.checkin_date)} to ${dayMonth(s.checkout_date)}`)
+  const { results: otherBlocks } = await DB.prepare(
+    `SELECT b.channel, b.checkin_date, b.checkout_date FROM stayvibe_ical_blocks b JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
+      WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1 AND b.feed_id != ? AND b.checkin_date < ? AND b.checkout_date > ?`
+  ).bind(villaId, feedResult.feedId, block.checkout, block.checkin).all()
+  for (const o of otherBlocks || []) {
+    // a platform block for the same booking as a stay already listed is the same thing twice
+    if ((stayRows || []).some(s => overlaps(s.checkin_date, s.checkout_date, o.checkin_date, o.checkout_date))) continue
+    const other = sourceLabel(o.channel)
+    clashes.push(`${/^[aeiou]/i.test(other) ? 'an' : 'a'} ${other} block, ${dayMonth(o.checkin_date)} to ${dayMonth(o.checkout_date)}`)
+  }
+  for (const o of await loadDateBlocks(DB, villaId, block.checkin, block.checkout)) clashes.push(`nights you closed by hand, ${dayMonth(o.start_date)} to ${dayMonth(o.end_date)}`)
+  const { results: nearby } = await DB.prepare(
+    `SELECT stay_id, guest_name, checkin_date, checkout_date, early_checkin_time, late_checkout_time FROM stayvibe_stays
+      WHERE villa_id = ? AND status NOT IN ('cancelled', 'void') AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
+        AND checkout_date >= ? AND checkin_date <= ?`
+  ).bind(villaId, block.checkin, block.checkout).all()
+  for (const h of heldNights(nearby, await holdRules(DB, villaId), '')) {
+    if (h.night >= block.checkin && h.night < block.checkout) clashes.push(`the night of ${dayMonth(h.night)} is held for ${h.guest || 'a guest'}'s ${holdPhrase(h)}`)
+  }
+
+  const subject = clashes.length
+    ? `⚠️ ${platform} shows nights you already have: ${range}`
+    : `📅 New ${platform} booking on your calendar: ${range} (${nights} night${nights === 1 ? '' : 's'})`
+  const since = new Date(Date.now() - 7 * 864e5).toISOString()
+  const dup = await DB.prepare(
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'platform_booking' AND subject = ? AND created_at > ? LIMIT 1`
+  ).bind(villaId, subject, since).first()
+  if (dup) return
+  const lines = [
+    `Source: ${platform} calendar > StayVibe calendar sync`,
+    clashes.length
+      ? `Action: ${platform} shows nights as taken that StayVibe already has taken. Check this today: it may be a double booking.`
+      : `Action: a booking appeared on ${platform}'s calendar and StayVibe has no guest record for it.`,
+    '',
+    `Platform:  ${platform}`,
+    `Dates:     ${range} (${nights} night${nights === 1 ? '' : 's'}; the guest arrives on the first date and leaves on the last)`,
+    `Called:    ${block.summary && block.summary.trim() ? '"' + block.summary.trim() + '"' : '(no description)'}`,
+    ...(clashes.length ? ['', 'Already taken here:', ...clashes.map(c => '  - ' + c)] : []),
+    '',
+    `Only the dates come through a platform's calendar: no name, phone or price.`,
+    clashes.length
+      ? `What to do: open ${platform}'s bookings page, find this booking and the one it clashes with, and move or cancel one of them.`
+      : `What to do: open ${platform}'s bookings page for the guest's details, then add the stay in StayVibe (New booking, source ${platform}) so the check-in link, your manager's list and your reports have it.`,
+    `The nights close on your other platforms' calendars when each next reads your StayVibe link (usually within a couple of hours).`,
+    `Time: ${new Date().toISOString()}`,
+  ]
+  await sendAlert(env, subject, lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'platform_booking')
 }
 
 // 256 random bits, URL-safe: the whole secret in a platform's calendar link.
@@ -3161,7 +3261,7 @@ export async function onRequest(ctx) {
   if (action === 'syncIcalFeeds' && method === 'POST') {
     const secret = request.headers.get('X-Cron-Secret') || ''
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
-    const results = await syncIcalFeedsForVillas(DB, null)
+    const results = await syncIcalFeedsForVillas(DB, null, env)
     return json({ success: true, data: { feeds: results.length, results } })
   }
 
@@ -7185,7 +7285,7 @@ export async function onRequest(ctx) {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const villaId = body.villaId || DEFAULT_VILLA_ID
         assertPropertyAccess(payload, villaId)
-        const results = await syncIcalFeedsForVillas(DB, villaId)
+        const results = await syncIcalFeedsForVillas(DB, villaId, env)
         return json({ success: true, data: { feeds: results.length, results } })
       }
 

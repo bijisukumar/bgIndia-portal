@@ -27,6 +27,10 @@
 //                    a guest asked for now reach this file and the guest's
 //                    confirmation email (the Worker never returned them).
 //                    The old Google-Form marker file lists the guests too.
+//                    refreshGuestInfoFiles(): run it ONCE from the editor
+//                    after pasting; it brings the file of every guest who
+//                    is still to arrive (or in the villa) and has sent the
+//                    form up to this format. Safe to run again.
 // —     2026-10-23  The time stamped into a Drive file name (CarPhoto-…, ID-…)
 //                    is the property's time zone (CLIENT.timezone, from
 //                    `timezone` in hosts/<id>/config.js via getTenantConfig),
@@ -625,6 +629,31 @@ function guestInfoFallback(stay, s, CLIENT) {
   lines.push('');
   lines.push('============================================================');
   return lines.join('\n');
+}
+
+// Run ONCE from the editor after pasting v2.6: brings the GuestInfo file of every guest who is still to arrive (or is in the villa)
+// and has sent the check-in form up to the current format, in place. A stay with no form or no Drive folder is skipped; a file that
+// already holds the same text is left alone, so running it again is harmless. The log ends with the counts.
+function refreshGuestInfoFiles() {
+  var CLIENT = getClient();
+  var resp = callWorker('GET', 'getUpcomingStays', { villaId: CLIENT.villaId });
+  if (!resp || !resp.success || !resp.data) { Logger.log('refreshGuestInfoFiles: could not read the stays: ' + JSON.stringify(resp)); return; }
+  var counts = { created: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0 };
+  resp.data.forEach(function(s) {
+    var m = (s.checkin_form_submitted && s.drive_folder_url) ? String(s.drive_folder_url).match(/folders\/([a-zA-Z0-9_-]+)/) : null;
+    if (!m) { counts.skipped++; return; }
+    try {
+      var info = fetchGuestInfo(s.stay_id);
+      if (!info) { counts.failed++; return; }
+      var res = saveGuestInfo(DriveApp.getFolderById(m[1]), s.stay_id, info.text);
+      counts[res]++;
+      Logger.log(s.guest_name + ' (' + s.stay_id + '): ' + res);
+    } catch (e) {
+      counts.failed++;
+      Logger.log('refreshGuestInfoFiles ' + s.stay_id + ': ' + e.message);
+    }
+  });
+  Logger.log('refreshGuestInfoFiles: ' + JSON.stringify(counts));
 }
 
 // ── PROCESS PENDING DOCUMENT UPLOADS (car/plate photos, etc.) ──────────

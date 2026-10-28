@@ -10,8 +10,8 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { addDays } from '../../utils/stayHolds'
 import AvailabilityNote from '../../components/AvailabilityNote'
 import {
-  getTariffEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
-  OVERFLOW_PER_GUEST_PER_NIGHT, OVERFLOW_MAX_RECOMMENDED, RATE_CARD_MAX_GUESTS, getBedroomEstimate,
+  getSeasonalEstimate, estimateNotes, describeEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
+  getBedroomEstimate,
   EXTRA_ITEMS,
 } from '../../utils/villaPricing'
 
@@ -326,6 +326,7 @@ export default function EnquiryDetail() {
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
   const [rateCard, setRateCard] = useState(FALLBACK_RATE_CARDS.dwarka)
+  const [seasons, setSeasons] = useState([])   // the busy seasons (Rates page); none until the owner adds one
   const [pricingParams, setPricingParams] = useState(null)   // { checkInDate, checkOutDate, adults, children, infants }
   const [pricingNote, setPricingNote] = useState(null)
   const [pricingBusy, setPricingBusy] = useState(false)
@@ -364,6 +365,7 @@ export default function EnquiryDetail() {
   useEffect(() => {
     api.getRateCard(DEFAULT_VILLA_ID).then(d => {
       if (d?.rateCard?.length) setRateCard(d.rateCard)
+      if (Array.isArray(d?.seasons)) setSeasons(d.seasons)
     }).catch(() => {})
   }, [])
 
@@ -644,16 +646,9 @@ export default function EnquiryDetail() {
     if (totalGuests === 0) { showToast('Add guest counts first', 'error'); return }
     if (nights === 0) { showToast('Add check-in and check-out dates first', 'error'); return }
 
-    const estimate = getTariffEstimate(rateCard, { adults: adultsNum, children: childrenNum, nights })
-
-    if (estimate.overflowGuests > 0) {
-      const msg = estimate.withinRecommended
-        ? `${estimate.overflowGuests} extra guest${estimate.overflowGuests === 1 ? '' : 's'} beyond ${RATE_CARD_MAX_GUESTS} added at ₹${OVERFLOW_PER_GUEST_PER_NIGHT}/guest/night (floor beds)`
-        : `${estimate.overflowGuests} extra guests beyond ${RATE_CARD_MAX_GUESTS} — exceeds the recommended max of ${OVERFLOW_MAX_RECOMMENDED} extra guests on floor beds`
-      setPricingNote({ msg, level: estimate.withinRecommended ? 'info' : 'warn' })
-    } else {
-      setPricingNote(null)
-    }
+    // night by night: a stay that runs into a busy season pays that season's price for those nights (Rates page)
+    const estimate = getSeasonalEstimate(rateCard, seasons, { adults: adultsNum, children: childrenNum, checkIn: pricingParams.checkInDate, checkOut: pricingParams.checkOutDate })
+    setPricingNote(estimateNotes(estimate))
 
     setPricingBusy(true)
     try {
@@ -673,7 +668,9 @@ export default function EnquiryDetail() {
         extraCharges: e.extra_charges || 0, extraLines: e.extra_lines || null,
         status: e.status, notes: e.notes,
       })
-      showToast(`Estimated ₹${estimate.tariffPerNight.toLocaleString('en-IN')}/night × ${nights} night${nights === 1 ? '' : 's'} — saved ✓`)
+      showToast(estimate.seasonal
+        ? `Estimated ${fmt(estimate.total)}: ${describeEstimate(estimate)} — saved ✓`
+        : `Estimated ₹${estimate.tariffPerNight.toLocaleString('en-IN')}/night × ${nights} night${nights === 1 ? '' : 's'} — saved ✓`)
       load()
     } catch { showToast('Failed to save pricing', 'error') }
     finally { setPricingBusy(false) }

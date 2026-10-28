@@ -374,6 +374,10 @@ export const api = {
   getEnquiryDashboard:  (vId, year)   => get('getEnquiryDashboard', year ? { villaId: vId, year } : { villaId: vId }),
   getEnquiryFollowUps:  (vId)         => get('getEnquiryFollowUps', { villaId: vId }),
   getRateCard:          (vId)         => get('getRateCard', { villaId: vId }),
+  getRatePlan:          (vId)         => get('getRatePlan', { villaId: vId }),
+  saveRateCard:         (data)        => post('saveRateCard', data),
+  saveRateSeason:       (data)        => post('saveRateSeason', data),
+  deleteRateSeason:     (data)        => post('deleteRateSeason', data),
 
   // ── MAINTENANCE / SCHEMA VALIDATION ────────────────────────
   getSchemaSnapshot: () => get('getSchemaSnapshot'),

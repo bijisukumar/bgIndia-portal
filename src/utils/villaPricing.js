@@ -17,6 +17,7 @@
 //   the recommended range — booking is still allowed, just surfaced as a note).
 
 import { CONFIG } from '../config'
+import { estimateStay } from './seasonRates'
 
 export const OVERFLOW_PER_GUEST_PER_NIGHT = CONFIG.pricing.overflowPerGuestPerNight
 export const OVERFLOW_MAX_RECOMMENDED = CONFIG.pricing.overflowMaxRecommended
@@ -97,6 +98,45 @@ export function getTariffEstimate(rateCard, { adults = 0, children = 0, nights =
     overflowGuests,
     withinRecommended,
   }
+}
+
+// ── BUSY SEASONS (2026-10-28) ────────────────────────────────
+// The same estimate, night by night: a stay that runs into a busy season (the Rates page) pays that season's price for those
+// nights. With no season in play it is exactly getTariffEstimate. The rules live in utils/seasonRates.js, shared with the Worker.
+export function getSeasonalEstimate(rateCard, seasons, { adults = 0, children = 0, checkIn, checkOut }) {
+  return estimateStay({
+    rateCard, seasons, adults, children, checkIn, checkOut,
+    overflowPerGuest: OVERFLOW_PER_GUEST_PER_NIGHT, overflowMax: OVERFLOW_MAX_RECOMMENDED,
+  })
+}
+
+const rupees = n => `₹${Number(n || 0).toLocaleString('en-IN')}`
+
+// "₹14,025 × 2 nights + Christmas / New Year ₹18,233 × 2 nights": the nights of a priced stay, grouped by season and price
+export function describeEstimate(est) {
+  const groups = []
+  for (const n of est.perNight) {
+    const key = `${n.season ? n.season.id : ''}|${n.rate}`
+    const last = groups[groups.length - 1]
+    if (last && last.key === key) last.nights++
+    else groups.push({ key, nights: 1, rate: n.rate, name: n.season ? n.season.name : '' })
+  }
+  return groups.map(g => `${g.name ? g.name + ' ' : ''}${rupees(g.rate)} × ${g.nights} night${g.nights === 1 ? '' : 's'}`).join(' + ')
+}
+
+// The note under "Get pricing": floor-bed guests, the busy season in play, a minimum stay not met. null when there is nothing to say.
+export function estimateNotes(est) {
+  const notes = []
+  let warn = false
+  if (est.overflowGuests > 0) {
+    notes.push(est.withinRecommended
+      ? `${est.overflowGuests} extra guest${est.overflowGuests === 1 ? '' : 's'} beyond ${RATE_CARD_MAX_GUESTS} added at ₹${OVERFLOW_PER_GUEST_PER_NIGHT}/guest/night (floor beds)`
+      : `${est.overflowGuests} extra guests beyond ${RATE_CARD_MAX_GUESTS} — exceeds the recommended max of ${OVERFLOW_MAX_RECOMMENDED} extra guests on floor beds`)
+    if (!est.withinRecommended) warn = true
+  }
+  if (est.seasonal) notes.push(`Busy season, priced night by night: ${describeEstimate(est)}`)
+  for (const n of est.minNightsNotes) { notes.push(n); warn = true }
+  return notes.length ? { msg: notes.join('. '), level: warn ? 'warn' : 'info' } : null
 }
 
 // ── DISCOUNT CATEGORIES ───────────────────────────────────────

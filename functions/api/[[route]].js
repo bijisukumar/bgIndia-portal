@@ -76,6 +76,7 @@ import { withRegistrationFromTwins } from '../../src/utils/twinStays.js'
 import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs, wallMs, zoneAbbr, stampLong, localiseStamps } from '../../src/utils/tz.js'
 import { collectGuests } from '../../src/utils/guestList.js'
 import { buildGuestInfoText } from '../../src/utils/guestInfoText.js'
+import { estimateStay, validateSeason, validateRateCardRows, DEFAULT_OVERFLOW_PER_GUEST, DEFAULT_OVERFLOW_MAX, isYmd } from '../../src/utils/seasonRates.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -896,6 +897,44 @@ function genStayId(villaId = 'dwarka') {
 }
 function genId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+// ── BUSY-SEASON RATES (2026-10-28) ─────────────────────────────────────────────────────────────────────────────────
+// The rate card prices a night by party size all year; a season (table stayvibe_rate_seasons, scripts/migrate-rate-seasons.sql) changes
+// the price for a range of dates. The pricing itself is src/utils/seasonRates.js, shared with the screens. Every read is wrapped: a
+// database without the table prices from the card alone and nothing else changes.
+function publicSeason(r) {
+  let card = null
+  if (r.card_json) { try { card = JSON.parse(r.card_json) } catch { card = null } }
+  return {
+    id: r.season_id, villaId: r.villa_id, name: r.name, startDate: r.start_date, endDate: r.end_date, yearly: !!r.yearly,
+    mode: r.mode === 'card' ? 'card' : 'percent', upliftPct: r.uplift_pct == null ? 0 : r.uplift_pct, card,
+    minNights: r.min_nights == null ? null : r.min_nights, active: !!r.active, notes: r.notes || '',
+  }
+}
+async function loadSeasons(DB, villaId, all = false) {
+  try {
+    const { results } = await DB.prepare(
+      `SELECT season_id, villa_id, name, start_date, end_date, yearly, mode, uplift_pct, card_json, min_nights, active, notes
+         FROM stayvibe_rate_seasons WHERE villa_id = ?${all ? '' : ' AND active = 1'} ORDER BY start_date, name`
+    ).bind(villaId).all()
+    return (results || []).map(publicSeason)
+  } catch (e) {
+    console.warn('loadSeasons (no table yet?):', e?.message || e)
+    return []
+  }
+}
+async function seasonsTableReady(DB) {
+  try {
+    // tenant-scope-exempt: an existence probe of the table that reads no tenant's row
+    await DB.prepare(`SELECT 1 FROM stayvibe_rate_seasons LIMIT 1`).first()
+    return true
+  } catch { return false }
+}
+// the floor-bed charge and the recommended limit for a villa (its own config, else the long-standing 750 and 4)
+function overflowSettings(villaId) {
+  const p = HOST_CONFIGS[villaId]?.pricing
+  return { overflowPerGuest: Number(p?.overflowPerGuestPerNight) || DEFAULT_OVERFLOW_PER_GUEST, overflowMax: Number(p?.overflowMaxRecommended) || DEFAULT_OVERFLOW_MAX }
 }
 
 // ── ICAL PARSER (channel calendar sync) ───────────────────────────────────
@@ -2865,41 +2904,31 @@ export async function onRequest(ctx) {
     if (!link) return json({ success: false, error: 'Invalid link' }, 404)
     if (!link.is_active) return json({ success: false, error: 'Link deactivated' }, 403)
 
-    const ci = qCheckin ? new Date(qCheckin) : null
-    const co = qCheckout ? new Date(qCheckout) : null
-    if (!ci || !co || isNaN(ci) || isNaN(co) || co <= ci) return err('Valid checkinDate/checkoutDate required')
-    const nights = Math.round((co - ci) / 86400000)
+    const ciYmd = String(qCheckin || '').slice(0, 10), coYmd = String(qCheckout || '').slice(0, 10)
+    if (!isYmd(ciYmd) || !isYmd(coYmd) || coYmd <= ciYmd) return err('Valid checkinDate/checkoutDate required')
 
     const adults = Math.max(0, parseInt(qAdults) || 0)
     const children = Math.max(0, parseInt(qChildren) || 0)
-    const billableGuests = adults + children
 
     const { results: rateCardRows } = await DB.prepare(
       `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
     ).bind(link.villa_id).all()
     const rateCard = (rateCardRows || []).map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night }))
 
-    const OVERFLOW_PER_GUEST_PER_NIGHT = 750, OVERFLOW_MAX_RECOMMENDED = 4
+    // Priced night by night (src/utils/seasonRates.js): a stay that runs into a busy season pays that season's price for those
+    // nights. The reply names the season and its nights, never its percentage or its own prices: the page shows an answer, not the
+    // rate card.
+    const est = estimateStay({
+      rateCard, seasons: await loadSeasons(DB, link.villa_id), adults, children, checkIn: ciYmd, checkOut: coYmd,
+      ...overflowSettings(link.villa_id),
+    })
+    const { nights, billableGuests, tariffPerNight, overflowGuests, withinRecommended } = est
     const VILLA_BEDROOMS = { dwarka: 4 }
-    let tariffPerNight = 0, overflowGuests = 0, withinRecommended = true
-    if (rateCard.length && billableGuests > 0) {
-      const maxRow = rateCard[rateCard.length - 1]
-      const exact = rateCard.find(r => r.guests === billableGuests)
-      if (exact) {
-        tariffPerNight = exact.tariff
-      } else if (billableGuests < rateCard[0].guests) {
-        tariffPerNight = rateCard[0].tariff
-      } else {
-        overflowGuests = billableGuests - maxRow.guests
-        tariffPerNight = maxRow.tariff + overflowGuests * OVERFLOW_PER_GUEST_PER_NIGHT
-        withinRecommended = overflowGuests <= OVERFLOW_MAX_RECOMMENDED
-      }
-    }
     const bedroomEstimate = billableGuests > 0
       ? Math.min(VILLA_BEDROOMS[link.villa_id] || 4, Math.ceil(billableGuests / 2))
       : (VILLA_BEDROOMS[link.villa_id] || 4)
 
-    const subtotal = tariffPerNight * nights
+    const subtotal = est.total
     const discountPct = link.discount_pct || 0
     const total = Math.round(subtotal * (1 - discountPct / 100))
 
@@ -2909,6 +2938,7 @@ export async function onRequest(ctx) {
       agentName: link.agent_name, nights, billableGuests, bedroomEstimate,
       tariffPerNight, subtotal, discountPct, total,
       overflowGuests, withinRecommended,
+      seasons: est.seasons.map(s => ({ name: s.name, nights: s.nights })), minNightsNotes: est.minNightsNotes,
     } })
   }
 
@@ -4665,7 +4695,23 @@ export async function onRequest(ctx) {
           `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
         ).bind(villaId).all()
         const rateCard = results.map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night }))
-        return json({ success: true, data: { villaId, rateCard } })
+        // the ACTIVE busy seasons come with the card, so every screen that quotes can price by date (none when the table is not there yet)
+        return json({ success: true, data: { villaId, rateCard, seasons: await loadSeasons(DB, villaId) } })
+      }
+
+      // The Rates page (2026-10-28): the base card, EVERY season (the switched-off ones too) and the settings the page explains. Owner only.
+      if (action === 'getRatePlan') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const { results: cardRows } = await DB.prepare(
+          `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+        ).bind(villaId).all()
+        return json({ success: true, data: {
+          villaId, rateCard: cardRows.map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night })),
+          seasons: await loadSeasons(DB, villaId, true), seasonsReady: await seasonsTableReady(DB),
+          maxGuests: partyLimit(HOST_CONFIGS[villaId]?.pricing), ...overflowSettings(villaId),
+        } })
       }
 
       if (action === 'getInventoryRestockLog') {
@@ -9534,6 +9580,87 @@ export async function onRequest(ctx) {
       // The owner's decision on a pending change (2026-10-27). Approving applies the new party to the stay (adults + children must
       // add up to what was asked for) and lifts the block on "ready for check-in"; declining keeps the booked party. The portal
       // cannot accept or decline anything IN Airbnb: for an Airbnb request the owner does that there first and records it here.
+      // ── RATES (2026-10-28): the owner edits the base rate card and the busy seasons. Owner only; each change is audited. ──────────
+      if (action === 'saveRateCard') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const v = validateRateCardRows(body.rows, partyLimit(HOST_CONFIGS[villaId]?.pricing))
+        if (!v.ok) return err(v.error)
+        const { results: before } = await DB.prepare(
+          `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ?`
+        ).bind(villaId).all()
+        const was = Object.fromEntries((before || []).map(r => [r.guest_count, r.tariff_per_night]))
+        const changed = v.rows.filter(r => was[r.guests] !== r.tariff).map(r => `${r.guests}: ${was[r.guests] ?? '-'} → ${r.tariff}`)
+        const gone = Object.keys(was).filter(g => !v.rows.some(r => String(r.guests) === g))
+        if (!changed.length && !gone.length) return json({ success: true, data: { villaId, rateCard: v.rows, unchanged: true } })
+        const stmts = v.rows.map(r => DB.prepare(
+          `INSERT INTO stayvibe_villa_rate_cards (villa_id, guest_count, tariff_per_night, created_by, updated_by) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(villa_id, guest_count) DO UPDATE SET tariff_per_night = excluded.tariff_per_night, updated_by = excluded.updated_by, updated_at = datetime('now')`
+        ).bind(villaId, r.guests, r.tariff, actor, actor))
+        stmts.push(DB.prepare(
+          `DELETE FROM stayvibe_villa_rate_cards WHERE villa_id = ? AND guest_count NOT IN (${v.rows.map(() => '?').join(',')})`
+        ).bind(villaId, ...v.rows.map(r => r.guests)))
+        stmts.push(DB.prepare(
+          `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'rates', NULL, ?, datetime('now'))`
+        ).bind(genId('LOG'), `Rate card changed by ${actor} (guests: was → now) ${changed.join('; ')}${gone.length ? `; removed ${gone.join(', ')}` : ''}`.slice(0, 900)))
+        await DB.batch(stmts)
+        return json({ success: true, data: { villaId, rateCard: v.rows } })
+      }
+
+      if (action === 'saveRateSeason') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = body.villaId || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const v = validateSeason(body, partyLimit(HOST_CONFIGS[villaId]?.pricing))
+        if (!v.ok) return err(v.error)
+        if (!(await seasonsTableReady(DB))) return err('Busy-season rates need a database table that has not been created yet (scripts/migrate-rate-seasons.sql)', 409)
+        const s = v.season
+        const cols = [s.name, s.startDate, s.endDate, s.yearly ? 1 : 0, s.mode, s.mode === 'percent' ? s.upliftPct : null, s.card ? JSON.stringify(s.card) : null, s.minNights, s.active ? 1 : 0, s.notes || null]
+        let seasonId = String(body.seasonId || '').trim()
+        if (seasonId) {
+          const ex = await DB.prepare(`SELECT season_id, villa_id FROM stayvibe_rate_seasons WHERE season_id = ?`).bind(seasonId).first()
+          if (!ex) return err('Season not found', 404)
+          assertPropertyAccess(payload, ex.villa_id)
+          if (ex.villa_id !== villaId) return err('That season belongs to another property', 403)
+          await DB.prepare(
+            `UPDATE stayvibe_rate_seasons SET name = ?, start_date = ?, end_date = ?, yearly = ?, mode = ?, uplift_pct = ?, card_json = ?, min_nights = ?, active = ?, notes = ?,
+               updated_by = ?, updated_at = datetime('now') WHERE season_id = ? AND villa_id = ?`
+          ).bind(...cols, actor, seasonId, villaId).run()
+        } else {
+          const { results: cnt } = await DB.prepare(`SELECT COUNT(*) AS n FROM stayvibe_rate_seasons WHERE villa_id = ?`).bind(villaId).all()
+          if ((cnt?.[0]?.n || 0) >= 40) return err('That is a lot of seasons (40 at most): delete one you no longer use')
+          seasonId = genId('SEAS')
+          await DB.prepare(
+            `INSERT INTO stayvibe_rate_seasons (season_id, villa_id, name, start_date, end_date, yearly, mode, uplift_pct, card_json, min_nights, active, notes, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(seasonId, villaId, ...cols, actor, actor).run()
+        }
+        try {
+          await DB.prepare(
+            `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'rates', NULL, ?, datetime('now'))`
+          ).bind(genId('LOG'), `Season "${s.name}" ${body.seasonId ? 'changed' : 'added'} by ${actor}: ${s.startDate} → ${s.endDate}${s.yearly ? ' every year' : ''}, ${s.mode === 'card' ? 'own prices' : `${s.upliftPct >= 0 ? '+' : ''}${s.upliftPct}%`}${s.minNights ? `, minimum ${s.minNights} nights` : ''}${s.active ? '' : ' (switched off)'}.`).run()
+        } catch (e) { console.error('rates audit:', e?.message || e) }
+        const saved = (await loadSeasons(DB, villaId, true)).find(x => x.id === seasonId)
+        return json({ success: true, data: { season: saved } })
+      }
+
+      if (action === 'deleteRateSeason') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const seasonId = String(body.seasonId || '').trim()
+        if (!seasonId) return err('seasonId required')
+        if (!(await seasonsTableReady(DB))) return err('Season not found', 404)
+        const ex = await DB.prepare(`SELECT season_id, villa_id, name FROM stayvibe_rate_seasons WHERE season_id = ?`).bind(seasonId).first()
+        if (!ex) return err('Season not found', 404)
+        assertPropertyAccess(payload, ex.villa_id)
+        await DB.batch([
+          DB.prepare(`DELETE FROM stayvibe_rate_seasons WHERE season_id = ? AND villa_id = ?`).bind(seasonId, ex.villa_id),
+          DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'rates', NULL, ?, datetime('now'))`)
+            .bind(genId('LOG'), `Season "${ex.name}" deleted by ${actor}.`),
+        ])
+        return json({ success: true, data: { seasonId } })
+      }
+
       if (action === 'resolveChangeRequest') {
         if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const { requestId, decision } = body

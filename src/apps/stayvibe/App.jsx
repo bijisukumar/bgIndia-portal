@@ -57,6 +57,7 @@ import KitchenIncidentals from '../../screens/villa/KitchenIncidentals'
 import BreakfastEntry     from '../../screens/villa/BreakfastEntry'
 import CarRentalEntry     from '../../screens/villa/CarRentalEntry'
 import RDashboardSnapshot from '../../screens/RDashboardSnapshot'
+import Rates          from '../../screens/villa/Rates'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
@@ -92,6 +93,7 @@ function ProtectedRoutes() {
         <Route path="/owner/villa/income"     element={<CompleteBooking />} />
         <Route path="/owner/villa/dashboard"  element={<VillaDashboard />} />
         <Route path="/owner/villa/channel-calendar" element={<ChannelCalendar />} />
+        <Route path="/owner/villa/rates"      element={<Rates />} />
         <Route path="/owner/villa/inventory"  element={<Inventory />} />
         <Route path="/raman/inventory"        element={<Inventory />} />
         <Route path="/owner/villa/expenses"   element={<VillaExpenses />} />

@@ -99,9 +99,17 @@ export default function AgentQuote() {
               <span className="net-val">{quote.bedroomEstimate}</span>
             </div>
             <div className="net-row">
-              <span className="net-label">Tariff / night</span>
+              <span className="net-label">{quote.seasons?.length ? 'Average tariff / night' : 'Tariff / night'}</span>
               <span className="net-val">{fmt(quote.tariffPerNight)}</span>
             </div>
+            {quote.seasons?.length > 0 && (
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', margin: '6px 0' }}>
+                Includes busy-season nights: {quote.seasons.map(s => `${s.name} (${s.nights} night${s.nights === 1 ? '' : 's'})`).join(', ')}.
+              </div>
+            )}
+            {quote.minNightsNotes?.map((n, i) => (
+              <div key={i} style={{ fontSize: '0.72rem', color: '#F59E0B', margin: '6px 0' }}>⚠️ {n}</div>
+            ))}
             {!quote.withinRecommended && (
               <div style={{ fontSize: '0.72rem', color: '#F59E0B', margin: '6px 0' }}>
                 ⚠️ {quote.billableGuests} guests is above our comfortably-recommended capacity — extra floor beds apply.

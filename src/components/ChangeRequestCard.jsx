@@ -8,11 +8,17 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { fmtStampZ, fmtDate } from '../utils/dates'
+import { dayMonth } from '../utils/stayHolds'
 
 const AMBER = '#E8A33D'
 
 export default function ChangeRequestCard({ request: r, onDone, onError, children }) {
   const asked = r.requestedGuests                      // null: a change that is not about the head count (dates, say)
+  const dates = r.requestedDates || null               // { originalFrom, originalTo, from, to, nights, extraNights } when the email moves the dates (one email can also change the head count)
+  const datesOnly = !!dates && asked == null
+  const range = (a, b) => `${dayMonth(a)} to ${dayMonth(b)}`
+  const nightsWord = n => `${n} night${n === 1 ? '' : 's'}`
+  const extra = dates ? dates.extraNights : 0
   const stayChildren = r.stayChildren ?? 0
   const [adults, setAdults] = useState(String(r.requestedAdults ?? (asked != null ? Math.max(1, asked - (r.requestedChildren ?? stayChildren)) : (r.stayAdults ?? 1))))
   const [kids, setKids] = useState(String(r.requestedChildren ?? stayChildren))
@@ -44,7 +50,11 @@ export default function ChangeRequestCard({ request: r, onDone, onError, childre
   return (
     <div style={{ border: `1px solid ${AMBER}66`, background: `${AMBER}12`, borderRadius: '12px', padding: '12px 14px', marginBottom: '10px' }}>
       <div style={{ fontSize: '0.9rem', fontWeight: 700, color: AMBER }}>
-        ✋ {r.guestName || r.stayGuest || 'A guest'} asked to {asked != null ? <>change the guests: {r.originalGuests ?? '?'} → {asked}</> : 'change the reservation'}
+        ✋ {r.guestName || r.stayGuest || 'A guest'} asked to {asked == null && !dates ? 'change the reservation' : <>
+          {asked != null && <>change the guests: {r.originalGuests ?? '?'} → {asked}</>}
+          {asked != null && dates && ' and '}
+          {dates && <>{asked != null ? 'the' : 'change the'} dates: {range(dates.originalFrom, dates.originalTo)} → {range(dates.from, dates.to)}</>}
+        </>}
       </div>
       <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '3px' }}>
         {fromEmail ? 'Airbnb email' : 'Their check-in form'}{r.createdAt ? ` · ${fmtStampZ(r.createdAt)}` : ''}
@@ -53,7 +63,9 @@ export default function ChangeRequestCard({ request: r, onDone, onError, childre
       </div>
       <div style={{ fontSize: '0.78rem', color: 'var(--text)', lineHeight: 1.5, marginTop: '8px' }}>
         {fromEmail
-          ? 'Accept or decline it in Airbnb first (the email has the buttons), then record your decision here. Until you do, this booking cannot be marked ready for check-in.'
+          ? (dates
+            ? 'Accept or decline it in Airbnb first (the email has the buttons), then record your decision here. Accepting moves the booking to the new dates on every calendar; the amounts are not changed, so enter Airbnb\'s new total afterwards. If something else is already booked on a night the new dates add, you are told here instead. Until you decide, this booking cannot be marked ready for check-in.'
+            : 'Accept or decline it in Airbnb first (the email has the buttons), then record your decision here. Until you do, this booking cannot be marked ready for check-in.')
           : 'The guest\'s check-in form gives a different head count from the booking. Check it with them, then record your decision. Until you do, this booking cannot be marked ready for check-in.'}
       </div>
       {fromEmail && r.detail && (
@@ -66,24 +78,34 @@ export default function ChangeRequestCard({ request: r, onDone, onError, childre
         <div style={{ fontSize: '0.76rem', color: '#EF4444', marginTop: '8px' }}>
           This could not be matched to a booking in the portal: look at it in Airbnb, then dismiss it here.
         </div>
-      ) : asked != null && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px', fontSize: '0.8rem' }}>
-          <span style={{ color: 'var(--text-dim)' }}>If approved the booking becomes</span>
-          <input type="number" inputMode="numeric" min="1" value={adults} onChange={e => setAdults(e.target.value)} style={num} aria-label="Adults" />
-          <span style={{ color: 'var(--text-dim)' }}>adults +</span>
-          <input type="number" inputMode="numeric" min="0" value={kids} onChange={e => setKids(e.target.value)} style={num} aria-label="Children" />
-          <span style={{ color: 'var(--text-dim)' }}>children</span>
-          <span style={{ color: totalOk ? '#58C07C' : '#EF4444', fontWeight: 700 }}>= {total}{totalOk ? ' ✓' : ` (must be ${asked})`}</span>
-        </div>
+      ) : (
+        <>
+          {dates && (
+            <div style={{ marginTop: '10px', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-dim)' }}>If approved the booking becomes </span>
+              <span style={{ color: '#58C07C', fontWeight: 700 }}>{range(dates.from, dates.to)} · {nightsWord(dates.nights)}{extra ? ` (${extra > 0 ? '+' : ''}${extra})` : ''}</span>
+            </div>
+          )}
+          {asked != null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-dim)' }}>{dates ? 'and the party becomes' : 'If approved the booking becomes'}</span>
+              <input type="number" inputMode="numeric" min="1" value={adults} onChange={e => setAdults(e.target.value)} style={num} aria-label="Adults" />
+              <span style={{ color: 'var(--text-dim)' }}>adults +</span>
+              <input type="number" inputMode="numeric" min="0" value={kids} onChange={e => setKids(e.target.value)} style={num} aria-label="Children" />
+              <span style={{ color: 'var(--text-dim)' }}>children</span>
+              <span style={{ color: totalOk ? '#58C07C' : '#EF4444', fontWeight: 700 }}>= {total}{totalOk ? ' ✓' : ` (must be ${asked})`}</span>
+            </div>
+          )}
+        </>
       )}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
         {!unmatched && (
           <button type="button" disabled={!!busy || !totalOk} onClick={() => decide('approved')} style={{ ...btn('52,168,83', true), opacity: busy || !totalOk ? 0.5 : 1 }}>
-            {busy === 'approved' ? '…' : (fromEmail ? '✅ I accepted it: update the booking' : '✅ Approve: update the booking')}
+            {busy === 'approved' ? '…' : (datesOnly ? '✅ I accepted it: change the dates' : fromEmail ? '✅ I accepted it: update the booking' : '✅ Approve: update the booking')}
           </button>
         )}
         <button type="button" disabled={!!busy} onClick={() => decide('declined')} style={btn(unmatched ? '154,165,180' : '239,68,68', false)}>
-          {busy === 'declined' ? '…' : (unmatched ? 'Dismiss' : (fromEmail ? '✖ I declined it: keep as booked' : '✖ Decline: keep as booked'))}
+          {busy === 'declined' ? '…' : (unmatched ? 'Dismiss' : (datesOnly ? `✖ I declined it: keep ${range(dates.originalFrom, dates.originalTo)}` : fromEmail ? '✖ I declined it: keep as booked' : '✖ Decline: keep as booked'))}
         </button>
       </div>
       {children}

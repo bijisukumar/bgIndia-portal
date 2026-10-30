@@ -18,6 +18,8 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { buildReviewRequestWaLink } from '../../utils/guestMessages'
 import { parseLocalDate, formatTime12h, localTodayStr, daysFromToday, fmtStampZ } from '../../utils/dates'
+import { dayMonth } from '../../utils/stayHolds'
+import { changeSubject } from '../../utils/changeRequestDates'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { stayTimes } from '../../utils/stayTimes'
@@ -536,7 +538,7 @@ export default function CheckIn() {
                               <div style={{fontSize:'0.68rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
                             )}
                             {stay.pendingChange && (
-                              <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ guest count not settled: ask the owner</div>
+                              <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ {changeSubject(stay.pendingChange)} not settled: ask the owner</div>
                             )}
                             <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                               {formatDate(stay.checkin_date)} · {calcNights(stay.checkin_date,stay.checkout_date)}N
@@ -560,17 +562,28 @@ export default function CheckIn() {
 
                 {selected && (
                   <>
-                    {/* A change to the guests the owner has not decided yet (more guests asked for, or a different count on the form). */}
+                    {/* A change to the guests or the dates the owner has not decided yet (more guests asked for, a different count on the form, a night added on Airbnb). */}
                     {selected.pendingChange && (
                       <div style={{marginBottom:'12px', padding:'12px 14px', borderRadius:'10px',
                         background:'rgba(232,163,61,0.12)', border:'1px solid rgba(232,163,61,0.6)'}}>
                         <div style={{color:'#E8A33D', fontWeight:'800', fontSize:'0.85rem', letterSpacing:'0.3px'}}>
-                          ✋ GUEST COUNT NOT SETTLED
+                          ✋ {changeSubject(selected.pendingChange).toUpperCase()} NOT SETTLED
                         </div>
                         <div style={{color:'var(--text)', fontSize:'0.82rem', lineHeight:'1.55', marginTop:'4px'}}>
-                          {selected.guest_name} was booked for {selected.pendingChange.originalGuests ?? '?'} but{' '}
-                          {selected.pendingChange.kind === 'airbnb_email' ? 'has asked Airbnb for' : 'says on the form'}{' '}
-                          {selected.pendingChange.requestedGuests ?? 'a different number'}. The owner has not decided yet: check with the owner before checking them in.
+                          {(selected.pendingChange.requestedGuests != null || !selected.pendingChange.requestedDates) && (
+                            <>
+                              {selected.guest_name} was booked for {selected.pendingChange.originalGuests ?? '?'} but{' '}
+                              {selected.pendingChange.kind === 'airbnb_email' ? 'has asked Airbnb for' : 'says on the form'}{' '}
+                              {selected.pendingChange.requestedGuests ?? 'a different number'}.{' '}
+                            </>
+                          )}
+                          {selected.pendingChange.requestedDates && (
+                            <>
+                              {selected.guest_name} was booked for {dayMonth(selected.pendingChange.requestedDates.originalFrom)} to {dayMonth(selected.pendingChange.requestedDates.originalTo)} but
+                              has asked Airbnb for {dayMonth(selected.pendingChange.requestedDates.from)} to {dayMonth(selected.pendingChange.requestedDates.to)}.{' '}
+                            </>
+                          )}
+                          The owner has not decided yet: check with the owner before checking them in.
                         </div>
                       </div>
                     )}
@@ -887,7 +900,7 @@ export default function CheckIn() {
                             <div style={{fontSize:'0.66rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
                           )}
                           {stay.pendingChange && (
-                            <div style={{fontSize:'0.66rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ guest count not settled</div>
+                            <div style={{fontSize:'0.66rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ {changeSubject(stay.pendingChange)} not settled</div>
                           )}
                           <div style={{fontSize:'0.72rem',color:'var(--text-dim)',marginTop:'2px'}}>
                             {formatDate(stay.checkin_date)}
@@ -951,7 +964,7 @@ export default function CheckIn() {
                                 <div style={{fontSize:'0.68rem',color:'#85B7EB',marginTop:'1px'}}>🔗 booked by {stay.booked_by_name}</div>
                               )}
                               {stay.pendingChange && (
-                                <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ guest count not settled</div>
+                                <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginTop:'1px'}}>✋ {changeSubject(stay.pendingChange)} not settled</div>
                               )}
                               <div style={{fontSize:'0.73rem',color:'var(--text-dim)',marginTop:'2px'}}>
                                 Out: {formatDate(stay.checkout_date)}

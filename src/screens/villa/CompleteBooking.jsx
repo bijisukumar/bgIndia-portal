@@ -21,6 +21,7 @@ import { parseLocalDate, formatTime12h, fmtClockZ, fmtStampZ, getPropertyZone } 
 import { dateInZone } from '../../utils/tz'
 import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '../../utils/stayTimes'
 import { stayHolds, dayMonth, heldSummary } from '../../utils/stayHolds'
+import { changeNoun, changeDetail } from '../../utils/changeRequestDates'
 import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
 import GuestTimesReview from '../../components/GuestTimesReview'
 import StayTimesLine from '../../components/StayTimesLine'
@@ -466,7 +467,7 @@ export default function CompleteBooking() {
   async function handleStatusChange(newStatus) {
     if (!selected) return
     if (newStatus === 'ready_for_checkin' && selected.pendingChange) {
-      showToast('Decide the change to the guests first', 'error')
+      showToast(`Decide the change to the ${changeNoun(selected.pendingChange)} first`, 'error')
       return
     }
     // The guest may have asked, on the check-in form, to arrive before check-in or
@@ -1074,7 +1075,7 @@ export default function CompleteBooking() {
                         )}
                         {stay.pendingChange && (
                           <div style={{fontSize:'0.68rem',color:'#E8A33D',fontWeight:'700',marginBottom:'3px'}}>
-                            ✋ guests {stay.pendingChange.originalGuests ?? '?'} → {stay.pendingChange.requestedGuests ?? '?'}: your decision
+                            ✋ {changeNoun(stay.pendingChange)} {changeDetail(stay.pendingChange)}: your decision
                           </div>
                         )}
                         <div style={{fontSize:'0.73rem',color:'var(--text-dim)'}}>
@@ -1322,11 +1323,16 @@ export default function CompleteBooking() {
                   )
                 })()}
 
-                {/* A change to the guests that is waiting for the owner (Airbnb email, or a check-in form with another count). */}
+                {/* A change to the guests or the dates that is waiting for the owner (Airbnb email, or a check-in form with another count). */}
                 {s.pendingChange && (
                   <ChangeRequestCard
                     request={{ ...s.pendingChange, stayId: s.stay_id, stayAdults: s.adults, stayChildren: s.children, checkIn: s.checkin_date, checkOut: s.checkout_date }}
-                    onDone={async (decision) => { showToast(decision === 'approved' ? 'Booking updated ✓' : 'Kept as booked ✓'); await loadStays() }}
+                    onDone={async (decision, res) => {
+                      showToast(decision === 'approved'
+                        ? (res && res.datesApplied ? `Dates now ${dayMonth(res.datesApplied.from)} to ${dayMonth(res.datesApplied.to)} ✓ Now update the amounts (Airbnb fee breakdown)` : 'Booking updated ✓')
+                        : 'Kept as booked ✓')
+                      await loadStays()
+                    }}
                     onError={m => showToast('Failed: ' + m, 'error')} />
                 )}
                 {/* Guest Info */}
@@ -2147,7 +2153,7 @@ export default function CompleteBooking() {
                   )}
                   {canMarkReadyForCheckin && s.pendingChange && (
                     <div style={{fontSize:'0.74rem',color:'#E8A33D',lineHeight:1.5}}>
-                      ✋ Decide the change to the guests first (the amber box above Guest info).
+                      ✋ Decide the change to the {changeNoun(s.pendingChange)} first (the amber box above Guest info).
                     </div>
                   )}
 

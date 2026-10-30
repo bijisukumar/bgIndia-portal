@@ -59,6 +59,8 @@ import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, a
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
 import { stayHolds, stayFlags, holdPhrase, dayMonth } from '../../src/utils/stayHolds.js'
+// The DATES an Airbnb "wants to change their reservation" email asks for (a guest adding a night, say).
+import { parseDateChange, addedNightRanges } from '../../src/utils/changeRequestDates.js'
 import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 // The biggest party the check-in form takes without asking the guest to confirm the number with the host.
@@ -1050,7 +1052,7 @@ async function syncIcalFeedsForVillas(DB, villaIdFilter, env) {
   ).all()
   const summary = []
   for (const feed of (feeds || [])) summary.push(await syncOneIcalFeed(DB, feed))
-  if (env) await notifyNewPlatformBookings(env, DB, summary)
+  if (env) await afterFeedSync(env, DB, summary)
   return summary
 }
 
@@ -1081,12 +1083,106 @@ async function refreshFeedsBeforeExport(DB, ctx, villaId, targetChannel, { maxAg
   if (!jobs.length) return
   const settled = Promise.allSettled(jobs).then(async rs => {
     // a booking that has just appeared on a platform's calendar is told to the owner (never delays the importer: this runs after the reply)
-    try { await notifyNewPlatformBookings(ctx?.env, DB, rs.map(x => (x.status === 'fulfilled' ? x.value : null))) }
+    try { await afterFeedSync(ctx?.env, DB, rs.map(x => (x.status === 'fulfilled' ? x.value : null))) }
     catch (e) { console.warn('new platform booking alert:', e?.message || e) }
     return rs
   })
   ctx?.waitUntil?.(settled)
   await Promise.race([settled, new Promise(resolve => setTimeout(resolve, budgetMs))])
+}
+
+// Everything worth telling the owner after calendars were read.
+async function afterFeedSync(env, DB, results) {
+  await notifyNewPlatformBookings(env, DB, results)
+  await alertAirbnbDateMismatches(env, DB, results)
+}
+
+const aOrAn = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w
+
+// What already holds the given night ranges ([from, to) pairs) apart from this stay: other live stays, nights the owner closed, and
+// other platforms' blocks (Airbnb's own block is this very booking, whose dates Airbnb has already changed). Used before a change
+// of dates is applied to a stay.
+async function nightClashes(DB, villaId, exceptStayId, ranges) {
+  const out = []
+  for (const [from, to] of ranges || []) {
+    const { results: stays } = await DB.prepare(
+      `SELECT guest_name, source, checkin_date, checkout_date FROM stayvibe_stays
+        WHERE villa_id = ? AND stay_id != ? AND status NOT IN ('cancelled', 'void') AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
+          AND checkin_date < ? AND checkout_date > ?`
+    ).bind(villaId, exceptStayId, to, from).all()
+    for (const s of stays || []) out.push(`${s.guest_name || 'a guest'} (${sourceLabel(s.source || 'direct')}) ${dayMonth(s.checkin_date)} to ${dayMonth(s.checkout_date)}`)
+    for (const o of await loadDateBlocks(DB, villaId, from, to)) out.push(`nights you closed by hand, ${dayMonth(o.start_date)} to ${dayMonth(o.end_date)}`)
+    const { results: blocks } = await DB.prepare(
+      `SELECT b.channel, b.checkin_date, b.checkout_date FROM stayvibe_ical_blocks b JOIN stayvibe_ical_feeds f ON f.feed_id = b.feed_id
+        WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1 AND b.checkin_date < ? AND b.checkout_date > ?`
+    ).bind(villaId, to, from).all()
+    for (const b of blocks || []) {
+      if (channelsMatch(b.channel, 'airbnb')) continue
+      out.push(`${aOrAn(sourceLabel(b.channel))} block ${dayMonth(b.checkin_date)} to ${dayMonth(b.checkout_date)}`)
+    }
+  }
+  return [...new Set(out)]
+}
+
+// Airbnb's calendar is the truth about an Airbnb booking's dates. When it says different dates from the stay StayVibe holds for it (a
+// change the guest asked for and the owner accepted on Airbnb that was never applied here: Srinidhi Srinivasan, 18-21 Dec in StayVibe
+// and 18-22 on Airbnb, 2026-10-29), the owner is told. Runs after every read of the Airbnb calendar; once per subject in 7 days.
+async function alertAirbnbDateMismatches(env, DB, results) {
+  if (!env) return
+  for (const r of results || []) {
+    if (!r || !r.ok || !r.villaId || !channelsMatch(r.channel, 'airbnb')) continue
+    const today = todayInZone(await zoneFor(DB, r.villaId))
+    const { results: blocks } = await DB.prepare(
+      `SELECT checkin_date, checkout_date FROM stayvibe_ical_blocks
+        WHERE villa_id = ? AND feed_id = ? AND removed_at IS NULL AND checkout_date > ? AND summary LIKE 'Reserved%'`
+    ).bind(r.villaId, r.feedId, today).all()
+    for (const b of blocks || []) {
+      try { await alertOneAirbnbDateMismatch(env, DB, r.villaId, b) }
+      catch (e) { console.warn('airbnb date mismatch alert:', e?.message || e) }
+    }
+  }
+}
+
+async function alertOneAirbnbDateMismatch(env, DB, villaId, b) {
+  const { results: overlapping } = await DB.prepare(
+    `SELECT stay_id, guest_name, source, checkin_date, checkout_date FROM stayvibe_stays
+      WHERE villa_id = ? AND status NOT IN ('cancelled', 'void') AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
+        AND checkin_date < ? AND checkout_date > ?`
+  ).bind(villaId, b.checkout_date, b.checkin_date).all()
+  const stays = (overlapping || []).filter(s => channelsMatch(s.source, 'airbnb'))     // stays store the source as typed ('airbnb', 'Airbnb' ...)
+  if (!stays.length) return                                                              // no stay yet: the booking email may still be on its way
+  if (stays.some(s => s.checkin_date === b.checkin_date && s.checkout_date === b.checkout_date)) return   // they agree
+  if (stays.length !== 1) return                                                         // cannot tell which stay this is: leave it
+  const s = stays[0]
+  // a change request nobody has decided yet, for exactly these dates, has already told the owner
+  try {
+    const { results: crs } = await DB.prepare(`SELECT detail FROM stayvibe_change_requests WHERE stay_id = ? AND status = 'pending'`).bind(s.stay_id).all()
+    for (const c of crs || []) {
+      const dc = parseDateChange(c.detail)
+      if (dc && dc.requestedCheckin === b.checkin_date && dc.requestedCheckout === b.checkout_date) return
+    }
+  } catch (e) { /* a database without the table */ }
+  const nightsOf = (a, z) => Math.max(1, Math.round((Date.parse(z + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000))
+  const airbnbRange = `${dayMonth(b.checkin_date)} to ${dayMonth(b.checkout_date)}`
+  const stayRange = `${dayMonth(s.checkin_date)} to ${dayMonth(s.checkout_date)}`
+  const subject = `⚠️ Airbnb has different dates for ${s.guest_name || 'a guest'}: ${airbnbRange} (StayVibe: ${stayRange})`
+  const since = new Date(Date.now() - 7 * 864e5).toISOString()
+  const dup = await DB.prepare(
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'airbnb_dates' AND subject = ? AND created_at > ? LIMIT 1`
+  ).bind(villaId, subject, since).first()
+  if (dup) return
+  await sendAlert(env, subject, [
+    `Source: Airbnb calendar > StayVibe calendar sync`,
+    `Action: Airbnb's calendar and StayVibe disagree about a booking's dates.`,
+    '',
+    `Guest:     ${s.guest_name || '?'} (${s.stay_id})`,
+    `Airbnb:    ${airbnbRange} (${nightsOf(b.checkin_date, b.checkout_date)} nights)`,
+    `StayVibe:  ${stayRange} (${nightsOf(s.checkin_date, s.checkout_date)} nights)`,
+    '',
+    `What to do: open the booking in Airbnb. If the dates really changed (the guest asked and you accepted), update the stay: Complete booking, Guest info, edit the check-in or check-out, and enter the new amounts from Airbnb. A change the guest has asked for by email shows under "Booking changes to decide" on your home screen: approving it there applies the new dates.`,
+    `Platforms that read your StayVibe calendar already see the nights Airbnb holds.`,
+    `Time: ${new Date().toISOString()}`,
+  ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'airbnb_dates')
 }
 
 // ── A BOOKING THAT ARRIVES ONLY AS BLOCKED DATES ──────────────────────────
@@ -1441,26 +1537,38 @@ async function attachStayPrefs(DB, rows) {
 // it, and while one is pending the stay cannot be marked ready for check-in. The table comes from
 // scripts/migrate-change-requests.sql; every read here is wrapped so a database without it still serves every screen.
 function publicChange(c) {
-  return c ? {
+  if (!c) return null
+  // A change of DATES (2026-10-29: Srinidhi Srinivasan asked Airbnb for one more night): read from the email's own words.
+  const dc = parseDateChange(c.detail)
+  return {
     requestId: c.request_id, kind: c.kind, guestName: c.guest_name || null,
     originalGuests: c.original_guests ?? null, requestedGuests: c.requested_guests ?? null,
     requestedAdults: c.requested_adults ?? null, requestedChildren: c.requested_children ?? null,
+    requestedDates: dc && dc.changed ? {
+      originalFrom: dc.originalCheckin, originalTo: dc.originalCheckout, from: dc.requestedCheckin, to: dc.requestedCheckout,
+      nights: dc.requestedNights, extraNights: dc.requestedNights - dc.originalNights,
+    } : null,
     createdAt: c.created_at || null,
-  } : null
+  }
 }
 
 async function pendingChangeFor(DB, stayId) {
   try {
     if (!stayId) return null
     return (await DB.prepare(
-      `SELECT request_id, stay_id, kind, guest_name, original_guests, requested_guests, requested_adults, requested_children, created_at
+      `SELECT request_id, stay_id, kind, guest_name, original_guests, requested_guests, requested_adults, requested_children, detail, created_at
          FROM stayvibe_change_requests WHERE stay_id = ? AND status = 'pending' ORDER BY created_at ASC LIMIT 1`
     ).bind(stayId).first()) || null
   } catch (e) { console.error('pendingChangeFor:', e?.message || e); return null }
 }
 
 function changeBlockedMessage(c) {
-  return `${c.guest_name || 'This guest'} has a change to the guests waiting for your decision (${c.original_guests ?? '?'} → ${c.requested_guests ?? '?'}). Approve or decline it first.`
+  const dc = parseDateChange(c.detail)
+  const dates = dc && dc.changed ? `${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}` : null
+  // the head count is part of the request unless the request is only about the dates
+  const guests = c.requested_guests != null || !dates ? `${c.original_guests ?? '?'} → ${c.requested_guests ?? '?'}` : null
+  const noun = guests && dates ? 'guests and dates' : dates ? 'dates' : 'guests'
+  return `${c.guest_name || 'This guest'} has a change to the ${noun} waiting for your decision (${[guests, dates].filter(Boolean).join('; ')}). Approve or decline it first.`
 }
 
 // Puts `pendingChange` on every stay row that has a request waiting.
@@ -1473,7 +1581,7 @@ async function attachPendingChanges(DB, rows) {
       const part = ids.slice(i, i + 90)
       // tenant-scope-exempt: only ever given ids of stays the caller has just read under villaScope.
       const { results } = await DB.prepare(
-        `SELECT request_id, stay_id, kind, guest_name, original_guests, requested_guests, requested_adults, requested_children, created_at
+        `SELECT request_id, stay_id, kind, guest_name, original_guests, requested_guests, requested_adults, requested_children, detail, created_at
            FROM stayvibe_change_requests WHERE status = 'pending' AND stay_id IN (${part.map(() => '?').join(',')}) ORDER BY created_at ASC`
       ).bind(...part).all()
       for (const c of (results || [])) if (!byId[c.stay_id]) byId[c.stay_id] = c
@@ -1494,11 +1602,14 @@ async function openChangeRequest(DB, r) {
     }
     if (r.stayId) {
       const open = await DB.prepare(
-        `SELECT request_id, requested_guests, requested_adults, requested_children FROM stayvibe_change_requests WHERE stay_id = ? AND kind = ? AND status = 'pending' LIMIT 1`
+        `SELECT request_id, requested_guests, requested_adults, requested_children, detail FROM stayvibe_change_requests WHERE stay_id = ? AND kind = ? AND status = 'pending' LIMIT 1`
       ).bind(r.stayId, r.kind).first()
       if (open) {
+        // a second email asking for DIFFERENT dates refreshes the request too (the guest changed their mind)
+        const asDates = x => JSON.stringify(parseDateChange(x) || null)
         const same = open.requested_guests === r.requestedGuests
           && (open.requested_adults ?? null) === (r.requestedAdults ?? null) && (open.requested_children ?? null) === (r.requestedChildren ?? null)
+          && asDates(open.detail) === asDates(r.detail)
         if (!same) {
           await DB.prepare(
             `UPDATE stayvibe_change_requests SET requested_guests = ?, requested_adults = ?, requested_children = ?, detail = COALESCE(?, detail), updated_at = datetime('now') WHERE request_id = ?`
@@ -1529,10 +1640,17 @@ async function openChangeRequest(DB, r) {
 // The owner's email when a change request opens or changes.
 async function alertChangeRequest(env, DB, villaId, c) {
   try {
-    await sendAlert(env, `✋ ${c.guestName || 'A guest'}: guests ${c.original ?? '?'} → ${c.requested ?? '?'} — decide before check-in`, [
+    const dc = c.dates
+    const dateWords = dc ? `${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}` : ''
+    // what the subject says was asked: the head count and/or the dates (a change of the reservation with neither reads as before)
+    const what = [c.requested != null ? `guests ${c.original ?? '?'} → ${c.requested}` : '', dc ? `dates ${dateWords}` : ''].filter(Boolean).join(' and ')
+      || `guests ${c.original ?? '?'} → ${c.requested ?? '?'}`
+    await sendAlert(env, `✋ ${c.guestName || 'A guest'}: ${what} — decide before check-in`, [
       `Guest:        ${c.guestName || '?'}${c.stayId ? ` (${c.stayId})` : ''}`,
       ...(c.checkin ? [`Dates:        ${c.checkin} → ${c.checkout || '?'}`] : []),
-      c.requested == null ? 'Asks:         a change to the reservation (see the email for what)' : `Guests:       booked ${c.original ?? '?'}, now ${c.requested}`,
+      ...(dc ? [`Asks:         new dates, ${dateWords} (${dc.requestedNights} nights, was ${dc.originalNights})`] : []),
+      ...(c.requested != null ? [`Guests:       booked ${c.original ?? '?'}, now ${c.requested}`] : (dc ? [] : ['Asks:         a change to the reservation (see the email for what)'])),
+      ...(dc ? ['Then:         approving it in the portal moves the booking to these dates on every calendar. The amounts are not changed: enter the new total from Airbnb.'] : []),
       `Raised by:    ${c.kind === 'airbnb_email' ? 'an Airbnb "wants to change their reservation" email' : "the guest's own check-in form"}`,
       ...(c.matched === false ? ['', 'It could not be matched to a booking in the portal: look at it in Airbnb.'] : []),
       '',
@@ -9683,6 +9801,7 @@ export async function onRequest(ctx) {
         // A change that is not about the guest count (dates, say) has no number: it is still recorded, with the email's own
         // words in `detail`, and still holds the stay until the owner decides.
         const askedGuests = Number.isFinite(requested) && requested >= 1 ? requested : null
+        const dc = parseDateChange(body.detail)
         let stay = null
         if (conf) {
           stay = await DB.prepare(
@@ -9697,7 +9816,7 @@ export async function onRequest(ctx) {
                 AND (checkout_date IS NULL OR checkout_date >= ${sqlDay(await todayOf(villaId))}) ORDER BY checkin_date ASC LIMIT 300`
           ).bind(villaId).all()
           let hits = (cands || []).filter(s => String(s.guest_name || '').toLowerCase().split(/\s+/)[0] === first)
-          const ci = String(body.checkIn || '').trim()
+          const ci = String(body.checkIn || (dc && dc.originalCheckin) || '').trim()
           if (ci && hits.some(s => s.checkin_date === ci)) hits = hits.filter(s => s.checkin_date === ci)
           if (hits.length > 1) { const a = hits.filter(s => s.source === 'airbnb'); if (a.length) hits = a }
           if (hits.length === 1) stay = hits[0]
@@ -9710,9 +9829,12 @@ export async function onRequest(ctx) {
         })
         if (opened.duplicate) return json({ success: true, data: { duplicate: true, matched: !!stay, stayId: stay ? stay.stay_id : null } })
         if (stay && opened.created) {
-          const line = askedGuests == null
-            ? 'A change to the reservation was asked on Airbnb: decide before check-in.'
-            : `Guest change asked on Airbnb: ${Number.isFinite(original) ? original : booked} → ${askedGuests} guests: decide before check-in.`
+          const guestsNote = askedGuests == null ? null : `${Number.isFinite(original) ? original : booked} → ${askedGuests} guests`
+          const datesNote = dc && dc.changed ? `${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}` : null
+          const line = guestsNote && datesNote ? `Guest and dates change asked on Airbnb: ${guestsNote}, ${datesNote}: decide before check-in.`
+            : guestsNote ? `Guest change asked on Airbnb: ${guestsNote}: decide before check-in.`
+            : datesNote ? `Dates change asked on Airbnb: ${datesNote}: decide before check-in.`
+            : 'A change to the reservation was asked on Airbnb: decide before check-in.'
           await DB.prepare(
             `UPDATE stayvibe_stays SET
                status = CASE WHEN status IN ('docs_uploaded','ready_for_checkin') THEN 'pending_review' ELSE status END,
@@ -9725,6 +9847,7 @@ export async function onRequest(ctx) {
             kind: 'airbnb_email', guestName: stay ? stay.guest_name : guestName, stayId: stay ? stay.stay_id : null,
             checkin: stay?.checkin_date, checkout: stay?.checkout_date,
             original: Number.isFinite(original) ? original : booked, requested: askedGuests, matched: !!stay,
+            dates: dc && dc.changed ? dc : null,
           })
         }
         return json({ success: true, data: { matched: !!stay, stayId: stay ? stay.stay_id : null, requestId: opened.requestId, created: opened.created } })
@@ -9828,9 +9951,45 @@ export async function onRequest(ctx) {
         const via = cr.kind === 'airbnb_email' ? 'Airbnb change request' : 'check-in form'
         const stmts = []
         let adults = null, children = null
+        // A change of DATES (2026-10-29): approving applies them to the stay. Nothing is changed, and the request stays open to be
+        // sorted out, when the stay is not on the dates the email started from (somebody changed it by hand) or when something else
+        // is already booked into the night(s) the new dates add. The amounts are never touched: they come from Airbnb's new total.
+        const dc = parseDateChange(cr.detail)
+        const datesAsked = !!(dc && dc.changed)
+        // how this request reads in a note or the audit log: the head count is part of it unless it is only about the dates
+        const guestsInRequest = cr.requested_guests != null || !datesAsked
+        const datesText = datesAsked ? `${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}` : ''
+        let datesApplied = null, datesHandled = false
+        if (decision === 'approved' && datesAsked && cr.stay_id) {
+          const st = await DB.prepare(`SELECT stay_id, villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(cr.stay_id).first()
+          if (!st) return err('The booking this belongs to is gone: decline the request', 409)
+          const day = x => String(x || '').slice(0, 10)
+          const alreadyThere = day(st.checkin_date) === dc.requestedCheckin && day(st.checkout_date) === dc.requestedCheckout
+          if (alreadyThere) {
+            // somebody (the owner, by hand in Guest info) has already put the booking on the new dates: approving just records that
+            datesHandled = true
+            stmts.push(DB.prepare(
+              `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
+            ).bind(`Dates change ${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)} (${via}) approved by the owner: the booking was already on these dates.`, actor, stamp, cr.stay_id))
+          } else {
+            if (day(st.checkin_date) !== dc.originalCheckin || day(st.checkout_date) !== dc.originalCheckout) {
+              return err(`The email moves ${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}, but this booking is ${dayMonth(day(st.checkin_date))} to ${dayMonth(day(st.checkout_date))}. If it should be on the new dates, change them in Guest info and approve again (that only records it); otherwise decline the request.`, 409)
+            }
+            const clashes = await nightClashes(DB, st.villa_id, st.stay_id, addedNightRanges(dc))
+            if (clashes.length) return err(`The night(s) the new dates add are already taken: ${clashes.join('; ')}. Sort that out first, then approve again.`, 409)
+            datesHandled = true
+            datesApplied = { from: dc.requestedCheckin, to: dc.requestedCheckout, nights: dc.requestedNights, was: { from: dc.originalCheckin, to: dc.originalCheckout, nights: dc.originalNights } }
+            stmts.push(DB.prepare(
+              `UPDATE stayvibe_stays SET checkin_date = ?, checkout_date = ?, nights = ?,
+                 notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
+            ).bind(dc.requestedCheckin, dc.requestedCheckout, dc.requestedNights,
+              `Dates ${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)} (${dc.requestedNights} nights): approved by the owner (${via}). The amounts were NOT changed: enter the new total from Airbnb.`,
+              actor, stamp, cr.stay_id))
+          }
+        }
         if (decision === 'approved' && cr.requested_guests == null && !Number.isFinite(parseInt(body.adults))) {
           // nothing about the party was asked (dates, say): approving just records it and lifts the block
-          if (cr.stay_id) {
+          if (cr.stay_id && !datesHandled) {
             stmts.push(DB.prepare(
               `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
             ).bind(`A change to the reservation (${via}) was approved by the owner.`, actor, stamp, cr.stay_id))
@@ -9854,16 +10013,22 @@ export async function onRequest(ctx) {
         } else if (cr.stay_id) {
           stmts.push(DB.prepare(
             `UPDATE stayvibe_stays SET notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_by = ?, updated_at = ? WHERE stay_id = ?`
-          ).bind(`Guests change to ${cr.requested_guests ?? '?'} declined by the owner (${via}): kept at ${cr.original_guests ?? '?'}.`, actor, stamp, cr.stay_id))
+          ).bind([
+            guestsInRequest ? `Guests change to ${cr.requested_guests ?? '?'} declined by the owner (${via}): kept at ${cr.original_guests ?? '?'}.` : '',
+            datesAsked ? `Dates change to ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)} declined by the owner (${via}): kept as booked.` : '',
+          ].filter(Boolean).join(' '), actor, stamp, cr.stay_id))
         }
         stmts.push(DB.prepare(
           `UPDATE stayvibe_change_requests SET status = ?, decided_by = ?, decided_at = ?, decision_note = ?, applied_adults = ?, applied_children = ?, updated_at = ? WHERE request_id = ?`
         ).bind(decision, actor, stamp, note, adults, children, stamp, requestId))
         stmts.push(DB.prepare(
           `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'change_request', ?, ?, datetime('now'))`
-        ).bind(genId('LOG'), cr.stay_id || null, `Guest change ${cr.original_guests ?? '?'} → ${cr.requested_guests ?? '?'} (${via}) ${decision} by ${actor}${note ? ': ' + note : ''}.`))
+        ).bind(genId('LOG'), cr.stay_id || null, [
+          guestsInRequest ? `Guest change ${cr.original_guests ?? '?'} → ${cr.requested_guests ?? '?'}` : '',
+          datesAsked ? `Date change ${datesText}` : '',
+        ].filter(Boolean).join(' and ') + ` (${via}) ${decision} by ${actor}${datesApplied ? ' and the dates applied to the stay' : ''}${note ? ': ' + note : ''}.`))
         await DB.batch(stmts)
-        return json({ success: true, data: { requestId, decision, stayId: cr.stay_id || null, adults, children } })
+        return json({ success: true, data: { requestId, decision, stayId: cr.stay_id || null, adults, children, datesApplied, amountsNeedUpdate: !!datesApplied } })
       }
 
       if (action === 'markReviewChased') {

@@ -8,7 +8,8 @@ import { waNumber, buildReviewRequestWaLink, guestBaseUrl } from '../utils/guest
 import { channelLabel, channelPillStyle } from '../utils/channel'
 import { stayTimes } from '../utils/stayTimes'
 import { villaTimeDefaults } from '../utils/villaTimes'
-import { heldSummary } from '../utils/stayHolds'
+import { heldSummary, dayMonth } from '../utils/stayHolds'
+import { changeNoun, changeDetail, changeTitle } from '../utils/changeRequestDates'
 import GuestTimesReview from '../components/GuestTimesReview'
 import StayTimesLine from '../components/StayTimesLine'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
@@ -386,7 +387,7 @@ function NeedsAttentionBlock() {
                 )}
                 {p.pendingChange && (
                   <div style={{ fontSize: '0.72rem', color: '#E8A33D', marginTop: '2px', fontWeight: 600 }}>
-                    ✋ Guests {p.pendingChange.originalGuests ?? '?'} → {p.pendingChange.requestedGuests ?? '?'}: waiting for your decision
+                    ✋ {changeTitle(p.pendingChange)} {changeDetail(p.pendingChange)}: waiting for your decision
                   </div>
                 )}
                 <StayTimesLine stay={p} dim="#9AA5B4" />
@@ -406,7 +407,7 @@ function NeedsAttentionBlock() {
             onError={m => showToast('Failed: ' + m, 'error')} />
           {selected.pendingChange && (
             <div style={{ fontSize: '0.76rem', color: '#E8A33D', lineHeight: 1.5 }}>
-              ✋ A change to the guests ({selected.pendingChange.originalGuests ?? '?'} → {selected.pendingChange.requestedGuests ?? '?'}) is waiting for your decision.
+              ✋ A change to the {changeNoun(selected.pendingChange)} ({changeDetail(selected.pendingChange)}) is waiting for your decision.
               Decide it first (the amber box above), then you can onboard {selected.guestName}.
             </div>
           )}
@@ -465,7 +466,8 @@ function ChangeRequestsBlock() {
         <ChangeRequestCard key={r.requestId} request={r}
           onDone={(decision, res) => {
             showToast(decision === 'approved'
-              ? (res && res.adults != null ? `✅ ${r.guestName || 'Booking'} updated: ${res.adults + res.children} guests` : '✅ Recorded')
+              ? (res && res.datesApplied ? `✅ ${r.guestName || 'Booking'} moved to ${dayMonth(res.datesApplied.from)} to ${dayMonth(res.datesApplied.to)}: now update the amounts`
+                : res && res.adults != null ? `✅ ${r.guestName || 'Booking'} updated: ${res.adults + res.children} guests` : '✅ Recorded')
               : 'Kept as booked')
             load()
             window.dispatchEvent(new Event('gvr-booking-changed'))

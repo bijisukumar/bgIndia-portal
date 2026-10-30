@@ -41,7 +41,9 @@ by frontend routing.
    off-season discounts, if any (dates, and a percentage or their own
    prices; the host can add and change these later on the Rates & seasons
    page)
-9. Booking channels used (Airbnb / Booking.com / direct…) + commission %
+9. Booking channels used (Airbnb / Booking.com / direct…). Their commission %, colours and rules are NOT collected here:
+   every known platform already has its file in `partners/` (the same for every host that uses it). Note only a rate that
+   differs from the platform's standard (a negotiated Agoda rate, say), and any platform we have no file for yet.
 
 **Operations**
 10. Manager/staff names + roles + commission basis (per-night rate) —
@@ -60,6 +62,17 @@ by frontend routing.
    `hosts/demovilla/config.js` for a leaner from-scratch template; edit
    every field, especially `villas[].id`, which becomes the villa id used
    everywhere else below).
+   **Partners**: list the booking partners the host uses under `partners`
+   (`airbnb: {}` means Airbnb as everyone has it, which is all a normal host
+   needs; write only what differs, e.g. `agoda: { commission: { hostPct: 17 } }`).
+   Nothing about a platform (its name, rate, fee model, colours, how its bookings
+   and calendar reach us) is written in code: `partners/README.md` says how to
+   change a rule, make a rate apply from a date, or add a platform, and the
+   build fails if a platform's name or rate appears in `src/` or `functions/`.
+   Also set `enquirySources` (or leave it out to build it from the partners).
+   After any config edit, push it into the database
+   (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
+   `syncTenantConfig`): the live screens read the stored copy.
    **`config.js` is public**: it is compiled into the site's JavaScript and
    served with no login by `getAppConfig`, so nothing private may go in it
    (no bank details, PAN, ID numbers, secrets). The lessor's identity, bank

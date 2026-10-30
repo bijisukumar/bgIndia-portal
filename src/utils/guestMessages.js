@@ -12,6 +12,7 @@
 // ============================================================
 
 import { CONFIG } from '../config'
+import { partnerFor } from './partners'
 import { parseLocalDate } from './dates'
 import { guestFacingTimes } from './stayTimes'
 import { dayMonth } from './stayHolds'
@@ -262,10 +263,11 @@ export function buildFarewellWaLink(stay = {}) {
 // well as 'booking', but the config is written under 'booking' alone, so every Booking.com guest was being asked for a
 // Google review. Normalised here, once; any other source keeps its own lower-cased name, so a host can add a channel to
 // the config without a code change.
-const REVIEW_KEYS = { booking_com: 'booking', 'booking.com': 'booking', bookingcom: 'booking', mmt: 'makemytrip' }
+// The key a platform goes by in the config is its partner file's `reviewKey`.
 function reviewKey(source) {
   const s = String(source || '').trim().toLowerCase()
-  return REVIEW_KEYS[s] || s
+  const p = s ? partnerFor(CONFIG, s) : null
+  return (p && p.reviewKey) || s
 }
 
 // { platform, url, label } for this stay: the platform's name, the link to its trips / bookings page (blank when we

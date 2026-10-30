@@ -203,7 +203,7 @@ function GuestDetail({ guest, onClose }) {
               <div className="net-row">
                 <span className="net-label">Review</span>
                 <span style={{ color:'#34A853', fontWeight:'700' }}>
-                  {'★'.repeat(guest.lastReviewRating)} {guest.lastReviewSource === 'google' ? 'Google' : 'Airbnb'}
+                  {'★'.repeat(guest.lastReviewRating)} {guest.lastReviewSource ? channelLabel(guest.lastReviewSource) : ''}
                 </span>
               </div>
             )}

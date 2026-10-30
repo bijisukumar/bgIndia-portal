@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
-import { STATUS_META, SOURCES, LOST_REASONS } from './EnquiryTracker'
+import { STATUS_META, enquirySourceLabel, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate, localTodayStr, fmtStampYear } from '../../utils/dates'
 import DatePicker from '../../components/DatePicker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
@@ -741,7 +741,7 @@ export default function EnquiryDetail() {
             📞 {e.phone || '—'} {e.email && <>· ✉️ {e.email}</>}<br />
             📅 {e.checkin_date || '—'} → {e.checkout_date || '—'} ({e.nights || 0}n) · 👥 {e.guests_count || 1} guests
             {(e.adults || e.children || e.infants) ? <> ({e.adults || 0}A{e.children ? ` + ${e.children}C` : ''}{e.infants ? ` + ${e.infants}I` : ''})</> : null}<br />
-            🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {SOURCES.find(s => s.id === e.source)?.label || e.source}
+            🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {enquirySourceLabel(e.source)}
           </div>
         </div>
 

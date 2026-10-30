@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
 import { CONFIG } from '../config'
+import { partnerFor } from '../utils/partners'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 import { partyLimit } from '../utils/partySize'
 import { breakfastRateFor, BREAKFAST_MAX_TYPES, joinBreakfastTypes } from '../utils/breakfast'
@@ -37,10 +38,8 @@ function LogoImg({ villaId }) {
 // villa. Falls back to the villa's own address fields if a tenant has not
 // set checkinAddress.
 const VILLA_ADDRESSES = {}
-const PARTNER_NAMES = {
-  airbnb: 'Airbnb', direct: 'Direct Booking',
-  makemytrip: 'MakeMyTrip', booking: 'Booking.com', goibibo: 'Goibibo',
-}
+// How the form names where the guest booked: from the partner's file (guestFormLabel for the host's own direct bookings, else its name).
+const partnerNameOf = key => { const p = partnerFor(CONFIG, key); return p ? (p.guestFormLabel || p.label) : key }
 const PURPOSE_OPTIONS  = ['Pilgrimage / Temple visit','Tourism','Family visit','Wedding / Function','Business','Arangettam','Other']
 const TRANSPORT_OPTIONS= ['Car / SUV','Train','Flight','Bus','Auto / Taxi']
 // The breakfast menu as the guest reads it. The first word is what is stored and shown to staff
@@ -229,7 +228,7 @@ export default function GuestCheckIn() {
   // The villa's standard times, quoted beside the arrival and check-out fields.
   const villaTimes  = CONFIG.villas.find(v => v.id === villaId) || {}
   const villaAddr   = CONFIG.checkinAddress || VILLA_ADDRESSES[villaId] || {}
-  const partnerName = PARTNER_NAMES[partner]    || partner
+  const partnerName = partnerNameOf(partner)
 
   // Resolve opaque token → villa + partner
   useEffect(() => {

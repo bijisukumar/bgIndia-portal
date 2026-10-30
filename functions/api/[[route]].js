@@ -56,6 +56,8 @@ const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 // The calendar published back to each booking platform: what goes in a
 // platform's link and how it is written (see src/server/icalHub.js).
 import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, addDays } from '../../src/server/icalHub.js'
+// What a booking platform is, keeps and does is read from the partner files (/partners) and the host's own config, never written here.
+import { partnerFor, commissionPct, hostPartners } from '../../src/utils/partners.js'
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
 import { stayHolds, stayFlags, holdPhrase, dayMonth } from '../../src/utils/stayHolds.js'
@@ -1094,15 +1096,15 @@ async function refreshFeedsBeforeExport(DB, ctx, villaId, targetChannel, { maxAg
 // Everything worth telling the owner after calendars were read.
 async function afterFeedSync(env, DB, results) {
   await notifyNewPlatformBookings(env, DB, results)
-  await alertAirbnbDateMismatches(env, DB, results)
+  await alertPlatformDateMismatches(env, DB, results)
 }
 
 const aOrAn = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w
 
 // What already holds the given night ranges ([from, to) pairs) apart from this stay: other live stays, nights the owner closed, and
-// other platforms' blocks (Airbnb's own block is this very booking, whose dates Airbnb has already changed). Used before a change
-// of dates is applied to a stay.
-async function nightClashes(DB, villaId, exceptStayId, ranges) {
+// other platforms' blocks (the stay's OWN platform's block is this very booking, whose dates that platform has already changed).
+// Used before a change of dates is applied to a stay.
+async function nightClashes(DB, villaId, exceptStayId, ranges, ownSource) {
   const out = []
   for (const [from, to] of ranges || []) {
     const { results: stays } = await DB.prepare(
@@ -1117,39 +1119,46 @@ async function nightClashes(DB, villaId, exceptStayId, ranges) {
         WHERE b.villa_id = ? AND b.removed_at IS NULL AND f.is_active = 1 AND b.checkin_date < ? AND b.checkout_date > ?`
     ).bind(villaId, to, from).all()
     for (const b of blocks || []) {
-      if (channelsMatch(b.channel, 'airbnb')) continue
+      if (ownSource && channelsMatch(b.channel, ownSource)) continue
       out.push(`${aOrAn(sourceLabel(b.channel))} block ${dayMonth(b.checkin_date)} to ${dayMonth(b.checkout_date)}`)
     }
   }
   return [...new Set(out)]
 }
 
-// Airbnb's calendar is the truth about an Airbnb booking's dates. When it says different dates from the stay StayVibe holds for it (a
-// change the guest asked for and the owner accepted on Airbnb that was never applied here: Srinidhi Srinivasan, 18-21 Dec in StayVibe
-// and 18-22 on Airbnb, 2026-10-29), the owner is told. Runs after every read of the Airbnb calendar; once per subject in 7 days.
-async function alertAirbnbDateMismatches(env, DB, results) {
+// A platform's calendar is the truth about the dates of a booking it sent us as an email. When it says different dates from the stay
+// StayVibe holds for it (a change the guest asked for and the owner accepted on the platform that was never applied here: Srinidhi
+// Srinivasan, 18-21 Dec in StayVibe and 18-22 on Airbnb, 2026-10-29), the owner is told. Runs after every read of such a platform's
+// calendar (its partner file says `bookingsFrom: 'email'` and how its calendar names a real booking, `calendar.reservedPrefix`);
+// once per subject in 7 days.
+async function alertPlatformDateMismatches(env, DB, results) {
   if (!env) return
   for (const r of results || []) {
-    if (!r || !r.ok || !r.villaId || !channelsMatch(r.channel, 'airbnb')) continue
+    if (!r || !r.ok || !r.villaId) continue
+    const partner = partnerFor(getHostConfig(r.villaId), r.channel)
+    if (!partner || partner.bookingsFrom !== 'email') continue               // only these have stays to compare the calendar with
+    const reserved = String((partner.calendar && partner.calendar.reservedPrefix) || '')
+    if (!reserved) continue                                                  // its calendar does not tell a booking from a closed night
     const today = todayInZone(await zoneFor(DB, r.villaId))
     const { results: blocks } = await DB.prepare(
       `SELECT checkin_date, checkout_date FROM stayvibe_ical_blocks
-        WHERE villa_id = ? AND feed_id = ? AND removed_at IS NULL AND checkout_date > ? AND summary LIKE 'Reserved%'`
-    ).bind(r.villaId, r.feedId, today).all()
+        WHERE villa_id = ? AND feed_id = ? AND removed_at IS NULL AND checkout_date > ? AND summary LIKE ?`
+    ).bind(r.villaId, r.feedId, today, reserved + '%').all()
     for (const b of blocks || []) {
-      try { await alertOneAirbnbDateMismatch(env, DB, r.villaId, b) }
-      catch (e) { console.warn('airbnb date mismatch alert:', e?.message || e) }
+      try { await alertOnePlatformDateMismatch(env, DB, r.villaId, b, partner) }
+      catch (e) { console.warn('platform date mismatch alert:', e?.message || e) }
     }
   }
 }
 
-async function alertOneAirbnbDateMismatch(env, DB, villaId, b) {
+async function alertOnePlatformDateMismatch(env, DB, villaId, b, partner) {
+  const platform = partner.label
   const { results: overlapping } = await DB.prepare(
     `SELECT stay_id, guest_name, source, checkin_date, checkout_date FROM stayvibe_stays
       WHERE villa_id = ? AND status NOT IN ('cancelled', 'void') AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL
         AND checkin_date < ? AND checkout_date > ?`
   ).bind(villaId, b.checkout_date, b.checkin_date).all()
-  const stays = (overlapping || []).filter(s => channelsMatch(s.source, 'airbnb'))     // stays store the source as typed ('airbnb', 'Airbnb' ...)
+  const stays = (overlapping || []).filter(s => channelsMatch(s.source, partner.id))   // stays store the source as typed ('airbnb', 'Airbnb' ...)
   if (!stays.length) return                                                              // no stay yet: the booking email may still be on its way
   if (stays.some(s => s.checkin_date === b.checkin_date && s.checkout_date === b.checkout_date)) return   // they agree
   if (stays.length !== 1) return                                                         // cannot tell which stay this is: leave it
@@ -1163,31 +1172,31 @@ async function alertOneAirbnbDateMismatch(env, DB, villaId, b) {
     }
   } catch (e) { /* a database without the table */ }
   const nightsOf = (a, z) => Math.max(1, Math.round((Date.parse(z + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000))
-  const airbnbRange = `${dayMonth(b.checkin_date)} to ${dayMonth(b.checkout_date)}`
+  const platformRange = `${dayMonth(b.checkin_date)} to ${dayMonth(b.checkout_date)}`
   const stayRange = `${dayMonth(s.checkin_date)} to ${dayMonth(s.checkout_date)}`
-  const subject = `⚠️ Airbnb has different dates for ${s.guest_name || 'a guest'}: ${airbnbRange} (StayVibe: ${stayRange})`
+  const subject = `⚠️ ${platform} has different dates for ${s.guest_name || 'a guest'}: ${platformRange} (StayVibe: ${stayRange})`
   const since = new Date(Date.now() - 7 * 864e5).toISOString()
   const dup = await DB.prepare(
-    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'airbnb_dates' AND subject = ? AND created_at > ? LIMIT 1`
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'platform_dates' AND subject = ? AND created_at > ? LIMIT 1`
   ).bind(villaId, subject, since).first()
   if (dup) return
   await sendAlert(env, subject, [
-    `Source: Airbnb calendar > StayVibe calendar sync`,
-    `Action: Airbnb's calendar and StayVibe disagree about a booking's dates.`,
+    `Source: ${platform} calendar > StayVibe calendar sync`,
+    `Action: ${platform}'s calendar and StayVibe disagree about a booking's dates.`,
     '',
     `Guest:     ${s.guest_name || '?'} (${s.stay_id})`,
-    `Airbnb:    ${airbnbRange} (${nightsOf(b.checkin_date, b.checkout_date)} nights)`,
+    `${(platform + ':').padEnd(10)} ${platformRange} (${nightsOf(b.checkin_date, b.checkout_date)} nights)`,
     `StayVibe:  ${stayRange} (${nightsOf(s.checkin_date, s.checkout_date)} nights)`,
     '',
-    `What to do: open the booking in Airbnb. If the dates really changed (the guest asked and you accepted), update the stay: Complete booking, Guest info, edit the check-in or check-out, and enter the new amounts from Airbnb. A change the guest has asked for by email shows under "Booking changes to decide" on your home screen: approving it there applies the new dates.`,
-    `Platforms that read your StayVibe calendar already see the nights Airbnb holds.`,
+    `What to do: open the booking in ${platform}. If the dates really changed (the guest asked and you accepted), update the stay: Complete booking, Guest info, edit the check-in or check-out, and enter the new amounts from ${platform}. A change the guest has asked for by email shows under "Booking changes to decide" on your home screen: approving it there applies the new dates.`,
+    `Platforms that read your StayVibe calendar already see the nights ${platform} holds.`,
     `Time: ${new Date().toISOString()}`,
-  ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'airbnb_dates')
+  ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'platform_dates')
 }
 
 // ── A BOOKING THAT ARRIVES ONLY AS BLOCKED DATES ──────────────────────────
-// Airbnb's bookings reach StayVibe as emails and become stays within minutes. A platform with no such feed (Agoda, Booking.com,
-// Vrbo ...) shows up only as a NEW block of dates in its calendar: no guest, no check-in link, nothing on the manager's list, and
+// A platform whose bookings reach StayVibe as emails (its partner file says bookingsFrom 'email': Airbnb today) becomes stays within
+// minutes. A platform with no such feed (Agoda, Booking.com, Vrbo ...) shows up only as a NEW block of dates in its calendar: no guest, no check-in link, nothing on the manager's list, and
 // nobody told. So when a feed we read lists a block we have never seen, the owner is emailed at once (2026-10-28, Agoda being
 // opened for sale). The first read of a newly added feed is its baseline, so what is already there is not "new". The email also
 // says whether those nights are ALREADY taken here (a stay, a night the owner closed, a held night, another platform's block):
@@ -1196,7 +1205,8 @@ async function notifyNewPlatformBookings(env, DB, results) {
   if (!env) return
   for (const r of results || []) {
     if (!r || !r.ok || r.baseline || !r.newBlocks?.length) continue
-    if (channelsMatch(r.channel, 'airbnb')) continue            // its bookings arrive as emails and become stays
+    // a platform whose bookings arrive as emails already becomes a stay (partner file: bookingsFrom 'email')
+    if ((partnerFor(getHostConfig(r.villaId), r.channel) || {}).bookingsFrom === 'email') continue
     const today = todayInZone(await zoneFor(DB, r.villaId))
     for (const b of r.newBlocks) {
       if (!b.checkout || b.checkout <= today) continue          // already over
@@ -8135,23 +8145,17 @@ export async function onRequest(ctx) {
         assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
-
-        // Derive the rate from the money rather than believe the caller.
-        //
-        // The Airbnb poller sent a hardcoded commissionPct of 3 for years. That
-        // was true while the listing was on split fees - guest ~12%, host ~3% -
-        // and it became wrong overnight on 2026-10-10 when the listing moved to
-        // host-only fees at 15.5%. The AMOUNT is parsed from the payout email
-        // and stayed correct throughout, so the percentage was the only thing
-        // lying, and nothing caught it because nothing recomputes from it.
-        //
-        // The amount is the fact; the percentage only describes it. A caller
-        // that supplies both no longer gets to have them disagree.
+        // The rate stored with the stay. The AMOUNT is the fact and the percentage only describes it: when the caller gives both a
+        // gross and a commission amount, the rate is worked out from them, so the two can never disagree (the email poller sent a
+        // constant 3 for years, which went wrong overnight on 2026-10-10 when Airbnb moved to host-only fees at 15.5%). With no amount
+        // yet it is the host's rule for the platform as of the booking's date (the partner's file plus the host's own config); a
+        // source nobody has described keeps what the caller sent.
+        const ruleHost = getHostConfig(body.villaId || DEFAULT_VILLA_ID)
         const bkGross = Number(body.gross) || 0
         const bkCommAmt = Number(body.commissionAmt) || 0
         const bkCommPct = (bkGross > 0 && bkCommAmt > 0)
           ? Math.round((bkCommAmt / bkGross) * 1000) / 10
-          : (Number(body.commissionPct) || 0)
+          : (partnerFor(ruleHost, body.source) ? commissionPct(ruleHost, body.source, body.checkInDate) : (Number(body.commissionPct) || 0))
 
         // Guard against a checkout <= checkin pair reaching the DB at all —
         // this exact shape (auto-imported Airbnb booking, correct nights,
@@ -8177,7 +8181,7 @@ export async function onRequest(ctx) {
 
         if (cls.ownOverlap) {
           const provisional = cls.ownOverlap
-          await DB.prepare(`UPDATE stayvibe_stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.source || '', body.airbnbConf || null, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
           await syncStayLedger(DB, provisional.stay_id)
           return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
@@ -8972,7 +8976,8 @@ export async function onRequest(ctx) {
 
       if (action === 'saveVillaRentalIncome') {
         if (body.stayId) {
-          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, await keepPaidMarks(DB, body.stayId, body.extraLines), body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, body.airbnbFees ? JSON.parse(body.airbnbFees).nightFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).cleaningFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).hostServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).youEarn || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestServiceFee || 0 : 0, body.airbnbFees ? JSON.parse(body.airbnbFees).guestPaid || 0 : 0, actor, now(), body.stayId).run()
+          const feeLines = body.feeBreakdown || body.airbnbFees || null
+          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), tariff_per_night = ?, extra_charges = ?, extra_lines = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, notes = ?, night_fee = COALESCE(NULLIF(?,0), night_fee), cleaning_fee = COALESCE(NULLIF(?,0), cleaning_fee), host_service_fee = COALESCE(NULLIF(?,0), host_service_fee), you_earn = COALESCE(NULLIF(?,0), you_earn), guest_service_fee = COALESCE(NULLIF(?,0), guest_service_fee), guest_paid_total = COALESCE(NULLIF(?,0), guest_paid_total), updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(body.channel ? body.channel.toLowerCase().replace(/[^a-z]/g,'_') : null, body.tariffPerNight || 0, body.extraCharges || 0, await keepPaidMarks(DB, body.stayId, body.extraLines), body.gross || 0, body.commPct || 0, body.commAmt || 0, body.net || 0, body.notes || null, feeLines ? JSON.parse(feeLines).nightFee || 0 : 0, feeLines ? JSON.parse(feeLines).cleaningFee || 0 : 0, feeLines ? JSON.parse(feeLines).hostServiceFee || 0 : 0, feeLines ? JSON.parse(feeLines).youEarn || 0 : 0, feeLines ? JSON.parse(feeLines).guestServiceFee || 0 : 0, feeLines ? JSON.parse(feeLines).guestPaid || 0 : 0, actor, now(), body.stayId).run()
           await syncStayLedger(DB, body.stayId)
           return json({ success: true, data: { stayId: body.stayId, updated: true } })
         }
@@ -9624,7 +9629,9 @@ export async function onRequest(ctx) {
         // that does not exist yet, leaving the handler's own checks in charge.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
-        await DB.prepare(`UPDATE stayvibe_stays SET review_rating = ?, review_source = ?, review_date = ?, review_text = ?, review_note = ?, review_highlights = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(rating || 0, source || 'airbnb', reviewDate || now(), reviewText || null, reviewNote || null, highlights || null, 'auto', now(), stayId).run()
+        // Where the review was written: what the caller says, else where the guest booked (a guest reviews where they booked)
+        const reviewSource = source || (await DB.prepare(`SELECT source FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first())?.source || null
+        await DB.prepare(`UPDATE stayvibe_stays SET review_rating = ?, review_source = ?, review_date = ?, review_text = ?, review_note = ?, review_highlights = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`).bind(rating || 0, reviewSource, reviewDate || now(), reviewText || null, reviewNote || null, highlights || null, 'auto', now(), stayId).run()
         return json({ success: true, data: { stayId, rating, source } })
       }
 
@@ -9835,7 +9842,8 @@ export async function onRequest(ctx) {
           let hits = (cands || []).filter(s => String(s.guest_name || '').toLowerCase().split(/\s+/)[0] === first)
           const ci = String(body.checkIn || (dc && dc.originalCheckin) || '').trim()
           if (ci && hits.some(s => s.checkin_date === ci)) hits = hits.filter(s => s.checkin_date === ci)
-          if (hits.length > 1) { const a = hits.filter(s => s.source === 'airbnb'); if (a.length) hits = a }
+          // several stays share the first name: prefer the ones booked through a platform whose bookings arrive as emails (this email's own)
+          if (hits.length > 1) { const viaEmail = hostPartners(getHostConfig(villaId)).filter(p => p.bookingsFrom === 'email'); const a = hits.filter(s => viaEmail.some(p => channelsMatch(s.source, p.id))); if (a.length) hits = a }
           if (hits.length === 1) stay = hits[0]
         }
         const booked = stay ? (parseInt(stay.adults) || 0) + (parseInt(stay.children) || 0) : null
@@ -9978,7 +9986,7 @@ export async function onRequest(ctx) {
         const datesText = datesAsked ? `${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}` : ''
         let datesApplied = null, datesHandled = false
         if (decision === 'approved' && datesAsked && cr.stay_id) {
-          const st = await DB.prepare(`SELECT stay_id, villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(cr.stay_id).first()
+          const st = await DB.prepare(`SELECT stay_id, villa_id, source, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(cr.stay_id).first()
           if (!st) return err('The booking this belongs to is gone: decline the request', 409)
           const day = x => String(x || '').slice(0, 10)
           const alreadyThere = day(st.checkin_date) === dc.requestedCheckin && day(st.checkout_date) === dc.requestedCheckout
@@ -9992,7 +10000,7 @@ export async function onRequest(ctx) {
             if (day(st.checkin_date) !== dc.originalCheckin || day(st.checkout_date) !== dc.originalCheckout) {
               return err(`The email moves ${dayMonth(dc.originalCheckin)} to ${dayMonth(dc.originalCheckout)} → ${dayMonth(dc.requestedCheckin)} to ${dayMonth(dc.requestedCheckout)}, but this booking is ${dayMonth(day(st.checkin_date))} to ${dayMonth(day(st.checkout_date))}. If it should be on the new dates, change them in Guest info and approve again (that only records it); otherwise decline the request.`, 409)
             }
-            const clashes = await nightClashes(DB, st.villa_id, st.stay_id, addedNightRanges(dc))
+            const clashes = await nightClashes(DB, st.villa_id, st.stay_id, addedNightRanges(dc), st.source)
             if (clashes.length) return err(`The night(s) the new dates add are already taken: ${clashes.join('; ')}. Sort that out first, then approve again.`, 409)
             datesHandled = true
             datesApplied = { from: dc.requestedCheckin, to: dc.requestedCheckout, nights: dc.requestedNights, was: { from: dc.originalCheckin, to: dc.originalCheckout, nights: dc.originalNights } }

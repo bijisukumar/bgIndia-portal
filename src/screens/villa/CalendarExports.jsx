@@ -11,11 +11,17 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../api'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
-import { channelKey, channelLabel, sourcePill, PARTNERS } from '../../utils/channel'
+import { channelKey, channelLabel, sourcePill } from '../../utils/channel'
+import { hostPartners, partnerFor } from '../../utils/partners'
+import { CONFIG } from '../../config'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { timeAgo } from '../../utils/localWhen'
 
 const DAY_MS = 24 * 3600 * 1000
+
+// The platforms this villa works with that have a calendar to connect, in the order the partner files rank them (the ones without a
+// rank last). How each takes our link (where to paste it, any exception, how often it reads) is in its partner file.
+const calendarPartners = () => hostPartners(CONFIG).filter(p => p.group === 'channel').sort((a, b) => (a.legendRank || 99) - (b.legendRank || 99))
 
 const BTN = { padding: '6px 11px', borderRadius: '8px', fontSize: '0.72rem', cursor: 'pointer', whiteSpace: 'nowrap' }
 
@@ -47,7 +53,7 @@ export default function CalendarExports({ feeds, showToast }) {
   // "booking_com" are one row. The usual ones keep their order, the rest follow A-Z.
   const rows = useMemo(() => {
     const byKey = new Map()
-    for (const p of PARTNERS) byKey.set(p.key, { key: p.key, channel: p.label, link: null })
+    for (const p of calendarPartners()) byKey.set(channelKey(p.id), { key: channelKey(p.id), channel: p.label, link: null })
     for (const f of feeds || []) {
       const k = channelKey(f.channel)
       if (k && !byKey.has(k)) byKey.set(k, { key: k, channel: f.channel, link: null })
@@ -58,7 +64,7 @@ export default function CalendarExports({ feeds, showToast }) {
       row.link = l
       byKey.set(k, row)
     }
-    const usual = PARTNERS.map(p => p.key)
+    const usual = calendarPartners().map(p => channelKey(p.id))
     const rank = r => { const i = usual.indexOf(r.key); return i < 0 ? usual.length : i }
     return [...byKey.values()].sort((a, b) => rank(a) - rank(b) || channelLabel(a.channel).localeCompare(channelLabel(b.channel)))
   }, [feeds, links])
@@ -99,17 +105,17 @@ export default function CalendarExports({ feeds, showToast }) {
     }
   }
 
-  // Agoda only imports addresses from sites on its own approved list and refuses ours
-  // ("Please enter a valid link") before it fetches anything, so its link is read by the
-  // "StayVibe to Agoda" Google script (apps-script/agoda-bridge/src/Code.js), which keeps a
-  // private Google Calendar for Agoda to import. This row's "Read N ago" is that script.
+  // A platform that refuses our address (its partner file says calendar.via 'google-bridge': Agoda only imports addresses from sites
+  // on its own approved list) has its link read by a Google script instead, which keeps a private Google Calendar for the platform
+  // to import (apps-script/agoda-bridge/src/Code.js). That row's "Read N ago" is that script reading the link.
   function status(l) {
     const name = channelLabel(l.channel)
-    const agoda = channelKey(l.channel) === 'agoda'
+    const cal = (partnerFor(CONFIG, l.channel) || {}).calendar || {}
+    const bridge = cal.via === 'google-bridge'
     if (!l.lastFetchedAt) {
       return {
-        text: agoda
-          ? 'Not read yet. Agoda refuses addresses it has not approved, so this link goes in through a Google Calendar: set up the “StayVibe to Agoda” script (see the manual).'
+        text: bridge
+          ? (cal.notReadYet || `Not read yet. ${name} takes this link through a Google Calendar: set up the bridge script (see the manual).`)
           : `Not read yet. Paste it into ${name}'s calendar import.`,
         warn: false,
       }
@@ -117,10 +123,12 @@ export default function CalendarExports({ feeds, showToast }) {
     const quiet = Date.now() - new Date(l.lastFetchedAt).getTime() > DAY_MS
     return {
       text: `Read ${timeAgo(l.lastFetchedAt)} · ${l.fetchCount} time${l.fetchCount === 1 ? '' : 's'}` +
-        (quiet ? (agoda ? ' · not read for over a day: is the “StayVibe to Agoda” script still running?' : ` · not read for over a day: is it still pasted into ${name}?`) : ''),
+        (quiet ? (bridge ? ` · not read for over a day: ${cal.quietWarning || 'is the bridge script still running?'}` : ` · not read for over a day: is it still pasted into ${name}?`) : ''),
       warn: quiet,
     }
   }
+  const bridges = calendarPartners().filter(p => (p.calendar || {}).via === 'google-bridge')
+  const readTimes = calendarPartners().filter(p => (p.calendar || {}).readsEvery)
 
   const INP = { flex: 1, minWidth: 0, padding: '9px 12px', borderRadius: '8px', boxSizing: 'border-box', background: 'var(--dark-input)', border: '1px solid var(--border-dim)', color: 'var(--text)', fontSize: '0.85rem' }
 
@@ -129,8 +137,7 @@ export default function CalendarExports({ feeds, showToast }) {
       <div className="card-section-label" style={{ marginBottom: '6px' }}>SHARE YOUR CALENDAR BACK</div>
       <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', lineHeight: 1.5, marginBottom: '10px' }}>
         Giving each platform its own link means it blocks the nights booked everywhere else, your direct
-        bookings included. Paste the link into that platform's calendar import (Agoda is the exception: it
-        only takes addresses it has approved, so its link goes in through a Google Calendar). A link never
+        bookings included. Paste the link into that platform's calendar import{bridges.length > 0 && ` (${bridges.map(p => p.label).join(' and ')} ${bridges.length > 1 ? 'are the exceptions' : 'is the exception'}: ${bridges[0].calendar.bridgeExplain || 'its link goes in through a Google Calendar'})`}. A link never
         contains that platform's own bookings, and holds dates only: no guest names or contact details.
       </div>
 
@@ -197,13 +204,11 @@ export default function CalendarExports({ feeds, showToast }) {
         <div style={{ marginTop: '6px' }}>
           Open the platform's calendar settings and look for <b>Import calendar</b> (some call it Connect or Sync calendars).
           <ul style={{ margin: '6px 0 6px', paddingLeft: '18px' }}>
-            <li><b>Airbnb:</b> Calendar → Availability → Connect calendars → Connect to another website.</li>
-            <li><b>Agoda:</b> Partner Portal → Calendar → Calendar connections → Other website link.</li>
-            <li><b>Vrbo:</b> Calendar → Import/Export → Import calendar.</li>
-            <li><b>Booking.com and Expedia:</b> Calendar → Sync calendars / Connect calendars.</li>
+            {calendarPartners().filter(p => (p.calendar || {}).whereToPaste).map(p => (
+              <li key={p.id}><b>{p.label}:</b> {p.calendar.whereToPaste}{p.calendar.note ? ` ${p.calendar.note}` : ''}</li>
+            ))}
           </ul>
-          Booking.com and Agoda only offer this when the villa is listed as a single unit, and Booking.com not at all if a
-          channel manager is connected. Platforms read the link on their own schedule (Airbnb about every 3 hours), so a
+          Platforms read the link on their own schedule{readTimes.length > 0 && ` (${readTimes.map(p => `${p.label} ${p.calendar.readsEvery}`).join(', ')})`}, so a
           new booking can take a few hours to show up on the others; nothing here can make that instant.
         </div>
       </details>

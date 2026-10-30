@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { SOURCES, LOST_REASONS } from './EnquiryTracker'
+import { enquirySourceLabel, LOST_REASONS } from './EnquiryTracker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { propertyYear } from '../../utils/dates'
 
@@ -94,7 +94,7 @@ export default function EnquiryConversionDashboard() {
           {Object.entries(data.bySource || {}).sort((a, b) => b[1].enquiries - a[1].enquiries).map(([src, s]) => (
             <div key={src} style={{ marginBottom: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
-                <span style={{ color: 'var(--text)', fontWeight: '600' }}>{SOURCES.find(x => x.id === src)?.label || src}</span>
+                <span style={{ color: 'var(--text)', fontWeight: '600' }}>{enquirySourceLabel(src)}</span>
                 <span style={{ color: '#5C7080' }}>{s.bookings}/{s.enquiries} · <span style={{ color: '#C8903A', fontWeight: '700' }}>{s.conversionPct}%</span></span>
               </div>
               <div style={{ height: '6px', borderRadius: '3px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>

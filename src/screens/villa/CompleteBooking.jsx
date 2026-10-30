@@ -27,11 +27,10 @@ import GuestTimesReview from '../../components/GuestTimesReview'
 import StayTimesLine from '../../components/StayTimesLine'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
+import { hostPartners, partnerFor, commissionPct, percentOf, platformTake } from '../../utils/partners'
 import { buildArrivalWaLink } from '../../utils/arrivalMessage'
 import { buildComfortCheckWaLink, buildHostIntroWaLink, buildFarewellWaLink, buildCheckinLinkWaLink, greetingName, reviewPlatformFor } from '../../utils/guestMessages'
 import { breakfastDraft, breakfastItems, breakfastTypesFor, formatBreakfast } from '../../utils/breakfastSplit'
-
-const CHANNELS   = ['Direct','Airbnb','MakeMyTrip','Booking.com','Goibibo','Agoda','Expedia','VRBO','Agent','Other']
 
 // Extra charge line items — single source of truth in utils/villaPricing
 // (shared with EnquiryDetail quotes) so the two dropdowns can never drift.
@@ -41,15 +40,13 @@ import { findTwinPairs } from '../../utils/twinStays'
 import ChangeRequestCard from '../../components/ChangeRequestCard'
 import { PhoneCountry } from '../../components/CountryFlag'
 
-// Airbnb-specific fee structure (from confirmation email)
-const EMPTY_AIRBNB = {
+// The itemised fee lines a platform's confirmation gives (the partners with feeBreakdown in /partners: Airbnb today)
+const EMPTY_FEES = {
   nightFee: '', nights: 1, cleaningFee: '', hostServiceFee: '',
   guestServiceFee: '', youEarn: '', guestPaid: '',
 }
-// Airbnb: 3% HOST fee only (guest pays 15% separately — not your deduction)
-// Host-side commission % only (what OTA deducts from your payout)
-// Airbnb: 3% host fee. Booking.com: 15%. MakeMyTrip/Goibibo: 18%. Expedia/VRBO: 3% (similar to Airbnb)
-const COMMISSION = { Direct:0, Airbnb:3, MakeMyTrip:18, 'Booking.com':15, Goibibo:18, Agoda:18, Expedia:3, VRBO:3, Agent:0, Other:10 }
+// What each platform keeps comes from the villa's config (partners in hosts/<id>/config.js, described in /partners),
+// read through src/utils/partners.js: nothing about a platform is written in this screen.
 
 // Status badge config
 const STATUS_META = {
@@ -133,7 +130,7 @@ export default function CompleteBooking() {
   const [selected, setSelected] = useState(null)
   const [form, setForm]         = useState(EMPTY_FORM)
   const [extraLines, setExtraLines] = useState([])      // [{label, amount}]
-  const [airbnb, setAirbnb]         = useState(EMPTY_AIRBNB) // Airbnb fee breakdown
+  const [fees, setFees]         = useState(EMPTY_FEES) // the platform's itemised fee breakdown
   const [loading, setLoading]   = useState(true)
   const [saving, setSaving]     = useState(false)
   const [transitioning, setTransitioning] = useState(false)
@@ -221,11 +218,8 @@ export default function CompleteBooking() {
     setBookedByOpen(false); setBookedByQuery(''); setBookedByResults([])
     setAddingPhone(false); setPhoneDraft('')
     setEditingEarlyTime(false); setEditingLateTime(false); setEarlyTimeDraft(''); setLateTimeDraft('')
-    const ch = stay.source
-      ? stay.source.charAt(0).toUpperCase() + stay.source.slice(1).replace('_','.')
-      : 'Direct'
-
-    const isAirbnb = ch === 'Airbnb'
+    const ch = channelLabel(stay.source)          // 'booking_com' -> 'Booking.com', as the channel list names it
+    const itemised = !!(partnerFor(CONFIG, ch) || {}).feeBreakdown   // does this platform's confirmation list its fees in rupees?
 
     // night_fee in DB is the TOTAL night fee (e.g. ₹9,650 for 2 nights).
     // tariff_per_night is the per-night rate (e.g. ₹4,825).
@@ -263,9 +257,9 @@ export default function CompleteBooking() {
       }
     } catch { setExtraLines([]) }
 
-    // Pre-fill Airbnb breakdown from DB values (written by email poller)
-    if (isAirbnb) {
-      setAirbnb({
+    // Pre-fill the platform's fee breakdown from DB values (written by the email poller)
+    if (itemised) {
+      setFees({
         nightFee:        String(totalNightFee || ''),
         cleaningFee:     String(stay.cleaning_fee      || stay.cleaningFee     || ''),
         hostServiceFee:  String(stay.host_service_fee  || stay.hostServiceFee  || ''),
@@ -314,14 +308,19 @@ export default function CompleteBooking() {
       </>
     )
   }
-  const commPct    = COMMISSION[form.channel]||0
-  // Airbnb: gross = nightFee + cleaningFee, commAmt = hostServiceFee, net = youEarn
+  // The platform this booking is through, and the rule it is worked out under: from the villa's config, by the stay's own date
+  const channelPartner = partnerFor(CONFIG, form.channel)
+  const channelNames   = hostPartners(CONFIG).map(p => p.label)
+  const ruleDate       = selected && selected.checkin_date
+  const commPct    = commissionPct(CONFIG, form.channel, ruleDate)
+  // A platform that itemises its fees: gross = nightFee + cleaningFee, commAmt = hostServiceFee, net = youEarn
   // Other:  gross = tariff * nights + extras, commAmt = gross * commPct%, net = gross - commAmt
-  const isAirbnb   = form.channel === 'Airbnb'
-  const nightFeeAmt   = parseFloat(airbnb.nightFee) || 0
-  const cleanFeeAmt   = parseFloat(airbnb.cleaningFee) || 0
-  const hostSvcAmt    = parseFloat(airbnb.hostServiceFee) || 0
-  const youEarnAmt    = parseFloat(airbnb.youEarn) || tariff
+  const itemisedNow = !!(channelPartner && channelPartner.feeBreakdown)
+  const platformName = channelPartner ? channelPartner.label : form.channel
+  const nightFeeAmt   = parseFloat(fees.nightFee) || 0
+  const cleanFeeAmt   = parseFloat(fees.cleaningFee) || 0
+  const hostSvcAmt    = parseFloat(fees.hostServiceFee) || 0
+  const youEarnAmt    = parseFloat(fees.youEarn) || tariff
   // Airbnb began collecting occupancy tax and there is no column left to store
   // it (D1 caps ALTER TABLE at 100 columns and stayvibe_stays is at the cap).
   // It does not need one — the guest's total minus the parts we already hold
@@ -332,9 +331,9 @@ export default function CompleteBooking() {
   // real outlay understated and the row impossible to reconcile against what
   // they actually handed over. Extras are money the guest paid us, so they
   // belong in their total.
-  const guestPaidChannel = parseFloat(airbnb.guestPaid) || 0
+  const guestPaidChannel = parseFloat(fees.guestPaid) || 0
   const guestPaidAmt  = guestPaidChannel > 0 ? guestPaidChannel + extraTotal : 0
-  const guestSvcAmt   = parseFloat(airbnb.guestServiceFee) || 0
+  const guestSvcAmt   = parseFloat(fees.guestServiceFee) || 0
   const occupancyTax  = (guestPaidAmt > 0 && nightFeeAmt > 0)
     // night_fee is the TOTAL room fee for the stay, not a per-night rate —
     // confirmed against four multi-night bookings where guest_paid minus
@@ -345,15 +344,19 @@ export default function CompleteBooking() {
     ? Math.max(0, Math.round((guestPaidAmt - nightFeeAmt - cleanFeeAmt - guestSvcAmt) * 100) / 100)
     : 0
 
-  const gross      = isAirbnb
-    ? (nightFeeAmt * nights) + cleanFeeAmt + extraTotal
+  // night_fee is the TOTAL room fee for the stay (see occupancyTax above), so the itemised gross is not multiplied by the nights
+  const feeSubtotal = nightFeeAmt + cleanFeeAmt
+  const gross      = itemisedNow
+    ? feeSubtotal + extraTotal
     : (tariff * nights) + extraTotal
-  const commAmt    = isAirbnb
-    ? (hostSvcAmt || Math.round(gross * 0.03))
+  const commAmt    = itemisedNow
+    ? (hostSvcAmt || percentOf(feeSubtotal, commPct))   // the typed host fee, else the rate in the config
     : Math.round(gross * commPct / 100)
-  const net        = isAirbnb
-    ? youEarnAmt + extraTotal          // youEarn already has 3% deducted
+  const net        = itemisedNow
+    ? youEarnAmt + extraTotal          // youEarn already has the platform's host fee deducted
     : gross - commAmt
+  // The host fee as a percentage of this booking: what it really was (an older booking's was lower), else the configured rate.
+  const shownHostPct = feeSubtotal > 0 && hostSvcAmt > 0 ? Math.round(hostSvcAmt / feeSubtotal * 1000) / 10 : commPct
 
   // "Paid" on an extra charge: records that the money was received (the server stamps the time). It changes no
   // total: an extra is revenue from the booking and is already inside gross; this is the record that it came in.
@@ -390,7 +393,7 @@ export default function CompleteBooking() {
         tariffPerNight: tariff,
         extraCharges:   extraTotal,
         extraLines:     JSON.stringify(extraLines),
-        airbnbFees:     form.channel === 'Airbnb' ? JSON.stringify(airbnb) : null,
+        feeBreakdown:   itemisedNow ? JSON.stringify(fees) : null,
         nights, gross, commPct, commAmt, net,
         notes: form.notes,
       })
@@ -1087,6 +1090,15 @@ export default function CompleteBooking() {
                           )}
                         </div>
                         <StayTimesLine stay={stay} />
+                        {/* What its platform takes on this booking, in total: the reason to bring a guest back direct. */}
+                        {(() => {
+                          const take = platformTake(stay, CONFIG)
+                          return take ? (
+                            <div style={{fontSize:'0.68rem',color:'#E8A33D',marginTop:'2px'}}>
+                              {take.label} takes {take.estimated ? 'about ' : ''}{fmt(Math.round(take.total))}{take.pct != null ? ` (${take.pct}%)` : ''}
+                            </div>
+                          ) : null
+                        })()}
                         {requestSummary(stay) && (
                           <div style={{fontSize:'0.68rem',color:'#C8903A',marginTop:'2px',
                             overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
@@ -1329,7 +1341,7 @@ export default function CompleteBooking() {
                     request={{ ...s.pendingChange, stayId: s.stay_id, stayAdults: s.adults, stayChildren: s.children, checkIn: s.checkin_date, checkOut: s.checkout_date }}
                     onDone={async (decision, res) => {
                       showToast(decision === 'approved'
-                        ? (res && res.datesApplied ? `Dates now ${dayMonth(res.datesApplied.from)} to ${dayMonth(res.datesApplied.to)} ✓ Now update the amounts (Airbnb fee breakdown)` : 'Booking updated ✓')
+                        ? (res && res.datesApplied ? `Dates now ${dayMonth(res.datesApplied.from)} to ${dayMonth(res.datesApplied.to)} ✓ Now update the amounts (fee breakdown)` : 'Booking updated ✓')
                         : 'Kept as booked ✓')
                       await loadStays()
                     }}
@@ -1722,6 +1734,29 @@ export default function CompleteBooking() {
                             )}
                           </div>
                         )}
+                        {/* What the booking's platform takes in total (its host fee plus any guest fee). Itemised platforms show the fees
+                            Airbnb-style from the amounts on the booking; the rest show the cut worked out from the rate in the config. */}
+                        {(() => {
+                          const take = platformTake(s, CONFIG)
+                          if (!take) return null
+                          return (
+                            <div style={{gridColumn:'1 / -1',padding:'9px 11px',borderRadius:'9px',background:'rgba(232,163,61,0.08)',border:'1px solid rgba(232,163,61,0.35)'}}>
+                              <div style={infoLabel}>{take.label} takes</div>
+                              <div style={{fontSize:'1rem',fontWeight:'700',color:'#E8A33D'}}>
+                                {take.estimated ? 'about ' : ''}{fmt(Math.round(take.total))}
+                                <span style={{fontSize:'0.76rem',fontWeight:'400',color:'var(--text-dim)',marginLeft:'6px'}}>
+                                  {' '}in total{take.pct != null ? ` · ${take.pct}% of the ${fmt(Math.round(take.base))} booking` : ''}
+                                </span>
+                              </div>
+                              <div style={small}>
+                                {take.estimated
+                                  ? `Worked out from the rate set for ${take.label}. `
+                                  : (take.guest > 0 ? `Host service fee ${fmt(take.host)} + guest service fee ${fmt(take.guest)}. ` : `Host service fee ${fmt(take.host)}. `)}
+                                Booked direct, this stays with you.
+                              </div>
+                            </div>
+                          )
+                        })()}
                         {/* What the guest said the visit is for, on the check-in form: shown once they have filled it in. */}
                         {!!String(s.purpose_of_visit || '').trim() && (
                           <div style={{gridColumn:'1 / -1'}}>
@@ -1821,12 +1856,12 @@ export default function CompleteBooking() {
                   <div className="field">
                     <label className="field-label">Booking channel</label>
                     <select className="field-input" value={form.channel} onChange={e=>set('channel',e.target.value)}>
-                      {CHANNELS.map(c=><option key={c}>{c}</option>)}
+                      {channelNames.map(c=><option key={c}>{c}</option>)}
                     </select>
                   </div>
                   <div className="grid-2">
-                    {/* Tariff/Night only shown for non-Airbnb — Airbnb uses nightFee breakdown */}
-                    {form.channel !== 'Airbnb' && (
+                    {/* Tariff/Night only shown for a platform without an itemised breakdown — the others use the nightFee breakdown */}
+                    {!itemisedNow && (
                       <div className="field">
                         <label className="field-label">Tariff / night (₹)</label>
                         <input className="field-input gold" type="number" placeholder="0"
@@ -1884,55 +1919,55 @@ export default function CompleteBooking() {
                   </div>
                 )}
 
-                {/* Airbnb fee breakdown */}
-                {form.channel === 'Airbnb' && (
+                {/* The platform's fee breakdown (partners with feeBreakdown) */}
+                {itemisedNow && (
                   <div className="card" style={{marginBottom:'8px'}}>
-                    <div className="card-section-label" style={{marginBottom:'8px'}}>AIRBNB FEE BREAKDOWN</div>
+                    <div className="card-section-label" style={{marginBottom:'8px'}}>{platformName.toUpperCase()} FEE BREAKDOWN</div>
                     <div style={{fontSize:'0.75rem',color:'var(--text-dim)',marginBottom:'10px'}}>
-                      From Airbnb confirmation email — "You earn" section
+                      From the {platformName} confirmation email — "You earn" section
                     </div>
                     <div className="grid-2">
                       <div className="field">
                         <label className="field-label">Night fee total (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto</span></label>
                         <input type="number" className="field-input" placeholder="0"
-                          value={airbnb.nightFee}
+                          value={fees.nightFee}
                           onChange={e => {
                             const nf = parseFloat(e.target.value) || 0
-                            const cf = parseFloat(airbnb.cleaningFee) || 0
-                            const hs = Math.round((nf + cf) * 0.03 * 100) / 100
+                            const cf = parseFloat(fees.cleaningFee) || 0
+                            const hs = percentOf(nf + cf, commPct)
                             const ye = Math.round((nf + cf - hs) * 100) / 100
-                            setAirbnb(prev => ({...prev, nightFee: e.target.value, hostServiceFee: String(hs), youEarn: String(ye)}))
+                            setFees(prev => ({...prev, nightFee: e.target.value, hostServiceFee: String(hs), youEarn: String(ye)}))
                           }}/>
                       </div>
                       <div className="field">
                         <label className="field-label">Cleaning fee (₹)</label>
                         <input type="number" className="field-input" placeholder="0"
-                          value={airbnb.cleaningFee}
+                          value={fees.cleaningFee}
                           onChange={e => {
-                            const nf = parseFloat(airbnb.nightFee) || 0
+                            const nf = parseFloat(fees.nightFee) || 0
                             const cf = parseFloat(e.target.value) || 0
-                            const hs = Math.round((nf + cf) * 0.03 * 100) / 100
+                            const hs = percentOf(nf + cf, commPct)
                             const ye = Math.round((nf + cf - hs) * 100) / 100
-                            setAirbnb(prev => ({...prev, cleaningFee: e.target.value, hostServiceFee: String(hs), youEarn: String(ye)}))
+                            setFees(prev => ({...prev, cleaningFee: e.target.value, hostServiceFee: String(hs), youEarn: String(ye)}))
                           }}/>
                       </div>
                       <div className="field">
-                        <label className="field-label">Host service fee (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto 3%</span></label>
+                        <label className="field-label">Host service fee (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto {commPct}%</span></label>
                         <input type="number" className="field-input" placeholder="0"
-                          value={airbnb.hostServiceFee}
+                          value={fees.hostServiceFee}
                           onChange={e => {
-                            const nf = parseFloat(airbnb.nightFee) || 0
-                            const cf = parseFloat(airbnb.cleaningFee) || 0
+                            const nf = parseFloat(fees.nightFee) || 0
+                            const cf = parseFloat(fees.cleaningFee) || 0
                             const hs = parseFloat(e.target.value) || 0
                             const ye = Math.round((nf + cf - hs) * 100) / 100
-                            setAirbnb(prev => ({...prev, hostServiceFee: e.target.value, youEarn: String(ye)}))
+                            setFees(prev => ({...prev, hostServiceFee: e.target.value, youEarn: String(ye)}))
                           }}/>
                       </div>
                       <div className="field">
                         <label className="field-label">You earn total (₹) <span style={{color:'var(--text-dim)',fontWeight:'400'}}>auto</span></label>
                         <input type="number" className="field-input" placeholder="0"
-                          value={airbnb.youEarn}
-                          onChange={e => setAirbnb(prev => ({...prev, youEarn: e.target.value}))}/>
+                          value={fees.youEarn}
+                          onChange={e => setFees(prev => ({...prev, youEarn: e.target.value}))}/>
                       </div>
                     </div>
                     <div style={{fontSize:'0.75rem',color:'var(--text-dim)',margin:'8px 0 6px'}}>
@@ -1946,8 +1981,8 @@ export default function CompleteBooking() {
                         <div key={f.key} className="field">
                           <label className="field-label">{f.label}</label>
                           <input type="number" className="field-input" placeholder="0"
-                            value={airbnb[f.key]}
-                            onChange={e => setAirbnb(prev => ({...prev, [f.key]: e.target.value}))}/>
+                            value={fees[f.key]}
+                            onChange={e => setFees(prev => ({...prev, [f.key]: e.target.value}))}/>
                         </div>
                       ))}
                     </div>
@@ -1956,7 +1991,7 @@ export default function CompleteBooking() {
 
                 {/* Revenue summary */}
                 <div className="net-box">
-                  {isAirbnb ? (
+                  {itemisedNow ? (
                     <>
                       {nightFeeAmt > 0 && <div className="net-row">
                         <span className="net-label">Night fee ({nights}N × {fmt(nightFeeAmt / (nights||1))})</span>
@@ -1967,16 +2002,16 @@ export default function CompleteBooking() {
                         <span className="net-val pos">{fmt(cleanFeeAmt)}</span>
                       </div>}
                       {hostSvcAmt > 0 && <div className="net-row">
-                        <span className="net-label">Host service fee (3%)</span>
+                        <span className="net-label">Host service fee ({shownHostPct}%)</span>
                         <span className="net-val neg">−{fmt(hostSvcAmt)}</span>
                       </div>}
-                      {/* Collected by Airbnb from the guest and remitted on —
+                      {/* Collected by the platform from the guest and remitted on —
                           never ours, so it does not touch "You earn". Shown so
                           the row reconciles against the confirmation email,
                           which is the only place this number appears. */}
                       {occupancyTax > 0 && <div className="net-row">
                         <span className="net-label" style={{color:'var(--text-dim)'}}>
-                          Occupancy tax (Airbnb collects)
+                          Occupancy tax ({platformName} collects)
                         </span>
                         <span className="net-val" style={{color:'var(--text-dim)'}}>{fmt(occupancyTax)}</span>
                       </div>}
@@ -2010,7 +2045,7 @@ export default function CompleteBooking() {
                   <div className="net-divider"/>
                   <div className="net-row">
                     <span style={{color:'#EDF2F7',fontWeight:'600',fontSize:'1rem'}}>
-                      {isAirbnb ? 'You earn (net)' : 'Net to owner'}
+                      {itemisedNow ? 'You earn (net)' : 'Net to owner'}
                     </span>
                     <span className="net-val big">{fmt(net)}</span>
                   </div>
@@ -2030,7 +2065,7 @@ export default function CompleteBooking() {
                     circular) are never part of it. An older Airbnb row whose night
                     fee was never captured falls back to the stay's tariff per night. */}
                 {(() => {
-                  const onNightFee = isAirbnb && nightFeeAmt > 0
+                  const onNightFee = itemisedNow && nightFeeAmt > 0
                   const base = onNightFee ? nightFeeAmt / (nights || 1) : tariff
                   const basis = onNightFee ? 'night fee' : 'room rate'
                   if (base <= 0) return null

@@ -289,6 +289,19 @@ Warm regards,
 
   estates: [],
 
+  // The booking partners this villa works with, in the order they are offered on Complete booking and New booking. Each one is
+  // described ONCE, for every host, in /partners (its name and colours, what it keeps of a booking, whether it itemises its fees, how
+  // its bookings and its calendar reach us): `airbnb: {}` means "Airbnb, as everyone has it". Write only what is DIFFERENT for this
+  // villa, e.g. another rate: `agoda: { commission: { hostPct: 17 } }`. When a platform changes its rules from a date, keep the old
+  // rule so older bookings are still worked out under it:
+  //   bookingcom: { commission: [{ from: '2020-01-01', hostPct: 15 }, { from: '2027-04-01', hostPct: 17 }] }
+  // A platform that is not in /partners can be defined here in full (label, names, commission, feeBreakdown, bookingsFrom ...). The
+  // live screens read this through the stored copy of this file (syncTenantConfig); until that is synced they use the partner files'
+  // own values, which are the same unless this block overrides one.
+  partners: {
+    direct: {}, airbnb: {}, makemytrip: {}, bookingcom: {}, goibibo: {}, agoda: {}, expedia: {}, vrbo: {}, agent: {}, other: {},
+  },
+
   // Pricing defaults — deliberately different values from dwarka's, so a
   // mix-up between hosts would be immediately obvious in the UI.
   breakfastRate:       300,

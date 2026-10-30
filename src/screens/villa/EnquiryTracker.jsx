@@ -3,17 +3,27 @@ import { useNavigate } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { daysFromToday } from '../../utils/dates'
+import { CONFIG } from '../../config'
+import { hostPartners } from '../../utils/partners'
+import { channelKey } from '../../utils/channel'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { waNumber } from '../../utils/guestMessages'
 
-export const SOURCES = [
-  { id: 'website',     label: 'Website' },
-  { id: 'airbnb',       label: 'Airbnb' },
-  { id: 'booking_com',  label: 'Booking.com' },
-  { id: 'whatsapp',     label: 'WhatsApp' },
-  { id: 'phone',        label: 'Phone' },
-  { id: 'referral',     label: 'Referral' },
-]
+// Where an enquiry can come from: the host's own list (`enquirySources` in its config.js), else its own doors (the direct partner's
+// enquiryDoors, partners/direct.js) and the platforms it lists. Platforms are never named here.
+function enquirySources() {
+  const mine = CONFIG.enquirySources
+  if (Array.isArray(mine) && mine.length) return mine
+  const partners = hostPartners(CONFIG)
+  const direct = partners.find(p => p.group === 'direct') || {}
+  const door = id => ({ id, label: (direct.doorLabels || {})[id] || id })
+  const doors = direct.enquiryDoors || []
+  return [...doors.slice(0, 1).map(door), ...partners.filter(p => p.group === 'channel').map(p => ({ id: p.id, label: p.label })), ...doors.slice(1).map(door)]
+}
+export const SOURCES = enquirySources()
+// The label for a stored enquiry source ('booking_com', 'bookingcom' and 'Booking.com' are one platform).
+export const enquirySourceLabel = id =>
+  (SOURCES.find(s => s.id === id) || SOURCES.find(s => channelKey(s.id) === channelKey(id)) || {}).label || id
 
 export const PURPOSES = ['Vacation', 'Wedding', 'Temple Visit', 'Family Function', 'Dance', 'Other']
 
@@ -87,7 +97,7 @@ function EnquiryCard({ enq, navigate, nudging, handleNudge, dimmed = false }) {
             )}
           </div>
           <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
-            {enq.phone || enq.email || 'No contact on file'} · {SOURCES.find(s => s.id === enq.source)?.label || enq.source}
+            {enq.phone || enq.email || 'No contact on file'} · {enquirySourceLabel(enq.source)}
           </div>
         </div>
         <span style={{ background: meta.bg, color: meta.color, fontSize: '0.68rem', fontWeight: '700', padding: '4px 10px', borderRadius: '10px', whiteSpace: 'nowrap' }}>
@@ -258,7 +268,7 @@ export default function EnquiryTracker() {
             {visibleMatches.map(m => (
               <div key={`${m.enquiryId}:${m.stayId}`} className="card" style={{ marginBottom: '10px', padding: '14px' }}>
                 <div style={{ fontSize: '0.82rem', color: 'var(--text)', marginBottom: '4px' }}>
-                  Enquiry <strong>{m.enquiryGuestName}</strong> ({SOURCES.find(s => s.id === m.enquirySource)?.label || m.enquirySource}) vs.
+                  Enquiry <strong>{m.enquiryGuestName}</strong> ({enquirySourceLabel(m.enquirySource)}) vs.
                   stay <strong>{m.stayGuestName}</strong> ({m.stayChannel || 'direct'}, {m.stayStatus})
                 </div>
                 <div style={{ color: '#5C7080', fontSize: '0.72rem', marginBottom: '10px' }}>

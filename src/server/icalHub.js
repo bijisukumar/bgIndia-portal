@@ -21,24 +21,21 @@
 // 'airbnb'…) and feeds store what the owner typed, so names are compared by a
 // normalised key rather than as written (shared with the Channel calendar
 // screen, which has to group the same way).
-import { channelKey, channelsMatch } from '../utils/channel.js'
+import { channelKey, channelsMatch, hubLabelFor } from '../utils/partners.js'
 export { channelKey, channelsMatch }
 
-const KNOWN_LABELS = {
-  airbnb: 'Airbnb', bookingcom: 'Booking.com', expedia: 'Expedia', vrbo: 'VRBO',
-  makemytrip: 'MakeMyTrip', agoda: 'Agoda', goibibo: 'Goibibo', cleartrip: 'Cleartrip',
-  // Dates the owner closed by hand (Block dates): from no platform, so the platform reads
-  // "Unavailable (Owner block)" and never the reason or the note.
-  owner: 'Owner block',
-}
-// Sources that are the owner's own bookings rather than a platform.
-const OWN_SOURCES = new Set(['', 'direct', 'website', 'guestform', 'manualtrigger', 'whatsapp', 'phone', 'agent', 'referral', 'walkin', 'other'])
+// Dates the owner closed by hand (Block dates) come from no platform, so the platform reads
+// "Unavailable (Owner block)" and never the reason or the note. (A word of this calendar's own,
+// not a platform's: platforms and the host's own doors are named in the /partners files.)
+const OWNER_BLOCK = { key: 'owner', label: 'Owner block' }
 
-// How a source reads in the calendar entry ("Unavailable (Booking.com)").
+// How a source reads in the calendar entry ("Unavailable (Booking.com)"): the platform's name from
+// its partner file, "Direct" for the host's own doors, a name nobody described Title-cased.
 export function sourceLabel(name) {
   const k = channelKey(name)
-  if (KNOWN_LABELS[k]) return KNOWN_LABELS[k]
-  if (OWN_SOURCES.has(k)) return 'Direct'
+  if (k === OWNER_BLOCK.key) return OWNER_BLOCK.label
+  const known = hubLabelFor(name)
+  if (known) return known
   return String(name).trim().split(/[\s._-]+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 

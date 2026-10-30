@@ -1400,7 +1400,7 @@ export default function VillaDashboard() {
 }
 
 const MOCK = {
-  bestMonth:'March', topChannel:'Airbnb', directSaving:18400, avgNights:3.2,
+  bestMonth:'March', topChannel:'', directSaving:18400, avgNights:3.2,
   quarterly:{ Q1:168000, Q2:241000, Q3:195000, Q4:220000 },
   months:{ 4:{ revenue:124000, profit:94200, fees:18400, bookings:4, margin:76, directRatio:'2 / 4',
     breakdown:{ tariff:98000, carRental:12400, kitchen:6800, breakfast:4500, events:2200 } } },

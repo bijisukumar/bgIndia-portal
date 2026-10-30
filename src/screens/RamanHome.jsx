@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { CONFIG } from '../config'
+import { partnerFor } from '../utils/partners'
 import TopBar from '../components/TopBar'
 import { parseLocalDate } from '../utils/dates'
 import { stayTimes as sharedStayTimes } from '../utils/stayTimes'
@@ -72,14 +73,10 @@ function fmtGap(mins) {
   return m === 0 ? `${sign}${h} hrs` : `${sign}${h}h ${m}m`
 }
 
+// The mark beside a booking on the list comes from its platform's partner file (icon); a source nobody described gets the house.
 function sourceIcon(source) {
-  if (!source) return '🏠'
-  const s = source.toLowerCase()
-  if (s.includes('airbnb'))  return '🏡'
-  if (s.includes('mmt') || s.includes('makemytrip')) return '✈️'
-  if (s.includes('booking')) return '🌐'
-  if (s.includes('goibibo')) return '🟣'
-  return '🏠'
+  const p = source ? partnerFor(CONFIG, source) : null
+  return (p && p.icon) || '🏠'
 }
 
 // ── OVERDUE STAYS BLOCK ────────────────────────────────────────────────────

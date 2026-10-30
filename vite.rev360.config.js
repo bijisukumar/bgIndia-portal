@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { checkTime } from './scripts/vite-check-time.mjs'
+import { checkPartners } from './scripts/vite-check-partners.mjs'
 
 // Rev360 — Rental Property Management
 // Build: vite build --config vite.rev360.config.js
@@ -30,6 +31,7 @@ export default defineConfig({
   },
   plugins: [
     checkTime(),   // fails the build on a time shown or decided the old way (scripts/check-time.mjs)
+    checkPartners(),   // fails the build when a platform's name or rate is written in the code (scripts/check-partners.mjs)
     react(),
     VitePWA({
       registerType: 'autoUpdate',

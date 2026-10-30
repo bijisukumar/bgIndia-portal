@@ -195,7 +195,7 @@ export default function NewHostRegistration() {
           <Field label="Rate card" hint="Nightly tariff bands — one per line, e.g. '2 guests — ₹6000/night'">{ta('rateCardNotes')}</Field>
           <Field label="Cleaning fee (₹)">{inp('cleaningFee', { type: 'number', inputMode: 'decimal' })}</Field>
           <Field label="Extra-charge menu" hint="e.g. Early check-in — ₹500, Floor bed — ₹750 — one per line">{ta('extraChargeMenuNotes')}</Field>
-          <Field label="Booking channels used" hint="e.g. Airbnb — 3% commission, Direct — 0% — one per line">{ta('bookingChannelsNotes')}</Field>
+          <Field label="Booking channels used" hint="e.g. Airbnb, Booking.com, Direct — one per line (we fill in each platform's standard commission; add a different rate if yours differs)">{ta('bookingChannelsNotes')}</Field>
         </Section>
 
         <Section n="3" title="Operations">

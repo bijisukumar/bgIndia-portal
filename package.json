@@ -12,6 +12,7 @@
     "build:demovilla": "vite build --config vite.demovilla.config.js",
     "build:manage": "vite build",
     "build:all": "npm run build:stayvibe && npm run build:rev360 && npm run build:estate360 && npm run build:demovilla && npm run build:manage",
+    "check:partners": "node scripts/check-partners.mjs",
     "seed:config": "node scripts/seed-tenant-config.mjs",
     "gas:pull": "node scripts/gas.mjs pull",
     "gas:push": "node scripts/gas.mjs push",

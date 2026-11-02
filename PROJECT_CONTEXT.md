@@ -218,6 +218,7 @@ Review email → pollGmail → saveReview → shows ★ in Guest Repository
 | `scripts/rollback-test-data.sql` | Clean test data after TestRunner | Run after testing |
 | `scripts/AppsScript-additions.gs` | Append to V20 → V21 | Done |
 | `apps-script/guest-form/src/Code.js` | Bound script on form response sheet | Done |
+| `apps-script/CONFIG.md` | Script properties + triggers clasp cannot sync | Done |
 | `scripts/BackfillLocationData-Standalone.gs` | **v3** — one-time location backfill | **IN PROGRESS** |
 
 ---

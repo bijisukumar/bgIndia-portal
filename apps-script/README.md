@@ -38,9 +38,10 @@ Open the project in the Apps Script editor. The URL is:
 
 Paste that id into the matching `.clasp.json`.
 
-## Triggers are not code
+## Triggers and properties are not code
 
-clasp syncs files. It does **not** sync time-based triggers, which live only in
-the editor under the clock icon. A pushed script with no trigger simply never
-runs, and nothing will say so - that is the failure mode to watch for after any
-project is recreated.
+clasp syncs files. It does **not** sync time-based triggers or script
+properties, which live only in the editor. A pushed script with no trigger
+never runs, and one with no properties cannot authenticate - and neither says
+so. **See CONFIG.md** for what every project needs, which values are set by
+hand, and the one trigger that exists in no code at all.

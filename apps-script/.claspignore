@@ -1,0 +1,3 @@
+# clasp pushes everything under rootDir unless listed here.
+**/README.md
+**/*.md

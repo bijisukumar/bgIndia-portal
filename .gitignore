@@ -23,3 +23,10 @@ dist/
 scripts/demo-data/generated-demo-stays.sql
 # Guest data: never commit it (2026-10-24)
 guests-missing-city.json
+
+# clasp's OAuth credential. It normally lives in the home directory, but clasp
+# will also read one sitting beside a project - so make it impossible to commit
+# by accident. The script id in .clasp.json is NOT a secret and stays tracked:
+# it is in the editor's own URL, and the repo needs it to know what to push to.
+.clasprc.json
+**/.clasprc.json

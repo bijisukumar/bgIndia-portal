@@ -8136,6 +8136,23 @@ export async function onRequest(ctx) {
         const stayId = genStayId(body.villaId)
         const nights = parseInt(body.nights) || 1
 
+        // Derive the rate from the money rather than believe the caller.
+        //
+        // The Airbnb poller sent a hardcoded commissionPct of 3 for years. That
+        // was true while the listing was on split fees - guest ~12%, host ~3% -
+        // and it became wrong overnight on 2026-10-10 when the listing moved to
+        // host-only fees at 15.5%. The AMOUNT is parsed from the payout email
+        // and stayed correct throughout, so the percentage was the only thing
+        // lying, and nothing caught it because nothing recomputes from it.
+        //
+        // The amount is the fact; the percentage only describes it. A caller
+        // that supplies both no longer gets to have them disagree.
+        const bkGross = Number(body.gross) || 0
+        const bkCommAmt = Number(body.commissionAmt) || 0
+        const bkCommPct = (bkGross > 0 && bkCommAmt > 0)
+          ? Math.round((bkCommAmt / bkGross) * 1000) / 10
+          : (Number(body.commissionPct) || 0)
+
         // Guard against a checkout <= checkin pair reaching the DB at all —
         // this exact shape (auto-imported Airbnb booking, correct nights,
         // checkout_date silently equal to checkin_date) happened once via
@@ -8160,7 +8177,7 @@ export async function onRequest(ctx) {
 
         if (cls.ownOverlap) {
           const provisional = cls.ownOverlap
-          await DB.prepare(`UPDATE stayvibe_stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
+          await DB.prepare(`UPDATE stayvibe_stays SET source = 'airbnb', airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.airbnbConf || null, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
           await syncStayLedger(DB, provisional.stay_id)
           return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
         }
@@ -8191,7 +8208,7 @@ export async function onRequest(ctx) {
           return json({ success: false, error: `Double booking detected: ${conflict.guest_name} is already booked`, conflict }, 409)
         }
 
-        await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, body.source || 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.guestPhone), body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, body.commissionPct || 0, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
+        await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, body.source || 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.guestPhone), body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
         await syncStayLedger(DB, stayId)
         return json({ success: true, data: { stayId } })
       }

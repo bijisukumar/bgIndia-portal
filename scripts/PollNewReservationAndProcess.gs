@@ -625,8 +625,10 @@ function pollAirbnbBookings() {
         infants:         booking.infants  || 0,
         // Gross = night fee + cleaning fee (both shown on host payout)
         gross:           (booking.nightFee || 0) + (booking.cleaningFee || 0),
-        // Host commission = 3% host service fee (NOT the 15% guest fee)
-        commissionPct:   3,
+        // Whatever Airbnb actually charged, not a fixed rate. This said 3 for
+        // years - true on split fees, wrong from 2026-10-10 when the listing
+        // moved to host-only fees at 15.5%. The worker derives the percentage
+        // from the amount now, so no rate is sent from here at all.
         commissionAmt:   booking.hostServiceFee || 0,
         net:             booking.youEarn || 0,
         // Store Airbnb confirmation code in airbnbConf field

@@ -100,7 +100,7 @@ by frontend routing.
    env vars. Build with `VITE_HOST=<hostId>`.
 4. Custom domain on Pages; SSL auto.
 5. Google: deploy the 3 Apps Script projects under host's Gmail; set
-   `WORKER_URL`/`TENANT_ID` (2 lines, per `scripts/GuestFormScript.gs`'s
+   `WORKER_URL`/`TENANT_ID` (2 lines, per `apps-script/guest-form/src/Code.js`'s
    own header) — everything else loads dynamically via `getTenantConfig`.
    That includes the wording of the guest's check-in confirmation email:
    it is `guestMessages.checkinConfirmation` in the host's `config.js`

@@ -217,7 +217,7 @@ Review email → pollGmail → saveReview → shows ★ in Guest Repository
 | `scripts/seed-reviews-5star.sql` | Set all existing stays to 5★ Google | Done May 17 |
 | `scripts/rollback-test-data.sql` | Clean test data after TestRunner | Run after testing |
 | `scripts/AppsScript-additions.gs` | Append to V20 → V21 | Done |
-| `scripts/GuestFormScript.gs` | Bound script on form response sheet | Done |
+| `apps-script/guest-form/src/Code.js` | Bound script on form response sheet | Done |
 | `scripts/BackfillLocationData-Standalone.gs` | **v3** — one-time location backfill | **IN PROGRESS** |
 
 ---

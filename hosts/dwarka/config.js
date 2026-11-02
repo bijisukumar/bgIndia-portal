@@ -484,7 +484,7 @@ Warm regards,
     },
     // The email a guest gets after submitting the online check-in form ("Your
     // Check-in Registration Completed"). Built and sent by the Google Apps Script
-    // (scripts/GuestFormScript.gs, sendCheckinConfirmationEmails), which reads
+    // (apps-script/guest-form/src/Code.js, sendCheckinConfirmationEmails), which reads
     // this block from the worker (getTenantConfig) every time it runs. So a
     // change to the words here goes live with the next deploy and nothing has to
     // be pasted into Google. If this block is missing, or its template has lost

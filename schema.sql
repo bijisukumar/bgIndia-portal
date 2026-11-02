@@ -905,7 +905,7 @@ CREATE INDEX IF NOT EXISTS infra_idx_deletion_log_villa ON infra_deletion_log(vi
 -- ════════════════════════════════════════════════════════════
 
 -- Cross-cutting SaaS tenancy + auth — used by every app AND by the
--- externally-deployed scripts/GuestFormScript.gs (via the worker's
+-- externally-deployed apps-script/guest-form/src/Code.js (via the worker's
 -- getTenantConfig action, not directly — confirmed the .gs file itself
 -- needs no change).
 CREATE TABLE IF NOT EXISTS platform_tenants (

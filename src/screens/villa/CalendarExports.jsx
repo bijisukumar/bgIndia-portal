@@ -101,7 +101,7 @@ export default function CalendarExports({ feeds, showToast }) {
 
   // Agoda only imports addresses from sites on its own approved list and refuses ours
   // ("Please enter a valid link") before it fetches anything, so its link is read by the
-  // "StayVibe to Agoda" Google script (scripts/AgodaCalendarBridge.gs), which keeps a
+  // "StayVibe to Agoda" Google script (apps-script/agoda-bridge/src/Code.js), which keeps a
   // private Google Calendar for Agoda to import. This row's "Read N ago" is that script.
   function status(l) {
     const name = channelLabel(l.channel)

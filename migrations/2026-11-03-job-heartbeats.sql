@@ -7,6 +7,9 @@
 -- when a script has been silent for more than four of its own runs (src/utils/calendarHealth.js, job_silent / job_failing).
 --
 -- One row per script per villa, overwritten by each run: this is the LATEST report, not a history (runs counts the reports received).
+-- The same table also holds, one row per calendar feed (job 'feed:<feed_id>'), the last read of that calendar that WORKED: a failed try
+-- overwrites stayvibe_ical_feeds.last_synced_at, and an empty calendar has no booking to date a good read by, so without this a single
+-- slow answer from a platform whose calendar happens to be empty could not be told from a calendar that has gone quiet.
 -- Until this table exists the Worker answers recordJobRun with recorded:false and the warning has no script to watch, so the order of
 -- deploy and migration does not matter.
 --

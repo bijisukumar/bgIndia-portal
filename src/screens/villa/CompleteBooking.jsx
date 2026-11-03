@@ -395,7 +395,9 @@ export default function CompleteBooking() {
         extraCharges:   extraTotal,
         extraLines:     JSON.stringify(extraLines),
         feeBreakdown:   itemisedNow ? JSON.stringify(fees) : null,
-        nights, gross, commPct, commAmt, net,
+        // The percentage is what the booking really paid (the typed host fee over the night fee + cleaning), the rule only when no fee is
+        // typed: saving a booking made under an older rate must not stamp today's rate beside its own amount.
+        nights, gross, commPct: shownHostPct, commAmt, net,
         notes: form.notes,
       })
       showToast('Financials saved ✓')
@@ -1462,7 +1464,7 @@ export default function CompleteBooking() {
                             onChange={e=>setD('vehicleNumber', e.target.value)}
                             placeholder="KL 08 AB 1234, TN 38 X 9" />
                           <div style={{fontSize:'0.66rem',color:'var(--text-dim)',marginTop:'3px'}}>
-                            Separate cars with a comma. The photos of the car and plate are deleted from Drive after {carPhotoMonths(CONFIG)} month{carPhotoMonths(CONFIG) === 1 ? '' : 's'}, and only once a number is on record here.
+                            Separate cars with a comma. The photos of the car and plate are deleted from Drive after {carPhotoMonths(CONFIG)} month{carPhotoMonths(CONFIG) === 1 ? '' : 's'}, and only once a car number that looks like a plate (KL 08 AB 1234) is on record here.
                           </div>
                         </div>
                         <div>

@@ -49,7 +49,7 @@ Booking.com host has the same `booking-com.js`. When a platform changes its rule
 A platform learns of nights booked elsewhere only by reading the link StayVibe gives it, so when it stops reading, it can sell a night
 that is already taken. StayVibe warns the owner (a red banner on Home and on the Channel calendar, and an email) when one has not read
 its link for too long. How long is the platform's own `calendar.staleAfterHours` in its file: how often it reads, with room to spare
-(Airbnb reads about every 3 hours, so 6; Vrbo about every half hour, 6; Agoda, through the bridge script every 15 minutes, 3). A platform
+(Airbnb reads about every 3 hours, so 8; Vrbo about every half hour, 6; Agoda, through the bridge script every 15 minutes, 3). A platform
 with no figure uses the host's default, 12. `calendar.readsEvery` is the words the warning uses ("it usually reads about every 3 hours")
 and `calendar.quietWarning` what to check first. A host can change the defaults (never a platform's own figure) with a block in its config:
 
@@ -57,7 +57,10 @@ and `calendar.quietWarning` what to check first. A host can change the defaults 
 calendarWatch: { linkStaleHours: 12, linkFirstReadHours: 48, feedStaleHours: 12 },
 ```
 
-`feedStaleHours` is how long StayVibe may go without managing to read a platform's calendar. The rules are in `src/utils/calendarHealth.js`.
+`feedStaleHours` is how long StayVibe may go without managing to read a platform's calendar. A platform that cannot give a calendar of its
+own (Booking.com when the villa is run through a channel manager, say) is declared with `calendar: { noFeed: true }` in its partner file
+or the host's `partners` block, and is then not warned about for having no calendar of ours. The rules are in
+`src/utils/calendarHealth.js`.
 
 ## A platform that is not here yet
 

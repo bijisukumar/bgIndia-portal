@@ -80,14 +80,36 @@ export function evaluateCalendarHealth({ config, now, feeds = [], links = [], jo
     const lastGood = toMs(f.lastGoodAt)
     const limit = w.feedStaleHours * HOUR
     const seenFor = Number.isFinite(lastGood) ? nowMs - lastGood : null
-    const youngFeed = Number.isFinite(toMs(f.createdAt)) && nowMs - toMs(f.createdAt) < HOUR   // just added: its first read is on its way
-    if (seenFor === null ? !youngFeed : seenFor > limit) {
-      const why = f.status === 'error' && f.error ? ` The last try failed: ${String(f.error).slice(0, 160)}.` : ''
+    const madeFor = Number.isFinite(toMs(f.createdAt)) ? nowMs - toMs(f.createdAt) : null
+    const why = f.status === 'error' && f.error ? ` The last try failed: ${String(f.error).slice(0, 160)}.` : ''
+    if (seenFor !== null) {
+      if (seenFor > limit) {
+        add({
+          key: `feed_failing:${key}`, kind: 'feed_failing', platform: label,
+          short: `StayVibe cannot read ${label}'s calendar`,
+          title: `StayVibe has not been able to read ${label}'s calendar for ${spanText(seenFor)}`,
+          detail: `A booking made on ${label} may not block your other platforms until it is read again.${why} Check the calendar link under Connected feeds on the Channel calendar, and press Sync now.`,
+        })
+      }
+    } else if (f.status === 'error') {
+      // The last try failed and nothing says when a read last WORKED (an empty calendar leaves no booking to date it by, and the record of
+      // good reads does not exist before its table does). One failed try is common (a platform is slow, a request times out), so this is
+      // told, not shouted: it is not a risk until a good read is known and old.
+      if (madeFor === null || madeFor > HOUR) {
+        add({
+          key: `feed_unreadable:${key}`, kind: 'feed_unreadable', severity: 'notice', platform: label,
+          short: `The last try to read ${label}'s calendar failed`,
+          title: `The last try to read ${label}'s calendar failed`,
+          detail: `StayVibe keeps trying.${why} It becomes a warning if ${label}'s calendar cannot be read for ${w.feedStaleHours} hours.`,
+        })
+      }
+    } else if (madeFor !== null && madeFor > limit) {
+      // never read at all, and made long enough ago for the first read to have happened
       add({
         key: `feed_failing:${key}`, kind: 'feed_failing', platform: label,
         short: `StayVibe cannot read ${label}'s calendar`,
-        title: seenFor === null ? `StayVibe has never managed to read ${label}'s calendar` : `StayVibe has not been able to read ${label}'s calendar for ${spanText(seenFor)}`,
-        detail: `A booking made on ${label} may not block your other platforms until it is read again.${why} Check the calendar link under Connected feeds on the Channel calendar, and press Sync now.`,
+        title: `StayVibe has never managed to read ${label}'s calendar`,
+        detail: `A booking made on ${label} may not block your other platforms until it is read. Check the calendar link under Connected feeds on the Channel calendar, and press Sync now.`,
       })
     }
   }
@@ -107,7 +129,7 @@ export function evaluateCalendarHealth({ config, now, feeds = [], links = [], jo
           key: `link_never_read:${key}`, kind: 'link_never_read', platform: label,
           short: `${label} has never read your calendar link`,
           title: `${label} has never read your calendar link (made ${spanText(age)} ago)`,
-          detail: `Until it does, ${label} cannot know about nights booked elsewhere and may sell them.${cal.via === 'google-bridge' ? ' ' + (cal.notReadYet || '') : where}`,
+          detail: `Until it does, ${label} cannot know about nights booked elsewhere and may sell them.${cal.via === 'google-bridge' ? ' ' + (cal.notReadYet || '') : where} If you will not use this link, remove it on the Channel calendar and this goes away.`,
         })
       } else {
         add({
@@ -129,8 +151,10 @@ export function evaluateCalendarHealth({ config, now, feeds = [], links = [], jo
         })
       }
     }
-    // A platform whose bookings come only as calendar dates and whose calendar we do not read: a booking there blocks nothing.
-    if (partner.bookingsFrom === 'calendar' && !feedKeys.has(key)) {
+    // A platform whose bookings come only as calendar dates, that IS reading our link, and whose calendar we do not read: a booking there
+    // blocks nothing. (A link nobody has pasted anywhere yet is told above, not here; and a platform that cannot give a calendar of its
+    // own says so in its partner file or the host's config, `calendar.noFeed`, and is not asked for one.)
+    if (partner.bookingsFrom === 'calendar' && !cal.noFeed && Number.isFinite(lastRead) && !feedKeys.has(key)) {
       add({
         key: `no_feed:${key}`, kind: 'no_feed', platform: label,
         short: `StayVibe does not read ${label}'s calendar`,

@@ -25,7 +25,7 @@ export const AIRBNB = {
     via: 'link',                         // 'link': paste the address StayVibe gives it. 'google-bridge': it refuses our address (see agoda.js)
     whereToPaste: 'Calendar → Availability → Connect calendars → Connect to another website.',
     readsEvery: 'about every 3 hours',
-    staleAfterHours: 6,                  // the owner is warned if it has not read our link for this long (see "Calendar watch" below)
+    staleAfterHours: 8,                  // the owner is warned if it has not read our link for this long (it reads about every 3 hours; see partners/README.md)
     reservedPrefix: 'Reserved',          // how its own calendar names a real booking, as opposed to a night someone closed
   },
 }

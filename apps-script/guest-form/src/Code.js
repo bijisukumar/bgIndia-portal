@@ -15,11 +15,15 @@
 //                    getTenantConfig (the standard plan keeps them 1 month, a
 //                    longer time is a paid extra; Dwarka keeps 6). A photo goes
 //                    to the Drive bin (30 more days there) only if its stay has
-//                    a plate number on record (the number is the record, the
+//                    a plate number on record, one that looks like an Indian
+//                    plate and not a note like "no car" (the number is the record, the
 //                    picture the convenience) AND it is still in that stay's own
 //                    folder; a photo whose stay has no number is kept and the
 //                    owner is emailed, at most once a week, which stays need
 //                    one (Complete booking > Guest info > Car number(s)).
+//                    The search asks Drive only for photos older than the
+//                    retention, and a pass too long for one run carries on in
+//                    the next from Drive's own continuation token.
 //                    sweepOldCarPhotos_ rides on processPendingDocumentUploads
 //                    (its 5-minute trigger exists) and works at most once a day,
 //                    so there is NO new trigger to install. If the Worker does
@@ -786,32 +790,47 @@ function processPendingDocumentUploads() {
 // in that stay's own folder. Every check is made in code, whatever the search returned: a file that is too young, is not named like
 // one of ours, belongs to no stay of this host, or has no number on its stay is left alone.
 var CAR_PHOTO_NAME = /^(?:CarPhoto|PlatePhoto)-(.+)-\d{8}-\d{6}\.[A-Za-z0-9]+$/;
-var CAR_PHOTO_SWEEP_EVERY_MS = 20 * 60 * 60 * 1000;   // about once a day; the 5-minute trigger just asks
-var CAR_PHOTO_BUDGET_MS      = 90 * 1000;             // a sweep never takes longer than this in one run
+var CAR_PHOTO_QUERY = "(title contains 'CarPhoto' or title contains 'PlatePhoto') and trashed = false";
+var CAR_PHOTO_SWEEP_EVERY_MS  = 20 * 60 * 60 * 1000;   // a NEW pass about once a day; the 5-minute trigger just asks
+var CAR_PHOTO_SCAN_BUDGET_MS  = 60 * 1000;             // one run looks through Drive for at most this long ...
+var CAR_PHOTO_CHUNK           = 120;                   // ... and handles at most this many files: a longer pass carries on in the next run
 var CAR_PHOTO_NOTIFY_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
 
 function sweepOldCarPhotos_(opts) {
   opts = opts || {};
   var started = Date.now();
   var props = PropertiesService.getScriptProperties();
-  if (!opts.force && started - Number(props.getProperty('CAR_PHOTO_SWEEP_AT') || 0) < CAR_PHOTO_SWEEP_EVERY_MS) return;
+  // A pass that did not finish in its last run carries on from where it stopped (Drive's own continuation token), whatever the clock says.
+  var token = opts.dryRun ? '' : (props.getProperty('CAR_PHOTO_SWEEP_TOKEN') || '');
+  if (!opts.force && !token && started - Number(props.getProperty('CAR_PHOTO_SWEEP_AT') || 0) < CAR_PHOTO_SWEEP_EVERY_MS) return;
   var CLIENT = getClient();
   var months = Number(CLIENT.carPhotoMonths) || 0;
-  if (months < 1) { Logger.log('Car photo clean-up: the Worker did not state the retention - nothing deleted'); return; }
-  // The attempt is what is dated, so a clean-up that fails is tried again tomorrow, not every five minutes.
-  if (!opts.dryRun) props.setProperty('CAR_PHOTO_SWEEP_AT', String(started));
+  if (months < 1) {
+    Logger.log('Car photo clean-up: the Worker did not state the retention - nothing deleted');
+    if (!opts.dryRun) props.deleteProperty('CAR_PHOTO_SWEEP_TOKEN');
+    return;
+  }
+  // A NEW pass is what is dated, so a clean-up that fails is tried again tomorrow, not every five minutes.
+  if (!opts.dryRun && !token) props.setProperty('CAR_PHOTO_SWEEP_AT', String(started));
 
   var cutoff = new Date();
   cutoff.setMonth(cutoff.getMonth() - months);
 
-  var due = [];
-  var it = DriveApp.searchFiles("(title contains 'CarPhoto' or title contains 'PlatePhoto') and trashed = false");
-  while (it.hasNext() && Date.now() - started < CAR_PHOTO_BUDGET_MS) {
-    var f = it.next();
-    var m = CAR_PHOTO_NAME.exec(f.getName());
-    if (!m) continue;
-    if (f.getDateCreated().getTime() >= cutoff.getTime()) continue;       // still inside its time
-    due.push({ file: f, stayId: m[1] });
+  var due = [], more = false, nextToken = '';
+  try {
+    var it = carPhotoIterator_(token, cutoff, props);
+    while (due.length < CAR_PHOTO_CHUNK && Date.now() - started < CAR_PHOTO_SCAN_BUDGET_MS && it.hasNext()) {
+      var f = it.next();
+      var m = CAR_PHOTO_NAME.exec(f.getName());
+      if (!m) continue;
+      if (f.getDateCreated().getTime() >= cutoff.getTime()) continue;       // still inside its time
+      due.push({ file: f, stayId: m[1] });
+    }
+    more = it.hasNext();
+    nextToken = more ? it.getContinuationToken() : '';
+  } catch (scanErr) {
+    if (!opts.dryRun) { props.deleteProperty('CAR_PHOTO_SWEEP_TOKEN'); props.deleteProperty('CAR_PHOTO_WAITING'); }
+    throw scanErr;
   }
 
   var info = {};
@@ -819,11 +838,16 @@ function sweepOldCarPhotos_(opts) {
   due.forEach(function(d) { if (stayIds.indexOf(d.stayId) < 0) stayIds.push(d.stayId); });
   for (var i = 0; i < stayIds.length; i += 60) {
     var r = callWorker('POST', 'checkCarPlates', { villaId: CLIENT.villaId, stayIds: stayIds.slice(i, i + 60) });
-    if (!r || !r.success) throw new Error('checkCarPlates failed: ' + (LAST_WORKER_ERROR || JSON.stringify(r)));
+    if (!r || !r.success) {
+      if (!opts.dryRun) { props.deleteProperty('CAR_PHOTO_SWEEP_TOKEN'); props.deleteProperty('CAR_PHOTO_WAITING'); }
+      throw new Error('checkCarPlates failed: ' + (LAST_WORKER_ERROR || JSON.stringify(r)));
+    }
     (r.data || []).forEach(function(s) { info[s.stayId] = s; });
   }
 
-  var removed = 0, elsewhere = 0, unknown = 0, waiting = {};
+  var waiting = {};
+  if (!opts.dryRun) { try { waiting = JSON.parse(props.getProperty('CAR_PHOTO_WAITING') || '{}'); } catch (je) { waiting = {}; } }
+  var removed = 0, elsewhere = 0, unknown = 0;
   due.forEach(function(d) {
     var s = info[d.stayId];
     if (!s) { unknown++; return; }                                        // not a stay of this host
@@ -841,18 +865,51 @@ function sweepOldCarPhotos_(opts) {
 
   var waitingIds = Object.keys(waiting);
   Logger.log('Car photo clean-up (' + months + ' month' + (months === 1 ? '' : 's') + (opts.dryRun ? ', PREVIEW: nothing deleted' : '') + '): ' + removed +
-    ' ' + (opts.dryRun ? 'would go' : 'deleted') + ', ' + waitingIds.length + ' stay(s) kept for want of a plate number, ' + elsewhere + ' not in the stay\'s folder, ' + unknown + ' not a stay of this host');
+    ' ' + (opts.dryRun ? 'would go' : 'deleted') + ', ' + waitingIds.length + ' stay(s) kept for want of a car number, ' + elsewhere + ' not in the stay\'s folder, ' + unknown +
+    ' not a stay of this host' + (more ? '; more to look through' + (opts.dryRun ? ' (a preview covers the first ' + CAR_PHOTO_CHUNK + ' only)' : ': carrying on in the next run') : ''));
 
-  if (waitingIds.length && !opts.dryRun && started - Number(props.getProperty('CAR_PHOTO_NOTIFIED_AT') || 0) > CAR_PHOTO_NOTIFY_EVERY_MS) {
+  if (opts.dryRun) return;
+  if (more) {
+    // The pass is not over: remember where it got to, and who is waiting for a number so far (a property holds about 9 KB).
+    var keep = {}; waitingIds.slice(0, 60).forEach(function(id) { keep[id] = waiting[id]; });
+    props.setProperty('CAR_PHOTO_SWEEP_TOKEN', nextToken);
+    props.setProperty('CAR_PHOTO_WAITING', JSON.stringify(keep));
+    return;
+  }
+  props.deleteProperty('CAR_PHOTO_SWEEP_TOKEN');
+  props.deleteProperty('CAR_PHOTO_WAITING');
+
+  if (waitingIds.length && started - Number(props.getProperty('CAR_PHOTO_NOTIFIED_AT') || 0) > CAR_PHOTO_NOTIFY_EVERY_MS) {
     props.setProperty('CAR_PHOTO_NOTIFIED_AT', String(started));
     sendEmailViaWorker(CLIENT.ownerEmail,
       '[GVR Portal] Car photos kept: no car number on record for ' + waitingIds.length + ' stay' + (waitingIds.length === 1 ? '' : 's'),
       'Car and plate photos are deleted from Drive ' + months + ' month' + (months === 1 ? '' : 's') + ' after they are taken, once the car number is on the stay.\n' +
-      'These stays have photos past that time but NO car number on record, so the photos were kept:\n\n' +
+      'These stays have photos past that time but NO car number on record (a number like KL 08 AB 1234), so the photos were kept:\n\n' +
       waitingIds.map(function(id) { return ' - ' + waiting[id] + ' (' + id + ')'; }).join('\n') +
       '\n\nOpen each in Complete booking > Guest info, read the number off the photo in the guest\'s Drive folder, and type it in Car number(s). ' +
       'The photos are cleared at the next daily clean-up. This reminder comes at most once a week.',
       'car_photos', CLIENT.villaId);
+  }
+}
+
+// The files to look through. A pass that was cut short carries on from its token. A new one asks Drive only for photos filed before the
+// cutoff (they are never edited, so the modified date is the day they were filed), so the many young photos are never even listed; if
+// Drive refuses the date in the search, it falls back to every car photo and the date is judged in code, file by file.
+function carPhotoIterator_(token, cutoff, props) {
+  if (token) {
+    try { return DriveApp.continueFileIterator(token); }
+    catch (e) {
+      Logger.log('Car photo clean-up: could not carry on from the last run (' + e.message + '), starting again');
+      props.deleteProperty('CAR_PHOTO_WAITING');
+    }
+  }
+  try {
+    var dated = DriveApp.searchFiles(CAR_PHOTO_QUERY + " and modifiedDate < '" + Utilities.formatDate(cutoff, 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'") + "'");
+    dated.hasNext();                                                      // runs the search now, so a refused one throws here
+    return dated;
+  } catch (e) {
+    Logger.log('Car photo clean-up: the search by date was refused (' + e.message + '); looking through every car photo by name');
+    return DriveApp.searchFiles(CAR_PHOTO_QUERY);
   }
 }
 

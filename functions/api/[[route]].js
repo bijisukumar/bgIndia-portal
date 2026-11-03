@@ -1031,6 +1031,13 @@ async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
       `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'ok', last_sync_error = NULL, last_sync_count = ? WHERE feed_id = ?`
     ).bind(nowStr, events.length, feed.feed_id))
     for (let i = 0; i < statements.length; i += 50) await DB.batch(statements.slice(i, i + 50))
+    // The last read that WORKED, kept apart from the attempt time: a failed try overwrites last_synced_at, and an empty calendar has no
+    // booking to date a good read by. The calendar warning needs it to tell one slow answer from a calendar that has really gone quiet.
+    // Best effort and a statement of its own, so a database without the table (before its migration) costs the sync nothing.
+    await DB.prepare(
+      `INSERT INTO infra_job_heartbeats (villa_id, job, label, last_run_at, last_ok_at, last_status, runs) VALUES (?, ?, ?, ?, ?, 'ok', 1)
+       ON CONFLICT(villa_id, job) DO UPDATE SET last_run_at = excluded.last_run_at, last_ok_at = excluded.last_ok_at, last_status = 'ok', runs = infra_job_heartbeats.runs + 1`
+    ).bind(feed.villa_id, `feed:${feed.feed_id}`, String(feed.channel || ''), nowStr, nowStr).run().catch(() => {})
     return {
       feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length,
       // for notifyNewPlatformBookings: the first read of a feed is its baseline, everything already there is not "new"
@@ -1122,14 +1129,18 @@ async function loadCalendarHealth(DB, villaId, nowMs = Date.now()) {
   const linkRows = await optional(DB.prepare(
     `SELECT channel, created_at, rotated_at, last_fetched_at FROM stayvibe_ical_exports WHERE villa_id = ?`
   ).bind(villaId))
-  const jobRows = await optional(DB.prepare(
+  const heartbeatRows = await optional(DB.prepare(
     `SELECT job, label, every_minutes, last_run_at, last_ok_at, last_status FROM infra_job_heartbeats WHERE villa_id = ?`
   ).bind(villaId))
+  // The table holds two kinds of row: a Google script reporting in, and (job "feed:<feed id>") the last good read of a calendar feed.
+  const isFeedRow = j => String(j.job).startsWith('feed:')
+  const feedOk = new Map(heartbeatRows.filter(isFeedRow).map(j => [String(j.job).slice(5), j.last_ok_at]))
+  const jobRows = heartbeatRows.filter(j => !isFeedRow(j))
   return evaluateCalendarHealth({
     config: getHostConfig(villaId), now: nowMs,
     feeds: feedRows.map(f => ({
       channel: f.channel, isActive: f.is_active, status: f.last_sync_status, error: f.last_sync_error, createdAt: f.created_at,
-      lastGoodAt: f.last_sync_status === 'error' ? (seen.get(f.feed_id) || null) : f.last_synced_at,
+      lastGoodAt: f.last_sync_status === 'error' ? ([seen.get(f.feed_id), feedOk.get(f.feed_id)].filter(Boolean).sort().pop() || null) : f.last_synced_at,
     })),
     links: linkRows.map(l => ({ channel: l.channel, createdAt: l.created_at, rotatedAt: l.rotated_at, lastFetchedAt: l.last_fetched_at })),
     jobs: jobRows.map(j => ({ job: j.job, label: j.label, everyMinutes: j.every_minutes, lastRunAt: j.last_run_at, lastOkAt: j.last_ok_at, lastStatus: j.last_status })),
@@ -1145,8 +1156,11 @@ async function alertCalendarHealth(env, DB, villaId) {
   const risks = health.problems.filter(p => p.severity === 'risk')
   if (!risks.length) return
   const subject = `⚠️ Calendars out of step: ${risks.map(p => p.short).join('; ')}`.slice(0, 220)
+  // Sent in the last day, or TRIED in the last half hour: a send that failed is tried again, but not at every five-minute report while a
+  // mail outage lasts.
   const dup = await DB.prepare(
-    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'calendar_health' AND subject = ? AND success = 1 AND created_at > datetime('now', '-24 hours') LIMIT 1`
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'calendar_health' AND subject = ?
+       AND ((success = 1 AND created_at > datetime('now', '-24 hours')) OR created_at > datetime('now', '-30 minutes')) LIMIT 1`
   ).bind(villaId, subject).first()
   if (dup) return
   const zone = await zoneFor(DB, villaId)
@@ -1239,7 +1253,8 @@ async function alertOnePlatformDateMismatch(env, DB, villaId, b, partner) {
   const subject = `⚠️ ${platform} has different dates for ${s.guest_name || 'a guest'}: ${platformRange} (StayVibe: ${stayRange})`
   const since = new Date(Date.now() - 7 * 864e5).toISOString()
   const dup = await DB.prepare(
-    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'platform_dates' AND subject = ? AND created_at > ? LIMIT 1`
+    // (airbnb_dates is what this category was called until 2026-11-03: emails already sent under that name still count)
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category IN ('platform_dates', 'airbnb_dates') AND subject = ? AND created_at > ? LIMIT 1`
   ).bind(villaId, subject, since).first()
   if (dup) return
   await sendAlert(env, subject, [

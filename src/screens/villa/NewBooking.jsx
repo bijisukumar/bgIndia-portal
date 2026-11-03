@@ -57,6 +57,11 @@ export default function NewBooking() {
   const commPct = commissionPct(CONFIG, form.channel, form.checkInDate)   // the rule of the booking's own date
   const commAmt = Math.round(gross * commPct / 100)
   const net     = gross - commAmt
+  // The host service fee shown in the preview as a percentage of the night fee + cleaning fee: what was typed, else the rule of the
+  // booking's date (never a rate written in the screen: a platform's rate changes, and has).
+  const feeBase = (parseFloat(fees.nightFee) || 0) + (parseFloat(fees.cleaningFee) || 0)
+  const feeTyped = parseFloat(fees.hostServiceFee) || 0
+  const hostFeePct = feeBase > 0 && feeTyped > 0 ? Math.round(feeTyped / feeBase * 1000) / 10 : commPct
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -396,7 +401,7 @@ export default function NewBooking() {
                     <span className="net-val pos">{fmt(fees.cleaningFee)}</span>
                   </div>}
                   {fees.hostServiceFee && <div className="net-row">
-                    <span className="net-label">Host service fee (3%)</span>
+                    <span className="net-label">Host service fee{hostFeePct > 0 ? ` (${hostFeePct}%)` : ''}</span>
                     <span className="net-val neg">−{fmt(fees.hostServiceFee)}</span>
                   </div>}
                   <div className="net-divider" />

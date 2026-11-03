@@ -143,7 +143,8 @@ by frontend routing.
    (v2.8) deletes car and plate photos from Drive once they are older than the
    host's `carPhotos.keepMonths` (the standard plan is 1 month; a longer time
    is a paid extra, set in that host's `config.js` when it is bought), but only
-   for a stay that has a car number on record, and only from that stay's own
+   for a stay that has a car number on record that looks like a plate (a note
+   such as "no car" does not count), and only from that stay's own
    Drive folder. It rides on `processPendingDocumentUploads`'s existing trigger
    and works about once a day, so there is no trigger to add; if the Worker
    does not state the retention it deletes nothing, and `previewOldCarPhotos`

@@ -12,5 +12,5 @@ export const VRBO = {
   feeBreakdown: false,
   bookingsFrom: 'calendar',
   reviewKey: 'vrbo',
-  calendar: { via: 'link', whereToPaste: 'Calendar → Import/Export → Import calendar.' },
+  calendar: { via: 'link', whereToPaste: 'Calendar → Import/Export → Import calendar.', readsEvery: 'every half hour or so', staleAfterHours: 6 },
 }

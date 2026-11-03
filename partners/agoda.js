@@ -17,6 +17,7 @@ export const AGODA = {
     // fetches anything, so its link is read by the "StayVibe to Agoda" Google script (apps-script/agoda-bridge/src/Code.js), which keeps a
     // private Google Calendar for Agoda to import. The screen's "Read N ago" on this row is that script reading our link.
     via: 'google-bridge',
+    staleAfterHours: 3,                  // the script reads our link every 15 minutes, so three quiet hours means it has stopped
     whereToPaste: 'Partner Portal → Calendar → Calendar connections → Other website link.',
     note: 'Only offered when the villa is listed as a single unit.',
     bridgeExplain: 'it only takes addresses it has approved, so its link goes in through a Google Calendar',

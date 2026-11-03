@@ -81,6 +81,7 @@ import { DEFAULT_TIMEZONE, zoneName, todayInZone, dateInZone, clock24, instantMs
 import { collectGuests } from '../../src/utils/guestList.js'
 import { buildGuestInfoText } from '../../src/utils/guestInfoText.js'
 import { estimateStay, groupNights, validateSeason, validateRateCardRows, DEFAULT_OVERFLOW_PER_GUEST, DEFAULT_OVERFLOW_MAX, isYmd } from '../../src/utils/seasonRates.js'
+import { evaluateCalendarHealth } from '../../src/utils/calendarHealth.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -1039,7 +1040,7 @@ async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
     await DB.prepare(
       `UPDATE stayvibe_ical_feeds SET last_synced_at = ?, last_sync_status = 'error', last_sync_error = ? WHERE feed_id = ?`
     ).bind(nowStr, String(e?.message || e).slice(0, 300), feed.feed_id).run().catch(() => {})
-    return { feedId: feed.feed_id, channel: feed.channel, ok: false, error: String(e?.message || e) }
+    return { feedId: feed.feed_id, channel: feed.channel, ok: false, error: String(e?.message || e), villaId: feed.villa_id }
   }
 }
 
@@ -1097,6 +1098,66 @@ async function refreshFeedsBeforeExport(DB, ctx, villaId, targetChannel, { maxAg
 async function afterFeedSync(env, DB, results) {
   await notifyNewPlatformBookings(env, DB, results)
   await alertPlatformDateMismatches(env, DB, results)
+}
+
+// ── ARE THE CALENDARS IN STEP? (2026-11-03) ───────────────────────────────
+// A night booked on one platform reaches the others only through calendars, and when one of those stops nothing says so: a platform
+// quietly sells a night that is already taken. This reads the rows behind the red warning on Home and on the Channel calendar, and
+// behind its email; src/utils/calendarHealth.js decides what is wrong. A table that does not exist yet (the heartbeat table, before
+// its migration) is an empty list, never an error.
+async function loadCalendarHealth(DB, villaId, nowMs = Date.now()) {
+  const optional = async (statement) => {
+    try { return (await statement.all()).results || [] }
+    catch (e) { if (/no such table/i.test(e?.message || '')) return []; throw e }
+  }
+  const feedRows = await optional(DB.prepare(
+    `SELECT feed_id, channel, is_active, last_synced_at, last_sync_status, last_sync_error, created_at FROM stayvibe_ical_feeds WHERE villa_id = ?`
+  ).bind(villaId))
+  // A failed try overwrites last_synced_at with the time of the TRY, so a feed that is failing was last read well when one of its own
+  // blocks was last seen.
+  const seen = new Map((await optional(DB.prepare(
+    `SELECT feed_id, MAX(last_seen_at) AS ok_at FROM stayvibe_ical_blocks WHERE villa_id = ? GROUP BY feed_id`
+  ).bind(villaId))).map(r => [r.feed_id, r.ok_at]))
+  const linkRows = await optional(DB.prepare(
+    `SELECT channel, created_at, rotated_at, last_fetched_at FROM stayvibe_ical_exports WHERE villa_id = ?`
+  ).bind(villaId))
+  const jobRows = await optional(DB.prepare(
+    `SELECT job, label, every_minutes, last_run_at, last_ok_at, last_status FROM infra_job_heartbeats WHERE villa_id = ?`
+  ).bind(villaId))
+  return evaluateCalendarHealth({
+    config: getHostConfig(villaId), now: nowMs,
+    feeds: feedRows.map(f => ({
+      channel: f.channel, isActive: f.is_active, status: f.last_sync_status, error: f.last_sync_error, createdAt: f.created_at,
+      lastGoodAt: f.last_sync_status === 'error' ? (seen.get(f.feed_id) || null) : f.last_synced_at,
+    })),
+    links: linkRows.map(l => ({ channel: l.channel, createdAt: l.created_at, rotatedAt: l.rotated_at, lastFetchedAt: l.last_fetched_at })),
+    jobs: jobRows.map(j => ({ job: j.job, label: j.label, everyMinutes: j.every_minutes, lastRunAt: j.last_run_at, lastOkAt: j.last_ok_at, lastStatus: j.last_status })),
+  })
+}
+
+// The email that goes with the warning. The subject names the faults, never how long they have lasted, so the same faults are the
+// same subject: one email, repeated once a day while any of it is still wrong, and a NEW fault is a new email at once. Only risks
+// are emailed (a paused calendar or a link that has not been read yet is on the screen only).
+async function alertCalendarHealth(env, DB, villaId) {
+  if (!env) return
+  const health = await loadCalendarHealth(DB, villaId)
+  const risks = health.problems.filter(p => p.severity === 'risk')
+  if (!risks.length) return
+  const subject = `⚠️ Calendars out of step: ${risks.map(p => p.short).join('; ')}`.slice(0, 220)
+  const dup = await DB.prepare(
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'calendar_health' AND subject = ? AND success = 1 AND created_at > datetime('now', '-24 hours') LIMIT 1`
+  ).bind(villaId, subject).first()
+  if (dup) return
+  const zone = await zoneFor(DB, villaId)
+  await sendAlert(env, subject, [
+    'Source: Calendar watch',
+    'Action: A calendar that keeps your platforms in step has gone quiet. Until it is put right, a platform can sell a night that is already taken: a double booking.',
+    '',
+    ...risks.flatMap(p => [`• ${p.title}`, `  ${p.detail}`, '']),
+    'Open the Channel calendar in the app to see each platform, press Sync now, or copy a link again. The same warning is at the top of your home screen while any of this is wrong.',
+    'This email comes once a day while it is still wrong, and again at once if something new goes wrong.',
+    `Time: ${stampLong(Date.now(), zone)}`,
+  ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'calendar_health')
 }
 
 const aOrAn = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w
@@ -3390,6 +3451,12 @@ export async function onRequest(ctx) {
     const secret = request.headers.get('X-Cron-Secret') || ''
     if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return err('Unauthorized', 401)
     const results = await syncIcalFeedsForVillas(DB, null, env)
+    // And are the calendars, as a whole, in step? (Also checked every time the Airbnb email reader reports in, so a schedule that
+    // GitHub does not fire is not the only thing standing between a stopped link and the owner.)
+    for (const villaId of Object.keys(HOST_CONFIGS)) {
+      try { await alertCalendarHealth(env, DB, villaId) }
+      catch (e) { console.warn('calendar health alert:', e?.message || e) }
+    }
     return json({ success: true, data: { feeds: results.length, results } })
   }
 
@@ -6383,6 +6450,15 @@ export async function onRequest(ctx) {
           if (!/no such table/i.test(e?.message || '')) throw e
         }
         return json({ success: true, data: rows.map(icalExportShape) })
+      }
+
+      // Are the calendars in step? The rows behind the red warning on Home and on the Channel calendar (see loadCalendarHealth).
+      // Owner only: it names the platforms that have gone quiet. It carries no link.
+      if (action === 'getCalendarHealth') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        return json({ success: true, data: await loadCalendarHealth(DB, villaId) })
       }
 
       // The nights the owner has closed by hand (Block dates), from today on, for the Channel
@@ -11603,6 +11679,39 @@ export async function onRequest(ctx) {
           actor, actor, now(), now()
         ).run()
         return json({ success: true, data: { stayId, status: 'pending_review' } })
+      }
+
+      // A SCRIPT REPORTING IN (2026-11-03). The Google scripts (the Airbnb email reader above all) run on their own triggers in the
+      // owner's Google account, and when one stops nothing says so: a new booking just never arrives. Each run ends by telling the
+      // Worker it ran, how long it took and how it went; the calendar warning turns red when a script has been silent for too long
+      // (src/utils/calendarHealth.js). The system token only: a login could otherwise paint a dead script green. A database without
+      // the table yet answers success with recorded:false, so a script is never made to fail by this.
+      if (action === 'recordJobRun') {
+        if (payload.name !== 'System') return err('System access only', 403)
+        const villaId = String(body.villaId || '').trim() || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const job = String(body.job || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 60)
+        if (!job) return err('job required')
+        const status = body.ok === false ? 'error' : 'ok'
+        const t = now()
+        try {
+          await DB.prepare(
+            `INSERT INTO infra_job_heartbeats (villa_id, job, label, every_minutes, last_run_at, last_ok_at, last_status, last_ms, last_summary, runs)
+             VALUES (?,?,?,?,?,?,?,?,?,1)
+             ON CONFLICT(villa_id, job) DO UPDATE SET label = excluded.label, every_minutes = excluded.every_minutes,
+               last_run_at = excluded.last_run_at,
+               last_ok_at = CASE WHEN excluded.last_status = 'ok' THEN excluded.last_run_at ELSE infra_job_heartbeats.last_ok_at END,
+               last_status = excluded.last_status, last_ms = excluded.last_ms, last_summary = excluded.last_summary,
+               runs = infra_job_heartbeats.runs + 1`
+          ).bind(villaId, job, String(body.label || job).slice(0, 60), parseInt(body.everyMinutes) || 5, t, status === 'ok' ? t : null, status,
+                 Math.max(0, parseInt(body.ms) || 0), String(body.summary || '').slice(0, 400)).run()
+        } catch (e) {
+          if (/no such table/i.test(e?.message || '')) return json({ success: true, data: { recorded: false, reason: 'the heartbeat table has not been created yet' } })
+          throw e
+        }
+        // The script comes back every five minutes whether or not GitHub's schedule fired: a good moment to look at the calendars.
+        ctx.waitUntil(alertCalendarHealth(env, DB, villaId).catch(e => console.warn('calendar health alert:', e?.message || e)))
+        return json({ success: true, data: { recorded: true } })
       }
 
       // MARK DOCUMENT UPLOADED — called by Apps Script after uploading to Drive

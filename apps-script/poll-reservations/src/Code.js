@@ -32,6 +32,17 @@
 // ============================================================
 
 // ── CHANGELOG (newest first — this file is the source of truth for live) ────
+// v1.4  2026-11-03
+//   • Hardened after one run was killed at Google's six-minute limit on 2026-11-02 (DEADLINE_EXCEEDED), with nothing recorded about
+//     which step was slow:
+//     - TIME GUARD: once a run has used 4 minutes no further step is started and no further email is picked up; whatever is left waits
+//       for the next run (nothing is lost: an email is marked done only when it has been handled).
+//     - "LAST RAN": every run ends by telling the Worker (recordJobRun) that it ran, how long it took, how long each step took, and
+//       whether it failed. The app shows the reader as alive, and warns (and emails) the owner when it has been silent or failing, which
+//       until now nobody would have noticed until a booking did not arrive.
+//     - The villa's settings (getTenantConfig) are fetched once an hour, not on every run (CacheService); one slow answer from the
+//       Worker could not stall every run any more, and a change of settings reaches this script within the hour.
+//     Nothing about reading or parsing the emails changed.
 // v1.3  2026-10-27
 //   • pollAirbnbChangeRequests(): reads Airbnb "<guest> wants to change their reservation" emails (a guest asking to change the
 //     number of guests, or the dates) and hands them to the Worker (recordChangeRequest), which flags the stay for the owner: it
@@ -81,8 +92,21 @@ var STAYS_SHEET   = 'Stays';
 // automatically when a tenant's config changes, instead of needing the
 // same literal hand-edited in two files.
 var _CLIENT = null;
+var CONFIG_CACHE_KEY     = 'tenantConfig-v1';
+var CONFIG_CACHE_SECONDS = 3600;   // the villa's settings change about once a year: ask the Worker once an hour, not every 5 minutes
 function getClient() {
   if (_CLIENT) return _CLIENT;
+  var cache = null;
+  try {
+    cache = CacheService.getScriptCache();
+    var hit = cache.get(CONFIG_CACHE_KEY + ':' + TENANT_ID);
+    if (hit) {
+      _CLIENT = JSON.parse(hit);
+      return _CLIENT;
+    }
+  } catch(e) {
+    Logger.log('config cache read: ' + e.message + ' — asking the Worker');
+  }
   try {
     var resp = callWorker('GET', 'getTenantConfig', { tenantId: TENANT_ID });
     if (resp && resp.success && resp.data) {
@@ -93,13 +117,63 @@ function getClient() {
         driveRootId:  resp.data.driveRootId || DRIVE_ROOT_ID,
       };
       Logger.log('✅ Tenant config loaded: ' + _CLIENT.villaName);
+      try { if (cache) cache.put(CONFIG_CACHE_KEY + ':' + TENANT_ID, JSON.stringify(_CLIENT), CONFIG_CACHE_SECONDS); }
+      catch(ce) { Logger.log('config cache write: ' + ce.message); }
       return _CLIENT;
     }
   } catch(e) {
     Logger.log('getTenantConfig error: ' + e.message + ' — using fallback');
   }
+  // The fallback is NOT cached: the next run asks the Worker again.
   _CLIENT = { villaName: 'Guruvayur Villa (Dwarka)', villaId: TENANT_ID, ownerEmail: OWNER_EMAIL, driveRootId: DRIVE_ROOT_ID };
   return _CLIENT;
+}
+
+// ── TIME GUARD AND "LAST RAN" (v1.4) ──────────────────────────────────────
+// Google kills a run at six minutes (the failure email says DEADLINE_EXCEEDED). The trigger fires every five, and each email is marked
+// done only when it has been handled, so stopping early costs nothing: the rest is picked up by the next run. A step run by hand from the
+// editor is not guarded (RUN_DEADLINE stays 0).
+var RUN_BUDGET_MS = 4 * 60 * 1000;
+var RUN_DEADLINE  = 0;
+var GUARD_HELD    = 0;      // emails left for the next run because the budget was used up
+function pastRunBudget_() {
+  if (RUN_DEADLINE > 0 && Date.now() > RUN_DEADLINE) { GUARD_HELD++; return true; }
+  return false;
+}
+
+function runStep_(steps, name, fn, onError) {
+  if (RUN_DEADLINE > 0 && Date.now() > RUN_DEADLINE) {
+    Logger.log('Time guard: ' + name + ' not started, this run has used its time');
+    steps.push({ name: name, skipped: true });
+    return;
+  }
+  var t0 = Date.now();
+  try {
+    fn();
+    steps.push({ name: name, ms: Date.now() - t0, ok: true });
+  } catch(e) {
+    Logger.log('poll ' + name + ' ERROR: ' + e.message);
+    steps.push({ name: name, ms: Date.now() - t0, ok: false });
+    if (onError) onError(e);
+  }
+}
+
+function stepsSummary_(steps) {
+  return steps.map(function(s) { return s.name + (s.skipped ? ' skipped' : ' ' + s.ms + 'ms' + (s.ok ? '' : ' FAILED')); }).join(', ');
+}
+
+// Tells the Worker this run happened. It never changes how the run ends: callWorker already swallows its own failures.
+function reportRun_(started, steps, failure) {
+  try {
+    var failedStep = steps.some(function(s) { return s.ok === false; });
+    callWorker('POST', 'recordJobRun', {
+      villaId: TENANT_ID, job: 'poll-reservations', label: 'Airbnb email reader', everyMinutes: 5,
+      ok: !failure && !failedStep, ms: Date.now() - started,
+      summary: (failure ? 'FAILED: ' + failure + '. ' : '') + stepsSummary_(steps) +
+        (GUARD_HELD ? '; the time guard held back ' + GUARD_HELD + ' email(s) for the next run' : ''),
+    });
+  } catch(e) { Logger.log('reportRun_: ' + e.message); }
+  GUARD_HELD = 0;
 }
 
 // Stays sheet column headers (must match V20 Apps Script STAYS_HEADERS)
@@ -129,36 +203,32 @@ function pollNewReservations() {
     Logger.log('pollNewReservations: previous run still in progress — skipping this trigger');
     return;
   }
+  var started = Date.now();
+  var steps = [];
+  var failure = null;
+  RUN_DEADLINE = started + RUN_BUDGET_MS;
   try {
     var CLIENT = getClient();
     OWNER_EMAIL   = CLIENT.ownerEmail;
     DRIVE_ROOT_ID = CLIENT.driveRootId;
     Logger.log('=== pollNewReservations START ' + new Date().toISOString() + ' ===');
-    try {
-      pollAirbnbBookings();
-    } catch(e) {
-      Logger.log('pollAirbnbBookings ERROR: ' + e.message);
+    // Each step is timed, and none is started once the run has used its budget.
+    runStep_(steps, 'bookings', pollAirbnbBookings, function(e) {
       sendAlert('🚨 Poller error', e.message + '\n' + (e.stack||''));
-    }
-    try {
-      pollAirbnbCancellations();
-    } catch(e) {
-      Logger.log('pollAirbnbCancellations ERROR: ' + e.message);
-    }
-    try {
-      pollAirbnbChangeRequests();
-    } catch(e) {
-      Logger.log('pollAirbnbChangeRequests ERROR: ' + e.message);
-    }
-    try {
-      pollAirbnbReviews();
-    } catch(e) {
-      Logger.log('pollAirbnbReviews ERROR: ' + e.message);
-    }
-    Logger.log('=== pollNewReservations END ===');
+    });
+    runStep_(steps, 'cancellations', pollAirbnbCancellations);
+    runStep_(steps, 'changes', pollAirbnbChangeRequests);
+    runStep_(steps, 'reviews', pollAirbnbReviews);
+    Logger.log('=== pollNewReservations END ' + stepsSummary_(steps) + ' ===');
+  } catch(e) {
+    failure = e.message;
+    Logger.log('pollNewReservations ERROR: ' + e.message);
   } finally {
+    RUN_DEADLINE = 0;
     lock.releaseLock();
   }
+  reportRun_(started, steps, failure);
+  if (failure) throw new Error(failure);     // Google's own failure email still fires for a run that could not even start
 }
 
 // ── AIRBNB CANCELLATION POLLER ────────────────────────────────────────────
@@ -171,6 +241,7 @@ function pollAirbnbCancellations() {
   if (threads.length === 0) return;
 
   threads.forEach(function(thread) {
+    if (pastRunBudget_()) return;     // out of time: this email waits for the next run
     var msg     = thread.getMessages()[0];
     var subject = msg.getSubject();
     var body    = msg.getPlainBody();
@@ -256,6 +327,7 @@ function pollAirbnbChangeRequests() {
   if (threads.length === 0) return;
 
   threads.forEach(function(thread) {
+    if (pastRunBudget_()) return;     // out of time: this email waits for the next run
     var allDone = true;
     thread.getMessages().forEach(function(msg) {
       var subject = msg.getSubject();
@@ -339,6 +411,7 @@ function pollAirbnbReviews() {
   if (threads.length === 0) return;
 
   threads.forEach(function(thread) {
+    if (pastRunBudget_()) return;     // out of time: this email waits for the next run
     var msg     = thread.getMessages()[0];
     var subject = msg.getSubject();
     var body    = msg.getPlainBody();
@@ -583,6 +656,7 @@ function pollAirbnbBookings() {
   Logger.log('Unread Airbnb reservation threads: ' + threads.length);
 
   threads.forEach(function(thread) {
+    if (pastRunBudget_()) return;     // out of time: this email waits for the next run
     var msg  = thread.getMessages()[0];
     var subj = msg.getSubject();
     var body = msg.getPlainBody();

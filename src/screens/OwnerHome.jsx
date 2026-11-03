@@ -14,6 +14,7 @@ import GuestTimesReview from '../components/GuestTimesReview'
 import StayTimesLine from '../components/StayTimesLine'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 import ChangeRequestCard from '../components/ChangeRequestCard'
+import CalendarHealthBlock from '../components/CalendarHealthBlock'
 
 // Manager name shown on the "Staff Perks" tile and elsewhere — configurable
 // per host so a white-label tenant sees their own on-site manager's name
@@ -1036,7 +1037,7 @@ function DuplicateBookingsBlock() {
       padding:'12px 14px', display:'flex', alignItems:'center', gap:'10px' }}>
       <span>✅</span>
       <span style={{ fontSize:'0.8rem', color:'#34A853' }}>
-        No duplicate bookings in the last 2 months — calendar sync is healthy
+        No duplicate bookings in the last 2 months
       </span>
     </div>
   )
@@ -1354,6 +1355,10 @@ export default function OwnerHome({ sections }) {
         {hasMaintenance && <SignupsBlock />}
 
         {showVillaBlocks && <>
+          {/* Calendars out of step — a platform that stopped reading our link, a calendar we cannot read, a script gone quiet.
+              Nothing is drawn while all is well. Above everything else: this is how a night gets sold twice. */}
+          <CalendarHealthBlock />
+
           {/* Needs Attention — guests awaiting approval, urgent items at top of page */}
           <ChangeRequestsBlock />
           <NeedsAttentionBlock />

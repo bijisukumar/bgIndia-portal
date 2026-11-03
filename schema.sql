@@ -1134,3 +1134,19 @@ CREATE TABLE IF NOT EXISTS stayvibe_date_blocks (
   removed_by  TEXT
 );
 CREATE INDEX IF NOT EXISTS stayvibe_idx_date_blocks ON stayvibe_date_blocks(villa_id, removed_at, start_date, end_date);
+
+-- "Last ran": the Google scripts that work from the owner's mailbox report in after every run (recordJobRun).
+-- See migrations/2026-11-03-job-heartbeats.sql for the reasoning.
+CREATE TABLE IF NOT EXISTS infra_job_heartbeats (
+  villa_id       TEXT NOT NULL,
+  job            TEXT NOT NULL,             -- the script's own name for itself, e.g. poll-reservations
+  label          TEXT,                      -- how it reads on screen and in emails
+  every_minutes  INTEGER,                   -- how often its trigger fires
+  last_run_at    TEXT,                      -- UTC, as the database writes it
+  last_ok_at     TEXT,                      -- the last run that ended well
+  last_status    TEXT,                      -- ok | error
+  last_ms        INTEGER,                   -- how long the last run took
+  last_summary   TEXT,                      -- what it did, a line (counts and step timings), or why it failed
+  runs           INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (villa_id, job)
+);

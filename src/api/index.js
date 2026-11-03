@@ -100,6 +100,8 @@ export const api = {
   deleteIcalFeed: (data)    => post('deleteIcalFeed', data),
   getVillaCalendar: (villaId) => get('getVillaCalendar', { villaId }),
   runIcalSyncNow: (data)    => post('runIcalSyncNow', data),
+  // Are the calendars in step? (owner only) The faults behind the warning on Home and on the Channel calendar.
+  getCalendarHealth:    (villaId) => get('getCalendarHealth', { villaId }),
   // The calendar links handed to each booking platform (owner only).
   getIcalExports:       (villaId) => get('getIcalExports', { villaId }),
   createIcalExport:     (data)    => post('createIcalExport', data),

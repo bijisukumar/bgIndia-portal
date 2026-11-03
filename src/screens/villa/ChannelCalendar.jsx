@@ -15,6 +15,7 @@ import CalendarExports from './CalendarExports'
 import BlockDates from './BlockDates'
 import { fmtStamp, parseLocalDate } from '../../utils/dates'
 import { instantMs } from '../../utils/tz'
+import CalendarHealthBlock from '../../components/CalendarHealthBlock'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -427,6 +428,7 @@ export default function ChannelCalendar() {
       </div>
 
       <div className="screen-body">
+        <CalendarHealthBlock showLink={false} />
         <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '14px', lineHeight: 1.5 }}>
           Add each channel's iCal export URL (Airbnb calendar settings → "Export Calendar") to pull
           in blocked dates automatically. They refresh in the background, whenever a platform reads

@@ -16,8 +16,9 @@ import { hostPartners, partnerFor } from '../../utils/partners'
 import { CONFIG } from '../../config'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { timeAgo } from '../../utils/localWhen'
+import { linkStaleHours, spanText } from '../../utils/calendarHealth'
+import { instantMs } from '../../utils/tz'
 
-const DAY_MS = 24 * 3600 * 1000
 
 // The platforms this villa works with that have a calendar to connect, in the order the partner files rank them (the ones without a
 // rank last). How each takes our link (where to paste it, any exception, how often it reads) is in its partner file.
@@ -120,10 +121,13 @@ export default function CalendarExports({ feeds, showToast }) {
         warn: false,
       }
     }
-    const quiet = Date.now() - new Date(l.lastFetchedAt).getTime() > DAY_MS
+    // Quiet by the same measure as the warning on Home: this platform's own tolerance (its partner file), not a flat day.
+    const silentFor = Date.now() - instantMs(l.lastFetchedAt)
+    const quiet = silentFor > linkStaleHours(CONFIG, l.channel) * 3600 * 1000
+    const askWhy = bridge ? (cal.quietWarning || 'is the bridge script still running?') : `is it still pasted into ${name}?`
     return {
       text: `Read ${timeAgo(l.lastFetchedAt)} · ${l.fetchCount} time${l.fetchCount === 1 ? '' : 's'}` +
-        (quiet ? (bridge ? ` · not read for over a day: ${cal.quietWarning || 'is the bridge script still running?'}` : ` · not read for over a day: is it still pasted into ${name}?`) : ''),
+        (quiet ? ` · not read for ${spanText(silentFor)}, longer than it usually goes: ${askWhy}` : ''),
       warn: quiet,
     }
   }

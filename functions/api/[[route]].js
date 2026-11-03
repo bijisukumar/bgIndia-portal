@@ -1033,11 +1033,14 @@ async function syncOneIcalFeed(DB, feed, { timeoutMs = 20000 } = {}) {
     for (let i = 0; i < statements.length; i += 50) await DB.batch(statements.slice(i, i + 50))
     // The last read that WORKED, kept apart from the attempt time: a failed try overwrites last_synced_at, and an empty calendar has no
     // booking to date a good read by. The calendar warning needs it to tell one slow answer from a calendar that has really gone quiet.
-    // Best effort and a statement of its own, so a database without the table (before its migration) costs the sync nothing.
-    await DB.prepare(
-      `INSERT INTO infra_job_heartbeats (villa_id, job, label, last_run_at, last_ok_at, last_status, runs) VALUES (?, ?, ?, ?, ?, 'ok', 1)
-       ON CONFLICT(villa_id, job) DO UPDATE SET last_run_at = excluded.last_run_at, last_ok_at = excluded.last_ok_at, last_status = 'ok', runs = infra_job_heartbeats.runs + 1`
-    ).bind(feed.villa_id, `feed:${feed.feed_id}`, String(feed.channel || ''), nowStr, nowStr).run().catch(() => {})
+    // Best effort, and built AND run inside its own try: a database without the table (before its migration) must cost the sync nothing,
+    // whether it reports the missing table when the statement is built or only when it runs.
+    try {
+      await DB.prepare(
+        `INSERT INTO infra_job_heartbeats (villa_id, job, label, last_run_at, last_ok_at, last_status, runs) VALUES (?, ?, ?, ?, ?, 'ok', 1)
+         ON CONFLICT(villa_id, job) DO UPDATE SET last_run_at = excluded.last_run_at, last_ok_at = excluded.last_ok_at, last_status = 'ok', runs = infra_job_heartbeats.runs + 1`
+      ).bind(feed.villa_id, `feed:${feed.feed_id}`, String(feed.channel || ''), nowStr, nowStr).run()
+    } catch (e) { /* no table yet: the read itself worked */ }
     return {
       feedId: feed.feed_id, channel: feed.channel, ok: true, count: events.length,
       // for notifyNewPlatformBookings: the first read of a feed is its baseline, everything already there is not "new"
@@ -1114,22 +1117,23 @@ async function afterFeedSync(env, DB, results) {
 // behind its email; src/utils/calendarHealth.js decides what is wrong. A table that does not exist yet (the heartbeat table, before
 // its migration) is an empty list, never an error.
 async function loadCalendarHealth(DB, villaId, nowMs = Date.now()) {
-  const optional = async (statement) => {
-    try { return (await statement.all()).results || [] }
+  // The statement is built inside the try (a function), so a missing table is an empty list whichever moment the database reports it.
+  const optional = async (build) => {
+    try { return (await build().all()).results || [] }
     catch (e) { if (/no such table/i.test(e?.message || '')) return []; throw e }
   }
-  const feedRows = await optional(DB.prepare(
+  const feedRows = await optional(() => DB.prepare(
     `SELECT feed_id, channel, is_active, last_synced_at, last_sync_status, last_sync_error, created_at FROM stayvibe_ical_feeds WHERE villa_id = ?`
   ).bind(villaId))
   // A failed try overwrites last_synced_at with the time of the TRY, so a feed that is failing was last read well when one of its own
   // blocks was last seen.
-  const seen = new Map((await optional(DB.prepare(
+  const seen = new Map((await optional(() => DB.prepare(
     `SELECT feed_id, MAX(last_seen_at) AS ok_at FROM stayvibe_ical_blocks WHERE villa_id = ? GROUP BY feed_id`
   ).bind(villaId))).map(r => [r.feed_id, r.ok_at]))
-  const linkRows = await optional(DB.prepare(
+  const linkRows = await optional(() => DB.prepare(
     `SELECT channel, created_at, rotated_at, last_fetched_at FROM stayvibe_ical_exports WHERE villa_id = ?`
   ).bind(villaId))
-  const heartbeatRows = await optional(DB.prepare(
+  const heartbeatRows = await optional(() => DB.prepare(
     `SELECT job, label, every_minutes, last_run_at, last_ok_at, last_status FROM infra_job_heartbeats WHERE villa_id = ?`
   ).bind(villaId))
   // The table holds two kinds of row: a Google script reporting in, and (job "feed:<feed id>") the last good read of a calendar feed.

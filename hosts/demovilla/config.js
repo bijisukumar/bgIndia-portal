@@ -10,6 +10,9 @@ export const CONFIG = {
   // The time zone this property keeps (an IANA name); see hosts/dwarka/config.js.
   timezone: 'Asia/Kolkata',
 
+  // Months the car and plate photos stay in Drive (the standard plan is 1); see hosts/dwarka/config.js.
+  carPhotos: { keepMonths: 1 },
+
   // Branding
   brandName:  'Demo Test Villas',
   brandShort: 'Demo Portal',

@@ -39,6 +39,7 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { findTwinPairs } from '../../utils/twinStays'
 import ChangeRequestCard from '../../components/ChangeRequestCard'
 import { PhoneCountry } from '../../components/CountryFlag'
+import { carPhotoMonths } from '../../utils/carPhotos'
 
 // The itemised fee lines a platform's confirmation gives (the partners with feeBreakdown in /partners: Airbnb today)
 const EMPTY_FEES = {
@@ -422,6 +423,7 @@ export default function CompleteBooking() {
       guestName:    selected.guest_name    || '',
       guestPhone:   selected.guest_phone   || '',
       guestEmail:   selected.guest_email   || '',
+      vehicleNumber: selected.vehicle_number || '',
       checkinDate:  selected.checkin_date  || '',
       checkoutDate: selected.checkout_date || '',
       adults:       selected.adults   != null ? String(selected.adults)   : '',
@@ -451,7 +453,7 @@ export default function CompleteBooking() {
       // Only the times that were changed go to the server: one the field cannot show
       // (a guest typed "around 3") would otherwise be saved back as blank.
       const body = { ...d }
-      for (const k of ['eta', 'etd', 'earlyCheckinTime', 'lateCheckoutTime']) if (d[k] === infoOrig[k]) delete body[k]
+      for (const k of ['eta', 'etd', 'earlyCheckinTime', 'lateCheckoutTime', 'vehicleNumber']) if (d[k] === infoOrig[k]) delete body[k]
       // Breakfast goes as a list of { type, count }, and only when it was changed: a request that only
       // has types (no counts) must not be rewritten by saving a new phone number.
       delete body.breakfast
@@ -1454,6 +1456,15 @@ export default function CompleteBooking() {
                           <input type="email" style={dfield} value={infoDraft.guestEmail}
                             onChange={e=>setD('guestEmail', e.target.value)} />
                         </div>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Car number(s)</div>
+                          <input style={dfield} value={infoDraft.vehicleNumber || ''}
+                            onChange={e=>setD('vehicleNumber', e.target.value)}
+                            placeholder="KL 08 AB 1234, TN 38 X 9" />
+                          <div style={{fontSize:'0.66rem',color:'var(--text-dim)',marginTop:'3px'}}>
+                            Separate cars with a comma. The photos of the car and plate are deleted from Drive after {carPhotoMonths(CONFIG)} month{carPhotoMonths(CONFIG) === 1 ? '' : 's'}, and only once a number is on record here.
+                          </div>
+                        </div>
                         <div>
                           <div style={infoLabel}>Adults</div>
                           <input type="number" min="0" style={dfield} value={infoDraft.adults}
@@ -1611,6 +1622,14 @@ export default function CompleteBooking() {
                             {s.guest_email
                               ? <a href={`mailto:${s.guest_email}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_email}</a>
                               : <span style={{color:'var(--text-dim)'}}>—</span>}
+                          </div>
+                        </div>
+                        <div style={{gridColumn:'1 / -1'}}>
+                          <div style={infoLabel}>Car number(s)</div>
+                          <div style={{fontSize:'0.85rem',color:'var(--text)',fontWeight:'500'}}>
+                            {s.vehicle_number
+                              ? <>🚗 {s.vehicle_number}</>
+                              : <span style={{color:'var(--text-dim)'}}>None on record</span>}{pencil('car')}
                           </div>
                         </div>
                         <div style={{gridColumn:'1 / -1'}}>

@@ -1,5 +1,5 @@
 // ============================================================
-// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.7
+// GUEST CHECK-IN FORM — BOUND SCRIPT  v2.8
 // ============================================================
 // Paste into Apps Script editor of:
 //   "GVR Registration-Check-In form (Responses)"
@@ -9,6 +9,23 @@
 // via getTenantConfig (see v2.1 below).
 //
 // ── VERSION HISTORY (newest first) — bump on every change ──
+// v2.8  2026-11-03  Car and plate photos are DELETED from Drive once they are
+//                    older than the host's retention: carPhotos.keepMonths in
+//                    hosts/<id>/config.js, served as carPhotoMonths by
+//                    getTenantConfig (the standard plan keeps them 1 month, a
+//                    longer time is a paid extra; Dwarka keeps 6). A photo goes
+//                    to the Drive bin (30 more days there) only if its stay has
+//                    a plate number on record (the number is the record, the
+//                    picture the convenience) AND it is still in that stay's own
+//                    folder; a photo whose stay has no number is kept and the
+//                    owner is emailed, at most once a week, which stays need
+//                    one (Complete booking > Guest info > Car number(s)).
+//                    sweepOldCarPhotos_ rides on processPendingDocumentUploads
+//                    (its 5-minute trigger exists) and works at most once a day,
+//                    so there is NO new trigger to install. If the Worker does
+//                    not state the retention, NOTHING is deleted.
+//                    previewOldCarPhotos() lists what would go and deletes
+//                    nothing; run it from the editor to check the clean-up.
 // v2.7  2026-10-28  The GuestInfo helpers (fetchGuestInfo_, saveGuestInfo_,
 //                    refreshGuestInfo_, guestInfoFallback_) end in an
 //                    underscore, which Apps Script treats as private: they
@@ -135,6 +152,8 @@ function getClient() {
         breakfastRate:    resp.data.breakfastRate || 275,
         bedroomCount:     resp.data.bedroomCount  || 4,
         storeCarPhotos:   !!resp.data.storeCarPhotos,
+        // Months a car or plate photo stays in Drive before sweepOldCarPhotos_ deletes it. 0 = the Worker did not say: delete nothing.
+        carPhotoMonths:   Math.floor(Number(resp.data.carPhotoMonths)) || 0,
         // Wording of the guest's check-in email, from the host config (null: built-in text).
         checkinConfirmation: resp.data.checkinConfirmation || null,
         // The biggest party the check-in form takes without asking the guest to confirm the count with the
@@ -166,6 +185,7 @@ function getClient() {
     breakfastRate:     275,
     bedroomCount:      4,
     storeCarPhotos:    false,
+    carPhotoMonths:    0,
     checkinConfirmation: null,
     partyLimit:        12,
     partyNote:         null,
@@ -675,6 +695,7 @@ function refreshGuestInfoFiles() {
 // the pending_review guest-info-txt / confirmation-email flow above.
 function processPendingDocumentUploads() {
   Logger.log('=== processPendingDocumentUploads START ===');
+  var runStartedAt = Date.now();
   var CLIENT = getClient();
   DRIVE_ROOT = CLIENT.driveRootId;
 
@@ -748,7 +769,101 @@ function processPendingDocumentUploads() {
     }
   });
 
+  // Clearing out photos that have outlived their time is the last, daily, job of this run, and is skipped when the uploads above
+  // have already used much of it (a run is killed at six minutes).
+  if (Date.now() - runStartedAt < 120000) {
+    try { sweepOldCarPhotos_({}); } catch (sweepErr) { Logger.log('sweepOldCarPhotos_ error: ' + sweepErr.message); }
+  }
+
   Logger.log('=== processPendingDocumentUploads END ===');
+}
+
+// ── CAR AND PLATE PHOTOS: DELETE THEM WHEN THEY HAVE OUTLIVED THEIR TIME (v2.8) ────────
+// processPendingDocumentUploads files these in the guest's own Drive folder as CarPhoto-<stay>-<time>.jpg and
+// PlatePhoto-<stay>-<time>.jpg. They are a convenience: the plate NUMBER is the record, and it sits on the stay. So once a photo is
+// older than the host's retention (CLIENT.carPhotoMonths, from carPhotos.keepMonths in hosts/<id>/config.js) it goes to the Drive bin,
+// which keeps it a further 30 days, but ONLY IF the Worker confirms its stay has a plate number on record AND the file is still
+// in that stay's own folder. Every check is made in code, whatever the search returned: a file that is too young, is not named like
+// one of ours, belongs to no stay of this host, or has no number on its stay is left alone.
+var CAR_PHOTO_NAME = /^(?:CarPhoto|PlatePhoto)-(.+)-\d{8}-\d{6}\.[A-Za-z0-9]+$/;
+var CAR_PHOTO_SWEEP_EVERY_MS = 20 * 60 * 60 * 1000;   // about once a day; the 5-minute trigger just asks
+var CAR_PHOTO_BUDGET_MS      = 90 * 1000;             // a sweep never takes longer than this in one run
+var CAR_PHOTO_NOTIFY_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
+
+function sweepOldCarPhotos_(opts) {
+  opts = opts || {};
+  var started = Date.now();
+  var props = PropertiesService.getScriptProperties();
+  if (!opts.force && started - Number(props.getProperty('CAR_PHOTO_SWEEP_AT') || 0) < CAR_PHOTO_SWEEP_EVERY_MS) return;
+  var CLIENT = getClient();
+  var months = Number(CLIENT.carPhotoMonths) || 0;
+  if (months < 1) { Logger.log('Car photo clean-up: the Worker did not state the retention - nothing deleted'); return; }
+  // The attempt is what is dated, so a clean-up that fails is tried again tomorrow, not every five minutes.
+  if (!opts.dryRun) props.setProperty('CAR_PHOTO_SWEEP_AT', String(started));
+
+  var cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - months);
+
+  var due = [];
+  var it = DriveApp.searchFiles("(title contains 'CarPhoto' or title contains 'PlatePhoto') and trashed = false");
+  while (it.hasNext() && Date.now() - started < CAR_PHOTO_BUDGET_MS) {
+    var f = it.next();
+    var m = CAR_PHOTO_NAME.exec(f.getName());
+    if (!m) continue;
+    if (f.getDateCreated().getTime() >= cutoff.getTime()) continue;       // still inside its time
+    due.push({ file: f, stayId: m[1] });
+  }
+
+  var info = {};
+  var stayIds = [];
+  due.forEach(function(d) { if (stayIds.indexOf(d.stayId) < 0) stayIds.push(d.stayId); });
+  for (var i = 0; i < stayIds.length; i += 60) {
+    var r = callWorker('POST', 'checkCarPlates', { villaId: CLIENT.villaId, stayIds: stayIds.slice(i, i + 60) });
+    if (!r || !r.success) throw new Error('checkCarPlates failed: ' + (LAST_WORKER_ERROR || JSON.stringify(r)));
+    (r.data || []).forEach(function(s) { info[s.stayId] = s; });
+  }
+
+  var removed = 0, elsewhere = 0, unknown = 0, waiting = {};
+  due.forEach(function(d) {
+    var s = info[d.stayId];
+    if (!s) { unknown++; return; }                                        // not a stay of this host
+    if (!s.hasPlate) { waiting[d.stayId] = s.guestName || d.stayId; return; }
+    var inFolder = false;
+    if (s.driveFolderId) {
+      var parents = d.file.getParents();
+      while (parents.hasNext()) { if (parents.next().getId() === s.driveFolderId) { inFolder = true; break; } }
+    }
+    if (!inFolder) { elsewhere++; return; }
+    if (opts.dryRun) { Logger.log('Would delete ' + d.file.getName()); removed++; return; }
+    d.file.setTrashed(true);
+    removed++;
+  });
+
+  var waitingIds = Object.keys(waiting);
+  Logger.log('Car photo clean-up (' + months + ' month' + (months === 1 ? '' : 's') + (opts.dryRun ? ', PREVIEW: nothing deleted' : '') + '): ' + removed +
+    ' ' + (opts.dryRun ? 'would go' : 'deleted') + ', ' + waitingIds.length + ' stay(s) kept for want of a plate number, ' + elsewhere + ' not in the stay\'s folder, ' + unknown + ' not a stay of this host');
+
+  if (waitingIds.length && !opts.dryRun && started - Number(props.getProperty('CAR_PHOTO_NOTIFIED_AT') || 0) > CAR_PHOTO_NOTIFY_EVERY_MS) {
+    props.setProperty('CAR_PHOTO_NOTIFIED_AT', String(started));
+    sendEmailViaWorker(CLIENT.ownerEmail,
+      '[GVR Portal] Car photos kept: no car number on record for ' + waitingIds.length + ' stay' + (waitingIds.length === 1 ? '' : 's'),
+      'Car and plate photos are deleted from Drive ' + months + ' month' + (months === 1 ? '' : 's') + ' after they are taken, once the car number is on the stay.\n' +
+      'These stays have photos past that time but NO car number on record, so the photos were kept:\n\n' +
+      waitingIds.map(function(id) { return ' - ' + waiting[id] + ' (' + id + ')'; }).join('\n') +
+      '\n\nOpen each in Complete booking > Guest info, read the number off the photo in the guest\'s Drive folder, and type it in Car number(s). ' +
+      'The photos are cleared at the next daily clean-up. This reminder comes at most once a week.',
+      'car_photos', CLIENT.villaId);
+  }
+}
+
+// Run from the editor to see what the clean-up WOULD delete, without deleting anything.
+function previewOldCarPhotos() {
+  sweepOldCarPhotos_({ dryRun: true, force: true });
+}
+
+// Run from the editor to clean up now rather than at the next daily pass.
+function runCarPhotoCleanupNow() {
+  sweepOldCarPhotos_({ force: true });
 }
 
 // ── SEND CHECK-IN CONFIRMATION EMAILS ────────────────────

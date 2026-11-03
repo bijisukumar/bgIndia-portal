@@ -82,6 +82,7 @@ import { collectGuests } from '../../src/utils/guestList.js'
 import { buildGuestInfoText } from '../../src/utils/guestInfoText.js'
 import { estimateStay, groupNights, validateSeason, validateRateCardRows, DEFAULT_OVERFLOW_PER_GUEST, DEFAULT_OVERFLOW_MAX, isYmd } from '../../src/utils/seasonRates.js'
 import { evaluateCalendarHealth } from '../../src/utils/calendarHealth.js'
+import { carPhotoMonths, hasPlateNumber, cleanPlateList } from '../../src/utils/carPhotos.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -4095,6 +4096,9 @@ export async function onRequest(ctx) {
           ownerEmailCC:  tenant.owner_email_cc || null,
           driveRootId:   tenant.drive_root_id || null,
           storeCarPhotos: !!tenant.store_car_photos,
+          // Months a car or plate photo stays in the host's Drive before the Google script deletes it (carPhotos.keepMonths in the
+          // host config; the standard plan is one month, a longer time is a paid extra).
+          carPhotoMonths: carPhotoMonths(HOST_CONFIGS[tenantId]),
           bedroomCount:  tenant.bedroom_count || 4,
           // The words of the guest's check-in confirmation email, which the Apps
           // Script builds and sends. They live in the host config (guestMessages)
@@ -9090,7 +9094,7 @@ export async function onRequest(ctx) {
       if (action === 'updateStayGuestInfo') {
         const { stayId, guestName, guestPhone, guestEmail,
                 checkinDate, checkoutDate, adults, children, eta, etd,
-                earlyCheckinTime, lateCheckoutTime, breakfast } = body
+                earlyCheckinTime, lateCheckoutTime, breakfast, vehicleNumber } = body
         if (!stayId) return err('stayId required')
         // An agreed check-in / check-out time closes a night on every calendar
         // (src/utils/stayHolds.js), so only the owner sets one, here as in
@@ -9117,6 +9121,9 @@ export async function onRequest(ctx) {
         if (eta        !== undefined) put('eta',         scrub(eta) || null)
         if (adults     !== undefined) put('adults',      parseInt(adults)   || 0)
         if (children   !== undefined) put('children',    parseInt(children) || 0)
+        // The car numbers on record ("KL 08 AB 1234, TN 38 X 9"). A car photo is deleted once it is old enough AND its stay has a number,
+        // so this is where the owner supplies one for a stay whose number was never typed.
+        if (vehicleNumber !== undefined) put('vehicle_number', cleanPlateList(scrub(vehicleNumber)) || null)
 
         const ci = checkinDate  !== undefined ? (scrub(checkinDate)  || null) : cur.checkin_date
         const co = checkoutDate !== undefined ? (scrub(checkoutDate) || null) : cur.checkout_date
@@ -11712,6 +11719,24 @@ export async function onRequest(ctx) {
         // The script comes back every five minutes whether or not GitHub's schedule fired: a good moment to look at the calendars.
         ctx.waitUntil(alertCalendarHealth(env, DB, villaId).catch(e => console.warn('calendar health alert:', e?.message || e)))
         return json({ success: true, data: { recorded: true } })
+      }
+
+      // CAR AND PLATE PHOTOS OLD ENOUGH TO GO (2026-11-03). The Google script that files these photos in each guest's Drive folder
+      // also clears the ones older than the host's retention (carPhotos.keepMonths in the host config, standard one month). It asks
+      // here about the stays whose files it found: a photo goes only if its stay has a plate number on record (the number is the
+      // record, the picture the convenience), and only from the stay's own Drive folder.
+      if (action === 'checkCarPlates') {
+        if (payload.name !== 'System') return err('System access only', 403)
+        const villaId = String(body.villaId || '').trim() || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const ids = [...new Set((Array.isArray(body.stayIds) ? body.stayIds : []).map(String))].slice(0, 80)
+        if (!ids.length) return json({ success: true, data: [] })
+        const { results } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkout_date, vehicle_number, drive_folder_id FROM stayvibe_stays WHERE villa_id = ? AND stay_id IN (${ids.map(() => '?').join(',')})`
+        ).bind(villaId, ...ids).all()
+        return json({ success: true, data: (results || []).map(r => ({
+          stayId: r.stay_id, guestName: r.guest_name, checkOut: r.checkout_date, hasPlate: hasPlateNumber(r.vehicle_number), driveFolderId: r.drive_folder_id || null,
+        })) })
       }
 
       // MARK DOCUMENT UPLOADED — called by Apps Script after uploading to Drive

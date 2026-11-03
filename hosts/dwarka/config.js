@@ -25,6 +25,11 @@ export const CONFIG = {
   // out is India's. Nothing else in the code names a zone.
   timezone: 'Asia/Kolkata',
 
+  // How long a guest's car and plate PHOTOS stay in the Google Drive folder before they are deleted (src/utils/carPhotos.js). The
+  // plate NUMBER stays on the stay for good, and a photo is only deleted once its stay has one. The standard plan is 1 month; a
+  // longer time is a paid extra for a client and is set here when it is bought. This property keeps them 6 months.
+  carPhotos: { keepMonths: 6 },
+
   // Branding
   brandName:  'Guruvayur Estates',
   brandShort: 'GE Portal',

@@ -53,7 +53,7 @@ by frontend routing.
 
 **Integrations**
 13. Gmail address that receives channel emails (for pollers)
-14. Google Drive folder for guest docs (we create structure)
+14. Google Drive folder for guest docs (we create structure) · how long car and plate photos stay in it: 1 month on the standard plan, longer is a paid extra (`carPhotos.keepMonths` in the host's `config.js`)
 15. Resend (email) — we provision; sender domain to verify
 
 ## B. Provisioning checklist (us)
@@ -102,6 +102,12 @@ by frontend routing.
      `scripts/migrate-rate-seasons.sql` and
      `scripts/migrate-change-requests.sql` (additive, safe to run twice);
      without them the features stay switched off and nothing else breaks.
+     `infra_job_heartbeats` ("last ran": the Google scripts report in after
+     every run, and the calendar warning watches it) is in `schema.sql` too; an
+     EXISTING host's database gets it from
+     `migrations/2026-11-03-job-heartbeats.sql`. Until it exists the Worker
+     answers each report with `recorded: false`, so the order of deploy and
+     migration does not matter.
 3. Create Pages project `<hostId>-portal`; bind DB/DB_ESTATES/AI; set
    `[vars] DEFAULT_VILLA_ID = "<the villa id from step 1>"` in that
    project's wrangler.toml (or Pages dashboard env var) — **easy to
@@ -130,6 +136,19 @@ by frontend routing.
    already in Drive, run `refreshGuestInfoFiles` once from the editor to bring
    their existing files up to date (the other GuestInfo functions are private
    and do not appear in the Run list).
+   The poller (`apps-script/poll-reservations`, v1.4 or later) also tells the
+   Worker after every run that it ran (`recordJobRun`), stops starting work
+   after four minutes of a run (Google kills one at six), and fetches the
+   villa's settings once an hour instead of every run. The guest-form script
+   (v2.8) deletes car and plate photos from Drive once they are older than the
+   host's `carPhotos.keepMonths` (the standard plan is 1 month; a longer time
+   is a paid extra, set in that host's `config.js` when it is bought), but only
+   for a stay that has a car number on record, and only from that stay's own
+   Drive folder. It rides on `processPendingDocumentUploads`'s existing trigger
+   and works about once a day, so there is no trigger to add; if the Worker
+   does not state the retention it deletes nothing, and `previewOldCarPhotos`
+   (run from the editor) lists what would go without deleting anything. Both
+   scripts reach Google with `npm run gas:push` (see `apps-script/README.md`).
    In the check-in **Form editor** (not the responses sheet — that setting
    lives on the Form itself, not in any script), mark the ID/passport
    upload question **Required** — easy to forget per-host, and without it

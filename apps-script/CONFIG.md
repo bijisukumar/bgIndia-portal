@@ -60,6 +60,17 @@ reviews.
 |---|---|---|
 | `pollNewReservations` | every **5 min** | `setupTrigger()` |
 
+### Reports in, and keeps time (v1.4)
+
+After every run it calls the Worker's `recordJobRun` (job `poll-reservations`,
+"Airbnb email reader", every 5 minutes). The app shows when it last ran and
+warns, and emails the owner, if it has been silent for four runs or keeps
+failing. That needs the `infra_job_heartbeats` table
+(`migrations/2026-11-03-job-heartbeats.sql`) and nothing else: no new property
+and no new trigger. It also stops starting work after 4 minutes of a run
+(Google kills one at 6) and keeps the villa's settings in the script cache for
+an hour.
+
 ### Hardcoded, not properties
 
 `WORKER_URL`, `TENANT_ID`, `OWNER_EMAIL`, `DRIVE_ROOT_ID` are constants at the
@@ -96,6 +107,17 @@ look right while check-in forms quietly stop being processed.
 
 It is also the job that failed on 2026-09-13 with a transient Google error, so
 it is worth knowing it is the hand-made one.
+
+### Car and plate photo clean-up (v2.8)
+
+`sweepOldCarPhotos_` deletes (to the Drive bin) car and plate photos older than
+the host's `carPhotos.keepMonths`, once the stay has a car number on record. It
+rides on `processPendingDocumentUploads`, whose 5-minute trigger exists, and
+works about once a day: **no trigger to install.** It writes two properties of
+its own, `CAR_PHOTO_SWEEP_AT` (when it last tried) and `CAR_PHOTO_NOTIFIED_AT`
+(when it last emailed about stays with no number); delete them to make it run
+or email again at once. If the Worker does not state the retention it deletes
+nothing. Run `previewOldCarPhotos` from the editor to see what would go.
 
 ### Hardcoded, not properties
 

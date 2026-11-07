@@ -3625,7 +3625,12 @@ export async function onRequest(ctx) {
         message ? `Message:    ${message}` : null,
         '',
         `From:       ${where || 'unknown location'}  (IP ${meta.ip})`,
-        `Enquiry ID: ${enquiryId} (in Enquiries as "new")`,
+        `Started by: Customer (website estimate page)`,
+        '',
+        `Open this enquiry in StayVibe (review, then send the quote):`,
+        `${new URL(request.url).origin}/owner/villa/enquiries/${enquiryId}`,
+        `(sign in with your PIN if asked — you will land on the enquiry)`,
+        `Enquiry ID: ${enquiryId}`,
       ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote'))
 
       return json({ success: true, data: { reference: enquiryId, available: est.available } })

@@ -6,6 +6,7 @@ import { daysFromToday } from '../../utils/dates'
 import { CONFIG } from '../../config'
 import { hostPartners } from '../../utils/partners'
 import { channelKey } from '../../utils/channel'
+import InitiatorBadge from '../../components/InitiatorBadge'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { waNumber } from '../../utils/guestMessages'
 
@@ -90,6 +91,7 @@ function EnquiryCard({ enq, navigate, nudging, handleNudge, dimmed = false }) {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ color: 'var(--text)', fontWeight: '700', fontSize: '0.92rem' }}>{enq.guest_name}</span>
+            <InitiatorBadge createdBy={enq.created_by} />
             {!!enq.is_repeat_guest && (
               <span style={{ background: 'rgba(139,92,246,0.15)', color: '#8B5CF6', fontSize: '0.65rem', fontWeight: '700', padding: '2px 8px', borderRadius: '10px' }}>
                 Repeat · {enq.previous_stays}×

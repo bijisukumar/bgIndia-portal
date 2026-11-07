@@ -5,7 +5,7 @@
 //  Screens: Villa owner + Raman (villa manager)
 //  Single DB, tenant isolated by auth token → villa_id
 // ============================================================
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { NavTrail } from '../../utils/navTrail'
 import { AuthProvider, useAuth } from '../../hooks/useAuth'
 import AccessDenied from '../../components/AccessDenied'
@@ -61,6 +61,7 @@ import Rates          from '../../screens/villa/Rates'
 
 function ProtectedRoutes() {
   const { user } = useAuth()
+  const location = useLocation()
   // On an acquisition host an unauthenticated visit lands on the public
   // gateway - Request Your Invite / Login / New Host Registration / Request a
   // Demo - because a first-time visitor needs the context.
@@ -69,7 +70,9 @@ function ProtectedRoutes() {
   // there is already a customer or their staff, mostly from an installed PWA
   // several times a day, and a gateway card offering one button was pure
   // friction between them and the keypad.
-  if (!user) return isAcquisitionHost() ? <Welcome /> : <Navigate to="/login" replace />
+  // A link into a screen (an enquiry in an email, say) survives the PIN screen: the page asked for rides along as ?next=
+  const wanted = location.pathname + location.search
+  if (!user) return isAcquisitionHost() ? <Welcome /> : <Navigate to={wanted && wanted !== '/' ? `/login?next=${encodeURIComponent(wanted)}` : '/login'} replace />
   const role = user.role
   // master_owner can log in directly to a tenant's own site too (not just
   // the aggregate manage.* console) for in-context troubleshooting.
@@ -175,6 +178,12 @@ export default function App() {
 
 function LoginGate() {
   const { user } = useAuth()
-  if (user) return <Navigate to="/" replace />
+  const location = useLocation()
+  if (user) {
+    // Only ever a path on this site: never an address that could send someone elsewhere.
+    const next = new URLSearchParams(location.search).get('next') || ''
+    const safe = next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/login') && !next.includes('\\')
+    return <Navigate to={safe ? next : '/'} replace />
+  }
   return <Login />
 }

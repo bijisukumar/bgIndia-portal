@@ -9,6 +9,7 @@ import DatePicker from '../../components/DatePicker'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { addDays } from '../../utils/stayHolds'
 import AvailabilityNote from '../../components/AvailabilityNote'
+import InitiatorBadge, { initiatedBy } from '../../components/InitiatorBadge'
 import { groupNights } from '../../utils/seasonRates'
 import {
   getSeasonalEstimate, estimateNotes, describeEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
@@ -718,7 +719,7 @@ export default function EnquiryDetail() {
       <div className="topbar">
         <button className="back-btn" onClick={goBack}>‹</button>
         <div>
-          <div className="topbar-title">{e.guest_name}</div>
+          <div className="topbar-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>{e.guest_name} <InitiatorBadge createdBy={e.created_by} /></div>
           <div className="topbar-sub">{e.enquiry_id}</div>
         </div>
         <button onClick={() => navigate(`/owner/villa/enquiries/${enquiryId}/edit`)}
@@ -741,7 +742,7 @@ export default function EnquiryDetail() {
             📞 {e.phone || '—'} {e.email && <>· ✉️ {e.email}</>}<br />
             📅 {e.checkin_date || '—'} → {e.checkout_date || '—'} ({e.nights || 0}n) · 👥 {e.guests_count || 1} guests
             {(e.adults || e.children || e.infants) ? <> ({e.adults || 0}A{e.children ? ` + ${e.children}C` : ''}{e.infants ? ` + ${e.infants}I` : ''})</> : null}<br />
-            🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {enquirySourceLabel(e.source)}
+            🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {enquirySourceLabel(e.source)} · started by {initiatedBy(e.created_by)?.label || '—'}
           </div>
         </div>
 

@@ -721,6 +721,78 @@ async function publicStayEstimate(DB, villaId, q, today) {
   }
 }
 
+// ── WEB LEAD LOG ─────────────────────────────────────────────────────────────
+// Every visit to the website's estimate page that reaches us is written down BEFORE
+// anything else happens to it, so a lead survives a crash, a bad input or a spam
+// verdict: who (name, phone, email as typed), where from (IP, country, region, city,
+// time zone, network), on what (browser, referring page, language), and what they
+// asked for (dates, party, the price shown). `kind` is 'search' (an estimate was
+// looked up) or 'request' (a final quote was asked for). `status` says how it ended.
+// The table is created on first use so the log can never be blocked by a missing migration.
+let webLeadTableReady = false
+async function ensureWebLeadTable(DB) {
+  if (webLeadTableReady) return
+  await DB.prepare(`CREATE TABLE IF NOT EXISTS stayvibe_web_leads (
+    log_id TEXT PRIMARY KEY, villa_id TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'received',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT,
+    visitor_id TEXT, ip TEXT, country TEXT, region TEXT, city TEXT, postal_code TEXT, timezone TEXT,
+    asn TEXT, as_org TEXT, colo TEXT, user_agent TEXT, referer TEXT, origin TEXT, language TEXT,
+    checkin_date TEXT, checkout_date TEXT, adults INTEGER, children INTEGER, infants INTEGER,
+    available INTEGER, approx_total REAL,
+    guest_name TEXT, phone TEXT, email TEXT, message TEXT, enquiry_id TEXT, error TEXT)`).run()
+  await DB.prepare(`CREATE INDEX IF NOT EXISTS stayvibe_idx_web_leads_created ON stayvibe_web_leads(villa_id, created_at DESC)`).run()
+  webLeadTableReady = true
+}
+
+const clipStr = (v, n) => (v == null || v === '' ? null : String(v).slice(0, n))
+// Where the visitor is and what they are using, as Cloudflare sees them.
+function webLeadMeta(request) {
+  const cf = request.cf || {}, h = request.headers
+  return {
+    ip: h.get('CF-Connecting-IP') || h.get('CF-Connecting-Ip') || 'unknown',
+    country: cf.country, region: cf.region, city: cf.city, postalCode: cf.postalCode, timezone: cf.timezone,
+    asn: cf.asn, asOrg: cf.asOrganization, colo: cf.colo,
+    userAgent: h.get('User-Agent'), referer: h.get('Referer'), origin: h.get('Origin'), language: h.get('Accept-Language'),
+  }
+}
+
+// Never throws: losing the log must not lose the guest. Returns the log id (or null).
+async function logWebLead(DB, villaId, kind, meta, f, extra = {}) {
+  try {
+    await ensureWebLeadTable(DB)
+    const id = genId('WL')
+    const num = v => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null }
+    await DB.prepare(`INSERT INTO stayvibe_web_leads (
+        log_id, villa_id, kind, status, visitor_id, ip, country, region, city, postal_code, timezone, asn, as_org, colo,
+        user_agent, referer, origin, language, checkin_date, checkout_date, adults, children, infants,
+        available, approx_total, guest_name, phone, email, message, enquiry_id, error
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      id, villaId, kind, extra.status || 'received', clipStr(f.visitorId, 40), clipStr(meta.ip, 64),
+      clipStr(meta.country, 8), clipStr(meta.region, 80), clipStr(meta.city, 80), clipStr(meta.postalCode, 20), clipStr(meta.timezone, 60),
+      meta.asn == null ? null : String(meta.asn), clipStr(meta.asOrg, 120), clipStr(meta.colo, 8),
+      clipStr(meta.userAgent, 400), clipStr(meta.referer, 300), clipStr(meta.origin, 200), clipStr(meta.language, 120),
+      clipStr(f.checkIn, 10), clipStr(f.checkOut, 10), num(f.adults), num(f.children), num(f.infants),
+      extra.available == null ? null : (extra.available ? 1 : 0), extra.approxTotal == null ? null : extra.approxTotal,
+      clipStr(f.guestName, 120), clipStr(f.phone, 40), clipStr(f.email, 160), clipStr(f.message, 800),
+      extra.enquiryId || null, clipStr(extra.error, 500)
+    ).run()
+    return id
+  } catch (e) {
+    console.error('logWebLead failed:', e?.message || e)
+    return null
+  }
+}
+async function updateWebLead(DB, logId, status, extra = {}) {
+  if (!logId) return
+  try {
+    await DB.prepare(`UPDATE stayvibe_web_leads SET status = ?, updated_at = datetime('now'),
+        enquiry_id = COALESCE(?, enquiry_id), error = COALESCE(?, error),
+        available = COALESCE(?, available), approx_total = COALESCE(?, approx_total) WHERE log_id = ?`)
+      .bind(status, extra.enquiryId || null, clipStr(extra.error, 500),
+        extra.available == null ? null : (extra.available ? 1 : 0), extra.approxTotal == null ? null : extra.approxTotal, logId).run()
+  } catch (e) { console.error('updateWebLead failed:', e?.message || e) }
+}
+
 // ── ESTATE360 WEEKLY OWNER DIGEST ────────────────────────────────────────
 // Irrigation compliance + Pradosh's logged expenses, emailed weekly by
 // runEstateWeeklyDigest (GitHub Actions cron, CRON_SECRET-guarded).
@@ -3434,100 +3506,151 @@ export async function onRequest(ctx) {
   // answers "is it free, and roughly what will it cost" for one party and dates.
   // submitQuoteRequest turns the visitor's interest into an enquiry the owner is
   // emailed about, so nobody has to ring to ask for a price.
+  // Both write to stayvibe_web_leads FIRST (see logWebLead) and answer with JSON
+  // even when they crash: a bare 500 carries no CORS headers, which the browser can
+  // only report as "Failed to fetch" — and the guest's request would simply be lost.
   if (action === 'getPublicEstimate' && method === 'POST') {
-    const ip = request.headers.get('CF-Connecting-Ip') || request.headers.get('CF-Connecting-IP') || 'unknown'
-    if (publicRateLimited('est:' + ip, 60, 10 * 60 * 1000)) return json({ success: false, error: 'Too many requests — please try again in a few minutes' }, 429)
+    const meta = webLeadMeta(request)
     const pBody = await request.json().catch(() => ({}))
-    const r = await publicStayEstimate(DB, DEFAULT_VILLA_ID, pBody, await todayOf(DEFAULT_VILLA_ID))
-    if (r.error) return err(r.error)
+    if (publicRateLimited('est:' + meta.ip, 60, 10 * 60 * 1000)) {
+      ctx.waitUntil(logWebLead(DB, DEFAULT_VILLA_ID, 'search', meta, pBody, { status: 'rate_limited' }))
+      return json({ success: false, error: 'Too many requests — please try again in a few minutes' }, 429)
+    }
+    let r
+    try {
+      r = await publicStayEstimate(DB, DEFAULT_VILLA_ID, pBody, await todayOf(DEFAULT_VILLA_ID))
+    } catch (e) {
+      console.error('getPublicEstimate failed:', e?.message || e)
+      ctx.waitUntil(logWebLead(DB, DEFAULT_VILLA_ID, 'search', meta, pBody, { status: 'failed', error: e?.message || String(e) }))
+      return json({ success: false, error: 'Estimates are not available right now — please send us a request or WhatsApp us' }, 500)
+    }
+    if (r.error) {
+      ctx.waitUntil(logWebLead(DB, DEFAULT_VILLA_ID, 'search', meta, pBody, { status: 'invalid', error: r.error }))
+      return err(r.error)
+    }
+    ctx.waitUntil(logWebLead(DB, DEFAULT_VILLA_ID, 'search', meta, pBody, { status: 'ok', available: r.available, approxTotal: r.approxTotal }))
     const { exactTotal, ...answer } = r
     return json({ success: true, data: answer })
   }
 
   if (action === 'submitQuoteRequest' && method === 'POST') {
-    const ip = request.headers.get('CF-Connecting-Ip') || request.headers.get('CF-Connecting-IP') || 'unknown'
-    if (publicRateLimited('req:' + ip, 6, 60 * 60 * 1000)) return json({ success: false, error: 'Too many requests — please WhatsApp us instead' }, 429)
+    const meta = webLeadMeta(request)
     const f = await request.json().catch(() => ({}))
-    // A hidden field real visitors never fill: a bot that does gets a cheerful nothing.
-    if (String(f.website || '').trim()) return json({ success: true, data: { reference: 'RECEIVED' } })
-
     const villaId = DEFAULT_VILLA_ID
-    const name = String(f.guestName || '').trim().slice(0, 80)
-    const phoneRaw = String(f.phone || '').trim()
-    const phoneDigits = phoneRaw.replace(/\D/g, '')
-    const email = String(f.email || '').trim().toLowerCase().slice(0, 120)
-    const message = String(f.message || '').trim().slice(0, 600)
-    if (name.length < 2) return err('Please tell us your name')
-    if (phoneDigits.length < 10 || phoneDigits.length > 15) return err('Please enter a phone / WhatsApp number we can reach you on')
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err('That email address does not look right')
+    // Logged before anything else can go wrong; the row is updated with how it ended.
+    const logId = await logWebLead(DB, villaId, 'request', meta, f, { status: 'received' })
+    const done = async (status, response, extra = {}) => { await updateWebLead(DB, logId, status, extra); return response }
 
-    const est = await publicStayEstimate(DB, villaId, f, await todayOf(villaId))
-    if (est.error) return err(est.error)
-
-    const normPhone = phoneRaw.replace(/[\s\-]/g, '').replace(/^\+?91/, '')
-    // One request per guest per dates: a second tap, or a refresh, must not email the owner twice.
-    const dup = await DB.prepare(
-      `SELECT enquiry_id FROM stayvibe_enquiries WHERE villa_id = ? AND phone = ? AND checkin_date = ? AND checkout_date = ? AND date_received >= datetime('now', '-2 day') LIMIT 1`
-    ).bind(villaId, normPhone, est.checkIn, est.checkOut).first()
-    if (dup) return json({ success: true, data: { reference: dup.enquiry_id, available: est.available, repeat: true } })
-
-    let guest = await DB.prepare(
-      `SELECT * FROM stayvibe_guests WHERE villa_id = ? AND ((phone = ? AND phone != '') OR (email = ? AND email != '')) LIMIT 1`
-    ).bind(villaId, normPhone, email).first()
-    let guestId
-    if (guest) {
-      guestId = guest.guest_id
-      await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = ?, updated_by = 'website', updated_at = ? WHERE guest_id = ?`).bind(now(), now(), guestId).run()
-    } else {
-      guestId = genId('GST')
-      await DB.prepare(`INSERT INTO stayvibe_guests (guest_id, villa_id, name, phone, email, created_by, updated_by) VALUES (?, ?, ?, ?, ?, 'website', 'website')`)
-        .bind(guestId, villaId, name, normPhone, email).run()
+    if (publicRateLimited('req:' + meta.ip, 6, 60 * 60 * 1000)) {
+      return done('rate_limited', json({ success: false, error: 'Too many requests — please WhatsApp us instead' }, 429))
     }
-    const isRepeat = !!(guest && guest.total_stays > 0)
-    const infants = Math.min(10, Math.max(0, parseInt(f.infants) || 0))
-    const enquiryId = genId('ENQ')
-    const shownLine = est.quotable
-      ? `Approximate price shown to the guest: ₹${est.approxTotal.toLocaleString('en-IN')} (about ₹${est.approxPerNight.toLocaleString('en-IN')}/night)${est.seasons.length ? ' — includes ' + est.seasons.map(s => `${s.name} (${s.nights} night${s.nights > 1 ? 's' : ''})`).join(', ') : ''}.`
-      : 'Party is above what the estimate covers — guest was asked to wait for a personal quote.'
-    const notes = [
-      'Requested a final quote from the website estimate page.',
-      est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
-      shownLine,
-      message ? `Guest message: ${message}` : null,
-    ].filter(Boolean).join('\n')
+    try {
+      // A hidden field real visitors never fill: a bot that does gets a cheerful nothing.
+      if (String(f.website || '').trim()) return done('spam', json({ success: true, data: { reference: 'RECEIVED' } }))
 
-    await DB.prepare(`
-      INSERT INTO stayvibe_enquiries (
-        enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
-        checkin_date, checkout_date, nights, guests_count, adults, children, infants,
-        quote_amount, is_repeat_guest, previous_stays, status, assigned_to, notes, created_by, updated_by
-      ) VALUES (?,?,?,?,?,?,'website',?,?,?,?,?,?,?,?,?,?,'new','owner',?,'website','website')
-    `).bind(
-      enquiryId, villaId, guestId, name, normPhone, email,
-      est.checkIn, est.checkOut, est.nights, est.adults + est.children + infants, est.adults, est.children, infants,
-      est.quotable ? est.exactTotal : 0, isRepeat ? 1 : 0, guest?.total_stays || 0, notes
-    ).run()
-    await DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'internal_note', 'Enquiry received via the website estimate page', 'website', ?)`)
-      .bind(genId('COMM'), enquiryId, villaId).run()
+      const name = String(f.guestName || '').trim().slice(0, 80)
+      const phoneRaw = String(f.phone || '').trim()
+      const phoneDigits = phoneRaw.replace(/\D/g, '')
+      const email = String(f.email || '').trim().toLowerCase().slice(0, 120)
+      const message = String(f.message || '').trim().slice(0, 600)
+      const bad = name.length < 2 ? 'Please tell us your name'
+        : (phoneDigits.length < 10 || phoneDigits.length > 15) ? 'Please enter a phone / WhatsApp number we can reach you on'
+        : (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ? 'That email address does not look right' : null
+      if (bad) return done('invalid', err(bad), { error: bad })
 
-    const waNumber = (phoneDigits.length === 10 ? '91' : '') + phoneDigits
-    ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)`, [
-      'A guest asked for a final quote from the website estimate page.',
-      '',
-      `Name:       ${name}${isRepeat ? '  (returning guest)' : ''}`,
-      `Phone:      ${phoneRaw}   → WhatsApp: https://wa.me/${waNumber}`,
-      `Email:      ${email || '—'}`,
-      `Dates:      ${est.checkIn} → ${est.checkOut} (${est.nights} night${est.nights > 1 ? 's' : ''})`,
-      `Guests:     ${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
-      `Available:  ${est.available ? 'YES' : 'NO — ' + (est.takenNights.join(', ') || 'see calendar')}`,
-      est.quotable ? `Shown:      ≈ ₹${est.approxTotal.toLocaleString('en-IN')} (system total ₹${est.exactTotal.toLocaleString('en-IN')})` : 'Shown:      no price (party too large for the estimate)',
-      est.seasons.length ? `Seasons:    ${est.seasons.map(s => `${s.name} ×${s.nights}`).join(', ')}` : null,
-      message ? `Message:    ${message}` : null,
-      '',
-      `Enquiry ID: ${enquiryId} (in Enquiries as "new")`,
-    ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote'))
+      const est = await publicStayEstimate(DB, villaId, f, await todayOf(villaId))
+      if (est.error) return done('invalid', err(est.error), { error: est.error })
 
-    return json({ success: true, data: { reference: enquiryId, available: est.available } })
+      const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ')   // not now(): that is declared further down this function
+      const normPhone = phoneRaw.replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+      // One request per guest per dates: a second tap, or a refresh, must not email the owner twice.
+      const dup = await DB.prepare(
+        `SELECT enquiry_id FROM stayvibe_enquiries WHERE villa_id = ? AND phone = ? AND checkin_date = ? AND checkout_date = ? AND date_received >= datetime('now', '-2 day') LIMIT 1`
+      ).bind(villaId, normPhone, est.checkIn, est.checkOut).first()
+      if (dup) return done('duplicate', json({ success: true, data: { reference: dup.enquiry_id, available: est.available, repeat: true } }), { enquiryId: dup.enquiry_id, available: est.available })
+
+      const guest = await DB.prepare(
+        `SELECT * FROM stayvibe_guests WHERE villa_id = ? AND ((phone = ? AND phone != '') OR (email = ? AND email != '')) LIMIT 1`
+      ).bind(villaId, normPhone, email).first()
+      let guestId
+      if (guest) {
+        guestId = guest.guest_id
+        await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = ?, updated_by = 'website', updated_at = ? WHERE guest_id = ?`).bind(stamp, stamp, guestId).run()
+      } else {
+        guestId = genId('GST')
+        await DB.prepare(`INSERT INTO stayvibe_guests (guest_id, villa_id, name, phone, email, created_by, updated_by) VALUES (?, ?, ?, ?, ?, 'website', 'website')`)
+          .bind(guestId, villaId, name, normPhone, email).run()
+      }
+      const isRepeat = !!(guest && guest.total_stays > 0)
+      const infants = Math.min(10, Math.max(0, parseInt(f.infants) || 0))
+      const enquiryId = genId('ENQ')
+      const shownLine = est.quotable
+        ? `Approximate price shown to the guest: ₹${est.approxTotal.toLocaleString('en-IN')} (about ₹${est.approxPerNight.toLocaleString('en-IN')}/night)${est.seasons.length ? ' — includes ' + est.seasons.map(s => `${s.name} (${s.nights} night${s.nights > 1 ? 's' : ''})`).join(', ') : ''}.`
+        : 'Party is above what the estimate covers — guest was asked to wait for a personal quote.'
+      const notes = [
+        'Requested a final quote from the website estimate page.',
+        est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
+        shownLine,
+        message ? `Guest message: ${message}` : null,
+      ].filter(Boolean).join('\n')
+
+      await DB.prepare(`
+        INSERT INTO stayvibe_enquiries (
+          enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
+          checkin_date, checkout_date, nights, guests_count, adults, children, infants,
+          quote_amount, is_repeat_guest, previous_stays, status, assigned_to, notes, created_by, updated_by
+        ) VALUES (?,?,?,?,?,?,'website',?,?,?,?,?,?,?,?,?,?,'new','owner',?,'website','website')
+      `).bind(
+        enquiryId, villaId, guestId, name, normPhone, email,
+        est.checkIn, est.checkOut, est.nights, est.adults + est.children + infants, est.adults, est.children, infants,
+        est.quotable ? est.exactTotal : 0, isRepeat ? 1 : 0, guest?.total_stays || 0, notes
+      ).run()
+      await DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'internal_note', 'Enquiry received via the website estimate page', 'website', ?)`)
+        .bind(genId('COMM'), enquiryId, villaId).run()
+      await updateWebLead(DB, logId, 'created', { enquiryId, available: est.available, approxTotal: est.approxTotal })
+
+      const waNumber = (phoneDigits.length === 10 ? '91' : '') + phoneDigits
+      const where = [meta.city, meta.region, meta.country].filter(Boolean).join(', ')
+      ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)`, [
+        'A guest asked for a final quote from the website estimate page.',
+        '',
+        `Name:       ${name}${isRepeat ? '  (returning guest)' : ''}`,
+        `Phone:      ${phoneRaw}   → WhatsApp: https://wa.me/${waNumber}`,
+        `Email:      ${email || '—'}`,
+        `Dates:      ${est.checkIn} → ${est.checkOut} (${est.nights} night${est.nights > 1 ? 's' : ''})`,
+        `Guests:     ${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
+        `Available:  ${est.available ? 'YES' : 'NO — ' + (est.takenNights.join(', ') || 'see calendar')}`,
+        est.quotable ? `Shown:      ≈ ₹${est.approxTotal.toLocaleString('en-IN')} (system total ₹${est.exactTotal.toLocaleString('en-IN')})` : 'Shown:      no price (party too large for the estimate)',
+        est.seasons.length ? `Seasons:    ${est.seasons.map(s => `${s.name} ×${s.nights}`).join(', ')}` : null,
+        message ? `Message:    ${message}` : null,
+        '',
+        `From:       ${where || 'unknown location'}  (IP ${meta.ip})`,
+        `Enquiry ID: ${enquiryId} (in Enquiries as "new")`,
+      ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote'))
+
+      return json({ success: true, data: { reference: enquiryId, available: est.available } })
+    } catch (e) {
+      // The request is already in stayvibe_web_leads; make sure the owner hears about it too, with the guest's details.
+      const msg = e?.message || String(e)
+      console.error('submitQuoteRequest failed:', msg)
+      await updateWebLead(DB, logId, 'failed', { error: msg })
+      ctx.waitUntil(sendAlert(env, `⚠️ Website quote request FAILED to save — follow up with ${String(f.guestName || 'a guest').slice(0, 60)}`, [
+        'A guest tried to request a quote on the website estimate page, but it could not be saved as an enquiry.',
+        'Their details are below (and in the stayvibe_web_leads table) — please contact them directly.',
+        '',
+        `Name:     ${clipStr(f.guestName, 120) || '—'}`,
+        `Phone:    ${clipStr(f.phone, 40) || '—'}`,
+        `Email:    ${clipStr(f.email, 160) || '—'}`,
+        `Dates:    ${clipStr(f.checkIn, 10) || '—'} → ${clipStr(f.checkOut, 10) || '—'}`,
+        `Guests:   ${parseInt(f.adults) || 0} adults, ${parseInt(f.children) || 0} children, ${parseInt(f.infants) || 0} infants`,
+        `Message:  ${clipStr(f.message, 600) || '—'}`,
+        '',
+        `From:     ${[meta.city, meta.region, meta.country].filter(Boolean).join(', ') || 'unknown location'}  (IP ${meta.ip})`,
+        `Error:    ${msg}`,
+        `Log ID:   ${logId || 'not logged'}`,
+      ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote_failed'))
+      return json({ success: false, error: logId ? 'Sorry — we could not save your request just now, but we have your details and will contact you. You can also WhatsApp us.' : 'Sorry — we could not save your request just now. Please WhatsApp us and we will help right away.' }, 500)
+    }
   }
 
   // ── FIND MY BOOKING (public) ──────────────────────────────────────────

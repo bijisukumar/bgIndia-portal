@@ -3559,6 +3559,29 @@ export async function onRequest(ctx) {
     return json({ success: true, data: answer })
   }
 
+  // The villa's standard nightly rate for a full house (12 guests), rounded like every price on the estimate
+  // page, for the website's "How we compare" table. One number: not the card, not the seasons. It is not a
+  // guest looking for a stay, so it is deliberately NOT written to the web lead log. Cached for 5 minutes.
+  if (action === 'getPublicBaseRate' && (method === 'GET' || method === 'POST')) {
+    const ipR = request.headers.get('CF-Connecting-IP') || 'unknown'
+    if (publicRateLimited('rate:' + ipR, 120, 10 * 60 * 1000)) return json({ success: false, error: 'Too many requests' }, 429)
+    try {
+      const { results: cardRows } = await DB.prepare(
+        `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+      ).bind(DEFAULT_VILLA_ID).all()
+      const card = cardRows || []
+      if (!card.length) return json({ success: false, error: 'Rate not available' }, 503)
+      const top = Math.max(...card.map(r => r.guest_count))
+      const row = card.find(r => r.guest_count === 12) || card.find(r => r.guest_count === top)
+      return new Response(JSON.stringify({ success: true, data: { guests: row.guest_count, perNight: roundTo(row.tariff_per_night, 100) } }), {
+        status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300', ...CORS },
+      })
+    } catch (e) {
+      console.error('getPublicBaseRate failed:', e?.message || e)
+      return json({ success: false, error: 'Rate not available' }, 500)
+    }
+  }
+
   if (action === 'submitQuoteRequest' && method === 'POST') {
     const meta = webLeadMeta(request)
     const f = await request.json().catch(() => ({}))

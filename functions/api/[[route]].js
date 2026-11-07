@@ -387,7 +387,7 @@ const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // domain - see the 403 retry below.
 const SAFE_ALERT_FROM = 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>'
 
-async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride, bccEmail) {
+async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride, bccEmail, html) {
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
@@ -410,6 +410,9 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
       subject: localiseStamps(subject, tz),
       text: lines.map(l => localiseStamps(l, tz)).join('\n'),
     }
+    // An HTML version shows clean buttons instead of long raw links (mail apps such as Outlook rewrite a bare link into a
+    // very long 'safe links' address); the plain text above remains for readers that cannot show HTML.
+    if (html) body.html = html
     // Only for the platform sender, whose domain has no inbox behind it.
     // Tenant alerts already come from a domain that can receive.
     if (body.from === PLATFORM_LEAD_FROM) body.reply_to = PLATFORM_REPLY_TO
@@ -742,6 +745,29 @@ async function ensureWebLeadTable(DB) {
     guest_name TEXT, phone TEXT, email TEXT, message TEXT, enquiry_id TEXT, error TEXT)`).run()
   await DB.prepare(`CREATE INDEX IF NOT EXISTS stayvibe_idx_web_leads_created ON stayvibe_web_leads(villa_id, created_at DESC)`).run()
   webLeadTableReady = true
+}
+
+const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+// The owner's email for a website quote request: the facts in a small table, two buttons, nothing raw.
+// Everything a guest typed is escaped; the two links are built here from ids and digits only.
+function quoteRequestHtml(d) {
+  const row = (k, v) => (v ? `<tr><td style="padding:6px 16px 6px 0;color:#6b7280;white-space:nowrap;vertical-align:top;font-size:14px">${k}</td><td style="padding:6px 0;color:#111827;font-size:14px">${v}</td></tr>` : '')
+  const btn = (href, label, bg, fg) => `<a href="${href}" style="display:inline-block;background:${bg};color:${fg};text-decoration:none;font-weight:600;font-size:15px;padding:13px 24px;border-radius:999px;margin:0 10px 10px 0">${label}</a>`
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827">
+  <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#9a7b1f;font-weight:700">New website quote request</div>
+  <div style="font-size:22px;font-weight:700;margin:6px 0 4px">${escHtml(d.name)}${d.repeat ? ' <span style="font-size:12px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:10px;vertical-align:middle">returning guest</span>' : ''}</div>
+  <div style="font-size:14px;color:#6b7280;margin-bottom:18px">${escHtml(d.dates)} &middot; ${escHtml(d.nights)} night${d.nights > 1 ? 's' : ''} &middot; ${escHtml(d.guests)}</div>
+  <div style="margin-bottom:18px">${btn(d.enquiryUrl, 'Open enquiry in StayVibe &rarr;', '#C9A84C', '#111827')}${btn(d.waUrl, 'Reply on WhatsApp &rarr;', '#16a34a', '#ffffff')}</div>
+  <table style="border-collapse:collapse;width:100%;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;margin-bottom:14px">
+    ${row('Availability', d.available ? '<b style="color:#15803d">Available</b>' : '<b style="color:#b91c1c">Not fully available</b>' + (d.taken ? ' (' + escHtml(d.taken) + ')' : ''))}
+    ${row('Price shown', d.shown)}
+    ${row('Seasons', d.seasons)}
+    ${row('Phone', escHtml(d.phone))}
+    ${row('Email', d.email ? escHtml(d.email) : '')}
+    ${row('Message', d.message ? escHtml(d.message) : '')}
+  </table>
+  <div style="font-size:12px;color:#9ca3af;line-height:1.6">Started by: Customer (website estimate page)<br>From: ${escHtml(d.where || 'unknown location')} &middot; IP ${escHtml(d.ip)}<br>Enquiry ${escHtml(d.enquiryId)} &middot; sign in with your PIN if asked and you will land on it</div>
+</div>`
 }
 
 const clipStr = (v, n) => (v == null || v === '' ? null : String(v).slice(0, n))
@@ -3611,6 +3637,16 @@ export async function onRequest(ctx) {
 
       const waNumber = (phoneDigits.length === 10 ? '91' : '') + phoneDigits
       const where = [meta.city, meta.region, meta.country].filter(Boolean).join(', ')
+      const enquiryUrl = `${new URL(request.url).origin}/owner/villa/enquiries/${enquiryId}`
+      const quoteHtml = quoteRequestHtml({
+        name, repeat: isRepeat, phone: phoneRaw, email, message, where, ip: meta.ip, enquiryId, enquiryUrl,
+        waUrl: `https://wa.me/${waNumber}`,
+        dates: `${dayMonth(est.checkIn)} → ${dayMonth(est.checkOut)}`, nights: est.nights,
+        guests: `${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
+        available: est.available, taken: est.takenNights.map(dayMonth).join(', '),
+        shown: est.quotable ? `<b>≈ ₹${est.approxTotal.toLocaleString('en-IN')}</b> <span style="color:#6b7280">(system total ₹${est.exactTotal.toLocaleString('en-IN')})</span>` : 'No price (party too large for the estimate)',
+        seasons: est.seasons.length ? est.seasons.map(x => `${escHtml(x.name)} ×${x.nights}`).join(', ') : '',
+      })
       ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)`, [
         'A guest asked for a final quote from the website estimate page.',
         '',
@@ -3631,7 +3667,7 @@ export async function onRequest(ctx) {
         `${new URL(request.url).origin}/owner/villa/enquiries/${enquiryId}`,
         `(sign in with your PIN if asked — you will land on the enquiry)`,
         `Enquiry ID: ${enquiryId}`,
-      ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote'))
+      ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote', undefined, undefined, quoteHtml))
 
       return json({ success: true, data: { reference: enquiryId, available: est.available } })
     } catch (e) {

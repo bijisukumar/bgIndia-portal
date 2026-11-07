@@ -558,6 +558,169 @@ async function getOwnerAlertEmail(DB, env, villaId) {
   return env.OWNER_EMAIL || 'bijits@hotmail.com'
 }
 
+// The nights a stay would collide with, and free dates nearby: bookings, nights held by an agreed
+// late check-out / early check-in, platform calendar blocks and dates the owner closed by hand.
+// Shared by the staff checkAvailability action and the public estimate (which exposes dates only).
+async function availabilityFor(DB, villaId, checkIn, checkOut, today) {
+  const { results } = await DB.prepare(`
+    SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, early_checkin_time, late_checkout_time
+    FROM stayvibe_stays
+    WHERE villa_id = ?
+      AND status NOT IN ('cancelled','void')
+      AND checkout_date IS NOT NULL AND checkout_date != ''
+      AND checkin_date  < date(?, '+3 day')
+      AND checkout_date > date(?, '-3 day')
+    ORDER BY checkin_date`).bind(villaId, checkOut, checkIn).all()
+
+  // Same-day turnover is normally fine — one guest out in the morning,
+  // the next in that afternoon. It stops being fine when the departing
+  // guest has an agreed late check-out (or, the other way round, the
+  // arriving one an agreed early check-in): the villa is still occupied
+  // into the afternoon, and the hours needed to reset it no longer exist.
+  // Dates alone can't see that, so a booking that should have been refused
+  // looked available. The same rule closes the night on the calendar and in
+  // the links handed to the booking platforms (src/utils/stayHolds.js).
+  const rules = await holdRules(DB, villaId)
+
+  const conflicts = [], nearby = []
+  for (const r of (results || [])) {
+    if (r.checkin_date < checkOut && r.checkout_date > checkIn) { conflicts.push(r); continue }
+    const hold = stayHolds(r, rules).find(h => h.night >= checkIn && h.night < checkOut)
+    if (hold) {
+      conflicts.push({ ...r,
+        reason: hold.kind === 'late_checkout' ? 'late_checkout_turnaround' : 'early_checkin_turnaround',
+        heldNight: hold.night,
+        note: `${r.guest_name} has an agreed ${holdPhrase(hold)}, so the night of ${hold.night} is held — the villa needs ${rules.turnaroundHours} h to reset before the next arrival.` })
+      continue
+    }
+    nearby.push(r)
+  }
+
+  // A date a platform's own calendar has closed (a reservation not entered here yet, or
+  // a night the host closed over there) is not for sale either. The Channel calendar
+  // already treats it as occupied; this check used to call it available. Blocks come
+  // from calendars that are switched on, as in the links handed to the platforms, and a
+  // block that a booking listed above already explains is not listed twice.
+  const lo = addDays(checkIn, -45), hi = addDays(checkOut, 75)
+  const blocks = await loadPlatformBlocks(DB, villaId, lo, hi)
+  for (const b of blocks) {
+    if (!(b.checkin_date < checkOut && b.checkout_date > checkIn)) continue
+    if (conflicts.some(c => c.checkin_date < b.checkout_date && c.checkout_date > b.checkin_date)) continue
+    conflicts.push({
+      kind: 'block', source: b.channel, guest_name: `${sourceLabel(b.channel)} calendar`,
+      checkin_date: b.checkin_date, checkout_date: b.checkout_date,
+    })
+  }
+  // Dates the owner has closed by hand (Block dates on the Channel calendar).
+  const owned = await loadDateBlocks(DB, villaId, lo, hi)
+  for (const o of owned) {
+    if (!(o.start_date < checkOut && o.end_date > checkIn)) continue
+    conflicts.push({
+      kind: 'owner_block', source: 'owner', guest_name: blockPhrase(o.reason),
+      checkin_date: o.start_date, checkout_date: o.end_date,
+    })
+  }
+  conflicts.sort((a, b) => (a.checkin_date < b.checkin_date ? -1 : a.checkin_date > b.checkin_date ? 1 : 0))
+
+  // Not free: say what IS, so the reply to the guest can offer real dates. Windows of the
+  // same length, a few just before and after, from the same taken-nights rules as above
+  // (bookings, nights held by an agreed late check-out / early check-in, platform blocks,
+  // dates the owner closed by hand).
+  let alternatives = null
+  if (conflicts.length) {
+    const { results: around } = await DB.prepare(`
+      SELECT stay_id, guest_name, checkin_date, checkout_date, early_checkin_time, late_checkout_time
+        FROM stayvibe_stays
+       WHERE villa_id = ? AND status NOT IN ('cancelled','void')
+         AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date != ''
+         AND checkin_date < ? AND checkout_date >= ?`).bind(villaId, hi, lo).all()
+    const stayRows = around || []
+    const taken = takenNights({
+      ranges: [
+        ...stayRows.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
+        ...blocks.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
+        ...owned.map(r => ({ start: r.start_date, end: r.end_date })),
+      ],
+      nights: heldNights(stayRows, rules).map(h => h.night),
+    })
+    alternatives = otherDates({ taken, checkIn, checkOut, today })
+  }
+  return { conflicts, nearby, alternatives }
+}
+
+// ── PUBLIC STAY ESTIMATE (the website's estimate page) ───────────────────────
+// Guests who ring up for "an estimate" get an approximate price and the real
+// availability here instead. Answers only: a rounded price for THEIR dates and
+// party, whether the nights are free, and (when they are not) free dates nearby.
+// Never the rate card, the seasons' own prices, or who holds the nights taken.
+
+// In-memory per-isolate counter: a speed bump against scripted hammering, not a
+// guarantee (isolates do not share it). The honeypot and the one-request-per-
+// guest-per-dates rule in submitQuoteRequest do the rest.
+const publicHits = new Map()
+function publicRateLimited(key, max, windowMs) {
+  const now = Date.now()
+  if (publicHits.size > 4000) for (const [k, v] of publicHits) if (now - v.firstAt > windowMs) publicHits.delete(k)
+  const e = publicHits.get(key)
+  if (!e || now - e.firstAt > windowMs) { publicHits.set(key, { count: 1, firstAt: now }); return false }
+  e.count++
+  return e.count > max
+}
+
+const PUBLIC_MAX_NIGHTS = 30
+const roundTo = (n, step) => Math.round(n / step) * step
+
+// q: { checkIn, checkOut, adults, children }. Returns { error } for a request that
+// makes no sense, else the answer the page shows.
+async function publicStayEstimate(DB, villaId, q, today) {
+  const ci = String(q.checkIn || '').slice(0, 10), co = String(q.checkOut || '').slice(0, 10)
+  if (!isYmd(ci) || !isYmd(co)) return { error: 'Please choose check-in and check-out dates' }
+  if (co <= ci) return { error: 'Check-out must be after check-in' }
+  if (ci < today) return { error: 'Check-in cannot be in the past' }
+  if (ci > addDaysISO(today, 550)) return { error: 'We can only estimate stays within the next 18 months' }
+  const nights = diffDaysISO(ci, co)
+  if (nights > PUBLIC_MAX_NIGHTS) return { error: `For stays longer than ${PUBLIC_MAX_NIGHTS} nights please send us a request and we will quote you directly` }
+
+  const adults = Math.min(50, Math.max(0, parseInt(q.adults) || 0))
+  const children = Math.min(50, Math.max(0, parseInt(q.children) || 0))
+  if (adults < 1) return { error: 'At least one adult is needed' }
+
+  const { results: rateCardRows } = await DB.prepare(
+    `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+  ).bind(villaId).all()
+  const rateCard = (rateCardRows || []).map(r => ({ guests: r.guest_count, tariff: r.tariff_per_night }))
+  if (!rateCard.length) return { error: 'Estimates are not available right now — please send us a request' }
+
+  const ov = overflowSettings(villaId)
+  const est = estimateStay({ rateCard, seasons: await loadSeasons(DB, villaId), adults, children, checkIn: ci, checkOut: co, ...ov })
+  const maxCard = Math.max(...rateCard.map(r => r.guests))
+  const quotable = est.billableGuests <= maxCard + ov.overflowMax
+
+  const av = await availabilityFor(DB, villaId, ci, co, today)
+  const free = av.conflicts.length === 0
+  // Which of the asked-for nights are taken — dates only, never why or by whom.
+  const taken = new Set()
+  for (const c of av.conflicts) {
+    const from = c.heldNight || c.checkin_date, to = c.heldNight ? addDaysISO(c.heldNight, 1) : c.checkout_date
+    for (let d = from < ci ? ci : from; d < to && d < co; d = addDaysISO(d, 1)) taken.add(d)
+  }
+
+  return {
+    checkIn: ci, checkOut: co, nights, adults, children, billableGuests: est.billableGuests,
+    available: free,
+    takenNights: [...taken].sort(),
+    alternatives: free ? null : { before: av.alternatives?.before || [], after: av.alternatives?.after || [] },
+    quotable,
+    // Rounded on purpose: this is an approximation, and the final quote can differ.
+    approxTotal: quotable ? roundTo(est.total, 100) : null,
+    approxPerNight: quotable ? roundTo(est.total / nights, 100) : null,
+    exactTotal: est.total,   // used server-side only (staff see it on the enquiry); stripped before replying
+    extraGuests: est.overflowGuests || 0,
+    seasons: est.seasons.map(s => ({ name: s.name, nights: s.nights })),
+    minNightsNotes: est.minNightsNotes,
+  }
+}
+
 // ── ESTATE360 WEEKLY OWNER DIGEST ────────────────────────────────────────
 // Irrigation compliance + Pradosh's logged expenses, emailed weekly by
 // runEstateWeeklyDigest (GitHub Actions cron, CRON_SECRET-guarded).
@@ -3266,6 +3429,107 @@ export async function onRequest(ctx) {
     } })
   }
 
+  // ── PUBLIC ESTIMATE + QUOTE REQUEST (the website's estimate page) ───────────
+  // PUBLIC by design, same pre-auth placement as getAgentQuote. getPublicEstimate
+  // answers "is it free, and roughly what will it cost" for one party and dates.
+  // submitQuoteRequest turns the visitor's interest into an enquiry the owner is
+  // emailed about, so nobody has to ring to ask for a price.
+  if (action === 'getPublicEstimate' && method === 'POST') {
+    const ip = request.headers.get('CF-Connecting-Ip') || request.headers.get('CF-Connecting-IP') || 'unknown'
+    if (publicRateLimited('est:' + ip, 60, 10 * 60 * 1000)) return json({ success: false, error: 'Too many requests — please try again in a few minutes' }, 429)
+    const pBody = await request.json().catch(() => ({}))
+    const r = await publicStayEstimate(DB, DEFAULT_VILLA_ID, pBody, await todayOf(DEFAULT_VILLA_ID))
+    if (r.error) return err(r.error)
+    const { exactTotal, ...answer } = r
+    return json({ success: true, data: answer })
+  }
+
+  if (action === 'submitQuoteRequest' && method === 'POST') {
+    const ip = request.headers.get('CF-Connecting-Ip') || request.headers.get('CF-Connecting-IP') || 'unknown'
+    if (publicRateLimited('req:' + ip, 6, 60 * 60 * 1000)) return json({ success: false, error: 'Too many requests — please WhatsApp us instead' }, 429)
+    const f = await request.json().catch(() => ({}))
+    // A hidden field real visitors never fill: a bot that does gets a cheerful nothing.
+    if (String(f.website || '').trim()) return json({ success: true, data: { reference: 'RECEIVED' } })
+
+    const villaId = DEFAULT_VILLA_ID
+    const name = String(f.guestName || '').trim().slice(0, 80)
+    const phoneRaw = String(f.phone || '').trim()
+    const phoneDigits = phoneRaw.replace(/\D/g, '')
+    const email = String(f.email || '').trim().toLowerCase().slice(0, 120)
+    const message = String(f.message || '').trim().slice(0, 600)
+    if (name.length < 2) return err('Please tell us your name')
+    if (phoneDigits.length < 10 || phoneDigits.length > 15) return err('Please enter a phone / WhatsApp number we can reach you on')
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err('That email address does not look right')
+
+    const est = await publicStayEstimate(DB, villaId, f, await todayOf(villaId))
+    if (est.error) return err(est.error)
+
+    const normPhone = phoneRaw.replace(/[\s\-]/g, '').replace(/^\+?91/, '')
+    // One request per guest per dates: a second tap, or a refresh, must not email the owner twice.
+    const dup = await DB.prepare(
+      `SELECT enquiry_id FROM stayvibe_enquiries WHERE villa_id = ? AND phone = ? AND checkin_date = ? AND checkout_date = ? AND date_received >= datetime('now', '-2 day') LIMIT 1`
+    ).bind(villaId, normPhone, est.checkIn, est.checkOut).first()
+    if (dup) return json({ success: true, data: { reference: dup.enquiry_id, available: est.available, repeat: true } })
+
+    let guest = await DB.prepare(
+      `SELECT * FROM stayvibe_guests WHERE villa_id = ? AND ((phone = ? AND phone != '') OR (email = ? AND email != '')) LIMIT 1`
+    ).bind(villaId, normPhone, email).first()
+    let guestId
+    if (guest) {
+      guestId = guest.guest_id
+      await DB.prepare(`UPDATE stayvibe_guests SET last_seen_at = ?, updated_by = 'website', updated_at = ? WHERE guest_id = ?`).bind(now(), now(), guestId).run()
+    } else {
+      guestId = genId('GST')
+      await DB.prepare(`INSERT INTO stayvibe_guests (guest_id, villa_id, name, phone, email, created_by, updated_by) VALUES (?, ?, ?, ?, ?, 'website', 'website')`)
+        .bind(guestId, villaId, name, normPhone, email).run()
+    }
+    const isRepeat = !!(guest && guest.total_stays > 0)
+    const infants = Math.min(10, Math.max(0, parseInt(f.infants) || 0))
+    const enquiryId = genId('ENQ')
+    const shownLine = est.quotable
+      ? `Approximate price shown to the guest: ₹${est.approxTotal.toLocaleString('en-IN')} (about ₹${est.approxPerNight.toLocaleString('en-IN')}/night)${est.seasons.length ? ' — includes ' + est.seasons.map(s => `${s.name} (${s.nights} night${s.nights > 1 ? 's' : ''})`).join(', ') : ''}.`
+      : 'Party is above what the estimate covers — guest was asked to wait for a personal quote.'
+    const notes = [
+      'Requested a final quote from the website estimate page.',
+      est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
+      shownLine,
+      message ? `Guest message: ${message}` : null,
+    ].filter(Boolean).join('\n')
+
+    await DB.prepare(`
+      INSERT INTO stayvibe_enquiries (
+        enquiry_id, villa_id, guest_id, guest_name, phone, email, source,
+        checkin_date, checkout_date, nights, guests_count, adults, children, infants,
+        quote_amount, is_repeat_guest, previous_stays, status, assigned_to, notes, created_by, updated_by
+      ) VALUES (?,?,?,?,?,?,'website',?,?,?,?,?,?,?,?,?,?,'new','owner',?,'website','website')
+    `).bind(
+      enquiryId, villaId, guestId, name, normPhone, email,
+      est.checkIn, est.checkOut, est.nights, est.adults + est.children + infants, est.adults, est.children, infants,
+      est.quotable ? est.exactTotal : 0, isRepeat ? 1 : 0, guest?.total_stays || 0, notes
+    ).run()
+    await DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'internal_note', 'Enquiry received via the website estimate page', 'website', ?)`)
+      .bind(genId('COMM'), enquiryId, villaId).run()
+
+    const waNumber = (phoneDigits.length === 10 ? '91' : '') + phoneDigits
+    ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)`, [
+      'A guest asked for a final quote from the website estimate page.',
+      '',
+      `Name:       ${name}${isRepeat ? '  (returning guest)' : ''}`,
+      `Phone:      ${phoneRaw}   → WhatsApp: https://wa.me/${waNumber}`,
+      `Email:      ${email || '—'}`,
+      `Dates:      ${est.checkIn} → ${est.checkOut} (${est.nights} night${est.nights > 1 ? 's' : ''})`,
+      `Guests:     ${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
+      `Available:  ${est.available ? 'YES' : 'NO — ' + (est.takenNights.join(', ') || 'see calendar')}`,
+      est.quotable ? `Shown:      ≈ ₹${est.approxTotal.toLocaleString('en-IN')} (system total ₹${est.exactTotal.toLocaleString('en-IN')})` : 'Shown:      no price (party too large for the estimate)',
+      est.seasons.length ? `Seasons:    ${est.seasons.map(s => `${s.name} ×${s.nights}`).join(', ')}` : null,
+      message ? `Message:    ${message}` : null,
+      '',
+      `Enquiry ID: ${enquiryId} (in Enquiries as "new")`,
+    ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote'))
+
+    return json({ success: true, data: { reference: enquiryId, available: est.available } })
+  }
+
   // ── FIND MY BOOKING (public) ──────────────────────────────────────────
   // Lets a guest pull up their own stay so the page can quote real numbers
   // instead of vague percentages. Public, so the matching is the security:
@@ -5300,90 +5564,7 @@ export async function onRequest(ctx) {
         const checkIn  = url.searchParams.get('checkIn')
         const checkOut = url.searchParams.get('checkOut')
         if (!checkIn || !checkOut || checkOut <= checkIn) return err('checkIn and checkOut (after checkIn) required')
-        const { results } = await DB.prepare(`
-          SELECT stay_id, guest_name, checkin_date, checkout_date, source, status, early_checkin_time, late_checkout_time
-          FROM stayvibe_stays
-          WHERE villa_id = ?
-            AND status NOT IN ('cancelled','void')
-            AND checkout_date IS NOT NULL AND checkout_date != ''
-            AND checkin_date  < date(?, '+3 day')
-            AND checkout_date > date(?, '-3 day')
-          ORDER BY checkin_date`).bind(villaId, checkOut, checkIn).all()
-
-        // Same-day turnover is normally fine — one guest out in the morning,
-        // the next in that afternoon. It stops being fine when the departing
-        // guest has an agreed late check-out (or, the other way round, the
-        // arriving one an agreed early check-in): the villa is still occupied
-        // into the afternoon, and the hours needed to reset it no longer exist.
-        // Dates alone can't see that, so a booking that should have been refused
-        // looked available. The same rule closes the night on the calendar and in
-        // the links handed to the booking platforms (src/utils/stayHolds.js).
-        const rules = await holdRules(DB, villaId)
-
-        const conflicts = [], nearby = []
-        for (const r of (results || [])) {
-          if (r.checkin_date < checkOut && r.checkout_date > checkIn) { conflicts.push(r); continue }
-          const hold = stayHolds(r, rules).find(h => h.night >= checkIn && h.night < checkOut)
-          if (hold) {
-            conflicts.push({ ...r,
-              reason: hold.kind === 'late_checkout' ? 'late_checkout_turnaround' : 'early_checkin_turnaround',
-              heldNight: hold.night,
-              note: `${r.guest_name} has an agreed ${holdPhrase(hold)}, so the night of ${hold.night} is held — the villa needs ${rules.turnaroundHours} h to reset before the next arrival.` })
-            continue
-          }
-          nearby.push(r)
-        }
-
-        // A date a platform's own calendar has closed (a reservation not entered here yet, or
-        // a night the host closed over there) is not for sale either. The Channel calendar
-        // already treats it as occupied; this check used to call it available. Blocks come
-        // from calendars that are switched on, as in the links handed to the platforms, and a
-        // block that a booking listed above already explains is not listed twice.
-        const today = await todayOf(villaId)
-        const lo = addDays(checkIn, -45), hi = addDays(checkOut, 75)
-        const blocks = await loadPlatformBlocks(DB, villaId, lo, hi)
-        for (const b of blocks) {
-          if (!(b.checkin_date < checkOut && b.checkout_date > checkIn)) continue
-          if (conflicts.some(c => c.checkin_date < b.checkout_date && c.checkout_date > b.checkin_date)) continue
-          conflicts.push({
-            kind: 'block', source: b.channel, guest_name: `${sourceLabel(b.channel)} calendar`,
-            checkin_date: b.checkin_date, checkout_date: b.checkout_date,
-          })
-        }
-        // Dates the owner has closed by hand (Block dates on the Channel calendar).
-        const owned = await loadDateBlocks(DB, villaId, lo, hi)
-        for (const o of owned) {
-          if (!(o.start_date < checkOut && o.end_date > checkIn)) continue
-          conflicts.push({
-            kind: 'owner_block', source: 'owner', guest_name: blockPhrase(o.reason),
-            checkin_date: o.start_date, checkout_date: o.end_date,
-          })
-        }
-        conflicts.sort((a, b) => (a.checkin_date < b.checkin_date ? -1 : a.checkin_date > b.checkin_date ? 1 : 0))
-
-        // Not free: say what IS, so the reply to the guest can offer real dates. Windows of the
-        // same length, a few just before and after, from the same taken-nights rules as above
-        // (bookings, nights held by an agreed late check-out / early check-in, platform blocks,
-        // dates the owner closed by hand).
-        let alternatives = null
-        if (conflicts.length) {
-          const { results: around } = await DB.prepare(`
-            SELECT stay_id, guest_name, checkin_date, checkout_date, early_checkin_time, late_checkout_time
-              FROM stayvibe_stays
-             WHERE villa_id = ? AND status NOT IN ('cancelled','void')
-               AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date != ''
-               AND checkin_date < ? AND checkout_date >= ?`).bind(villaId, hi, lo).all()
-          const stayRows = around || []
-          const taken = takenNights({
-            ranges: [
-              ...stayRows.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
-              ...blocks.map(r => ({ start: r.checkin_date, end: r.checkout_date })),
-              ...owned.map(r => ({ start: r.start_date, end: r.end_date })),
-            ],
-            nights: heldNights(stayRows, rules).map(h => h.night),
-          })
-          alternatives = otherDates({ taken, checkIn, checkOut, today })
-        }
+        const { conflicts, nearby, alternatives } = await availabilityFor(DB, villaId, checkIn, checkOut, await todayOf(villaId))
         return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby, alternatives } })
       }
 

@@ -83,6 +83,7 @@ import { buildGuestInfoText } from '../../src/utils/guestInfoText.js'
 import { estimateStay, groupNights, validateSeason, validateRateCardRows, DEFAULT_OVERFLOW_PER_GUEST, DEFAULT_OVERFLOW_MAX, isYmd } from '../../src/utils/seasonRates.js'
 import { evaluateCalendarHealth } from '../../src/utils/calendarHealth.js'
 import { carPhotoMonths, hasPlateNumber, cleanPlateList } from '../../src/utils/carPhotos.js'
+import { buildWebVisit, webVisitChip } from '../../src/utils/visitorInfo.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -765,8 +766,9 @@ function quoteRequestHtml(d) {
     ${row('Phone', escHtml(d.phone))}
     ${row('Email', d.email ? escHtml(d.email) : '')}
     ${row('Message', d.message ? escHtml(d.message) : '')}
+    ${(d.visit?.facts || []).map(f => row(escHtml(f.label), escHtml(f.value) + (f.warn ? ' <b style="color:#b91c1c">(' + escHtml(f.warn) + ')</b>' : '') + (f.lines?.length ? '<br><span style="color:#6b7280;font-size:13px">' + f.lines.map(escHtml).join('<br>') + '</span>' : ''))).join('')}
   </table>
-  <div style="font-size:12px;color:#9ca3af;line-height:1.6">Started by: Customer (website estimate page)<br>From: ${escHtml(d.where || 'unknown location')} &middot; IP ${escHtml(d.ip)}<br>Enquiry ${escHtml(d.enquiryId)} &middot; sign in with your PIN if asked and you will land on it</div>
+  <div style="font-size:12px;color:#9ca3af;line-height:1.6">Started by: Customer (website estimate page)<br>${d.visit ? '' : 'From: ' + escHtml(d.where || 'unknown location') + ' &middot; '}IP ${escHtml(d.ip)}<br>Enquiry ${escHtml(d.enquiryId)} &middot; sign in with your PIN if asked and you will land on it</div>
 </div>`
 }
 
@@ -817,6 +819,51 @@ async function updateWebLead(DB, logId, status, extra = {}) {
       .bind(status, extra.enquiryId || null, clipStr(extra.error, 500),
         extra.available == null ? null : (extra.available ? 1 : 0), extra.approxTotal == null ? null : extra.approxTotal, logId).run()
   } catch (e) { console.error('updateWebLead failed:', e?.message || e) }
+}
+
+// The visit behind a website enquiry, written for the enquiry screen and the owner's email: where the guest was, what they used, what
+// time it was for them, their language, and the dates they price-checked before asking (src/utils/visitorInfo.js). It only READS the
+// log the estimate page already writes; nothing is stored for it. null when there is no such visit, or the log table does not exist
+// yet (a read never creates it). Never throws: a missing extra must not lose the enquiry.
+async function loadWebVisit(DB, villaId, enquiryId) {
+  try {
+    const { results: rows } = await DB.prepare(
+      `SELECT log_id, status, created_at, visitor_id, country, region, city, timezone, user_agent, language
+         FROM stayvibe_web_leads WHERE villa_id = ? AND kind = 'request' AND enquiry_id = ? ORDER BY created_at ASC LIMIT 20`
+    ).bind(villaId, enquiryId).all()
+    if (!rows?.length) return null
+    // the request that made the enquiry; a 'duplicate' row only says the guest sent the same request again
+    const lead = rows.find(r => r.status === 'created') || rows[0]
+    let lookups = []
+    if (lead.visitor_id) {
+      const { results } = await DB.prepare(
+        `SELECT created_at, checkin_date, checkout_date, adults, children, available, approx_total
+           FROM stayvibe_web_leads WHERE villa_id = ? AND kind = 'search' AND status = 'ok' AND visitor_id = ? AND created_at <= ?
+          ORDER BY created_at ASC LIMIT 60`
+      ).bind(villaId, lead.visitor_id, lead.created_at).all()
+      lookups = results || []
+    }
+    return buildWebVisit({ lead, repeats: rows.filter(r => r !== lead).length, lookups, propertyZone: await zoneFor(DB, villaId) })
+  } catch (e) {
+    console.warn('loadWebVisit failed (no log table yet?):', e?.message || e)
+    return null
+  }
+}
+
+// One small chip per website enquiry for the list: { enquiry_id: { city, place, icon, kind, bot } }. {} when there are none.
+async function loadWebVisitChips(DB, villaId) {
+  try {
+    const { results } = await DB.prepare(
+      `SELECT enquiry_id, status, city, region, country, user_agent FROM stayvibe_web_leads
+        WHERE villa_id = ? AND kind = 'request' AND enquiry_id IS NOT NULL ORDER BY created_at ASC LIMIT 3000`
+    ).bind(villaId).all()
+    const chips = {}
+    for (const r of results || []) if (!chips[r.enquiry_id] || r.status === 'created') chips[r.enquiry_id] = webVisitChip(r)
+    return chips
+  } catch (e) {
+    console.warn('loadWebVisitChips failed (no log table yet?):', e?.message || e)
+    return {}
+  }
 }
 
 // ── ESTATE360 WEEKLY OWNER DIGEST ────────────────────────────────────────
@@ -3660,9 +3707,10 @@ export async function onRequest(ctx) {
 
       const waNumber = (phoneDigits.length === 10 ? '91' : '') + phoneDigits
       const where = [meta.city, meta.region, meta.country].filter(Boolean).join(', ')
+      const visit = await loadWebVisit(DB, villaId, enquiryId)   // null if the log cannot be read: the email then keeps the plain "From" line
       const enquiryUrl = `${new URL(request.url).origin}/owner/villa/enquiries/${enquiryId}`
       const quoteHtml = quoteRequestHtml({
-        name, repeat: isRepeat, phone: phoneRaw, email, message, where, ip: meta.ip, enquiryId, enquiryUrl,
+        name, repeat: isRepeat, phone: phoneRaw, email, message, where, visit, ip: meta.ip, enquiryId, enquiryUrl,
         waUrl: `https://wa.me/${waNumber}`,
         dates: `${dayMonth(est.checkIn)} → ${dayMonth(est.checkOut)}`, nights: est.nights,
         guests: `${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
@@ -3670,7 +3718,7 @@ export async function onRequest(ctx) {
         shown: est.quotable ? `<b>≈ ₹${est.approxTotal.toLocaleString('en-IN')}</b> <span style="color:#6b7280">(system total ₹${est.exactTotal.toLocaleString('en-IN')})</span>` : 'No price (party too large for the estimate)',
         seasons: est.seasons.length ? est.seasons.map(x => `${escHtml(x.name)} ×${x.nights}`).join(', ') : '',
       })
-      ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)`, [
+      ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)${visit?.city ? ' · ' + visit.city : ''}`, [
         'A guest asked for a final quote from the website estimate page.',
         '',
         `Name:       ${name}${isRepeat ? '  (returning guest)' : ''}`,
@@ -3683,7 +3731,9 @@ export async function onRequest(ctx) {
         est.seasons.length ? `Seasons:    ${est.seasons.map(s => `${s.name} ×${s.nights}`).join(', ')}` : null,
         message ? `Message:    ${message}` : null,
         '',
-        `From:       ${where || 'unknown location'}  (IP ${meta.ip})`,
+        ...(visit
+          ? [...visit.facts.flatMap(f => [`${(f.label + ': ').padEnd(12)}${f.value}${f.warn ? '  (' + f.warn + ')' : ''}`, ...(f.lines || []).map(l => `            ${l}`)]), `IP:         ${meta.ip}`]
+          : [`From:       ${where || 'unknown location'}  (IP ${meta.ip})`]),
         `Started by: Customer (website estimate page)`,
         '',
         `Open this enquiry in StayVibe (review, then send the quote):`,
@@ -7230,7 +7280,9 @@ export async function onRequest(ctx) {
             ? `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? AND status = ? ORDER BY date_received DESC`
             : `SELECT * FROM stayvibe_enquiries WHERE villa_id = ? ORDER BY date_received DESC`
         ).bind(...(status ? [villaId, status] : [villaId])).all()
-        return json({ success: true, data: results })
+        // A website enquiry carries where the guest was and whether they were on a phone or a computer (a small chip on its card).
+        const chips = await loadWebVisitChips(DB, villaId)
+        return json({ success: true, data: results.map(r => (chips[r.enquiry_id] ? { ...r, web_visit: chips[r.enquiry_id] } : r)) })
       }
 
       // Active (non-terminal) enquiries that have gone quiet — used by the daily
@@ -7276,7 +7328,9 @@ export async function onRequest(ctx) {
         if (enquiry.guest_id) {
           guest = await DB.prepare(`SELECT * FROM stayvibe_guests WHERE guest_id = ?`).bind(enquiry.guest_id).first()
         }
-        return json({ success: true, data: { enquiry, timeline, guest } })
+        // Where the guest was, what they used and what they checked first, when this enquiry came from the website's estimate page.
+        const webVisit = await loadWebVisit(DB, enquiry.villa_id, enquiryId)
+        return json({ success: true, data: { enquiry, timeline, guest, webVisit } })
       }
 
       // Repeat-guest lookup by phone/email — used while creating a new enquiry,

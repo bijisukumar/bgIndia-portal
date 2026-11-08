@@ -386,6 +386,7 @@ export default function EnquiryDetail() {
   }, [])
 
   const e = data?.enquiry
+  const webVisit = data?.webVisit || null   // where the guest was, what they used and what they checked first (enquiries from the website's estimate page)
   const extraTotal = extraLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
   const earlyLine = extraLines.find(l => (l.label || '').includes('Early Check-in'))
   const lateLine  = extraLines.find(l => (l.label || '').includes('Late Check-out'))
@@ -745,6 +746,28 @@ export default function EnquiryDetail() {
             🎯 {e.purpose === 'Other' && e.purpose_other ? e.purpose_other : (e.purpose || '—')} · via {enquirySourceLabel(e.source)} · started by {initiatedBy(e.created_by)?.label || '—'}
           </div>
         </div>
+
+        {webVisit && (
+          <>
+            <div className="card-section-label" style={{ marginTop: '14px' }}>WEBSITE VISIT</div>
+            <div className="card" style={{ padding: '12px 14px' }} data-testid="web-visit">
+              {webVisit.facts.map(f => (
+                <div key={f.key} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '0.78rem', lineHeight: 1.6, marginBottom: '4px' }}>
+                  <span style={{ width: '18px', flex: '0 0 auto', textAlign: 'center' }}>{f.icon}</span>
+                  <span style={{ color: '#5C7080', flex: '0 0 auto', minWidth: '92px' }}>{f.label}</span>
+                  <span style={{ color: 'var(--text)', flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+                    {f.value}
+                    {f.warn ? <strong style={{ color: '#EF4444' }}> · {f.warn}</strong> : null}
+                    {f.lines && f.lines.length > 0 ? <div style={{ color: '#5C7080', marginTop: '2px' }}>{f.lines.map((l, i) => <div key={i}>{l}</div>)}</div> : null}
+                  </span>
+                </div>
+              ))}
+              <div style={{ color: '#5C7080', fontSize: '0.66rem', marginTop: '6px' }}>
+                The place comes from the guest's internet connection, not their phone's GPS, so treat the city as a good guess.
+              </div>
+            </div>
+          </>
+        )}
 
         {!isFinal && avail && avail !== 'loading' && avail.available === false && (
           <div className="card" style={{ padding: '12px 14px', marginTop: '10px' }}>

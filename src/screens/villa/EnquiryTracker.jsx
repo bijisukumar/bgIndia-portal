@@ -100,6 +100,7 @@ function EnquiryCard({ enq, navigate, nudging, handleNudge, dimmed = false }) {
           </div>
           <div style={{ color: '#5C7080', fontSize: '0.72rem', marginTop: '2px' }}>
             {enq.phone || enq.email || 'No contact on file'} · {enquirySourceLabel(enq.source)}
+            {enq.web_visit ? <span title="From the website's estimate page"> · {enq.web_visit.icon}{enq.web_visit.city || enq.web_visit.place ? ` ${enq.web_visit.city || enq.web_visit.place}` : ''}</span> : null}
           </div>
         </div>
         <span style={{ background: meta.bg, color: meta.color, fontSize: '0.68rem', fontWeight: '700', padding: '4px 10px', borderRadius: '10px', whiteSpace: 'nowrap' }}>

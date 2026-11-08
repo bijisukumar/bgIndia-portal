@@ -30,6 +30,13 @@ export const CONFIG = {
   // longer time is a paid extra for a client and is set here when it is bought. This property keeps them 6 months.
   carPhotos: { keepMonths: 6 },
 
+  // The email that asks the owner to LOOK at the prices on the booking sites (src/utils/priceReminder.js). The sites take prices only from
+  // the host or a channel manager, never through a calendar link, so their prices are changed by hand and can go stale. Set per customer:
+  // how far ahead the owner wants prices set (3 or 6 months), how often it comes (every 3 months: Jan, Apr, Jul, Oct) and which sites it
+  // names (partner ids; the names come from the partner files). A host without this is not emailed. This property: 6 months ahead,
+  // Airbnb, VRBO and Agoda, the same price as direct on all of them.
+  priceReminder: { horizonMonths: 6, everyMonths: 3, platforms: ['airbnb', 'vrbo', 'agoda'] },
+
   // Branding
   brandName:  'Guruvayur Estates',
   brandShort: 'GE Portal',

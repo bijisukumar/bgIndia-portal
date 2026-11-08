@@ -84,6 +84,7 @@ import { estimateStay, groupNights, validateSeason, validateRateCardRows, DEFAUL
 import { evaluateCalendarHealth } from '../../src/utils/calendarHealth.js'
 import { carPhotoMonths, hasPlateNumber, cleanPlateList } from '../../src/utils/carPhotos.js'
 import { buildWebVisit, webVisitChip } from '../../src/utils/visitorInfo.js'
+import { priceReminderSettings, periodStartStamp, buildPriceReminder } from '../../src/utils/priceReminder.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -1485,6 +1486,39 @@ async function alertCalendarHealth(env, DB, villaId) {
     'This email comes once a day while it is still wrong, and again at once if something new goes wrong.',
     `Time: ${stampLong(Date.now(), zone)}`,
   ], await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'calendar_health')
+}
+
+// The quarterly reminder to LOOK at the prices on the booking sites (src/utils/priceReminder.js). The sites take prices only from the host
+// or a channel manager, never through a calendar link, so their prices go stale quietly. Only for a host whose config asks for it
+// (`priceReminder`: how far ahead, how often, which sites). ONE email per period (every 3 months by default: Jan, Apr, Jul, Oct), and the
+// first goes out at the next schedule run after it is switched on. A send that failed is tried again at a later run, but not within half an
+// hour. It asks the owner for a look and changes nothing.
+async function maybeSendPriceReminder(env, DB, villaId) {
+  if (!env) return
+  const cfg = getHostConfig(villaId)
+  const settings = priceReminderSettings(cfg)
+  if (!settings.enabled) return
+  const zone = await zoneFor(DB, villaId)
+  const today = todayInZone(zone)
+  const since = periodStartStamp(today, settings.everyMonths, zone)   // midnight at the property when this period began, as a stored UTC time
+  if (!since) return
+  const dup = await DB.prepare(
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'price_reminder'
+       AND ((success = 1 AND created_at >= ?) OR created_at > datetime('now', '-30 minutes')) LIMIT 1`
+  ).bind(villaId, since).first()
+  if (dup) return
+  const { results: cardRows } = await DB.prepare(
+    `SELECT guest_count, tariff_per_night FROM stayvibe_villa_rate_cards WHERE villa_id = ? ORDER BY guest_count`
+  ).bind(villaId).all()
+  const partners = hostPartners(cfg)
+  const labels = settings.platforms.map(id => (partners.find(p => p.id === id) || partnerFor(cfg, id) || {}).label || id)
+  const base = String(cfg.checkinBaseUrl || '').replace(/\/+$/, '')
+  const mail = buildPriceReminder({
+    labels, today, horizonMonths: settings.horizonMonths, everyMonths: settings.everyMonths,
+    seasons: await loadSeasons(DB, villaId), rateCard: cardRows || [],
+    link: base ? `${base}/owner/villa/rates` : '', time: stampLong(Date.now(), zone),
+  })
+  await sendAlert(env, mail.subject, mail.lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'price_reminder', undefined, undefined, mail.html)
 }
 
 const aOrAn = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w
@@ -3977,6 +4011,9 @@ export async function onRequest(ctx) {
     for (const villaId of Object.keys(HOST_CONFIGS)) {
       try { await alertCalendarHealth(env, DB, villaId) }
       catch (e) { console.warn('calendar health alert:', e?.message || e) }
+      // And is it time to ask the owner to look at the prices on the booking sites? (a host that did not ask for it is skipped)
+      try { await maybeSendPriceReminder(env, DB, villaId) }
+      catch (e) { console.warn('price reminder:', e?.message || e) }
     }
     return json({ success: true, data: { feeds: results.length, results } })
   }

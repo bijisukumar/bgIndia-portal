@@ -56,6 +56,9 @@ by frontend routing.
 14. Google Drive folder for guest docs (we create structure) · how long car and plate photos stay in it: 1 month on the standard plan, longer is a paid extra (`carPhotos.keepMonths` in the host's `config.js`)
 15. Resend (email) — we provision; sender domain to verify
 
+**Prices**
+16. Booking sites you set prices on (Airbnb, VRBO, Agoda ...) and how far ahead you keep them set, 3 or 6 months: StayVibe emails a reminder every quarter to look at them (`priceReminder` in the host's `config.js`: `horizonMonths` 3 or 6, `everyMonths`, `platforms` as partner ids)
+
 ## B. Provisioning checklist (us)
 1. `hosts/<hostId>/config.js` from intake (copy `hosts/dwarka/config.js` —
    the only real reference implementation as of Release 2.1 — or
@@ -70,6 +73,9 @@ by frontend routing.
    change a rule, make a rate apply from a date, or add a platform, and the
    build fails if a platform's name or rate appears in `src/` or `functions/`.
    Also set `enquirySources` (or leave it out to build it from the partners).
+   Set `priceReminder` from intake item 16 (`horizonMonths` 3 or 6, `everyMonths` 3, `platforms` the partner ids): a host without
+   it gets no reminder email. The server reads this one from the file, so it works from the deploy; the next seed run copies it into
+   the stored copy as well.
    After any config edit, push it into the database
    (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
    `syncTenantConfig`): the live screens read the stored copy.

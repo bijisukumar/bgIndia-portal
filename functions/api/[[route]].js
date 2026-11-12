@@ -2652,6 +2652,7 @@ export async function onRequest(ctx) {
     'logIrrigation',         
     'getEstateHighlights',    
     'getIrrigationZoneHealth', 
+    'getIrrigationMissingDays', 'approveIrrigationMissedDay',
     'saveIrrigationZoneLog', 'saveIrrigationZoneLogs',   
     'saveIrrigationZone',      
     'saveFertilization',      
@@ -6346,6 +6347,59 @@ export async function onRequest(ctx) {
       }
 
       // IRRIGATION HISTORY — full log list
+      // WHICH DAYS HAVE NO ENTRY AT ALL
+      //
+      // Every other irrigation view answers "when was this zone last watered",
+      // which is current state and says nothing about the days in between. A day
+      // with no entry is missing data, and it simply scrolled off the top of the
+      // history: in the 45 days to 2026-11-12 there were 28 such days, including
+      // an eight-day stretch nobody was in a position to notice.
+      //
+      // Days already acknowledged come back too, marked rather than hidden - the
+      // owner needs to see that a gap was explained, not merely that it stopped
+      // appearing.
+      if (action === 'getIrrigationMissingDays') {
+        const estateId = url.searchParams.get('estate') || 'pollachi'
+        assertEstateAccess(payload, estateId)
+        const days = Math.min(180, Math.max(1, parseInt(url.searchParams.get('days')) || 30))
+        const today = await todayOf()
+        const from = addDaysISO(today, -days)
+
+        const [loggedRes, ackRes] = await Promise.all([
+          ActiveDB.prepare(
+            `SELECT DISTINCT logged_date FROM estate360_irrigation_logs
+              WHERE estate = ? AND logged_date >= ?`
+          ).bind(estateId, from).all(),
+          ActiveDB.prepare(
+            `SELECT missed_date, reason, approved_by, approved_at
+               FROM estate360_irrigation_missed_days
+              WHERE estate = ? AND missed_date >= ?`
+          ).bind(estateId, from).all(),
+        ])
+
+        const has = new Set((loggedRes.results || []).map(r => r.logged_date))
+        const ack = new Map((ackRes.results || []).map(r => [r.missed_date, r]))
+
+        // Yesterday backwards: today is still in progress, so an entry not made
+        // yet is not a miss.
+        const missing = []
+        for (let i = 1; i <= days; i++) {
+          const d = addDaysISO(today, -i)
+          if (has.has(d)) continue
+          const a = ack.get(d) || null
+          missing.push({
+            date: d, approved: !!a,
+            reason: a ? a.reason : null,
+            approvedBy: a ? a.approved_by : null,
+            approvedAt: a ? a.approved_at : null,
+          })
+        }
+        return json({ success: true, data: {
+          days, today, loggedDays: has.size, missing,
+          outstanding: missing.filter(d => !d.approved).length,
+        }})
+      }
+
       if (action === 'getIrrigationHistory') {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         assertEstateAccess(payload, estateId)
@@ -11317,6 +11371,47 @@ export async function onRequest(ctx) {
       }
 
       // LOG IRRIGATION — Simple tap log (No zone info specified)
+      // "Seen, that is fine" against a day with no entry.
+      //
+      // The reason is optional on purpose: asking for one every time is how a
+      // list like this stops being worked at all. But it is offered every time,
+      // because in three months "why was there no entry for eight days in
+      // October" is a question the gap itself cannot answer.
+      //
+      // Writing a row IS the approval - a missing day with no row here is still
+      // outstanding. Re-approving simply replaces the reason.
+      if (action === 'approveIrrigationMissedDay') {
+        const estateId = String(body.estate || 'pollachi')
+        assertEstateAccess(payload, estateId)
+        const date = String(body.date || '').trim()
+        if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)) return err('A date as YYYY-MM-DD is required')
+
+        const today = await todayOf()
+        if (date >= today) return err('That day is not over yet, so there is nothing to approve')
+
+        // Refuse to mark a day missing when it plainly is not: the list is only
+        // worth trusting if it cannot be made to disagree with the logs.
+        const logged = await ActiveDB.prepare(
+          `SELECT 1 AS x FROM estate360_irrigation_logs WHERE estate = ? AND logged_date = ? LIMIT 1`
+        ).bind(estateId, date).first()
+        if (logged) return err('That day has an irrigation entry, so it is not missing')
+
+        const reason = String(body.reason || '').trim().slice(0, 200) || null
+        if (body.undo) {
+          await ActiveDB.prepare(
+            `DELETE FROM estate360_irrigation_missed_days WHERE estate = ? AND missed_date = ?`
+          ).bind(estateId, date).run()
+          return json({ success: true, data: { date, approved: false } })
+        }
+        await ActiveDB.prepare(
+          `INSERT INTO estate360_irrigation_missed_days (estate, missed_date, reason, approved_by, approved_at)
+           VALUES (?,?,?,?,datetime('now'))
+           ON CONFLICT(estate, missed_date) DO UPDATE SET
+             reason = excluded.reason, approved_by = excluded.approved_by, approved_at = excluded.approved_at`
+        ).bind(estateId, date, reason, actor).run()
+        return json({ success: true, data: { date, approved: true, reason } })
+      }
+
       if (action === 'logIrrigation') {
         const { estate, loggedDate, notes, durationMins } = body
         if (!estate || !loggedDate) return err('estate and loggedDate required')

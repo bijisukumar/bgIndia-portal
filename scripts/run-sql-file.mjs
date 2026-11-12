@@ -23,7 +23,22 @@ if (!db || !file) {
 
 const statements = readFileSync(file, 'utf8')
   .split('\n')
-  .filter(l => !l.trim().startsWith('--'))       // strip comment-only lines
+  // Strip BOTH comment-only lines and trailing `-- ...` comments. Statements
+  // are flattened to one line below, which turns a trailing comment into one
+  // that swallows the rest of the statement - D1 then reports 'incomplete
+  // input' and the real cause appears nowhere in the message. Quotes are
+  // tracked so a double dash inside a string literal is left alone.
+  .map(line => {
+    let q = null
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (q) { if (c === q) q = null }
+      else if (c === String.fromCharCode(39) || c === String.fromCharCode(34)) q = c
+      else if (c === '-' && line[i + 1] === '-') return line.slice(0, i)
+    }
+    return line
+  })
+  .filter(l => l.trim())
   .join('\n')
   .split(';')
   // Collapse to one line: the statement crosses a shell boundary, and embedded

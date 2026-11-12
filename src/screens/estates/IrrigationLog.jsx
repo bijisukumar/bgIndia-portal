@@ -27,13 +27,17 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   const [saving, setSaving]     = useState(false)
   const [toast, setToast]       = useState(null)
   const [history, setHistory]   = useState([])
-  const [tab, setTab]           = useState('log') // 'log' | 'history'
+  const [tab, setTab]           = useState('log') // 'log' | 'missing' | 'history'
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [missing, setMissing]   = useState(null)
+  const [missDays, setMissDays] = useState(30)
+  const [busyDay, setBusyDay]   = useState(null)
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000) }
 
   useEffect(() => { loadZones() }, [estate])
   useEffect(() => { if (tab === 'history') loadHistory() }, [tab])
+  useEffect(() => { if (tab === 'missing') loadMissing() }, [tab, missDays])
 
   async function loadZones() {
     try {
@@ -49,6 +53,36 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
       setHistory(Array.isArray(d) ? d : [])
     } catch(e) { setHistory([]) }
     finally { setLoadingHistory(false) }
+  }
+
+  async function loadMissing() {
+    try { setMissing(await api.getIrrigationMissingDays(estate, missDays)) }
+    catch(e) { setMissing(null) }
+  }
+
+  // The reason is optional: prompt returns '' when the box is left empty and
+  // null when it is cancelled, and only a cancel should stop the approval.
+  async function approveDay(day) {
+    const reason = window.prompt(
+      'Approving ' + fmtDate(day.date) + ' - no irrigation entry.' + String.fromCharCode(10) + String.fromCharCode(10) +
+      'Reason (optional: rain, pump down, nobody on site). Leave blank to just mark it seen:', '')
+    if (reason === null) return
+    setBusyDay(day.date)
+    try {
+      await api.approveIrrigationMissedDay({ estate, date: day.date, reason })
+      await loadMissing()
+      showToast('Approved ' + fmtDate(day.date))
+    } catch(e) { showToast(e?.message || 'Could not approve', 'error') }
+    finally { setBusyDay(null) }
+  }
+
+  async function undoDay(day) {
+    setBusyDay(day.date)
+    try {
+      await api.approveIrrigationMissedDay({ estate, date: day.date, undo: true })
+      await loadMissing()
+    } catch(e) { showToast(e?.message || 'Could not undo', 'error') }
+    finally { setBusyDay(null) }
   }
 
   function toggleZone(zoneId) {
@@ -115,6 +149,9 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
 
       <div style={{display:'flex', borderBottom:'1px solid rgba(255,255,255,0.06)', background:'#111'}}>
         <button style={tabBtn('log')} onClick={()=>setTab('log')}>💧 Log irrigation</button>
+        <button style={tabBtn('missing')} onClick={()=>setTab('missing')}>
+          ⚠️ Missing days{missing?.outstanding ? ' (' + missing.outstanding + ')' : ''}
+        </button>
         <button style={tabBtn('history')} onClick={()=>setTab('history')}>📋 History</button>
       </div>
 
@@ -200,6 +237,77 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
             </button>
           </>
         )}
+
+        {tab === 'missing' && (
+          <div>
+            <div style={{display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap'}}>
+              {[7, 30, 45, 90].map(d => (
+                <button key={d} onClick={() => setMissDays(d)}
+                  style={{padding:'6px 12px', borderRadius:'16px', cursor:'pointer', fontSize:'0.76rem',
+                    border:'1px solid ' + (missDays===d ? 'rgba(200,144,58,0.5)' : 'rgba(255,255,255,0.1)'),
+                    background: missDays===d ? 'rgba(200,144,58,0.15)' : 'transparent',
+                    color: missDays===d ? '#C8903A' : 'var(--text-dim)', fontWeight: missDays===d ? 700 : 400}}>
+                  {d} days
+                </button>
+              ))}
+            </div>
+
+            {!missing && <p style={{color:'var(--text-dim)', fontSize:'0.85rem'}}>Loading...</p>}
+
+            {missing && missing.missing.length === 0 && (
+              <p style={{color:'#34A853', fontSize:'0.88rem'}}>
+                An entry on every one of the last {missing.days} days. Nothing missing.
+              </p>
+            )}
+
+            {missing && missing.missing.length > 0 && (
+              <>
+                <p style={{color:'var(--text-dim)', fontSize:'0.8rem', marginBottom:'12px'}}>
+                  {missing.loggedDays} day{missing.loggedDays===1?'':'s'} logged of the last {missing.days}.{' '}
+                  <strong style={{color: missing.outstanding ? '#EF4444' : '#34A853'}}>
+                    {missing.outstanding} still to look at
+                  </strong>
+                  {missing.missing.length - missing.outstanding > 0 &&
+                    ', ' + (missing.missing.length - missing.outstanding) + ' approved'}.
+                </p>
+
+                <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
+                  {missing.missing.map(day => (
+                    <div key={day.date}
+                      style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px',
+                        borderRadius:'10px',
+                        background: day.approved ? 'rgba(52,168,83,0.06)' : 'rgba(239,68,68,0.06)',
+                        border:'1px solid ' + (day.approved ? 'rgba(52,168,83,0.25)' : 'rgba(239,68,68,0.25)')}}>
+                      <div style={{flex:1, minWidth:0}}>
+                        <div style={{fontWeight:600, fontSize:'0.88rem'}}>{fmtDate(day.date)}</div>
+                        <div style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>
+                          {day.approved
+                            ? (day.reason ? day.reason : 'Approved, no reason given')
+                            : 'No entry'}
+                        </div>
+                      </div>
+                      {day.approved ? (
+                        <button onClick={() => undoDay(day)} disabled={busyDay===day.date}
+                          style={{padding:'6px 10px', borderRadius:'8px', cursor:'pointer', fontSize:'0.72rem',
+                            border:'1px solid rgba(255,255,255,0.12)', background:'transparent', color:'var(--text-dim)'}}>
+                          Undo
+                        </button>
+                      ) : (
+                        <button onClick={() => approveDay(day)} disabled={busyDay===day.date}
+                          style={{padding:'6px 12px', borderRadius:'8px', cursor:'pointer', fontSize:'0.75rem',
+                            fontWeight:700, border:'1px solid rgba(52,168,83,0.45)',
+                            background:'rgba(52,168,83,0.12)', color:'#34A853'}}>
+                          {busyDay===day.date ? '...' : 'OK'}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
 
         {tab === 'history' && (
           <>

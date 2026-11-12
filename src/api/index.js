@@ -273,6 +273,8 @@ export const api = {
   saveMangoHarvest:        (data)   => post('saveMangoHarvest', data),
   getMangoHarvests:        (estate) => get('getMangoHarvests', { estate }),
   getIrrigationHistory:    (estate) => get('getIrrigationHistory', { estate }),
+  getIrrigationMissingDays: (estate, days) => get('getIrrigationMissingDays', { estate, days }),
+  approveIrrigationMissedDay: (data)  => post('approveIrrigationMissedDay', data),
   getEstateContacts:       (estate) => get('getEstateContacts', { estate }),
   logIrrigation:        (data)   => post('logIrrigation', data),
 

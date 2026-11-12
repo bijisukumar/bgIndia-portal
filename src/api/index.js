@@ -275,6 +275,7 @@ export const api = {
   getIrrigationHistory:    (estate) => get('getIrrigationHistory', { estate }),
   getIrrigationMissingDays: (estate, days) => get('getIrrigationMissingDays', { estate, days }),
   approveIrrigationMissedDay: (data)  => post('approveIrrigationMissedDay', data),
+  approveIrrigationMissedDays: (data) => post('approveIrrigationMissedDays', data),
   getEstateContacts:       (estate) => get('getEstateContacts', { estate }),
   logIrrigation:        (data)   => post('logIrrigation', data),
 

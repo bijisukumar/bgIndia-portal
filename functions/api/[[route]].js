@@ -2652,7 +2652,7 @@ export async function onRequest(ctx) {
     'logIrrigation',         
     'getEstateHighlights',    
     'getIrrigationZoneHealth', 
-    'getIrrigationMissingDays', 'approveIrrigationMissedDay',
+    'getIrrigationMissingDays', 'approveIrrigationMissedDay', 'approveIrrigationMissedDays',
     'saveIrrigationZoneLog', 'saveIrrigationZoneLogs',   
     'saveIrrigationZone',      
     'saveFertilization',      
@@ -11380,6 +11380,59 @@ export async function onRequest(ctx) {
       //
       // Writing a row IS the approval - a missing day with no row here is still
       // outstanding. Re-approving simply replaces the reason.
+      // Approve every outstanding day in a window at once.
+      //
+      // A season of monsoon is one decision, not forty taps, and a list that takes
+      // forty taps does not get worked at all. But bulk is where a careless click
+      // does the most damage, so the server recomputes which days are actually
+      // missing instead of trusting a list the browser sends: a day that has an
+      // entry cannot be marked missing by this, however it is called.
+      //
+      // Days already approved keep the reason they were given. Someone who wrote
+      // "pump failed" on one day should not have it overwritten by a later sweep
+      // of "monsoon".
+      if (action === 'approveIrrigationMissedDays') {
+        const estateId = String(body.estate || 'pollachi')
+        assertEstateAccess(payload, estateId)
+        const days = Math.min(180, Math.max(1, parseInt(body.days) || 30))
+        const today = await todayOf()
+        const from = addDaysISO(today, -days)
+        const reason = String(body.reason || '').trim().slice(0, 200) || null
+
+        const [loggedRes, ackRes] = await Promise.all([
+          ActiveDB.prepare(
+            `SELECT DISTINCT logged_date FROM estate360_irrigation_logs
+              WHERE estate = ? AND logged_date >= ?`
+          ).bind(estateId, from).all(),
+          ActiveDB.prepare(
+            `SELECT missed_date FROM estate360_irrigation_missed_days
+              WHERE estate = ? AND missed_date >= ?`
+          ).bind(estateId, from).all(),
+        ])
+        const has = new Set((loggedRes.results || []).map(r => r.logged_date))
+        const already = new Set((ackRes.results || []).map(r => r.missed_date))
+
+        const toApprove = []
+        for (let i = 1; i <= days; i++) {
+          const d = addDaysISO(today, -i)
+          if (!has.has(d) && !already.has(d)) toApprove.push(d)
+        }
+        if (!toApprove.length) return json({ success: true, data: { approved: 0 } })
+
+        const stamp = now()
+        await ActiveDB.batch(toApprove.map(d => ActiveDB.prepare(
+          `INSERT OR IGNORE INTO estate360_irrigation_missed_days
+             (estate, missed_date, reason, approved_by, approved_at)
+           VALUES (?,?,?,?,?)`
+        ).bind(estateId, d, reason, actor, stamp)))
+
+        return json({ success: true, data: {
+          approved: toApprove.length,
+          from: toApprove[toApprove.length - 1],
+          to: toApprove[0],
+        }})
+      }
+
       if (action === 'approveIrrigationMissedDay') {
         const estateId = String(body.estate || 'pollachi')
         assertEstateAccess(payload, estateId)

@@ -76,6 +76,27 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     finally { setBusyDay(null) }
   }
 
+  // One decision for a whole season. Confirmed separately from the reason
+  // prompt, because cancelling a prompt and approving forty days by accident
+  // should not be the same gesture.
+  async function approveAll() {
+    const n = missing?.outstanding || 0
+    if (!n) return
+    const reason = window.prompt(
+      'Approving all ' + n + ' days with no entry in the last ' + missDays + ' days.' + String.fromCharCode(10) + String.fromCharCode(10) +
+      'One reason for all of them (optional: monsoon, nobody on site). Leave blank to just mark them seen:', '')
+    if (reason === null) return
+    if (!window.confirm('Approve ' + n + ' day' + (n === 1 ? '' : 's') + '? Days already approved keep their own reason.')) return
+    setBusyDay('all')
+    try {
+      const r = await api.approveIrrigationMissedDays({ estate, days: missDays, reason })
+      await loadMissing()
+      showToast('Approved ' + (r?.approved ?? n) + ' day' + ((r?.approved ?? n) === 1 ? '' : 's'))
+    } catch(e) { showToast(e?.message || 'Could not approve', 'error') }
+    finally { setBusyDay(null) }
+  }
+
+
   async function undoDay(day) {
     setBusyDay(day.date)
     try {
@@ -270,6 +291,17 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                   {missing.missing.length - missing.outstanding > 0 &&
                     ', ' + (missing.missing.length - missing.outstanding) + ' approved'}.
                 </p>
+
+                {missing.outstanding > 1 && (
+                  <button onClick={approveAll} disabled={busyDay === 'all'}
+                    style={{width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'10px',
+                      cursor: busyDay === 'all' ? 'default' : 'pointer', fontSize:'0.82rem', fontWeight:700,
+                      border:'1px solid rgba(52,168,83,0.45)', background:'rgba(52,168,83,0.12)', color:'#34A853'}}>
+                    {busyDay === 'all'
+                      ? 'Approving...'
+                      : 'Approve all ' + missing.outstanding + ' with one reason'}
+                  </button>
+                )}
 
                 <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
                   {missing.missing.map(day => (

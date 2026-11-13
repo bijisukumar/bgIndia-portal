@@ -900,6 +900,22 @@ function irrigationZoneStatus(lastLogged, freq, today) {
   return { daysSince, consecutiveMisses, status }
 }
 
+// Why a day has no irrigation entry, as a fixed set rather than whatever words came to mind.
+// Free prose cannot be counted: "power cut", "Power Cut", "current gone" and "no EB" are one
+// cause typed four ways, so a season of gaps can never be added up. The code is what the estate
+// manager must choose; the note beside it is for the detail a code cannot carry.
+const IRRIGATION_MISS_REASONS = [
+  { code: 'power_cut',      label: 'Power cut' },
+  { code: 'pump_fault',     label: 'Pump or motor fault' },
+  { code: 'no_water',       label: 'Well or tank dry' },
+  { code: 'not_needed',     label: 'Soil still wet, not needed' },
+  { code: 'nobody_on_site', label: 'Nobody on site' },
+  // Deliberately last, and it demands a note: an "other" that explains nothing is the one
+  // option that would quietly swallow every real cause.
+  { code: 'other',          label: 'Something else' },
+]
+const IRRIGATION_MISS_REASON_LABEL = Object.fromEntries(IRRIGATION_MISS_REASONS.map(r => [r.code, r.label]))
+
 const addMonthsISO = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10) }
 const addDaysISO  = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10)
 const diffDaysISO = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)
@@ -2654,7 +2670,7 @@ export async function onRequest(ctx) {
     'logIrrigation',         
     'getEstateHighlights',    
     'getIrrigationZoneHealth', 
-    'getIrrigationMissingDays', 'approveIrrigationMissedDay', 'approveIrrigationMissedDays',
+    'getIrrigationMissingDays', 'approveIrrigationMissedDay',
     'saveIrrigationZoneLog', 'saveIrrigationZoneLogs',   
     'saveIrrigationZone',      
     'saveFertilization',      
@@ -6373,7 +6389,7 @@ export async function onRequest(ctx) {
               WHERE estate = ? AND logged_date >= ?`
           ).bind(estateId, from).all(),
           ActiveDB.prepare(
-            `SELECT missed_date, reason, approved_by, approved_at
+            `SELECT missed_date, reason, reason_code, approved_by, approved_at
                FROM estate360_irrigation_missed_days
               WHERE estate = ? AND missed_date >= ?`
           ).bind(estateId, from).all(),
@@ -6392,13 +6408,27 @@ export async function onRequest(ctx) {
           missing.push({
             date: d, approved: !!a,
             reason: a ? a.reason : null,
+            reasonCode: a ? a.reason_code : null,
+            reasonLabel: a && a.reason_code ? (IRRIGATION_MISS_REASON_LABEL[a.reason_code] || a.reason_code) : null,
             approvedBy: a ? a.approved_by : null,
             approvedAt: a ? a.approved_at : null,
           })
         }
+
+        // What the codes were for: a stretch of gaps adds up to a cause. Eleven power cuts is a
+        // generator question; eleven dry wells is a different one entirely.
+        const byCode = []
+        for (const r of IRRIGATION_MISS_REASONS) {
+          const n = missing.filter(d => d.reasonCode === r.code).length
+          if (n) byCode.push({ code: r.code, label: r.label, days: n })
+        }
+        byCode.sort((a, b) => b.days - a.days)
+
         return json({ success: true, data: {
           days, today, loggedDays: has.size, missing,
           outstanding: missing.filter(d => !d.approved).length,
+          reasonCodes: IRRIGATION_MISS_REASONS,
+          byCode,
         }})
       }
 
@@ -11387,59 +11417,11 @@ export async function onRequest(ctx) {
       // outstanding. Re-approving simply replaces the reason.
       // Approve every outstanding day in a window at once.
       //
-      // A season of monsoon is one decision, not forty taps, and a list that takes
-      // forty taps does not get worked at all. But bulk is where a careless click
-      // does the most damage, so the server recomputes which days are actually
-      // missing instead of trusting a list the browser sends: a day that has an
-      // entry cannot be marked missing by this, however it is called.
-      //
-      // Days already approved keep the reason they were given. Someone who wrote
-      // "pump failed" on one day should not have it overwritten by a later sweep
-      // of "monsoon".
-      if (action === 'approveIrrigationMissedDays') {
-        // One tap that clears a whole stretch is the owner's decision. The estate manager works through the
-        // days one by one: he records what was watered, or says why nothing was.
-        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
-        const estateId = String(body.estate || 'pollachi')
-        assertEstateAccess(payload, estateId)
-        const days = Math.min(180, Math.max(1, parseInt(body.days) || 30))
-        const today = await todayOf()
-        const from = addDaysISO(today, -days)
-        const reason = String(body.reason || '').trim().slice(0, 200) || null
-
-        const [loggedRes, ackRes] = await Promise.all([
-          ActiveDB.prepare(
-            `SELECT DISTINCT logged_date FROM estate360_irrigation_logs
-              WHERE estate = ? AND logged_date >= ?`
-          ).bind(estateId, from).all(),
-          ActiveDB.prepare(
-            `SELECT missed_date FROM estate360_irrigation_missed_days
-              WHERE estate = ? AND missed_date >= ?`
-          ).bind(estateId, from).all(),
-        ])
-        const has = new Set((loggedRes.results || []).map(r => r.logged_date))
-        const already = new Set((ackRes.results || []).map(r => r.missed_date))
-
-        const toApprove = []
-        for (let i = 1; i <= days; i++) {
-          const d = addDaysISO(today, -i)
-          if (!has.has(d) && !already.has(d)) toApprove.push(d)
-        }
-        if (!toApprove.length) return json({ success: true, data: { approved: 0 } })
-
-        const stamp = now()
-        await ActiveDB.batch(toApprove.map(d => ActiveDB.prepare(
-          `INSERT OR IGNORE INTO estate360_irrigation_missed_days
-             (estate, missed_date, reason, approved_by, approved_at)
-           VALUES (?,?,?,?,?)`
-        ).bind(estateId, d, reason, actor, stamp)))
-
-        return json({ success: true, data: {
-          approved: toApprove.length,
-          from: toApprove[toApprove.length - 1],
-          to: toApprove[0],
-        }})
-      }
+      // There is deliberately no bulk approve. One tap that clears a whole stretch of gaps leaves
+      // nothing behind worth reading: every day gets the same reason, which is to say no reason,
+      // and the person who left the gaps is the one who clears them. Each day is answered on its
+      // own, with a code, below. (Removed 2026-11-12; `git log` has it if a season of monsoon ever
+      // makes the case again.)
 
       if (action === 'approveIrrigationMissedDay') {
         const estateId = String(body.estate || 'pollachi')
@@ -11458,6 +11440,7 @@ export async function onRequest(ctx) {
         if (logged) return err('That day has an irrigation entry, so it is not missing')
 
         const reason = String(body.reason || '').trim().slice(0, 200) || null
+        const reasonCode = String(body.reasonCode || '').trim() || null
         const isOwner = payload.role === 'owner' || payload.role === 'master_owner'
         if (body.undo) {
           // Anyone can take back their own explanation; only the owner can reopen one somebody else gave.
@@ -11466,18 +11449,31 @@ export async function onRequest(ctx) {
           ).bind(...(isOwner ? [estateId, date] : [estateId, date, actor])).run()
           return json({ success: true, data: { date, approved: false } })
         }
-        // The owner can wave a gap through with or without a word. The estate manager cannot: he records what
-        // was watered (Update now), or says why nothing was, in words, against his own name.
-        if (!isOwner && (reason || '').length < 3) {
-          return err('Say why nothing was watered that day (a few words), or tap Update now and record it')
+        // A code the screen did not offer is a typo or a stale tab, not a new cause: refuse it rather
+        // than store a value nothing can count.
+        if (reasonCode && !IRRIGATION_MISS_REASON_LABEL[reasonCode]) return err('Unknown reason code')
+
+        // The owner can wave a gap through with or without a word - it is his estate, and his OK means
+        // "seen, leave it". The estate manager cannot: he records what was watered (Update now), or
+        // picks the reason nothing was, against his own name.
+        if (!isOwner && !reasonCode) {
+          return err('Pick why nothing was watered that day, or tap Update now and record it')
+        }
+        // "Something else" that says nothing else is the one answer worth refusing.
+        if (reasonCode === 'other' && (reason || '').length < 3) {
+          return err('Say in a few words what happened that day')
         }
         await ActiveDB.prepare(
-          `INSERT INTO estate360_irrigation_missed_days (estate, missed_date, reason, approved_by, approved_at)
-           VALUES (?,?,?,?,datetime('now'))
+          `INSERT INTO estate360_irrigation_missed_days (estate, missed_date, reason, reason_code, approved_by, approved_at)
+           VALUES (?,?,?,?,?,datetime('now'))
            ON CONFLICT(estate, missed_date) DO UPDATE SET
-             reason = excluded.reason, approved_by = excluded.approved_by, approved_at = excluded.approved_at`
-        ).bind(estateId, date, reason, actor).run()
-        return json({ success: true, data: { date, approved: true, reason } })
+             reason = excluded.reason, reason_code = excluded.reason_code,
+             approved_by = excluded.approved_by, approved_at = excluded.approved_at`
+        ).bind(estateId, date, reason, reasonCode, actor).run()
+        return json({ success: true, data: {
+          date, approved: true, reason, reasonCode,
+          reasonLabel: reasonCode ? IRRIGATION_MISS_REASON_LABEL[reasonCode] : null,
+        }})
       }
 
       if (action === 'logIrrigation') {

@@ -39,7 +39,8 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   const isOwner = user?.role === 'owner' || user?.role === 'master_owner'
   const [updatingDay, setUpdatingDay] = useState(null)   // the day with no entry that Update now opened the form for
   const [explainDay, setExplainDay]   = useState(null)   // the day whose "not watered, because..." box is open
-  const [explainText, setExplainText] = useState('')
+  const [explainCode, setExplainCode] = useState('')     // which of the fixed reasons, so a season of gaps can be added up
+  const [explainNote, setExplainNote] = useState('')     // the detail a code cannot carry; the whole answer for 'other'
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000) }
 
@@ -86,27 +87,6 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     finally { setBusyDay(null) }
   }
 
-  // One decision for a whole season. Confirmed separately from the reason
-  // prompt, because cancelling a prompt and approving forty days by accident
-  // should not be the same gesture.
-  async function approveAll() {
-    const n = missing?.outstanding || 0
-    if (!n) return
-    const reason = window.prompt(
-      'Approving all ' + n + ' days with no entry in the last ' + missDays + ' days.' + String.fromCharCode(10) + String.fromCharCode(10) +
-      'One reason for all of them (optional: monsoon, nobody on site). Leave blank to just mark them seen:', '')
-    if (reason === null) return
-    if (!window.confirm('Approve ' + n + ' day' + (n === 1 ? '' : 's') + '? Days already approved keep their own reason.')) return
-    setBusyDay('all')
-    try {
-      const r = await api.approveIrrigationMissedDays({ estate, days: missDays, reason })
-      await loadMissing()
-      showToast('Approved ' + (r?.approved ?? n) + ' day' + ((r?.approved ?? n) === 1 ? '' : 's'))
-    } catch(e) { showToast(e?.message || 'Could not approve', 'error') }
-    finally { setBusyDay(null) }
-  }
-
-
   async function undoDay(day) {
     setBusyDay(day.date)
     try {
@@ -134,15 +114,21 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     setTab('missing')
   }
 
-  // Nothing was watered that day. Not a bare OK: the estate manager says why, in words, and it is stored
-  // against his name for the owner to read.
+  // Nothing was watered that day. Not a bare OK: the estate manager picks the cause from the fixed
+  // list, and it is stored under his name against that date for the owner to read and to count.
+  const explainReady = !!explainCode && (explainCode !== 'other' || explainNote.trim().length >= 3)
+
   async function saveExplanation(day) {
-    const reason = explainText.trim()
-    if (reason.length < 3) { showToast('Say why nothing was watered that day', 'error'); return }
+    if (!explainReady) {
+      showToast(explainCode ? 'Say in a few words what happened' : 'Pick why nothing was watered', 'error')
+      return
+    }
     setBusyDay(day.date)
     try {
-      await api.approveIrrigationMissedDay({ estate, date: day.date, reason })
-      setExplainDay(null); setExplainText('')
+      await api.approveIrrigationMissedDay({
+        estate, date: day.date, reasonCode: explainCode, reason: explainNote.trim(),
+      })
+      setExplainDay(null); setExplainCode(''); setExplainNote('')
       await loadMissing()
       showToast('Saved: ' + fmtDate(day.date))
     } catch(e) { showToast(e?.message || 'Could not save', 'error') }
@@ -374,15 +360,19 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                   </div>
                 )}
 
-                {isOwner && missing.outstanding > 1 && (
-                  <button onClick={approveAll} disabled={busyDay === 'all'}
-                    style={{width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'10px',
-                      cursor: busyDay === 'all' ? 'default' : 'pointer', fontSize:'0.82rem', fontWeight:700,
-                      border:'1px solid rgba(52,168,83,0.45)', background:'rgba(52,168,83,0.12)', color:'#34A853'}}>
-                    {busyDay === 'all'
-                      ? 'Approving...'
-                      : 'Approve all ' + missing.outstanding + ' with one reason'}
-                  </button>
+                {/* What the codes are for. Not a tally of taps - a tally of causes, which is the
+                    only thing twenty-eight explained gaps can usefully become. */}
+                {missing.byCode?.length > 0 && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'12px'}}>
+                    {missing.byCode.map(c => (
+                      <span key={c.code}
+                        style={{padding:'4px 10px', borderRadius:'14px', fontSize:'0.72rem',
+                          background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)',
+                          color:'var(--text-dim)'}}>
+                        {c.label} <strong style={{color:'var(--text)'}}>{c.days}</strong>
+                      </span>
+                    ))}
+                  </div>
                 )}
 
                 <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
@@ -397,8 +387,10 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                         <div style={{fontWeight:600, fontSize:'0.88rem'}}>{fmtDate(day.date)}</div>
                         <div style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>
                           {day.approved
-                            ? (day.reason ? day.reason : 'Approved, no reason given') + (day.approvedBy ? ' - ' + who(day.approvedBy) : '')
+                            ? [day.reasonLabel, day.reason].filter(Boolean).join(' - ')
+                              || 'Approved, no reason given'
                             : 'No entry'}
+                          {day.approved && day.approvedBy ? ' - ' + who(day.approvedBy) : ''}
                         </div>
                       </div>
                       {day.approved ? (
@@ -424,7 +416,7 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                               background:'rgba(200,144,58,0.18)', color:'#C8903A'}}>
                             Update now
                           </button>
-                          <button onClick={() => { setExplainDay(explainDay === day.date ? null : day.date); setExplainText('') }}
+                          <button onClick={() => { setExplainDay(explainDay === day.date ? null : day.date); setExplainCode(''); setExplainNote('') }}
                             style={{padding:'2px 4px', cursor:'pointer', fontSize:'0.7rem', background:'transparent',
                               border:'none', color:'var(--text-dim)', textDecoration:'underline'}}>
                             Not watered
@@ -438,24 +430,27 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                         <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginBottom:'8px'}}>
                           Why was nothing watered on {fmtDate(day.date)}? If it rained, use Update now and tick Raining.
                         </div>
+                        {/* The list comes from the Worker, which is also what validates it. Two copies of
+                            these words would disagree the first time either was touched. */}
                         <div style={{display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'8px'}}>
-                          {['Power cut', 'Pump or motor fault', 'No water', 'Nobody on site'].map(r => (
-                            <button key={r} onClick={() => setExplainText(r)}
+                          {(missing.reasonCodes || []).map(r => (
+                            <button key={r.code} onClick={() => setExplainCode(r.code)}
                               style={{padding:'5px 10px', borderRadius:'14px', cursor:'pointer', fontSize:'0.72rem',
-                                border:'1px solid ' + (explainText === r ? 'rgba(200,144,58,0.5)' : 'rgba(255,255,255,0.12)'),
-                                background: explainText === r ? 'rgba(200,144,58,0.15)' : 'transparent',
-                                color: explainText === r ? '#C8903A' : 'var(--text-dim)'}}>
-                              {r}
+                                border:'1px solid ' + (explainCode === r.code ? 'rgba(200,144,58,0.5)' : 'rgba(255,255,255,0.12)'),
+                                background: explainCode === r.code ? 'rgba(200,144,58,0.15)' : 'transparent',
+                                color: explainCode === r.code ? '#C8903A' : 'var(--text-dim)'}}>
+                              {r.label}
                             </button>
                           ))}
                         </div>
-                        <input value={explainText} onChange={e => setExplainText(e.target.value)} maxLength={200}
-                          placeholder="Or write the reason" style={INP}/>
+                        <input value={explainNote} onChange={e => setExplainNote(e.target.value)} maxLength={200}
+                          placeholder={explainCode === 'other' ? 'What happened that day (needed)' : 'Anything to add (optional)'}
+                          style={INP}/>
                         <button onClick={() => saveExplanation(day)}
-                          disabled={busyDay === day.date || explainText.trim().length < 3}
+                          disabled={busyDay === day.date || !explainReady}
                           style={{width:'100%', marginTop:'8px', padding:'9px', borderRadius:'8px', fontSize:'0.8rem', fontWeight:700,
-                            cursor: explainText.trim().length < 3 ? 'default' : 'pointer',
-                            opacity: explainText.trim().length < 3 ? 0.5 : 1,
+                            cursor: explainReady ? 'pointer' : 'default',
+                            opacity: explainReady ? 1 : 0.5,
                             border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.06)', color:'var(--text)'}}>
                           {busyDay === day.date ? 'Saving...' : 'Save reason'}
                         </button>

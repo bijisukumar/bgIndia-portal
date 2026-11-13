@@ -913,8 +913,13 @@ const IRRIGATION_MISS_REASONS = [
   // Deliberately last, and it demands a note: an "other" that explains nothing is the one
   // option that would quietly swallow every real cause.
   { code: 'other',          label: 'Something else' },
+  // The owner's alone. He clears days he was not there for, and a cause he guessed at would
+  // poison the only thing the codes are for - the count. The estate manager WAS there, so this
+  // is not his to reach for.
+  { code: 'not_known',      label: 'Not known', ownerOnly: true },
 ]
 const IRRIGATION_MISS_REASON_LABEL = Object.fromEntries(IRRIGATION_MISS_REASONS.map(r => [r.code, r.label]))
+const IRRIGATION_MISS_REASON_OWNER_ONLY = new Set(IRRIGATION_MISS_REASONS.filter(r => r.ownerOnly).map(r => r.code))
 
 const addMonthsISO = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10) }
 const addDaysISO  = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10)
@@ -6380,6 +6385,7 @@ export async function onRequest(ctx) {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         assertEstateAccess(payload, estateId)
         const days = Math.min(180, Math.max(1, parseInt(url.searchParams.get('days')) || 30))
+        const canSayUnknown = payload.role === 'owner' || payload.role === 'master_owner'
         const today = await todayOf()
         const from = addDaysISO(today, -days)
 
@@ -6427,7 +6433,7 @@ export async function onRequest(ctx) {
         return json({ success: true, data: {
           days, today, loggedDays: has.size, missing,
           outstanding: missing.filter(d => !d.approved).length,
-          reasonCodes: IRRIGATION_MISS_REASONS,
+          reasonCodes: IRRIGATION_MISS_REASONS.filter(r => !r.ownerOnly || canSayUnknown),
           byCode,
         }})
       }
@@ -11453,11 +11459,14 @@ export async function onRequest(ctx) {
         // than store a value nothing can count.
         if (reasonCode && !IRRIGATION_MISS_REASON_LABEL[reasonCode]) return err('Unknown reason code')
 
-        // The owner can wave a gap through with or without a word - it is his estate, and his OK means
-        // "seen, leave it". The estate manager cannot: he records what was watered (Update now), or
-        // picks the reason nothing was, against his own name.
-        if (!isOwner && !reasonCode) {
-          return err('Pick why nothing was watered that day, or tap Update now and record it')
+        // Every cleared day carries a code, the owner's included. A day waved through with no cause
+        // is a day the tally cannot see, and a tally with holes in it answers nothing.
+        if (!reasonCode) {
+          return err(isOwner ? 'Pick why nothing was watered that day' : 'Pick why nothing was watered that day, or tap Update now and record it')
+        }
+        // "Not known" belongs to the owner, who was not there. The estate manager was.
+        if (!isOwner && IRRIGATION_MISS_REASON_OWNER_ONLY.has(reasonCode)) {
+          return err('Say what actually happened that day, or tap Update now and record it')
         }
         // "Something else" that says nothing else is the one answer worth refusing.
         if (reasonCode === 'other' && (reason || '').length < 3) {

@@ -71,22 +71,6 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     catch(e) { setMissing(null) }
   }
 
-  // The reason is optional: prompt returns '' when the box is left empty and
-  // null when it is cancelled, and only a cancel should stop the approval.
-  async function approveDay(day) {
-    const reason = window.prompt(
-      'Approving ' + fmtDate(day.date) + ' - no irrigation entry.' + String.fromCharCode(10) + String.fromCharCode(10) +
-      'Reason (optional: rain, pump down, nobody on site). Leave blank to just mark it seen:', '')
-    if (reason === null) return
-    setBusyDay(day.date)
-    try {
-      await api.approveIrrigationMissedDay({ estate, date: day.date, reason })
-      await loadMissing()
-      showToast('Approved ' + fmtDate(day.date))
-    } catch(e) { showToast(e?.message || 'Could not approve', 'error') }
-    finally { setBusyDay(null) }
-  }
-
   async function undoDay(day) {
     setBusyDay(day.date)
     try {
@@ -349,14 +333,19 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                     {missing.outstanding} still to {isOwner ? 'look at' : 'update'}
                   </strong>
                   {missing.missing.length - missing.outstanding > 0 &&
-                    ', ' + (missing.missing.length - missing.outstanding) + (isOwner ? ' approved' : ' explained')}.
+                    ', ' + (missing.missing.length - missing.outstanding) + ' explained'}.
                 </p>
 
-                {!isOwner && missing.outstanding > 0 && (
+                {missing.outstanding > 0 && (
                   <div style={{background:'rgba(200,144,58,0.08)', border:'1px solid rgba(200,144,58,0.3)', borderRadius:'10px',
                     padding:'10px 12px', marginBottom:'12px', fontSize:'0.78rem', color:'var(--text-dim)'}}>
-                    Tap <strong style={{color:'#C8903A'}}>Update now</strong> and record what was watered that day.
-                    If nothing was watered, tap <strong>Not watered</strong> and say why.
+                    {isOwner ? (
+                      <>Tap <strong style={{color:'#C8903A'}}>OK</strong> and pick why nothing was watered.
+                      Every cleared day carries a reason, so the tally above stays worth reading.</>
+                    ) : (
+                      <>Tap <strong style={{color:'#C8903A'}}>Update now</strong> and record what was watered that day.
+                      If nothing was watered, tap <strong>Not watered</strong> and say why.</>
+                    )}
                   </div>
                 )}
 
@@ -402,11 +391,12 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                           </button>
                         )
                       ) : isOwner ? (
-                        <button onClick={() => approveDay(day)} disabled={busyDay===day.date}
+                        <button onClick={() => { setExplainDay(explainDay === day.date ? null : day.date); setExplainCode(''); setExplainNote('') }}
+                          disabled={busyDay===day.date}
                           style={{padding:'6px 12px', borderRadius:'8px', cursor:'pointer', fontSize:'0.75rem',
                             fontWeight:700, border:'1px solid rgba(52,168,83,0.45)',
                             background:'rgba(52,168,83,0.12)', color:'#34A853'}}>
-                          {busyDay===day.date ? '...' : 'OK'}
+                          {busyDay===day.date ? '...' : explainDay === day.date ? 'Close' : 'OK'}
                         </button>
                       ) : (
                         <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px', flexShrink:0}}>
@@ -424,11 +414,14 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                         </div>
                       )}
                     </div>
-                    {explainDay === day.date && !day.approved && !isOwner && (
+                    {explainDay === day.date && !day.approved && (
                       <div style={{margin:'4px 0 2px', padding:'10px 12px', borderRadius:'10px',
                         background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.1)'}}>
                         <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginBottom:'8px'}}>
-                          Why was nothing watered on {fmtDate(day.date)}? If it rained, use Update now and tick Raining.
+                          Why was nothing watered on {fmtDate(day.date)}?{' '}
+                          {isOwner
+                            ? 'If you were not there to know, say Not known rather than guess.'
+                            : 'If it rained, use Update now and tick Raining.'}
                         </div>
                         {/* The list comes from the Worker, which is also what validates it. Two copies of
                             these words would disagree the first time either was touched. */}

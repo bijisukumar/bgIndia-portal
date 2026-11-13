@@ -677,7 +677,13 @@ const roundTo = (n, step) => Math.round(n / step) * step
 
 // q: { checkIn, checkOut, adults, children }. Returns { error } for a request that
 // makes no sense, else the answer the page shows.
-async function publicStayEstimate(DB, villaId, q, today) {
+// Is the villa free for these dates? Dates only - no party, no rate card, no prices.
+//
+// Its own endpoint because the website now answers "is it free" the moment the dates are
+// picked, before anyone asks for a price. The estimate calls this for its OWN availability
+// answer rather than keeping a second copy: a page that was told free while choosing and
+// taken while pricing would be worse than one that stayed quiet.
+async function publicAvailabilityAnswer(DB, villaId, q, today) {
   const ci = String(q.checkIn || '').slice(0, 10), co = String(q.checkOut || '').slice(0, 10)
   if (!isYmd(ci) || !isYmd(co)) return { error: 'Please choose check-in and check-out dates' }
   if (co <= ci) return { error: 'Check-out must be after check-in' }
@@ -685,6 +691,29 @@ async function publicStayEstimate(DB, villaId, q, today) {
   if (ci > addDaysISO(today, 550)) return { error: 'We can only estimate stays within the next 18 months' }
   const nights = diffDaysISO(ci, co)
   if (nights > PUBLIC_MAX_NIGHTS) return { error: `For stays longer than ${PUBLIC_MAX_NIGHTS} nights please send us a request and we will quote you directly` }
+
+  const av = await availabilityFor(DB, villaId, ci, co, today)
+  const free = av.conflicts.length === 0
+  // Which of the asked-for nights are taken - dates only, never why or by whom.
+  const taken = new Set()
+  for (const c of av.conflicts) {
+    const from = c.heldNight || c.checkin_date, to = c.heldNight ? addDaysISO(c.heldNight, 1) : c.checkout_date
+    for (let d = from < ci ? ci : from; d < to && d < co; d = addDaysISO(d, 1)) taken.add(d)
+  }
+
+  return {
+    checkIn: ci, checkOut: co, nights,
+    available: free,
+    takenNights: [...taken].sort(),
+    alternatives: free ? null : { before: av.alternatives?.before || [], after: av.alternatives?.after || [] },
+  }
+}
+
+async function publicStayEstimate(DB, villaId, q, today) {
+  // Dates, and whether they are free, from the one function that answers that question.
+  const avail = await publicAvailabilityAnswer(DB, villaId, q, today)
+  if (avail.error) return { error: avail.error }
+  const { checkIn: ci, checkOut: co, nights } = avail
 
   const adults = Math.min(50, Math.max(0, parseInt(q.adults) || 0))
   const children = Math.min(50, Math.max(0, parseInt(q.children) || 0))
@@ -701,20 +730,9 @@ async function publicStayEstimate(DB, villaId, q, today) {
   const maxCard = Math.max(...rateCard.map(r => r.guests))
   const quotable = est.billableGuests <= maxCard + ov.overflowMax
 
-  const av = await availabilityFor(DB, villaId, ci, co, today)
-  const free = av.conflicts.length === 0
-  // Which of the asked-for nights are taken — dates only, never why or by whom.
-  const taken = new Set()
-  for (const c of av.conflicts) {
-    const from = c.heldNight || c.checkin_date, to = c.heldNight ? addDaysISO(c.heldNight, 1) : c.checkout_date
-    for (let d = from < ci ? ci : from; d < to && d < co; d = addDaysISO(d, 1)) taken.add(d)
-  }
-
   return {
-    checkIn: ci, checkOut: co, nights, adults, children, billableGuests: est.billableGuests,
-    available: free,
-    takenNights: [...taken].sort(),
-    alternatives: free ? null : { before: av.alternatives?.before || [], after: av.alternatives?.after || [] },
+    ...avail,
+    adults, children, billableGuests: est.billableGuests,
     quotable,
     // Rounded on purpose: this is an approximation, and the final quote can differ.
     approxTotal: quotable ? roundTo(est.total, 100) : null,
@@ -764,6 +782,7 @@ function quoteRequestHtml(d) {
     ${row('Availability', d.available ? '<b style="color:#15803d">Available</b>' : '<b style="color:#b91c1c">Not fully available</b>' + (d.taken ? ' (' + escHtml(d.taken) + ')' : ''))}
     ${row('Price shown', d.shown)}
     ${row('Seasons', d.seasons)}
+    ${row('Timings', d.flexibility ? '<b style="color:#9a7b1f">May need an earlier check-in or later check-out</b><br><span style="color:#6b7280;font-size:13px">Read the flexibility page and asked. Check the adjoining night before quoting.</span>' : '')}
     ${row('Phone', escHtml(d.phone))}
     ${row('Email', d.email ? escHtml(d.email) : '')}
     ${row('Message', d.message ? escHtml(d.message) : '')}
@@ -3664,6 +3683,34 @@ export async function onRequest(ctx) {
     return json({ success: true, data: answer })
   }
 
+  // Availability on its own, for the moment the guest finishes picking dates - before anyone has
+  // asked for a price. Nothing about the party, nothing about money, so a visitor still deciding
+  // gets the one answer that decides whether the rest is worth their time.
+  //
+  // Logged as kind 'availability', NOT 'search': the enquiry screen lists a visitor's earlier price
+  // checks, and these are not that. They fire on their own, which would bury the searches the
+  // visitor actually asked for under the dates they merely tried.
+  if (action === 'getPublicAvailability' && method === 'POST') {
+    const meta = webLeadMeta(request)
+    const aBody = await request.json().catch(() => ({}))
+    // Looser than the estimate's 60, because this one is not a tap: picking a check-in and then a
+    // check-out is two changes, and a visitor comparing weekends makes a dozen honestly.
+    if (publicRateLimited('avail:' + meta.ip, 120, 10 * 60 * 1000)) {
+      return json({ success: false, error: 'Too many checks — please try again in a few minutes' }, 429)
+    }
+    let a
+    try {
+      a = await publicAvailabilityAnswer(DB, DEFAULT_VILLA_ID, aBody, await todayOf(DEFAULT_VILLA_ID))
+    } catch (e) {
+      console.error('getPublicAvailability failed:', e?.message || e)
+      ctx.waitUntil(logWebLead(DB, DEFAULT_VILLA_ID, 'availability', meta, aBody, { status: 'failed', error: e?.message || String(e) }))
+      return json({ success: false, error: 'We could not check those dates right now' }, 500)
+    }
+    if (a.error) return err(a.error)
+    ctx.waitUntil(logWebLead(DB, DEFAULT_VILLA_ID, 'availability', meta, aBody, { status: 'ok', available: a.available }))
+    return json({ success: true, data: a })
+  }
+
   // The villa's standard nightly rate for a full house (12 guests), rounded like every price on the estimate
   // page, for the website's "How we compare" table. One number: not the card, not the seasons. It is not a
   // guest looking for a stay, so it is deliberately NOT written to the web lead log. Cached for 5 minutes.
@@ -3715,6 +3762,12 @@ export async function onRequest(ctx) {
       const est = await publicStayEstimate(DB, villaId, f, await todayOf(villaId))
       if (est.error) return done('invalid', err(est.error), { error: est.error })
 
+      // The guest ticked "I may need an earlier check-in or a later check-out" on the estimate page,
+      // having been shown /flexibility. It reaches the owner with the request rather than coming up
+      // later in conversation, because the answer depends on the adjoining night being free - which
+      // is a thing to look at while looking at these dates, not after the quote has gone out.
+      const wantsFlex = f.flexibility === true || f.flexibility === 1 || /^(1|yes|true)$/i.test(String(f.flexibility || ''))
+
       const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ')   // not now(): that is declared further down this function
       const normPhone = phoneRaw.replace(/[\s\-]/g, '').replace(/^\+?91/, '')
       // One request per guest per dates: a second tap, or a refresh, must not email the owner twice.
@@ -3745,6 +3798,7 @@ export async function onRequest(ctx) {
         'Requested a final quote from the website estimate page.',
         est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
         shownLine,
+        wantsFlex ? 'Guest may need an EARLIER CHECK-IN or LATER CHECK-OUT — they read the flexibility page and asked. Check whether the adjoining night is free before quoting; 25% or 50% of a night if it has to be held.' : null,
         message ? `Guest message: ${message}` : null,
       ].filter(Boolean).join('\n')
 
@@ -3773,6 +3827,7 @@ export async function onRequest(ctx) {
         dates: `${dayMonth(est.checkIn)} → ${dayMonth(est.checkOut)}`, nights: est.nights,
         guests: `${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
         available: est.available, taken: est.takenNights.map(dayMonth).join(', '),
+        flexibility: wantsFlex,
         shown: est.quotable ? `<b>≈ ₹${est.approxTotal.toLocaleString('en-IN')}</b> <span style="color:#6b7280">(system total ₹${est.exactTotal.toLocaleString('en-IN')})</span>` : 'No price (party too large for the estimate)',
         seasons: est.seasons.length ? est.seasons.map(x => `${escHtml(x.name)} ×${x.nights}`).join(', ') : '',
       })
@@ -3787,6 +3842,7 @@ export async function onRequest(ctx) {
         `Available:  ${est.available ? 'YES' : 'NO — ' + (est.takenNights.join(', ') || 'see calendar')}`,
         est.quotable ? `Shown:      ≈ ₹${est.approxTotal.toLocaleString('en-IN')} (system total ₹${est.exactTotal.toLocaleString('en-IN')})` : 'Shown:      no price (party too large for the estimate)',
         est.seasons.length ? `Seasons:    ${est.seasons.map(s => `${s.name} ×${s.nights}`).join(', ')}` : null,
+        wantsFlex ? 'Timings:    MAY NEED earlier check-in or later check-out (read the flexibility page and asked)' : null,
         message ? `Message:    ${message}` : null,
         '',
         ...(visit

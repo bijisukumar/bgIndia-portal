@@ -780,6 +780,8 @@ function quoteRequestHtml(d) {
   <div style="margin-bottom:18px">${btn(d.enquiryUrl, 'Open enquiry in StayVibe &rarr;', '#C9A84C', '#111827')}${btn(d.waUrl, 'Reply on WhatsApp &rarr;', '#16a34a', '#ffffff')}</div>
   <table style="border-collapse:collapse;width:100%;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;margin-bottom:14px">
     ${row('Availability', d.available ? '<b style="color:#15803d">Available</b>' : '<b style="color:#b91c1c">Not fully available</b>' + (d.taken ? ' (' + escHtml(d.taken) + ')' : ''))}
+    ${row('They asked for', d.askedFor ? '<b style="color:#b91c1c">' + escHtml(d.askedFor) + '</b> &mdash; taken, so this quote is for the open dates they picked' : '')}
+    ${row('Also open to', d.alsoOpenTo ? escHtml(d.alsoOpenTo) : '')}
     ${row('Price shown', d.shown)}
     ${row('Seasons', d.seasons)}
     ${row('Timings', d.flexibility ? '<b style="color:#9a7b1f">May need an earlier check-in or later check-out</b><br><span style="color:#6b7280;font-size:13px">Read the flexibility page and asked. Check the adjoining night before quoting.</span>' : '')}
@@ -3759,8 +3761,38 @@ export async function onRequest(ctx) {
         : (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ? 'That email address does not look right' : null
       if (bad) return done('invalid', err(bad), { error: bad })
 
-      const est = await publicStayEstimate(DB, villaId, f, await todayOf(villaId))
+      const qToday = await todayOf(villaId)
+      let est = await publicStayEstimate(DB, villaId, f, qToday)
       if (est.error) return done('invalid', err(est.error), { error: est.error })
+
+      // The dates they asked for are taken, and they ticked some of the open stretches the page
+      // offered them. Quote one of THOSE: an enquiry keyed to nights somebody else has is a quote
+      // nobody can act on, and the guest already told us which dates they would take.
+      //
+      // Re-checked here, never trusted. The page drew that list when it loaded, and a night can go
+      // in the time it takes to type a name. Availability only in the loop - the rate card and the
+      // seasons are read once, for whichever stretch wins.
+      const wanted = (Array.isArray(f.alternatives) ? f.alternatives : []).slice(0, 6)
+        .map(w => ({ checkIn: String(w && w.checkIn || '').slice(0, 10), checkOut: String(w && w.checkOut || '').slice(0, 10) }))
+        .filter(w => isYmd(w.checkIn) && isYmd(w.checkOut) && w.checkOut > w.checkIn)
+      let askedFor = null          // set only when we end up quoting a stretch other than the one they typed
+      const stillTaken = []        // the ones they picked that have gone since the page drew them
+      if (!est.available && wanted.length) {
+        for (const w of wanted) {
+          const a = await publicAvailabilityAnswer(DB, villaId, w, qToday)
+          if (a.error) continue
+          if (!a.available) { stillTaken.push(w); continue }
+          const t = await publicStayEstimate(DB, villaId, { ...f, checkIn: w.checkIn, checkOut: w.checkOut }, qToday)
+          if (t.error) continue
+          askedFor = { checkIn: est.checkIn, checkOut: est.checkOut, taken: est.takenNights }
+          est = t
+          break
+        }
+      }
+      // Everything they said they would take, minus the one being quoted: the owner may want to
+      // offer a different one, and it is their own list, not a guess.
+      const alsoOpenTo = wanted.filter(w => !(w.checkIn === est.checkIn && w.checkOut === est.checkOut))
+      const datePair = w => `${w.checkIn} to ${w.checkOut}`
 
       // The guest ticked "I may need an earlier check-in or a later check-out" on the estimate page,
       // having been shown /flexibility. It reaches the owner with the request rather than coming up
@@ -3796,7 +3828,12 @@ export async function onRequest(ctx) {
         : 'Party is above what the estimate covers — guest was asked to wait for a personal quote.'
       const notes = [
         'Requested a final quote from the website estimate page.',
-        est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
+        askedFor
+          ? `They asked for ${datePair(askedFor)}, which is NOT free (taken: ${askedFor.taken.join(', ') || 'see calendar'}). They picked from the open dates the page offered, so this quote is for ${datePair(est)}.`
+          : est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
+        alsoOpenTo.length ? `Would also take: ${alsoOpenTo.map(datePair).join('; ')}.` : null,
+        stillTaken.length ? `Gone since they picked it: ${stillTaken.map(datePair).join('; ')}.` : null,
+        !askedFor && !est.available && wanted.length ? 'None of the dates they picked is free any more - worth ringing them with what is.' : null,
         shownLine,
         wantsFlex ? 'Guest may need an EARLIER CHECK-IN or LATER CHECK-OUT — they read the flexibility page and asked. Check whether the adjoining night is free before quoting; 25% or 50% of a night if it has to be held.' : null,
         message ? `Guest message: ${message}` : null,
@@ -3828,6 +3865,8 @@ export async function onRequest(ctx) {
         guests: `${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
         available: est.available, taken: est.takenNights.map(dayMonth).join(', '),
         flexibility: wantsFlex,
+        askedFor: askedFor ? `${dayMonth(askedFor.checkIn)} → ${dayMonth(askedFor.checkOut)}` : '',
+        alsoOpenTo: alsoOpenTo.map(w => `${dayMonth(w.checkIn)} → ${dayMonth(w.checkOut)}`).join('; '),
         shown: est.quotable ? `<b>≈ ₹${est.approxTotal.toLocaleString('en-IN')}</b> <span style="color:#6b7280">(system total ₹${est.exactTotal.toLocaleString('en-IN')})</span>` : 'No price (party too large for the estimate)',
         seasons: est.seasons.length ? est.seasons.map(x => `${escHtml(x.name)} ×${x.nights}`).join(', ') : '',
       })
@@ -3839,7 +3878,10 @@ export async function onRequest(ctx) {
         `Email:      ${email || '—'}`,
         `Dates:      ${est.checkIn} → ${est.checkOut} (${est.nights} night${est.nights > 1 ? 's' : ''})`,
         `Guests:     ${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
+        askedFor ? `Asked for:  ${askedFor.checkIn} → ${askedFor.checkOut} — NOT free (${askedFor.taken.join(', ') || 'see calendar'}); quoting the open dates they picked instead` : null,
         `Available:  ${est.available ? 'YES' : 'NO — ' + (est.takenNights.join(', ') || 'see calendar')}`,
+        alsoOpenTo.length ? `Also open to: ${alsoOpenTo.map(datePair).join('; ')}` : null,
+        stillTaken.length ? `Gone since:   ${stillTaken.map(datePair).join('; ')}` : null,
         est.quotable ? `Shown:      ≈ ₹${est.approxTotal.toLocaleString('en-IN')} (system total ₹${est.exactTotal.toLocaleString('en-IN')})` : 'Shown:      no price (party too large for the estimate)',
         est.seasons.length ? `Seasons:    ${est.seasons.map(s => `${s.name} ×${s.nights}`).join(', ')}` : null,
         wantsFlex ? 'Timings:    MAY NEED earlier check-in or later check-out (read the flexibility page and asked)' : null,
@@ -3856,7 +3898,11 @@ export async function onRequest(ctx) {
         `Enquiry ID: ${enquiryId}`,
       ].filter(l => l !== null), await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'website_quote', undefined, undefined, quoteHtml))
 
-      return json({ success: true, data: { reference: enquiryId, available: est.available } })
+      return json({ success: true, data: {
+        reference: enquiryId, available: est.available,
+        checkIn: est.checkIn, checkOut: est.checkOut,     // may not be the dates they typed, when they picked an open stretch
+        movedFrom: askedFor ? { checkIn: askedFor.checkIn, checkOut: askedFor.checkOut } : null,
+      } })
     } catch (e) {
       // The request is already in stayvibe_web_leads; make sure the owner hears about it too, with the guest's details.
       const msg = e?.message || String(e)

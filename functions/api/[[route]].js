@@ -903,6 +903,8 @@ function irrigationZoneStatus(lastLogged, freq, today) {
 const addMonthsISO = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10) }
 const addDaysISO  = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10)
 const diffDaysISO = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)
+// Whole days between the day an entry is FOR and the day it was typed in. 0 when it was typed in on the day, or when either is not a date.
+const lateDays    = (forDate, enteredDate) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(forDate || '') && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(enteredDate || '') ? Math.max(0, diffDaysISO(forDate, enteredDate)) : 0
 const dayLabel    = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
 // A screen that has not seen a "Paid" tick yet (another device, an old tab) must not erase it when it saves the extra
 // lines back. Carry the paid marks of the STORED lines onto the incoming ones that lack them, matching by position AND
@@ -6404,7 +6406,10 @@ export async function onRequest(ctx) {
         const estateId = url.searchParams.get('estate') || 'pollachi'
         assertEstateAccess(payload, estateId)
         const { results } = await ActiveDB.prepare(`SELECT * FROM estate360_irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 200`).bind(estateId).all()
-        return json({ success: true, data: results })
+        // How many days after the day an entry is FOR it was typed in, so the owner can tell a catch-up from an
+        // entry made on the day. created_at is a UTC stamp: read its calendar day in the villa's own zone.
+        const histZone = await zoneFor(DB, DEFAULT_VILLA_ID)
+        return json({ success: true, data: results.map(r => ({ ...r, late_days: lateDays(r.logged_date, dateInZone(r.created_at, histZone)) })) })
       }
 
       // MANGO HARVESTS — list
@@ -11392,6 +11397,9 @@ export async function onRequest(ctx) {
       // "pump failed" on one day should not have it overwritten by a later sweep
       // of "monsoon".
       if (action === 'approveIrrigationMissedDays') {
+        // One tap that clears a whole stretch is the owner's decision. The estate manager works through the
+        // days one by one: he records what was watered, or says why nothing was.
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
         const estateId = String(body.estate || 'pollachi')
         assertEstateAccess(payload, estateId)
         const days = Math.min(180, Math.max(1, parseInt(body.days) || 30))
@@ -11450,11 +11458,18 @@ export async function onRequest(ctx) {
         if (logged) return err('That day has an irrigation entry, so it is not missing')
 
         const reason = String(body.reason || '').trim().slice(0, 200) || null
+        const isOwner = payload.role === 'owner' || payload.role === 'master_owner'
         if (body.undo) {
+          // Anyone can take back their own explanation; only the owner can reopen one somebody else gave.
           await ActiveDB.prepare(
-            `DELETE FROM estate360_irrigation_missed_days WHERE estate = ? AND missed_date = ?`
-          ).bind(estateId, date).run()
+            `DELETE FROM estate360_irrigation_missed_days WHERE estate = ? AND missed_date = ?` + (isOwner ? '' : ' AND approved_by = ?')
+          ).bind(...(isOwner ? [estateId, date] : [estateId, date, actor])).run()
           return json({ success: true, data: { date, approved: false } })
+        }
+        // The owner can wave a gap through with or without a word. The estate manager cannot: he records what
+        // was watered (Update now), or says why nothing was, in words, against his own name.
+        if (!isOwner && (reason || '').length < 3) {
+          return err('Say why nothing was watered that day (a few words), or tap Update now and record it')
         }
         await ActiveDB.prepare(
           `INSERT INTO estate360_irrigation_missed_days (estate, missed_date, reason, approved_by, approved_at)
@@ -11543,12 +11558,15 @@ export async function onRequest(ctx) {
         const batchEstateLabel = ESTATE_LABELS[estate] || estate
         const rained = /^rain/i.test(notes || '')
         const names  = zoneList.map(z => z.zoneName || z.zoneId)
-        ctx.waitUntil(sendAlert(env, `${rained ? '🌧' : '💧'} Estate360 — Irrigation logged: ${names.length} zone${names.length > 1 ? 's' : ''} (${batchEstateLabel})`, [
+        // Typed in after the day it is for? Then it is a catch-up: say so, and how late, in the owner's email.
+        const lateBy = lateDays(loggedDate, await todayOf())
+        ctx.waitUntil(sendAlert(env, `${rained ? '🌧' : '💧'} Estate360 — Irrigation logged: ${names.length} zone${names.length > 1 ? 's' : ''} (${batchEstateLabel})${lateBy ? ` — LATE, for ${loggedDate}` : ''}`, [
           'Source: Estate360 > Irrigation Log',
           `Action: ${rained ? 'Rain day — all selected zones logged' : 'Irrigation logged'}`,
           '',
           `Estate:    ${batchEstateLabel}`,
           `Date:      ${loggedDate}`,
+          ...(lateBy ? [`Late entry: typed in ${lateBy} day${lateBy > 1 ? 's' : ''} after the day it is for`] : []),
           `Zones (${names.length}): ${names.join(', ')}`,
           `Duration:  ${mins} mins${mins ? ' per zone' : ''}`,
           `Notes:     ${notes || '—'}`,

@@ -6,9 +6,11 @@
 import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
+import { useAuth } from '../../hooks/useAuth'
 import { parseLocalDate, localTodayStr } from '../../utils/dates'
 
-const TODAY = localTodayStr()
+// 'pradosh' -> 'Pradosh' (the actor name is stored in lower case)
+const who = a => (a ? a.charAt(0).toUpperCase() + a.slice(1) : '')
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -20,7 +22,7 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   const goBack = useBack()
   const [zones, setZones]       = useState([])
   const [selected, setSelected] = useState({}) // zone_id -> checked
-  const [date, setDate]         = useState(TODAY)
+  const [date, setDate]         = useState(() => localTodayStr())   // read when the screen opens, not when the app was first loaded
   const [duration, setDuration] = useState('')
   const [notes, setNotes]       = useState('')
   const [raining, setRaining]   = useState(false)   // rain watered every zone
@@ -32,12 +34,20 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   const [missing, setMissing]   = useState(null)
   const [missDays, setMissDays] = useState(30)
   const [busyDay, setBusyDay]   = useState(null)
+  const { user } = useAuth()
+  // The owner may wave a gap through with OK. The estate manager may not: he updates the day, or says why.
+  const isOwner = user?.role === 'owner' || user?.role === 'master_owner'
+  const [updatingDay, setUpdatingDay] = useState(null)   // the day with no entry that Update now opened the form for
+  const [explainDay, setExplainDay]   = useState(null)   // the day whose "not watered, because..." box is open
+  const [explainText, setExplainText] = useState('')
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000) }
 
   useEffect(() => { loadZones() }, [estate])
   useEffect(() => { if (tab === 'history') loadHistory() }, [tab])
-  useEffect(() => { if (tab === 'missing') loadMissing() }, [tab, missDays])
+  // Loaded on arrival, not only when the tab is opened, so the count on the tab is there the moment he walks in.
+  useEffect(() => { loadMissing() }, [estate, missDays])
+  useEffect(() => { if (tab === 'missing') loadMissing() }, [tab])
 
   async function loadZones() {
     try {
@@ -106,6 +116,39 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     finally { setBusyDay(null) }
   }
 
+  // Update now: the same form the log tab always had, opened on the day that has no entry. The date stays on
+  // that day until he saves or cancels, so the entry cannot land on some other date.
+  function startUpdate(day) {
+    setUpdatingDay(day.date)
+    setDate(day.date)
+    setSelected({}); setRaining(false); setNotes(''); setDuration('')
+    setExplainDay(null)
+    setTab('log')
+    try { window.scrollTo(0, 0) } catch { /* nothing to scroll */ }
+  }
+
+  function cancelUpdate() {
+    setUpdatingDay(null)
+    setDate(localTodayStr())
+    setSelected({}); setRaining(false); setNotes(''); setDuration('')
+    setTab('missing')
+  }
+
+  // Nothing was watered that day. Not a bare OK: the estate manager says why, in words, and it is stored
+  // against his name for the owner to read.
+  async function saveExplanation(day) {
+    const reason = explainText.trim()
+    if (reason.length < 3) { showToast('Say why nothing was watered that day', 'error'); return }
+    setBusyDay(day.date)
+    try {
+      await api.approveIrrigationMissedDay({ estate, date: day.date, reason })
+      setExplainDay(null); setExplainText('')
+      await loadMissing()
+      showToast('Saved: ' + fmtDate(day.date))
+    } catch(e) { showToast(e?.message || 'Could not save', 'error') }
+    finally { setBusyDay(null) }
+  }
+
   function toggleZone(zoneId) {
     setSelected(s => ({...s, [zoneId]: !s[zoneId]}))
   }
@@ -142,6 +185,13 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
       setNotes('')
       setDuration('')
       loadZones() // refresh zone health
+      if (updatingDay) {
+        // Back to the list, which reloads: the day he has just filled in is gone and the next one is the next job.
+        showToast('✅ Saved for ' + fmtDate(updatingDay))
+        setUpdatingDay(null)
+        setDate(localTodayStr())
+        setTab('missing')
+      }
     } catch(e) { showToast('Save failed: ' + e.message, 'error') }
     finally { setSaving(false) }
   }
@@ -180,13 +230,37 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
 
         {tab === 'log' && (
           <>
+            {updatingDay && (
+              <div style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', marginBottom:'12px',
+                borderRadius:'10px', background:'rgba(200,144,58,0.12)', border:'1px solid rgba(200,144,58,0.45)'}}>
+                <div style={{flex:1, minWidth:0, fontSize:'0.82rem', color:'#C8903A', fontWeight:600}}>
+                  Updating {fmtDate(updatingDay)}, a day with no entry. Tick the zones that were watered.
+                </div>
+                <button onClick={cancelUpdate}
+                  style={{padding:'6px 12px', borderRadius:'8px', cursor:'pointer', fontSize:'0.74rem', flexShrink:0,
+                    border:'1px solid rgba(255,255,255,0.18)', background:'transparent', color:'var(--text-dim)'}}>
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {!updatingDay && !isOwner && missing?.outstanding > 0 && (
+              <div onClick={() => setTab('missing')}
+                style={{padding:'10px 14px', marginBottom:'12px', borderRadius:'10px', cursor:'pointer',
+                  fontSize:'0.82rem', fontWeight:600, color:'#EF4444',
+                  background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.35)'}}>
+                ⚠️ {missing.outstanding} day{missing.outstanding === 1 ? '' : 's'} in the last {missing.days} with no entry. Update them now →
+              </div>
+            )}
+
             {/* Date + duration */}
             <div className="card-section-label">IRRIGATION DATE</div>
             <div className="card" style={{marginBottom:'12px'}}>
               <div className="grid-2">
                 <div>
                   <label style={{display:'block', fontSize:'0.68rem', color:'var(--text-dim)', letterSpacing:'1px', marginBottom:'4px'}}>DATE</label>
-                  <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={INP}/>
+                  <input type="date" value={date} onChange={e=>setDate(e.target.value)} disabled={!!updatingDay}
+                    style={{...INP, opacity: updatingDay ? 0.7 : 1}}/>
                 </div>
                 <div>
                   <label style={{display:'block', fontSize:'0.68rem', color:'var(--text-dim)', letterSpacing:'1px', marginBottom:'4px'}}>DURATION (MINS)</label>
@@ -286,13 +360,21 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                 <p style={{color:'var(--text-dim)', fontSize:'0.8rem', marginBottom:'12px'}}>
                   {missing.loggedDays} day{missing.loggedDays===1?'':'s'} logged of the last {missing.days}.{' '}
                   <strong style={{color: missing.outstanding ? '#EF4444' : '#34A853'}}>
-                    {missing.outstanding} still to look at
+                    {missing.outstanding} still to {isOwner ? 'look at' : 'update'}
                   </strong>
                   {missing.missing.length - missing.outstanding > 0 &&
-                    ', ' + (missing.missing.length - missing.outstanding) + ' approved'}.
+                    ', ' + (missing.missing.length - missing.outstanding) + (isOwner ? ' approved' : ' explained')}.
                 </p>
 
-                {missing.outstanding > 1 && (
+                {!isOwner && missing.outstanding > 0 && (
+                  <div style={{background:'rgba(200,144,58,0.08)', border:'1px solid rgba(200,144,58,0.3)', borderRadius:'10px',
+                    padding:'10px 12px', marginBottom:'12px', fontSize:'0.78rem', color:'var(--text-dim)'}}>
+                    Tap <strong style={{color:'#C8903A'}}>Update now</strong> and record what was watered that day.
+                    If nothing was watered, tap <strong>Not watered</strong> and say why.
+                  </div>
+                )}
+
+                {isOwner && missing.outstanding > 1 && (
                   <button onClick={approveAll} disabled={busyDay === 'all'}
                     style={{width:'100%', padding:'10px', marginBottom:'12px', borderRadius:'10px',
                       cursor: busyDay === 'all' ? 'default' : 'pointer', fontSize:'0.82rem', fontWeight:700,
@@ -305,7 +387,8 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
 
                 <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
                   {missing.missing.map(day => (
-                    <div key={day.date}
+                    <div key={day.date}>
+                    <div
                       style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px 12px',
                         borderRadius:'10px',
                         background: day.approved ? 'rgba(52,168,83,0.06)' : 'rgba(239,68,68,0.06)',
@@ -314,24 +397,70 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                         <div style={{fontWeight:600, fontSize:'0.88rem'}}>{fmtDate(day.date)}</div>
                         <div style={{fontSize:'0.72rem', color:'var(--text-dim)'}}>
                           {day.approved
-                            ? (day.reason ? day.reason : 'Approved, no reason given')
+                            ? (day.reason ? day.reason : 'Approved, no reason given') + (day.approvedBy ? ' - ' + who(day.approvedBy) : '')
                             : 'No entry'}
                         </div>
                       </div>
                       {day.approved ? (
-                        <button onClick={() => undoDay(day)} disabled={busyDay===day.date}
-                          style={{padding:'6px 10px', borderRadius:'8px', cursor:'pointer', fontSize:'0.72rem',
-                            border:'1px solid rgba(255,255,255,0.12)', background:'transparent', color:'var(--text-dim)'}}>
-                          Undo
-                        </button>
-                      ) : (
+                        (isOwner || day.approvedBy === user?.actor) && (
+                          <button onClick={() => undoDay(day)} disabled={busyDay===day.date}
+                            style={{padding:'6px 10px', borderRadius:'8px', cursor:'pointer', fontSize:'0.72rem',
+                              border:'1px solid rgba(255,255,255,0.12)', background:'transparent', color:'var(--text-dim)'}}>
+                            Undo
+                          </button>
+                        )
+                      ) : isOwner ? (
                         <button onClick={() => approveDay(day)} disabled={busyDay===day.date}
                           style={{padding:'6px 12px', borderRadius:'8px', cursor:'pointer', fontSize:'0.75rem',
                             fontWeight:700, border:'1px solid rgba(52,168,83,0.45)',
                             background:'rgba(52,168,83,0.12)', color:'#34A853'}}>
                           {busyDay===day.date ? '...' : 'OK'}
                         </button>
+                      ) : (
+                        <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px', flexShrink:0}}>
+                          <button onClick={() => startUpdate(day)} disabled={busyDay===day.date}
+                            style={{padding:'8px 14px', borderRadius:'8px', cursor:'pointer', fontSize:'0.8rem',
+                              fontWeight:700, border:'1px solid rgba(200,144,58,0.6)',
+                              background:'rgba(200,144,58,0.18)', color:'#C8903A'}}>
+                            Update now
+                          </button>
+                          <button onClick={() => { setExplainDay(explainDay === day.date ? null : day.date); setExplainText('') }}
+                            style={{padding:'2px 4px', cursor:'pointer', fontSize:'0.7rem', background:'transparent',
+                              border:'none', color:'var(--text-dim)', textDecoration:'underline'}}>
+                            Not watered
+                          </button>
+                        </div>
                       )}
+                    </div>
+                    {explainDay === day.date && !day.approved && !isOwner && (
+                      <div style={{margin:'4px 0 2px', padding:'10px 12px', borderRadius:'10px',
+                        background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.1)'}}>
+                        <div style={{fontSize:'0.74rem', color:'var(--text-dim)', marginBottom:'8px'}}>
+                          Why was nothing watered on {fmtDate(day.date)}? If it rained, use Update now and tick Raining.
+                        </div>
+                        <div style={{display:'flex', flexWrap:'wrap', gap:'6px', marginBottom:'8px'}}>
+                          {['Power cut', 'Pump or motor fault', 'No water', 'Nobody on site'].map(r => (
+                            <button key={r} onClick={() => setExplainText(r)}
+                              style={{padding:'5px 10px', borderRadius:'14px', cursor:'pointer', fontSize:'0.72rem',
+                                border:'1px solid ' + (explainText === r ? 'rgba(200,144,58,0.5)' : 'rgba(255,255,255,0.12)'),
+                                background: explainText === r ? 'rgba(200,144,58,0.15)' : 'transparent',
+                                color: explainText === r ? '#C8903A' : 'var(--text-dim)'}}>
+                              {r}
+                            </button>
+                          ))}
+                        </div>
+                        <input value={explainText} onChange={e => setExplainText(e.target.value)} maxLength={200}
+                          placeholder="Or write the reason" style={INP}/>
+                        <button onClick={() => saveExplanation(day)}
+                          disabled={busyDay === day.date || explainText.trim().length < 3}
+                          style={{width:'100%', marginTop:'8px', padding:'9px', borderRadius:'8px', fontSize:'0.8rem', fontWeight:700,
+                            cursor: explainText.trim().length < 3 ? 'default' : 'pointer',
+                            opacity: explainText.trim().length < 3 ? 0.5 : 1,
+                            border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.06)', color:'var(--text)'}}>
+                          {busyDay === day.date ? 'Saving...' : 'Save reason'}
+                        </button>
+                      </div>
+                    )}
                     </div>
                   ))}
                 </div>
@@ -359,6 +488,11 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                     {h.duration_mins > 0 && ` · ${h.duration_mins} min`}
                     {h.notes && ` · ${h.notes}`}
                   </div>
+                  {h.late_days > 0 && (
+                    <div style={{fontSize:'0.68rem', color:'#F59E0B', marginTop:'2px'}}>
+                      Entered {h.late_days} day{h.late_days === 1 ? '' : 's'} late
+                    </div>
+                  )}
                 </div>
                 <div style={{fontSize:'0.7rem', color:'#34A853'}}>💧</div>
               </div>

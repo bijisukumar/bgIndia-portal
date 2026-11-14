@@ -164,6 +164,11 @@ export default function EnquiryTracker() {
   const [dismissedMatches, setDismissedMatches] = useState(() => new Set())
   const [linkingMatch, setLinkingMatch] = useState(null)
 
+  // Open enquiries that cannot go ahead any more: the dates passed with no booking, or the nights are now booked. The
+  // server works them out; the owner closes them out here as Lost, Dates Unavailable.
+  const [toClose, setToClose] = useState([])
+  const [closingOut, setClosingOut] = useState(null)   // an enquiry id, or 'all'
+
   useEffect(() => {
     let cancelled = false
     api.getEnquiries(DEFAULT_VILLA_ID).then(rows => {
@@ -171,6 +176,9 @@ export default function EnquiryTracker() {
     }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false) })
     api.getEnquiryMatchCandidates(DEFAULT_VILLA_ID).then(rows => {
       if (!cancelled && Array.isArray(rows)) setMatches(rows)
+    }).catch(() => {})
+    api.getEnquiriesToCloseOut(DEFAULT_VILLA_ID).then(d => {
+      if (!cancelled && Array.isArray(d?.enquiries)) setToClose(d.enquiries)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -187,6 +195,24 @@ export default function EnquiryTracker() {
       alert(err.message || 'Could not link — try again.')
     } finally {
       setLinkingMatch(null)
+    }
+  }
+
+  // Close out enquiries that cannot go ahead. `ids` = the ones to close, or null for all of them. The server decides
+  // which really qualify, so a screen that is out of date cannot close one that is fine again; the list is read again after.
+  async function handleCloseOut(ids) {
+    if (!ids && !window.confirm(`Close all ${toClose.length} as Lost, Dates Unavailable?`)) return
+    setClosingOut(ids ? ids[0] : 'all')
+    try {
+      const r = await api.closeOutEnquiries({ villaId: DEFAULT_VILLA_ID, ...(ids ? { enquiryIds: ids } : {}) })
+      const done = new Set(r?.enquiryIds || [])
+      setEnquiries(prev => prev.map(e => done.has(e.enquiry_id) ? { ...e, status: 'lost', lost_reason: 'dates_unavailable' } : e))
+      const d = await api.getEnquiriesToCloseOut(DEFAULT_VILLA_ID)
+      setToClose(Array.isArray(d?.enquiries) ? d.enquiries : [])
+    } catch (err) {
+      alert(err.message || 'Could not close them — try again.')
+    } finally {
+      setClosingOut(null)
     }
   }
 
@@ -264,6 +290,41 @@ export default function EnquiryTracker() {
             📊 Conversion Dashboard
           </button>
         </div>
+
+        {toClose.length > 0 && !search.trim() && (
+          <div style={{ marginBottom: '14px' }}>
+            <div className="card-section-label" style={{ color: '#FB923C' }}>⏳ CAN'T GO AHEAD ({toClose.length})</div>
+            <div className="card" style={{ padding: '12px 14px' }}>
+              <div style={{ color: '#5C7080', fontSize: '0.74rem', marginBottom: '8px', lineHeight: 1.4 }}>
+                The dates passed without a booking, or someone else now has them. Close marks the enquiry Lost, Dates Unavailable.
+                To offer other dates first, tap the name.
+              </div>
+              {toClose.map(s => (
+                <div key={s.enquiryId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderTop: '1px solid var(--border-dim)' }}>
+                  <div onClick={() => navigate(`/owner/villa/enquiries/${s.enquiryId}`)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                    <div style={{ color: 'var(--text)', fontWeight: '600', fontSize: '0.82rem' }}>{s.guestName}</div>
+                    <div style={{ color: '#5C7080', fontSize: '0.7rem', marginTop: '2px' }}>
+                      {fmtDate(s.checkIn)} → {fmtDate(s.checkOut)} · {s.nights || 0}n · {s.guests || 1}p ·{' '}
+                      <span style={{ color: s.why === 'taken' ? '#EF4444' : '#8794A6', fontWeight: '600' }}>
+                        {s.why === 'taken' ? 'now booked' : 'dates passed'}
+                      </span>
+                    </div>
+                  </div>
+                  <button onClick={() => handleCloseOut([s.enquiryId])} disabled={closingOut !== null}
+                    style={{ flexShrink: 0, background: 'transparent', border: '1px solid var(--border-dim)', borderRadius: '8px', color: 'var(--text)', fontWeight: '700', fontSize: '0.72rem', padding: '6px 12px', cursor: closingOut !== null ? 'default' : 'pointer', opacity: closingOut === s.enquiryId ? 0.6 : 1 }}>
+                    {closingOut === s.enquiryId ? 'Closing…' : 'Close'}
+                  </button>
+                </div>
+              ))}
+              {toClose.length > 1 && (
+                <button onClick={() => handleCloseOut(null)} disabled={closingOut !== null}
+                  style={{ width: '100%', marginTop: '6px', background: 'rgba(251,146,60,0.12)', border: '1px solid rgba(251,146,60,0.4)', borderRadius: '8px', color: '#FB923C', fontWeight: '700', fontSize: '0.78rem', padding: '9px', cursor: closingOut !== null ? 'default' : 'pointer', opacity: closingOut === 'all' ? 0.6 : 1 }}>
+                  {closingOut === 'all' ? 'Closing…' : `Close all ${toClose.length}`}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {visibleMatches.length > 0 && (
           <div style={{ marginBottom: '14px' }}>

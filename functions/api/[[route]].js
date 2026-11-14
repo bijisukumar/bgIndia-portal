@@ -653,6 +653,33 @@ async function availabilityFor(DB, villaId, checkIn, checkOut, today) {
   return { conflicts, nearby, alternatives }
 }
 
+// Open enquiries that cannot go ahead any more: the check-in date has passed with no booking, or the nights are now taken.
+// "Taken" is availabilityFor, the rule behind the "Not available" card on an enquiry, so the two can never disagree.
+// Confirmed, lost and cancelled enquiries are never listed. At most 60 open enquiries are looked at, earliest dates first.
+async function enquiriesToCloseOut(DB, villaId, today) {
+  const { results } = await DB.prepare(`
+    SELECT enquiry_id, guest_name, source, status, checkin_date, checkout_date, nights, guests_count, quote_amount, final_offer_amount
+      FROM stayvibe_enquiries
+     WHERE villa_id = ? AND status NOT IN ('confirmed', 'lost', 'cancelled')
+       AND checkin_date IS NOT NULL AND checkin_date != '' AND checkout_date IS NOT NULL AND checkout_date != ''
+     ORDER BY checkin_date LIMIT 60`).bind(villaId).all()
+  const out = []
+  for (const e of (results || [])) {
+    let why = null
+    if (e.checkin_date < today) why = 'passed'
+    else if (e.checkout_date > e.checkin_date) {
+      const { conflicts } = await availabilityFor(DB, villaId, e.checkin_date, e.checkout_date, today)
+      if (conflicts.length) why = 'taken'
+    }
+    if (why) {
+      out.push({ enquiryId: e.enquiry_id, guestName: e.guest_name, source: e.source, status: e.status,
+        checkIn: e.checkin_date, checkOut: e.checkout_date, nights: e.nights, guests: e.guests_count,
+        amount: e.final_offer_amount || e.quote_amount || 0, why })
+    }
+  }
+  return out
+}
+
 // ── PUBLIC STAY ESTIMATE (the website's estimate page) ───────────────────────
 // Guests who ring up for "an estimate" get an approximate price and the real
 // availability here instead. Answers only: a rounded price for THEIR dates and
@@ -5972,6 +5999,15 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { available: conflicts.length === 0, conflicts, nearby, alternatives } })
       }
 
+      // The owner's list of open enquiries that cannot go ahead (dates passed, or now booked), to close out.
+      if (action === 'getEnquiriesToCloseOut') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const today = await todayOf(villaId)
+        return json({ success: true, data: { today, enquiries: await enquiriesToCloseOut(DB, villaId, today) } })
+      }
+
       // Live cleaning-turnaround check for a requested early-checkin/late-
       // checkout TIME — used while composing an enquiry (before any stay
       // exists) and on Complete Booking (against the actual stay's dates).
@@ -8465,6 +8501,38 @@ export async function onRequest(ctx) {
           VALUES (?, ?, 'status_change', ?, ?, (SELECT villa_id FROM stayvibe_enquiries WHERE enquiry_id = ?))
         `).bind(genId('COMM'), enquiryId, `Marked Lost — ${body.lostReason || 'other'}`, actor, enquiryId).run()
         return json({ success: true })
+      }
+
+      // Close out the enquiries that cannot go ahead (check-in passed with no booking, or the nights are now taken) as
+      // Lost, "Dates Unavailable": the same two writes as markEnquiryLost for each one. The server works out which
+      // enquiries qualify; the browser only says which of them to close (or none = all), so a screen that is out of date
+      // cannot close an enquiry that is fine again (a booking cancelled meanwhile), and an id that does not qualify is
+      // ignored. The note on an enquiry is only written for a row that really changed.
+      if (action === 'closeOutEnquiries') {
+        const villaId = String(body.villaId || DEFAULT_VILLA_ID)
+        assertPropertyAccess(payload, villaId)
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const today = await todayOf(villaId)
+        const wanted = Array.isArray(body.enquiryIds) ? new Set(body.enquiryIds.map(String)) : null
+        const toClose = (await enquiriesToCloseOut(DB, villaId, today)).filter(e => !wanted || wanted.has(e.enquiryId))
+        const closed = []
+        const stamp = now()
+        for (let i = 0; i < toClose.length; i += 25) {
+          const part = toClose.slice(i, i + 25)
+          const res = await DB.batch(part.map(e => DB.prepare(
+            `UPDATE stayvibe_enquiries SET status = 'lost', lost_reason = 'dates_unavailable', updated_by = ?, updated_at = ?
+              WHERE enquiry_id = ? AND villa_id = ? AND status NOT IN ('confirmed', 'lost', 'cancelled')`
+          ).bind(actor, stamp, e.enquiryId, villaId)))
+          const changed = part.filter((e, k) => (res[k]?.meta?.changes || 0) > 0)
+          if (changed.length) {
+            await DB.batch(changed.map(e => DB.prepare(
+              `INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'status_change', ?, ?, ?)`
+            ).bind(genId('COMM'), e.enquiryId,
+              `Marked Lost — dates_unavailable (${e.why === 'passed' ? 'the dates passed with no booking' : 'the dates are now booked'})`, actor, villaId)))
+          }
+          closed.push(...changed.map(e => e.enquiryId))
+        }
+        return json({ success: true, data: { closed: closed.length, enquiryIds: closed } })
       }
 
       // Confirm an enquiry: creates a stays row (so dashboard/calendar pick it

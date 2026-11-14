@@ -928,7 +928,11 @@ function irrigationZoneStatus(lastLogged, freq, today) {
 const IRRIGATION_MISS_REASONS = [
   { code: 'power_cut',      label: 'Power cut' },
   { code: 'pump_fault',     label: 'Pump or motor fault' },
-  { code: 'no_water',       label: 'Well or tank dry' },
+  // "Water shortage" is the owner's word for a dry well, an empty tank or too little water: one code, one word
+  // everywhere, including the tick-box on the log form.
+  { code: 'no_water',       label: 'Water shortage' },
+  // The land was being cleaned, so it was not watered. Also a tick-box on the log form, beside Raining.
+  { code: 'land_cleaning',  label: 'Land cleaning' },
   { code: 'not_needed',     label: 'Soil still wet, not needed' },
   { code: 'nobody_on_site', label: 'Nobody on site' },
   // Deliberately last, and it demands a note: an "other" that explains nothing is the one

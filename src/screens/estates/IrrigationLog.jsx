@@ -26,6 +26,8 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   const [duration, setDuration] = useState('')
   const [notes, setNotes]       = useState('')
   const [raining, setRaining]   = useState(false)   // rain watered every zone
+  const [landCleaning, setLandCleaning]   = useState(false)   // the land was being cleaned (a reason code, like the Not watered picker's)
+  const [waterShortage, setWaterShortage] = useState(false)   // not enough water (the code the picker also offers)
   const [saving, setSaving]     = useState(false)
   const [toast, setToast]       = useState(null)
   const [history, setHistory]   = useState([])
@@ -80,12 +82,16 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     finally { setBusyDay(null) }
   }
 
+  function clearForm() {
+    setSelected({}); setRaining(false); setLandCleaning(false); setWaterShortage(false); setNotes(''); setDuration('')
+  }
+
   // Update now: the same form the log tab always had, opened on the day that has no entry. The date stays on
   // that day until he saves or cancels, so the entry cannot land on some other date.
   function startUpdate(day) {
     setUpdatingDay(day.date)
     setDate(day.date)
-    setSelected({}); setRaining(false); setNotes(''); setDuration('')
+    clearForm()
     setExplainDay(null)
     setTab('log')
     try { window.scrollTo(0, 0) } catch { /* nothing to scroll */ }
@@ -94,7 +100,7 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   function cancelUpdate() {
     setUpdatingDay(null)
     setDate(localTodayStr())
-    setSelected({}); setRaining(false); setNotes(''); setDuration('')
+    clearForm()
     setTab('missing')
   }
 
@@ -137,8 +143,47 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
     if (on) selectAll(); else setSelected({})
   }
 
+  // The reasons ticked beside the zones go into the note, Rain first (the Worker reads a note that starts with
+  // "rain" as a rain day). The words for the two codes come from the list the Worker serves, so this form and
+  // the Not watered picker cannot disagree about what to call them.
+  const codeLabel = (code, fallback) => (missing?.reasonCodes || []).find(r => r.code === code)?.label || fallback
+  const dayReasons = [
+    raining && 'Rain',
+    landCleaning && codeLabel('land_cleaning', 'Land cleaning'),
+    waterShortage && codeLabel('no_water', 'Water shortage'),
+  ].filter(Boolean)
+  const noteText = [...dayReasons, notes.trim()].filter(Boolean).join(' — ')
+
+  // No zone ticked and a reason ticked: nothing was watered that day. It is saved as a day that was not
+  // watered, with the same code the Not watered picker uses, so it is added up with the rest. Only for a day
+  // that is over: the server does not take today.
+  const notWatered = selectedZones.length === 0 && !raining && (landCleaning || waterShortage)
+  const dayOver    = !!date && date < localTodayStr()
+  const canSave    = notWatered ? dayOver : selectedZones.length > 0
+
+  async function saveNotWatered() {
+    // One code per day. When both are ticked the water is the harder cause; land cleaning goes into the note.
+    const code     = waterShortage ? 'no_water' : 'land_cleaning'
+    const alsoLand = landCleaning && waterShortage ? codeLabel('land_cleaning', 'Land cleaning') : ''
+    setSaving(true)
+    try {
+      await api.approveIrrigationMissedDay({
+        estate, date, reasonCode: code, reason: [alsoLand, notes.trim()].filter(Boolean).join(' — '),
+      })
+      showToast('Saved: not watered on ' + fmtDate(date))
+      clearForm()
+      loadMissing()
+      if (updatingDay) { setUpdatingDay(null); setDate(localTodayStr()); setTab('missing') }
+    } catch(e) {
+      showToast(/has an irrigation entry/.test(e?.message || '')
+        ? 'That day already has an entry. Tick the zones to add to it.'
+        : (e?.message || 'Could not save'), 'error')
+    } finally { setSaving(false) }
+  }
+
   async function handleSave() {
-    if (selectedZones.length === 0) { showToast('Select at least one zone', 'error'); return }
+    if (notWatered) { await saveNotWatered(); return }
+    if (selectedZones.length === 0) { showToast('Select at least one zone, or tick the reason if nothing was watered', 'error'); return }
     setSaving(true)
     try {
       // One request, one summary email — not one per zone
@@ -146,15 +191,13 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
         estate,
         loggedDate:   date,
         durationMins: parseInt(duration) || 0,
-        notes:        (raining ? ['Rain', notes.trim()].filter(Boolean).join(' — ') : notes.trim()) || null,
+        notes:        noteText || null,
         zones:        selectedZones.map(z => ({ zoneId: z.zone_id, zoneName: z.zone_name })),
       })
       showToast(`✅ Logged irrigation for ${selectedZones.length} zone${selectedZones.length>1?'s':''}`)
-      setSelected({})
-      setRaining(false)
-      setNotes('')
-      setDuration('')
+      clearForm()
       loadZones() // refresh zone health
+      loadMissing() // the day he has just filled in may have been on the missing list
       if (updatingDay) {
         // Back to the list, which reloads: the day he has just filled in is gone and the next one is the next job.
         showToast('✅ Saved for ' + fmtDate(updatingDay))
@@ -204,7 +247,7 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
               <div style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', marginBottom:'12px',
                 borderRadius:'10px', background:'rgba(200,144,58,0.12)', border:'1px solid rgba(200,144,58,0.45)'}}>
                 <div style={{flex:1, minWidth:0, fontSize:'0.82rem', color:'#C8903A', fontWeight:600}}>
-                  Updating {fmtDate(updatingDay)}, a day with no entry. Tick the zones that were watered.
+                  Updating {fmtDate(updatingDay)}, a day with no entry. Tick the zones that were watered, or the reason if none were.
                 </div>
                 <button onClick={cancelUpdate}
                   style={{padding:'6px 12px', borderRadius:'8px', cursor:'pointer', fontSize:'0.74rem', flexShrink:0,
@@ -246,6 +289,25 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                   style={{width:'20px', height:'20px', accentColor:'#185FA5', flexShrink:0}}/>
                 🌧 Raining — rain watered all zones
               </label>
+              <label style={{display:'flex', alignItems:'center', gap:'10px', marginTop:'10px', cursor:'pointer', userSelect:'none', fontSize:'0.86rem', color: landCleaning ? '#85B7EB' : 'var(--text)'}}>
+                <input type="checkbox" checked={landCleaning} onChange={e=>setLandCleaning(e.target.checked)}
+                  style={{width:'20px', height:'20px', accentColor:'#185FA5', flexShrink:0}}/>
+                🧹 {codeLabel('land_cleaning', 'Land cleaning')}
+              </label>
+              <label style={{display:'flex', alignItems:'center', gap:'10px', marginTop:'10px', cursor:'pointer', userSelect:'none', fontSize:'0.86rem', color: waterShortage ? '#85B7EB' : 'var(--text)'}}>
+                <input type="checkbox" checked={waterShortage} onChange={e=>setWaterShortage(e.target.checked)}
+                  style={{width:'20px', height:'20px', accentColor:'#185FA5', flexShrink:0}}/>
+                🚱 {codeLabel('no_water', 'Water shortage')}
+              </label>
+              {(landCleaning || waterShortage) && (
+                <div style={{marginTop:'8px', fontSize:'0.72rem', color:'var(--text-dim)', lineHeight:1.4}}>
+                  {!notWatered
+                    ? 'The reason is added to the note for the zones you tick.'
+                    : dayOver
+                      ? 'No zones ticked, so this day is saved as not watered, with this reason.'
+                      : "Today isn't over yet. Tick the zones that were watered, or save this day as not watered tomorrow, from Missing days."}
+                </div>
+              )}
             </div>
 
             {/* Zone selector */}
@@ -296,9 +358,9 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
               </div>
             )}
 
-            <button className="btn btn-gold" onClick={handleSave} disabled={saving || selectedZones.length === 0}
-              style={{opacity: selectedZones.length === 0 ? 0.5 : 1}}>
-              {saving ? 'Saving…' : `💧 Save irrigation log${selectedZones.length > 1 ? ` (${selectedZones.length} zones)` : ''}`}
+            <button className="btn btn-gold" onClick={handleSave} disabled={saving || !canSave}
+              style={{opacity: canSave ? 1 : 0.5}}>
+              {saving ? 'Saving…' : notWatered ? '🚫 Save day as not watered' : `💧 Save irrigation log${selectedZones.length > 1 ? ` (${selectedZones.length} zones)` : ''}`}
             </button>
           </>
         )}

@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
-import { propertyYear } from '../utils/dates'
+import { propertyYear, fmtDate, daysFromToday } from '../utils/dates'
 
 const STATUS_COLOR = {
   'Signed Up':'#185FA5','Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
@@ -60,6 +60,39 @@ function KpiStrip({ props, income, losses, currency }) {
         <div style={{...styles.kpiVal, color:'#EF4444'}}>{fmtCurrency(totalWrittenOff, cur)}</div>
         <div style={styles.kpiSub}>unrecoverable losses</div>
       </div>
+    </div>
+  )
+}
+
+// One line of lease term: "LEASE  01 Jan 2025 → 31 Dec 2025". The end date turns red once the lease is over and amber
+// when it runs out within 60 days, the same window the "expiring soon" banner uses.
+function TermLine({ label, who, start, end }) {
+  const left = end ? daysFromToday(end) : null          // negative = already over
+  const endColor = left === null ? '#B8C4D0' : left < 0 ? '#EF9A9A' : left <= 60 ? '#F59E0B' : '#B8C4D0'
+  return (
+    <div style={styles.leaseLine}>
+      <span style={styles.leaseLabel}>{label}</span>
+      {who && <span>{who} ·</span>}
+      <span>{start ? fmtDate(start) : 'not set'}</span>
+      <span style={{color:'#5C7080'}}>→</span>
+      <span style={{color:endColor}}>{end ? fmtDate(end) : 'open-ended'}</span>
+    </div>
+  )
+}
+
+// What goes under a property: its lease term, and the parking lease when the parking is let separately (that is
+// the lease the "expiring soon" banner is often about). A tenant with no dates yet says so, so a missing term is
+// visible instead of silent.
+function LeaseTerms({ p }) {
+  const main    = p.lease_start || p.lease_end
+  const parking = !!p.has_separate_parking && !!(p.parking_lease_start || p.parking_lease_end)   // booleans: a bare 0 from the database would print "0"
+  if (!main && !parking && !p.tenant_name) return null
+  return (
+    <div style={styles.leaseBox}>
+      {main
+        ? <TermLine label="LEASE" start={p.lease_start} end={p.lease_end} />
+        : p.tenant_name && <div style={{color:'#5C7080'}}>Lease dates not set</div>}
+      {parking && <TermLine label="PARKING" who={p.parking_tenant_name} start={p.parking_lease_start} end={p.parking_lease_end} />}
     </div>
   )
 }
@@ -214,26 +247,28 @@ export default function Rev360Home() {
             <div style={{marginBottom:'12px'}}>
               {tabProps.map(p => (
                 <div key={p.prop_id} style={{
-                  display:'flex',justifyContent:'space-between',alignItems:'center',
                   padding:'10px 14px',marginBottom:'6px',borderRadius:'10px',
                   background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',
                 }}>
-                  <div>
-                    <div style={{fontWeight:'600',fontSize:'0.88rem',color:'#EDF2F7'}}>{p.name}</div>
-                    <div style={{fontSize:'0.7rem',color:'#5C7080',marginTop:'2px'}}>{p.location}</div>
-                  </div>
-                  <div style={{textAlign:'right'}}>
-                    <div style={{
-                      fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',
-                      background:`${STATUS_COLOR[p.is_delinquent ? 'Delinquent' : (p.stage||p.status)]||'#5C7080'}18`,
-                      color:STATUS_COLOR[p.is_delinquent ? 'Delinquent' : (p.stage||p.status)]||'#5C7080',
-                    }}>
-                      {p.is_delinquent ? '⚠️ Delinquent' : (p.stage || p.status || 'Active')}
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <div>
+                      <div style={{fontWeight:'600',fontSize:'0.88rem',color:'#EDF2F7'}}>{p.name}</div>
+                      <div style={{fontSize:'0.7rem',color:'#5C7080',marginTop:'2px'}}>{p.location}</div>
                     </div>
-                    {p.tenant_name && (
-                      <div style={{fontSize:'0.68rem',color:'#5C7080',marginTop:'3px'}}>{p.tenant_name}</div>
-                    )}
+                    <div style={{textAlign:'right'}}>
+                      <div style={{
+                        fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',borderRadius:'10px',
+                        background:`${STATUS_COLOR[p.is_delinquent ? 'Delinquent' : (p.stage||p.status)]||'#5C7080'}18`,
+                        color:STATUS_COLOR[p.is_delinquent ? 'Delinquent' : (p.stage||p.status)]||'#5C7080',
+                      }}>
+                        {p.is_delinquent ? '⚠️ Delinquent' : (p.stage || p.status || 'Active')}
+                      </div>
+                      {p.tenant_name && (
+                        <div style={{fontSize:'0.68rem',color:'#5C7080',marginTop:'3px'}}>{p.tenant_name}</div>
+                      )}
+                    </div>
                   </div>
+                  <LeaseTerms p={p} />
                 </div>
               ))}
             </div>
@@ -288,4 +323,7 @@ const styles = {
   kpiLabel:     {fontSize:'0.62rem',color:'#5C7080',letterSpacing:'1.5px',marginBottom:'6px'},
   kpiVal:       {fontSize:'1.4rem',fontWeight:'700',lineHeight:1},
   kpiSub:       {fontSize:'0.68rem',color:'#5C7080',marginTop:'4px'},
+  leaseBox:     {marginTop:'8px',paddingTop:'7px',borderTop:'1px solid rgba(255,255,255,0.05)',fontSize:'0.72rem',color:'#B8C4D0',display:'flex',flexDirection:'column',gap:'4px'},
+  leaseLine:    {display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'},
+  leaseLabel:   {fontSize:'0.58rem',letterSpacing:'1.5px',color:'#5C7080',minWidth:'46px'},
 }

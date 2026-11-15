@@ -6,6 +6,7 @@ import EstateHighlights    from './EstateHighlights'
 import IrrigationDashboard from './IrrigationDashboard'
 import PollachiEstateMap    from './PollachiEstateMap'
 import { parseLocalDate, localTodayStr, propertyYear } from '../../utils/dates'
+import { marketAge, ageLabel } from '../../utils/coconutPrice'
 
 const CUR_YEAR = propertyYear()
 const YEARS    = [0, CUR_YEAR, CUR_YEAR - 1, CUR_YEAR - 2, CUR_YEAR - 3]
@@ -142,6 +143,8 @@ export default function CoconutDashboard() {
   const [harvestLogOpen, setHarvestLogOpen] = useState(false)   // Harvest Log collapsible
   const [irrigationOpen, setIrrigationOpen] = useState(false)   // Irrigation Zone Health collapsible
   const [reloadKey, setReloadKey] = useState(0)                 // bump to refetch harvests
+  const [market, setMarket]     = useState(null)                // coconutboard.in, or null while it loads or if it fails
+  const [marketFailed, setMarketFailed] = useState(false)
   const [editInterval, setEditInterval] = useState(false)       // next-harvest interval editor open
   const [intervalInput, setIntervalInput] = useState('')
   const [intervalSaving, setIntervalSaving] = useState(false)
@@ -159,6 +162,14 @@ export default function CoconutDashboard() {
       .catch(() => setData(null))
       .finally(() => setLoading(false))
   }, [year, reloadKey])
+
+  // Its own effect, and failures are swallowed: the board is somebody else's website, and a slow
+  // or missing price must not hold up or break a dashboard that is mostly about our own numbers.
+  useEffect(() => {
+    api.getCoconutMarketPrice()
+      .then(d => setMarket(d))
+      .catch(() => setMarketFailed(true))
+  }, [])
 
   useEffect(() => {
     // P&L only for owner
@@ -267,6 +278,59 @@ export default function CoconutDashboard() {
           )}
         </div>
 
+
+        {/* ── MARKET PRICE — what the Coconut Board says a kilo fetches, beside what we last got ──
+             Not headed "today": the board quotes on the days it quotes, and the figure can be several
+             days old. The age is on the card so nobody reads a stale number as this morning's. */}
+        {(market || marketFailed) && (() => {
+          const rows = [
+            { label: 'Pollachi (Green)', data: market?.pollachiGreen },
+            { label: 'Pollachi (Black)', data: market?.pollachiBlack },
+            { label: 'Thrissur',         data: market?.thrissur },
+          ]
+          const any = rows.some(r => r.data && r.data.price)
+          const { newest, daysOld } = marketAge(rows.map(r => r.data), localTodayStr())
+          const age = ageLabel(daysOld)
+          return (
+            <div style={s.mktCard}>
+              <div style={s.mktHead}>
+                <span style={s.mktTitle}>🥥 MARKET PRICE</span>
+                {any && age && (
+                  <span style={{ ...s.mktAge, color: daysOld > 2 ? '#FFCC80' : '#5C7080' }}>{age}</span>
+                )}
+              </div>
+              {!any ? (
+                <div style={s.mktNone}>
+                  The Coconut Board's page did not give a price just now. Nothing is wrong with our own figures below.
+                </div>
+              ) : (
+                <>
+                  <div style={s.mktGrid}>
+                    {rows.map(({ label, data }) => (
+                      <div key={label} style={s.mktItem}>
+                        <div style={s.mktPrice}>{data && data.price ? `₹${data.price}` : '—'}</div>
+                        <div style={s.mktPer}>{data && data.price ? 'per kg' : 'no quote'}</div>
+                        <div style={s.mktLabel}>{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Our own last price next to theirs. Deliberately not a subtraction: what a harvest
+                      fetched and what the board quotes are not guaranteed to be the same measure, and a
+                      confident difference between two unlike numbers is worse than two honest ones. */}
+                  {latestHarvest?.pricePerKg > 0 && (
+                    <div style={s.mktOurs}>
+                      Our last harvest fetched <strong style={{ color:'#C8903A' }}>₹{latestHarvest.pricePerKg}/kg</strong>
+                      {latestHarvest.date ? ` on ${fmtDate(latestHarvest.date)}` : ''}
+                    </div>
+                  )}
+                  <div style={s.mktSrc}>
+                    Source: coconutboard.in{newest ? ` · board's own date ${fmtDate(newest)}` : ''}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })()}
 
         {/* ── EMAIL REPORT — owner only: irrigation compliance + expenses logged, for any date range ── */}
         {isOwner && (
@@ -663,6 +727,18 @@ export default function CoconutDashboard() {
 }
 
 const s = {
+  mktCard:  { background:'#1E2535', borderRadius:12, border:'1px solid rgba(15,110,86,0.25)', padding:'12px', marginBottom:12 },
+  mktHead:  { display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:10 },
+  mktTitle: { color:'#8A9BAE', fontSize:'0.62rem', letterSpacing:'0.1em', fontWeight:700 },
+  mktAge:   { fontSize:'0.62rem' },
+  mktGrid:  { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 },
+  mktItem:  { textAlign:'center', background:'rgba(15,110,86,0.06)', borderRadius:8, padding:'10px 6px', border:'1px solid rgba(15,110,86,0.12)' },
+  mktPrice: { color:'#4CAF50', fontSize:'1.05rem', fontWeight:700, lineHeight:1.2 },
+  mktPer:   { color:'#3A4A40', fontSize:'0.58rem' },
+  mktLabel: { color:'#5C7080', fontSize:'0.6rem', marginTop:4, lineHeight:1.3 },
+  mktOurs:  { color:'#8A9BAE', fontSize:'0.72rem', textAlign:'center', marginTop:10 },
+  mktNone:  { color:'#8A9BAE', fontSize:'0.74rem', lineHeight:1.5 },
+  mktSrc:   { color:'#3A4A40', fontSize:'0.6rem', textAlign:'center', marginTop:6 },
   nextBanner: {
     borderRadius: 12,
     border: '1px solid',

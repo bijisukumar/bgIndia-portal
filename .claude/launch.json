@@ -4,8 +4,24 @@
     {
       "name": "stayvibe",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--config", "vite.stayvibe.config.js"],
+      "runtimeArgs": [
+        "vite",
+        "--config",
+        "vite.stayvibe.config.js"
+      ],
       "port": 5173
+    },
+    {
+      "name": "estate360",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--config",
+        "vite.estate360.config.js",
+        "--port",
+        "5175"
+      ],
+      "port": 5175
     }
   ]
 }

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
 import TopBar from '../components/TopBar'
-import { parseLocalDate, fmtClock } from '../utils/dates'
+import { parseLocalDate, localTodayStr, fmtClock } from '../utils/dates'
+import { marketAge, ageLabel } from '../utils/coconutPrice'
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -173,8 +174,19 @@ export default function EstateManagerHome() {
 
         </div>
 
-        {/* ── COCONUT MARKET PRICE ── */}
-        <div className="card-section-label" style={{ marginTop: 16 }}>🥥 MARKET PRICE TODAY</div>
+        {/* ── COCONUT MARKET PRICE ──
+             It used to say TODAY. The board quotes on the days it quotes, and the figure under that
+             heading was three days old; the age now comes from the board's own date. */}
+        <div className="card-section-label" style={{ marginTop: 16 }}>
+          🥥 MARKET PRICE
+          {(() => {
+            const age = ageLabel(marketAge(
+              [marketPrice?.pollachiGreen, marketPrice?.pollachiBlack, marketPrice?.thrissur],
+              localTodayStr(),
+            ).daysOld)
+            return age ? <span style={{ textTransform:'none', letterSpacing:0, marginLeft:8, opacity:0.75 }}>· {age}</span> : null
+          })()}
+        </div>
         <div style={s.marketCard}>
           {marketLoading ? (
             <div style={s.marketLoading}>Fetching live prices…</div>

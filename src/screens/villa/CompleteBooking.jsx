@@ -26,6 +26,7 @@ import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
 import GuestTimesReview from '../../components/GuestTimesReview'
 import StayTimesLine from '../../components/StayTimesLine'
 import TimeAskHistory from '../../components/TimeAskHistory'
+import { canSendCheckinEmail, lastCheckinEmail } from '../../utils/checkinEmail'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { hostPartners, partnerFor, commissionPct, percentOf, platformTake } from '../../utils/partners'
@@ -183,6 +184,7 @@ export default function CompleteBooking() {
   // The "Guest names & ages" list under Guests (Guest info): fetched when it is opened, for one stay at a time.
   const [guestNames, setGuestNames] = useState({ stayId: null, open: false, loading: false, data: null, error: '' })
   const [checkoutEmailBusy, setCheckoutEmailBusy] = useState(null) // stay_id currently sending, or null
+  const [checkinEmailBusy, setCheckinEmailBusy] = useState(null)   // stay_id whose check-in email is going out, or null
   const [farewellAsked, setFarewellAsked] = useState({}) // stay_id -> when "Send farewell message" was tapped this session
 
   const showToast = (msg, type='success') => {
@@ -670,6 +672,26 @@ export default function CompleteBooking() {
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
     finally { setCheckoutEmailBusy(null) }
+  }
+
+  // The check-in email: the booking details with the online check-in link at the top, sent from the villa's own address (a copy goes to
+  // the villa inbox). It leaves the moment this is confirmed, so it asks first, and says so when the guest was already emailed.
+  async function handleSendCheckinEmail(stay) {
+    const to = String(stay.guest_email || '').trim()
+    if (!to) return
+    const last = lastCheckinEmail(stay)
+    const what = stay.checkin_form_submitted ? 'the booking details' : 'the booking details and the online check-in link'
+    const ask = last
+      ? `${stay.guest_name} was already emailed on ${fmtStampZ(last.at)}.\n\nEmail ${what} to ${to} again?`
+      : `Email ${what} to ${to}?`
+    if (!window.confirm(ask)) return
+    setCheckinEmailBusy(stay.stay_id)
+    try {
+      const res = await api.sendCheckinEmail({ stayId: stay.stay_id })
+      showToast(res && res.alreadySent ? 'That email went a moment ago ✓' : `Email sent to ${to} ✓`)
+      await loadStays()
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setCheckinEmailBusy(null) }
   }
 
   // The farewell carries the review ask (it goes out on the way home, when a review gets written), so tapping it counts
@@ -2200,6 +2222,38 @@ export default function CompleteBooking() {
                       }}>
                       📝 Send check-in link to {name}
                     </a>
+                  )
+                })()}
+
+                {/* Email: the booking details with the online check-in link at the top (the Worker sends it from the villa's address,
+                    with a copy to the villa inbox). Shown for any guest still to arrive; with no email on record it offers to add one. */}
+                {s && canSendCheckinEmail(s) && (() => {
+                  const email = String(selected?.guest_email || '').trim()
+                  const name  = greetingName(selected?.guest_name)
+                  if (!email) return (
+                    <button
+                      onClick={() => { openInfoEdit('email'); guestInfoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
+                      style={{
+                        width: '100%', padding:'10px 14px', borderRadius:'10px', marginBottom:'14px',
+                        background:'rgba(133,183,235,0.05)', border:'1px dashed rgba(133,183,235,0.3)',
+                        color:'rgba(133,183,235,0.75)', fontSize:'0.78rem', textAlign:'center',
+                        cursor:'pointer', textDecoration:'underline', textDecorationStyle:'dotted',
+                      }}>
+                      ✉️ Email available once the guest's email is captured — tap to add it
+                    </button>
+                  )
+                  const last = lastCheckinEmail(selected)
+                  const sending = checkinEmailBusy === selected.stay_id
+                  return (
+                    <button onClick={() => handleSendCheckinEmail(selected)} disabled={sending}
+                      style={{
+                        display:'block', width:'100%', padding:'12px', borderRadius:'10px', textAlign:'center',
+                        background:'rgba(133,183,235,0.08)', border:'1px solid rgba(133,183,235,0.3)',
+                        color:'#85B7EB', fontWeight:'700', fontSize:'0.85rem',
+                        cursor: sending ? 'default' : 'pointer', opacity: sending ? 0.6 : 1, marginBottom:'14px',
+                      }}>
+                      {sending ? 'Sending…' : last ? `✉️ Email sent ${fmtStampZ(last.at)} · send again` : `✉️ Send email to ${name}`}
+                    </button>
                   )
                 })()}
 

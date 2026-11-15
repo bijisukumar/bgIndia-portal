@@ -17,6 +17,7 @@ import { parseLocalDate } from './dates'
 import { guestFacingTimes } from './stayTimes'
 import { dayMonth } from './stayHolds'
 import { bedroomsNeeded } from './villaPricing'
+import { greetingName } from './guestWording'
 
 const villa = CONFIG.villas[0]
 
@@ -406,20 +407,9 @@ function windowLine(w, year) {
     : '* ' + dayLabel(w.checkIn) + ' to ' + dayLabel(w.checkOut)
 }
 
-// The word to greet a guest by. Enquiries are often typed in capitals ("VIGNESH M"), and a greeting in capitals
-// shouts; and many names put initials first ("P. B Krishnan"), where the first WORD is no name at all
-// ("Namaskaram P.!", 2026-10-24). So: the first word of two or more letters that is not a title (Mr, Dr, Shri...).
-const GREETING_TITLES = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'shri', 'sri', 'smt', 'sreemati'])
-export function greetingName(fullName) {
-  const words = String(fullName || '').trim().split(/\s+/).filter(Boolean)
-  if (!words.length) return 'there'
-  const letters = w => w.replace(/[^\p{L}]/gu, '')
-  const pick = words.find(w => letters(w).length >= 2 && !GREETING_TITLES.has(letters(w).toLowerCase())) || words[0]
-  const first = pick.replace(/[.,;:]+$/, '')
-  if (!first) return 'there'
-  const shouting = first === first.toUpperCase() && first !== first.toLowerCase()
-  return shouting ? first.charAt(0) + first.slice(1).toLowerCase() : first
-}
+// The word to greet a guest by (capitals tamed, initials and titles skipped) is in guestWording.js, pure, so the Worker's check-in
+// email greets a guest the same way; it is re-exported here so every existing import keeps working.
+export { greetingName }
 
 // { guestName, checkIn, checkOut ('YYYY-MM-DD'), alternatives } -> the message
 // text, or null when the dates are not usable. `alternatives` is what

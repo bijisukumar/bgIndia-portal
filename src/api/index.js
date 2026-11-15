@@ -169,6 +169,7 @@ export const api = {
   declineGuestTimes:   (data)    => post('declineGuestTimes', data),
   updateStayCheckinTimes: (data) => post('updateStayCheckinTimes', data),
   sendCheckoutEmailNow: (data) => post('sendCheckoutEmailNow', data),
+  sendCheckinEmail:     (data) => post('sendCheckinEmail', data),
   getFlexRequests:   (villaId) => get('getFlexRequests', { villaId }),
   updateFlexRequest: (data)    => post('updateFlexRequest', data),
   getTurnaroundHistory: (villaId) => get('getTurnaroundHistory', { villaId }),

@@ -136,6 +136,11 @@ by frontend routing.
    so a change of words is a deploy, not a paste into Google. The script
    keeps only a fallback copy (`DEFAULT_CHECKIN_EMAIL`), used when a host
    has no such block.
+   The email the owner sends from Complete booking ("Send email": the online
+   check-in link first, then the booking details) is `guestMessages.checkinEmail`
+   in the same file (placeholders are listed above the block). The Worker reads
+   it from the file, so it works from the deploy; a host without the block gets
+   "not set up" on the button.
    The poller (`PollNewReservationAndProcess.gs`, v1.3 or later) also reads
    Airbnb's "wants to change their reservation" emails for the change
    requests above: inside the same 5-minute `pollNewReservations` run, no new

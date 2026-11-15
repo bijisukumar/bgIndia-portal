@@ -473,6 +473,35 @@ If you haven't completed your online check-in registration yet, please take a mo
 
 {checkinUrl}`,
     },
+    // The email behind "✉️ Send email to ..." on Complete booking (src/utils/checkinEmail.js, action sendCheckinEmail): the online check-in
+    // link FIRST (a button in the HTML version, the bare link in the plain text), then the booking details. Sent from email.guestFrom with
+    // a silent copy to email.guestBcc, like the checkout-day email. The server reads this block from this file, so a change of words is a
+    // deploy and nothing to seed or paste. {placeholders}: firstName, villaName, checkinDateShort, checkinDateFull, checkoutDateFull,
+    // nights, guestCount, ownerName, ownerWhatsApp, managerName, managerPhone, brandName, checkinUrl, and {bookingDetails} (the Check-in /
+    // Check-out / Guests / Bedrooms / Duration / Address / Map lines, built from the booking). subjectDone and doneIntro are used instead
+    // once the guest has already done the online check-in form.
+    checkinEmail: {
+      subject:     'Your stay on {checkinDateShort}: please complete your online check-in',
+      subjectDone: 'Your stay on {checkinDateShort}: your booking details',
+      linkIntro:   'Please complete your online check-in before you arrive. It is a mandatory requirement in the Temple Town of Guruvayur, and it takes about two minutes.',
+      linkButton:  'Complete online check-in',
+      doneIntro:   'Thank you for completing your online check-in. It helps us make your arrival smooth and hassle-free.',
+      bedType:     'Indian Queen Size beds',
+      template:
+`Namaskaram {firstName}!
+
+This is Biji from Guruvayur Villa (Dwarka). I wanted to personally welcome you ahead of your stay on {checkinDateShort}.
+
+YOUR BOOKING DETAILS
+{bookingDetails}
+
+If you have a time in mind for your arrival, or any special requirements, please message me on WhatsApp at {ownerWhatsApp}. Any change to your booking (dates, number of guests or requests) needs to be approved by me directly.
+
+We are truly looking forward to hosting you and your family!
+
+Snehapoorvam (സ്നേഹപൂർവ്വം),
+Biji | Guruvayur Villa (Dwarka)`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

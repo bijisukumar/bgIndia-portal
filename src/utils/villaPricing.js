@@ -18,6 +18,7 @@
 
 import { CONFIG } from '../config'
 import { estimateStay, groupNights } from './seasonRates'
+import { GUESTS_PER_BEDROOM, bedroomsNeeded } from './guestWording'
 
 export const OVERFLOW_PER_GUEST_PER_NIGHT = CONFIG.pricing.overflowPerGuestPerNight
 export const OVERFLOW_MAX_RECOMMENDED = CONFIG.pricing.overflowMaxRecommended
@@ -27,17 +28,10 @@ export const RATE_CARD_MAX_GUESTS = CONFIG.pricing.rateCardMaxGuests
 // once billable guests exceed 2x a villa's bedroom count, the bedroom count
 // shown just stays capped rather than implying more bedrooms exist.
 export const VILLA_BEDROOMS = Object.fromEntries(CONFIG.villas.map(v => [v.id, v.bedrooms]))
-export const GUESTS_PER_BEDROOM = 2
-
-// The one rule for "how many bedrooms does this party take": about two guests to a room,
-// rounded up, never more than the villa has; an unknown party size means the whole villa.
-// Used by the enquiry quote (getBedroomEstimate below), the host intro and the arrival
-// message, so a family of 5 is told 3 bedrooms everywhere, not the villa's full 4.
-export function bedroomsNeeded(villaBedrooms, billableGuests) {
-  const max = Number(villaBedrooms) || 0
-  if (!billableGuests || billableGuests <= 0) return max
-  return Math.min(max || 1, Math.ceil(billableGuests / GUESTS_PER_BEDROOM))
-}
+// The bedroom rule ("how many bedrooms does this party take": about two guests to a room, rounded up, never more than the villa has)
+// is in guestWording.js, pure, so the Worker's check-in email tells a family of 5 the same 3 bedrooms as the quote, the host intro and
+// the arrival message. Re-exported here so every existing import keeps working.
+export { GUESTS_PER_BEDROOM, bedroomsNeeded }
 
 export function getBedroomEstimate(villaId, billableGuests) {
   const maxBedrooms = VILLA_BEDROOMS[villaId] || VILLA_BEDROOMS.dwarka

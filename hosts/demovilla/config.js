@@ -213,6 +213,29 @@ Demo Villa`,
 {checkinUrl}
 `,
     },
+    // The email behind "Send email to ..." on Complete booking: the online check-in link first, then the booking details. Same shape and
+    // {placeholders} as hosts/dwarka/config.js, where they are listed.
+    checkinEmail: {
+      subject:     'Your stay on {checkinDateShort}: please complete your online check-in',
+      subjectDone: 'Your stay on {checkinDateShort}: your booking details',
+      linkIntro:   'Please complete your online check-in before you arrive. It is a mandatory registration and takes about two minutes.',
+      linkButton:  'Complete online check-in',
+      doneIntro:   'Thank you for completing your online check-in.',
+      template:
+`Namaskaram {firstName}!
+
+This is your host from Demo Villa. I wanted to personally welcome you ahead of your stay on {checkinDateShort}.
+
+YOUR BOOKING DETAILS
+{bookingDetails}
+
+If you have a time in mind for your arrival, or any special requirements, please message me on WhatsApp at {ownerWhatsApp}.
+
+We're looking forward to hosting you and your family.
+
+Warm regards,
+Demo Villa`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

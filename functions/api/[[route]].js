@@ -86,6 +86,7 @@ import { carPhotoMonths, hasPlateNumber, cleanPlateList } from '../../src/utils/
 import { buildWebVisit, webVisitChip } from '../../src/utils/visitorInfo.js'
 import { priceReminderSettings, periodStartStamp, buildPriceReminder } from '../../src/utils/priceReminder.js'
 import { leaseReminderSettings, renewalRemindersDue, buildRenewalEmail } from '../../src/utils/leaseRenewal.js'
+import { buildCheckinEmail, canSendCheckinEmail, CHECKIN_EMAIL_KIND } from '../../src/utils/checkinEmail.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -513,11 +514,11 @@ function renderTemplate(template, vars) {
 // Separate from sendAlert (which is always host-Biji-facing, from a
 // "Security" sender) — this sends TO a guest, so it needs its own
 // guest-appropriate from-address. Shares the same Resend key/logging.
-async function sendGuestEmail(env, DB, { to, subject, text, villaId, category }) {
+async function sendGuestEmail(env, DB, { to, subject, text, html, villaId, category }) {
   let ok = false, statusCode = null, detail = ''
   try {
     const apiKey = await getResendApiKey(DB, env)
-    if (!apiKey) throw new Error('RESEND_API_KEY not configured')
+    if (!apiKey && !env.ALERT_DRY_RUN) throw new Error('RESEND_API_KEY not configured')
     // Per-host sender and silent copy. The guest must see the brand they
     // actually booked with, and the villa's own inbox holds the exact
     // message rather than a reconstruction from the log. BCC not CC: the
@@ -525,12 +526,17 @@ async function sendGuestEmail(env, DB, { to, subject, text, villaId, category })
     // and the copy is omitted entirely when a host sets no address.
     const hostEmail = getHostConfig(villaId)?.email || {}
     const bcc = hostEmail.guestBcc
-    const res = await fetch('https://api.resend.com/emails', {
+    // Local tests only (ALERT_DRY_RUN is never set in production): nothing is sent, and the START of the finished text is kept in the
+    // delivery log (the check-in link is at the top of the check-in email).
+    if (env.ALERT_DRY_RUN) detail = '[dry run] ' + `${subject} || ${text}`.slice(0, 470)
+    const res = env.ALERT_DRY_RUN ? { ok: true, status: 200, statusText: 'dry run', text: async () => '' } : await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
         from: hostEmail.guestFrom || 'Guruvayur Estates <stay@luxuryvillasofguruvayur.com>',
         to: [to], subject, text,
+        // An HTML version (the check-in email has its link as a button); the text above stays for readers that cannot show it.
+        ...(html ? { html } : {}),
         ...(bcc ? { bcc: [bcc] } : {}),
       }),
     })
@@ -2119,22 +2125,51 @@ async function guestTimeHistory(DB, stayId) {
   } catch (e) { console.error('guestTimeHistory:', e?.message || e); return [] }
 }
 
+// The history lines of ONE kind for these stay rows: { stayId: [{ note, created_at }] }, oldest first. One query for every 90 stays.
+async function stayEventRows(DB, rows, eventType) {
+  const ids = [...new Set((rows || []).map(r => r.stay_id).filter(Boolean))]
+  const byId = {}
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90)
+    // tenant-scope-exempt: only ever given ids of stays the caller has just read under villaScope.
+    const { results } = await DB.prepare(
+      `SELECT stay_id, note, created_at FROM infra_processing_log
+        WHERE event_type = ? AND stay_id IN (${part.map(() => '?').join(',')}) ORDER BY created_at ASC, rowid ASC`
+    ).bind(eventType, ...part).all()
+    for (const r of (results || [])) (byId[r.stay_id] = byId[r.stay_id] || []).push(r)
+  }
+  return byId
+}
+
 // Puts `timeAsks` on every stay row, for the lists that show a guest's times (Complete booking, Needs attention, Raman's lists).
 async function attachTimeAsks(DB, rows) {
   try {
-    const ids = [...new Set((rows || []).map(r => r.stay_id).filter(Boolean))]
-    const byId = {}
-    for (let i = 0; i < ids.length; i += 90) {
-      const part = ids.slice(i, i + 90)
-      // tenant-scope-exempt: only ever given ids of stays the caller has just read under villaScope.
-      const { results } = await DB.prepare(
-        `SELECT stay_id, note, created_at FROM infra_processing_log
-          WHERE event_type = '${GUEST_TIME_EVENT}' AND stay_id IN (${part.map(() => '?').join(',')}) ORDER BY created_at ASC, rowid ASC`
-      ).bind(...part).all()
-      for (const r of (results || [])) (byId[r.stay_id] = byId[r.stay_id] || []).push(r)
-    }
+    const byId = await stayEventRows(DB, rows, GUEST_TIME_EVENT)
     for (const r of rows || []) r.timeAsks = guestTimeEvents(byId[r.stay_id])
   } catch (e) { console.error('attachTimeAsks:', e?.message || e) }
+  return rows
+}
+
+// ── THE EMAILS SENT TO A GUEST FROM COMPLETE BOOKING (2026-11-15) ───────────────────────────────────────────────────
+// Each one is a line on the stay's history too (infra_processing_log, event 'guest_email': which email, to whom, who sent it, when), so the
+// screen can say when the check-in email last went and a double tap is one send. See action sendCheckinEmail and src/utils/checkinEmail.js.
+const GUEST_EMAIL_EVENT = 'guest_email'
+function guestEmailEvents(rows) {
+  const out = []
+  for (const r of rows || []) {
+    try {
+      const n = JSON.parse(r.note)
+      if (n && n.kind) out.push({ kind: n.kind, to: n.to || '', subject: n.subject || '', by: n.by || null, done: !!n.done, at: r.created_at || null })
+    } catch (e) { /* a line that is not ours */ }
+  }
+  return out
+}
+// Puts `guestEmails` on every stay row (Complete booking's list).
+async function attachGuestEmails(DB, rows) {
+  try {
+    const byId = await stayEventRows(DB, rows, GUEST_EMAIL_EVENT)
+    for (const r of rows || []) r.guestEmails = guestEmailEvents(byId[r.stay_id])
+  } catch (e) { console.error('attachGuestEmails:', e?.message || e) }
   return rows
 }
 
@@ -6240,6 +6275,7 @@ export async function onRequest(ctx) {
         }
         await attachPendingChanges(DB, results)
         await attachTimeAsks(DB, results)
+        await attachGuestEmails(DB, results)
         return json({ success: true, data: withRegistrationFromTwins(results) })
       }
 
@@ -10290,6 +10326,44 @@ export async function onRequest(ctx) {
         if (!result.ok) return err('Email send failed: ' + (result.detail || 'unknown error'))
         await DB.prepare(`UPDATE stayvibe_stays SET checkout_email_sent_at = ? WHERE stay_id = ?`).bind(now(), stayId).run()
         return json({ success: true, data: { stayId, sentAt: now() } })
+      }
+
+      // The check-in email: the booking details with the online check-in link at the top (src/utils/checkinEmail.js), to the address on
+      // the stay, from the host's guest address with a silent copy to the villa inbox, as the checkout-day email goes. It is the owner's
+      // tap on Complete booking (Send email), so owner only. Each send is one line on the stay's history (event 'guest_email'); the same
+      // address emailed twice within a minute is one send (a double tap). A guest who has already done the online check-in form (also
+      // through a twin record of the same visit) gets the details without the button.
+      if (action === 'sendCheckinEmail') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        const to = String(stay.guest_email || '').trim()
+        if (!to) return err('No email on file for this guest. Add it in Guest info first.')
+        if (!EMAIL_LOOKS_OK.test(to)) return err('The email on file does not look right. Correct it in Guest info first.')
+        if (!canSendCheckinEmail(stay)) return err('This guest has already arrived, or the booking is closed, so a check-in email is no use.', 409)
+        const { results: sameDates } = await DB.prepare(
+          `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date = ? AND checkout_date = ?`
+        ).bind(stay.villa_id, stay.checkin_date, stay.checkout_date).all()
+        const registered = !!((withRegistrationFromTwins(sameDates || []).find(s => s.stay_id === stayId) || stay).checkin_form_submitted)
+        const mail = buildCheckinEmail({ stay, host: getHostConfig(stay.villa_id), registered })
+        if (mail.error) return err(mail.error)
+        const { results: recent } = await DB.prepare(
+          `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? AND created_at > datetime('now', '-60 seconds') ORDER BY created_at DESC LIMIT 3`
+        ).bind(GUEST_EMAIL_EVENT, stayId).all()
+        const dup = guestEmailEvents(recent).find(e => e.kind === CHECKIN_EMAIL_KIND && String(e.to).toLowerCase() === to.toLowerCase())
+        if (dup) return json({ success: true, data: { stayId, to, alreadySent: true, sentAt: dup.at } })
+        const result = await sendGuestEmail(env, DB, {
+          to, subject: mail.subject, text: mail.text, html: mail.html, villaId: stay.villa_id, category: 'guest_checkin_email',
+        })
+        if (!result.ok) return err('Email send failed: ' + (result.detail || 'unknown error'))
+        const sentAt = now()
+        await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(genId('GE'), GUEST_EMAIL_EVENT, stayId, JSON.stringify({ kind: CHECKIN_EMAIL_KIND, to, subject: mail.subject, by: actor, done: !!mail.done }), sentAt).run()
+        return json({ success: true, data: { stayId, to, subject: mail.subject, sentAt, withLink: !mail.done } })
       }
 
       if (action === 'saveRentalIncome') {

@@ -76,6 +76,9 @@ by frontend routing.
    Set `priceReminder` from intake item 16 (`horizonMonths` 3 or 6, `everyMonths` 3, `platforms` the partner ids): a host without
    it gets no reminder email. The server reads this one from the file, so it works from the deploy; the next seed run copies it into
    the stored copy as well.
+   Set `leaseReminder` (`monthsBefore: [3, 2, 1]`) only on the host whose owner runs Rev360 rentals: it emails the owner when a lease
+   reaches 3, 2 and 1 month before its end. The rental list is one list, not one per villa, so never on two hosts. A host without it gets
+   no email (the Rev360 home's "(N months to renew)" and to-do block do not depend on it). Read from the file, like `priceReminder`.
    After any config edit, push it into the database
    (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
    `syncTenantConfig`): the live screens read the stored copy.

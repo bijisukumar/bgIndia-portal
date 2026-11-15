@@ -22,6 +22,7 @@
 //  under a "history" filter.
 // ============================================================
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { CONFIG } from '../../config'
@@ -84,6 +85,7 @@ const EMPTY_FORM = {
 
 export default function RentalAgreement() {
   const goBack = useBack()
+  const wantedProp = useLocation().state?.propId || null   // set by the Rev360 home's renewal to-do: open that property's agreement first
   const { properties, reload: reloadProperties } = usePropertyList()
   const [country, setCountry] = useState('IN')
   const [showSignedUp, setShowSignedUp] = useState(false)   // tucked-away toggle
@@ -126,6 +128,15 @@ export default function RentalAgreement() {
   // loadAgreements() itself.
   useEffect(() => {
     if (selectedProp || properties.length === 0 || loading) return
+    // Opened from the renewal to-do: show that property (on its own country tab) instead of the first one.
+    const wanted = wantedProp && properties.find(p => p.id === wantedProp)
+    if (wanted) {
+      setCountry(getCountry(wanted, agreements))
+      if (getStage(wanted.id, agreements) === 'Signed Up') setShowSignedUp(true)   // tucked away by default: show it so its tab is there
+      setSelectedProp(wanted.id)
+      if (agreements[wanted.id]) prefill(agreements[wanted.id])
+      return
+    }
     const inDayToDay = properties.find(p => matchesDayToDay(p, agreements, 'IN'))
       || properties[0]
     if (inDayToDay) {

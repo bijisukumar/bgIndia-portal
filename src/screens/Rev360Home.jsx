@@ -5,7 +5,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../api'
-import { propertyYear, fmtDate, daysFromToday } from '../utils/dates'
+import { propertyYear, fmtDate, localTodayStr } from '../utils/dates'
+import { renewalStatus, renewalTodos, isActiveTenancy, leaseTerms } from '../utils/leaseRenewal'
 
 const STATUS_COLOR = {
   'Signed Up':'#185FA5','Active':'#34A853','Notice Given':'#F59E0B','Delinquent':'#EF4444',
@@ -64,35 +65,46 @@ function KpiStrip({ props, income, losses, currency }) {
   )
 }
 
-// One line of lease term: "LEASE  01 Jan 2025 → 31 Dec 2025". The end date turns red once the lease is over and amber
-// when it runs out within 60 days, the same window the "expiring soon" banner uses.
-function TermLine({ label, who, start, end }) {
-  const left = end ? daysFromToday(end) : null          // negative = already over
-  const endColor = left === null ? '#B8C4D0' : left < 0 ? '#EF9A9A' : left <= 60 ? '#F59E0B' : '#B8C4D0'
+// How a renewal countdown is coloured: yellow with 3 months left, red with 2 or fewer (or once the lease is over), plain beyond that.
+const TONE = { red: '#EF4444', yellow: '#F59E0B', none: '#B8C4D0' }
+
+// One line of lease term: "LEASE  01 Jan 2025 → 31 Dec 2025  (3 months to renew)". `status` is the countdown from renewalStatus(), or
+// null when the lease is not running (a tenancy on notice or finished carries no countdown); the end date and the label take its colour.
+function TermLine({ label, who, start, end, status, monthToMonth }) {
+  const tone = status ? TONE[status.tone] : TONE.none
+  const flagged = !!status && status.tone !== 'none'
   return (
     <div style={styles.leaseLine}>
       <span style={styles.leaseLabel}>{label}</span>
       {who && <span>{who} ·</span>}
       <span>{start ? fmtDate(start) : 'not set'}</span>
       <span style={{color:'#5C7080'}}>→</span>
-      <span style={{color:endColor}}>{end ? fmtDate(end) : 'open-ended'}</span>
+      <span style={{color: flagged ? tone : TONE.none}}>{end ? fmtDate(end) : 'open-ended'}</span>
+      {monthToMonth && <span style={{color:'#5C7080'}}>(month to month)</span>}
+      {status && <span style={{color:tone,fontWeight: flagged ? 700 : 400}}>({status.label})</span>}
     </div>
   )
 }
 
-// What goes under a property: its lease term, and the parking lease when the parking is let separately (that is
-// the lease the "expiring soon" banner is often about). A tenant with no dates yet says so, so a missing term is
-// visible instead of silent.
-function LeaseTerms({ p }) {
+// What goes under a property: its lease term, and the parking lease when the parking is let separately. A tenant with no dates
+// yet says so, so a missing term is visible instead of silent. The "(N months to renew)" countdown goes only on a lease that is
+// running with a tenant on it: the same leases that fill the to-do block and send the reminder emails (utils/leaseRenewal.js).
+function LeaseTerms({ p, today }) {
   const main    = p.lease_start || p.lease_end
   const parking = !!p.has_separate_parking && !!(p.parking_lease_start || p.parking_lease_end)   // booleans: a bare 0 from the database would print "0"
   if (!main && !parking && !p.tenant_name) return null
+  const running = isActiveTenancy(p) ? leaseTerms(p) : []
+  const countdown = unit => {
+    const t = running.find(x => x.unit === unit)
+    return { monthToMonth: !!(t && t.monthToMonth), status: t && !t.monthToMonth ? renewalStatus(t.end, today) : null }
+  }
+  const mainCd = countdown('lease'), parkCd = countdown('parking')
   return (
     <div style={styles.leaseBox}>
       {main
-        ? <TermLine label="LEASE" start={p.lease_start} end={p.lease_end} />
+        ? <TermLine label="LEASE" start={p.lease_start} end={p.lease_end} status={mainCd.status} monthToMonth={mainCd.monthToMonth} />
         : p.tenant_name && <div style={{color:'#5C7080'}}>Lease dates not set</div>}
-      {parking && <TermLine label="PARKING" who={p.parking_tenant_name} start={p.parking_lease_start} end={p.parking_lease_end} />}
+      {parking && <TermLine label="PARKING" who={p.parking_tenant_name} start={p.parking_lease_start} end={p.parking_lease_end} status={parkCd.status} monthToMonth={false} />}
     </div>
   )
 }
@@ -138,8 +150,9 @@ export default function Rev360Home() {
 
   const income     = dash?.income  || []
   const losses     = dash?.losses  || []
-  const renewals   = (dash?.renewalAlerts || []).filter(r => r.days_left <= 60)
-  const tabRenewals = renewals.filter(r => tabProps.some(p => p.prop_id === r.prop_id))
+  const today      = localTodayStr()                  // the property's today, asked at every render so a screen left open overnight does not count from yesterday
+  const todos      = renewalTodos(allProps, today)    // running leases with 3 months or less left (or over), both countries, soonest first
+  const anyRed     = todos.some(t => t.tone === 'red')
 
   const alertProps = tabProps.filter(p => p.is_delinquent || ['Delinquent','Evicted','Runaway'].includes(p.status))
 
@@ -186,18 +199,25 @@ export default function Rev360Home() {
           </div>
         )}
 
-        {/* Renewal alerts */}
-        {tabRenewals.length > 0 && (
-          <div style={styles.renewalBanner}>
-            <div style={{color:'#F59E0B',fontWeight:'700',fontSize:'0.82rem',marginBottom:'6px'}}>
-              📅 {tabRenewals.length} lease{tabRenewals.length>1?'s':''} expiring soon
+        {/* To do: renewals. Every running lease with 3 months or less left (yellow at 3, red at 2 or fewer or over), soonest first.
+            Both countries, so a USA lease is not hidden while the India tab is open. A tap opens that property's agreement. */}
+        {todos.length > 0 && (
+          <div style={{...styles.todoBox, ...(anyRed ? styles.todoBoxRed : null)}}>
+            <div style={{...styles.todoTitle, color: anyRed ? TONE.red : TONE.yellow}}>
+              📋 TO DO · RENEWALS ({todos.length})
             </div>
-            {tabRenewals.map(r => (
-              <div key={r.prop_id} style={{display:'flex',justifyContent:'space-between',fontSize:'0.78rem',marginBottom:'3px'}}>
-                <span style={{color:'#EDF2F7'}}>{r.name} — {r.tenant_name}</span>
-                <span style={{color:r.days_left<0?'#EF9A9A':r.days_left<30?'#FFCC80':'#F59E0B'}}>
-                  {r.days_left<0?`Expired ${Math.abs(r.days_left)}d ago`:`${r.days_left}d left`}
-                </span>
+            {todos.map(r => (
+              <div key={`${r.propId}-${r.unit}`} style={styles.todoRow}
+                onClick={() => navigate('/owner/rental/agreement', { state: { propId: r.propId } })}>
+                <div style={{minWidth:0}}>
+                  <div style={{color:'#EDF2F7',fontSize:'0.8rem',fontWeight:'600'}}>
+                    {r.name}{r.unit === 'parking' ? ' · parking' : ''}{r.country === 'US' ? ' · USA' : ''}
+                  </div>
+                  <div style={{color:'#5C7080',fontSize:'0.68rem',marginTop:'1px'}}>
+                    {r.who ? `${r.who} · ` : ''}ends {fmtDate(r.end)}
+                  </div>
+                </div>
+                <span style={{color:TONE[r.tone],fontWeight:'700',fontSize:'0.74rem',whiteSpace:'nowrap'}}>{r.label}</span>
               </div>
             ))}
           </div>
@@ -268,7 +288,7 @@ export default function Rev360Home() {
                       )}
                     </div>
                   </div>
-                  <LeaseTerms p={p} />
+                  <LeaseTerms p={p} today={today} />
                 </div>
               ))}
             </div>
@@ -318,7 +338,10 @@ const styles = {
   welcomeBadge: {background:'rgba(24,95,165,0.12)',border:'1px solid rgba(24,95,165,0.2)',borderRadius:'20px',padding:'4px 12px'},
   welcomeLabel: {color:'#185FA5',fontSize:'0.65rem',fontWeight:'700',letterSpacing:'2px'},
   alertBanner:  {background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'},
-  renewalBanner:{background:'rgba(245,158,11,0.08)',border:'1px solid rgba(245,158,11,0.25)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'},
+  todoBox:      {background:'rgba(245,158,11,0.08)',border:'1px solid rgba(245,158,11,0.25)',borderRadius:'12px',padding:'12px 14px',marginBottom:'12px'},
+  todoBoxRed:   {background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.3)'},
+  todoTitle:    {fontWeight:'700',fontSize:'0.72rem',letterSpacing:'1.5px',marginBottom:'4px'},
+  todoRow:      {display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px',padding:'7px 0',borderTop:'1px solid rgba(255,255,255,0.06)',cursor:'pointer'},
   kpiCard:      {background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:'12px',padding:'14px'},
   kpiLabel:     {fontSize:'0.62rem',color:'#5C7080',letterSpacing:'1.5px',marginBottom:'6px'},
   kpiVal:       {fontSize:'1.4rem',fontWeight:'700',lineHeight:1},

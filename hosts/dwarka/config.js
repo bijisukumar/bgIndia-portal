@@ -37,6 +37,13 @@ export const CONFIG = {
   // Airbnb, VRBO and Agoda, the same price as direct on all of them.
   priceReminder: { horizonMonths: 6, everyMonths: 3, platforms: ['airbnb', 'vrbo', 'agoda'] },
 
+  // The emails that say a lease is about to end (src/utils/leaseRenewal.js). The Rev360 home also counts "(N months to renew)" beside every
+  // lease, yellow at 3 months and red at 2 or fewer, and lists those in its to-do block; those need no setting. This is the EMAIL: one when a
+  // running lease (or a separate parking lease) reaches each mark, once each. `monthsBefore` is which marks (1 to 12 months; the standard is
+  // 3, 2 and 1) and `enabled: false` switches the emails off. A host without this is not emailed. The rental list is one list, not one per
+  // villa, so set it on the one host whose owner runs Rev360. The server reads it from this file, so it works from the deploy.
+  leaseReminder: { monthsBefore: [3, 2, 1] },
+
   // Branding
   brandName:  'Guruvayur Estates',
   brandShort: 'GE Portal',

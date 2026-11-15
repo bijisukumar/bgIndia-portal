@@ -85,6 +85,7 @@ import { evaluateCalendarHealth } from '../../src/utils/calendarHealth.js'
 import { carPhotoMonths, hasPlateNumber, cleanPlateList } from '../../src/utils/carPhotos.js'
 import { buildWebVisit, webVisitChip } from '../../src/utils/visitorInfo.js'
 import { priceReminderSettings, periodStartStamp, buildPriceReminder } from '../../src/utils/priceReminder.js'
+import { leaseReminderSettings, renewalRemindersDue, buildRenewalEmail } from '../../src/utils/leaseRenewal.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -1594,6 +1595,37 @@ async function maybeSendPriceReminder(env, DB, villaId) {
     link: base ? `${base}/owner/villa/rates` : '', time: stampLong(Date.now(), zone),
   })
   await sendAlert(env, mail.subject, mail.lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'price_reminder', undefined, undefined, mail.html)
+}
+
+// The reminders to renew a lease (src/utils/leaseRenewal.js): one email when a running lease, or a separate parking lease, reaches 3, then 2,
+// then 1 month before its end. Only for a host whose config asks for it (`leaseReminder`; the Rev360 rental list is one list, not one per
+// villa, so that is the one host whose owner runs it). Each lease is told about once per mark: the subject names the lease, its end date and
+// the mark, so it is the same at every run and different for a renewed term, and the log says whether it already went. A send that failed is
+// tried again at a later run, but not within half an hour. A lease that is month-to-month, let to nobody, no longer running or already over
+// gets no email (the to-do block on the Rev360 home still shows an overdue one). It asks the owner to talk to the tenant and changes nothing.
+async function maybeSendLeaseReminders(env, DB, villaId) {
+  if (!env) return
+  const settings = leaseReminderSettings(getHostConfig(villaId))
+  if (!settings.enabled) return
+  let props
+  try { props = (await DB.prepare(`SELECT * FROM rev360_rental_props ORDER BY prop_id`).all()).results || [] }
+  catch (e) { if (/no such table/i.test(String(e?.message || e))) return; throw e }   // a host that does not run Rev360 has no such table
+  if (!props.length) return
+  const zone = await zoneFor(DB, villaId)
+  const due = renewalRemindersDue(props, todayInZone(zone), settings.monthsBefore)
+  if (!due.length) return
+  const to = await getOwnerAlertEmail(DB, env, villaId)
+  let sent = 0
+  for (const item of due) {
+    const mail = buildRenewalEmail(item, { time: stampLong(Date.now(), zone), marks: settings.monthsBefore })
+    const dup = await DB.prepare(
+      `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'lease_renewal' AND subject = ?
+         AND (success = 1 OR created_at > datetime('now', '-30 minutes')) LIMIT 1`
+    ).bind(villaId, mail.subject).first()
+    if (dup) continue
+    await sendAlert(env, mail.subject, mail.lines, to, DB, villaId, 'lease_renewal')
+    if (++sent >= 12) break   // a runaway cap: no portfolio has this many leases reaching a mark on the same day
+  }
 }
 
 const aOrAn = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w
@@ -4171,6 +4203,9 @@ export async function onRequest(ctx) {
       // And is it time to ask the owner to look at the prices on the booking sites? (a host that did not ask for it is skipped)
       try { await maybeSendPriceReminder(env, DB, villaId) }
       catch (e) { console.warn('price reminder:', e?.message || e) }
+      // And is a lease about to end? One email at 3, 2 and 1 month before (a host that did not ask for it is skipped)
+      try { await maybeSendLeaseReminders(env, DB, villaId) }
+      catch (e) { console.warn('lease reminder:', e?.message || e) }
     }
     return json({ success: true, data: { feeds: results.length, results } })
   }

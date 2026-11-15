@@ -404,7 +404,7 @@ function NeedsAttentionBlock() {
       {selected && (
         <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <GuestTimesReview stay={selected} compact
-            onDone={async (_which, res) => { showToast('Time approved ✓' + heldSummary(res && res.holds)); await load(selected.stayId) }}
+            onDone={async (_which, res) => { showToast(res && res.declined ? 'Declined: the stay keeps a note ✓' : 'Time approved ✓' + heldSummary(res && res.holds)); await load(selected.stayId) }}
             onError={m => showToast('Failed: ' + m, 'error')} />
           {selected.pendingChange && (
             <div style={{ fontSize: '0.76rem', color: '#E8A33D', lineHeight: 1.5 }}>

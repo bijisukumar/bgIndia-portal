@@ -25,6 +25,7 @@ import { changeNoun, changeDetail } from '../../utils/changeRequestDates'
 import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
 import GuestTimesReview from '../../components/GuestTimesReview'
 import StayTimesLine from '../../components/StayTimesLine'
+import TimeAskHistory from '../../components/TimeAskHistory'
 import { CONFIG } from '../../config'
 import { channelLabel, channelPillStyle } from '../../utils/channel'
 import { hostPartners, partnerFor, commissionPct, percentOf, platformTake } from '../../utils/partners'
@@ -113,8 +114,10 @@ function daysFromNow(d) {
 // guest individually — same underlying flags as the detail view's pills.
 function requestSummary(stay) {
   const parts = []
-  if (stay.request_early_checkin) parts.push('⏰ Early check-in' + (stay.early_checkin_time ? ` — ${formatTime12h(stay.early_checkin_time)}` : ''))
-  if (stay.request_late_checkout) parts.push('🌙 Late check-out' + (stay.late_checkout_time ? ` — ${formatTime12h(stay.late_checkout_time)}` : ''))
+  // A request the owner turned down says so, instead of looking like one still waiting.
+  const tt = stayTimes(stay, villaTimeDefaults())
+  if (stay.request_early_checkin) parts.push('⏰ Early check-in' + (stay.early_checkin_time ? ` — ${formatTime12h(stay.early_checkin_time)}` : tt.inDeclined ? ' — declined' : ''))
+  if (stay.request_late_checkout) parts.push('🌙 Late check-out' + (stay.late_checkout_time ? ` — ${formatTime12h(stay.late_checkout_time)}` : tt.outDeclined ? ' — declined' : ''))
   if (stay.request_breakfast) parts.push('🍳 Breakfast' + (stay.breakfast_choice ? ` — ${stay.breakfast_choice}` : ''))
   if (stay.request_cab) parts.push('🚗 Cab')
   if (stay.request_extra_beds) parts.push('🛏 Extra beds' + (stay.extra_beds_count > 0 ? ` × ${stay.extra_beds_count}` : ''))
@@ -455,7 +458,12 @@ export default function CompleteBooking() {
       // Only the times that were changed go to the server: one the field cannot show
       // (a guest typed "around 3") would otherwise be saved back as blank.
       const body = { ...d }
-      for (const k of ['eta', 'etd', 'earlyCheckinTime', 'lateCheckoutTime', 'vehicleNumber']) if (d[k] === infoOrig[k]) delete body[k]
+      for (const k of ['eta', 'etd', 'earlyCheckinTime', 'lateCheckoutTime', 'vehicleNumber', 'guestEmail']) if (d[k] === infoOrig[k]) delete body[k]
+      // An address that was just typed must look like one: the check-in link and the guest's emails go there (the server checks too).
+      if (body.guestEmail !== undefined) {
+        const mail = String(body.guestEmail).trim()
+        if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(mail)) { showToast('That email does not look right: it should be like name@example.com', 'error'); return }
+      }
       // Breakfast goes as a list of { type, count }, and only when it was changed: a request that only
       // has types (no counts) must not be rewritten by saving a new phone number.
       delete body.breakfast
@@ -1368,7 +1376,7 @@ export default function CompleteBooking() {
                       the villa gives: decide before marking ready for check-in. */}
                   {!editInfo && (
                     <GuestTimesReview stay={s}
-                      onDone={async (_which, res) => { showToast('Time approved ✓' + heldSummary(res && res.holds)); await loadStays() }}
+                      onDone={async (_which, res) => { showToast(res && res.declined ? 'Declined: the stay keeps a note ✓' : 'Time approved ✓' + heldSummary(res && res.holds)); await loadStays() }}
                       onError={m => showToast('Failed: ' + m, 'error')} />
                   )}
                   {(() => {
@@ -1455,7 +1463,8 @@ export default function CompleteBooking() {
                         </div>
                         <div style={{gridColumn:'1 / -1'}}>
                           <div style={infoLabel}>Email</div>
-                          <input type="email" style={dfield} value={infoDraft.guestEmail}
+                          <input type="email" style={dfield} value={infoDraft.guestEmail} autoFocus={infoFocus === 'email'}
+                            autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="name@example.com"
                             onChange={e=>setD('guestEmail', e.target.value)} />
                         </div>
                         <div style={{gridColumn:'1 / -1'}}>
@@ -1556,8 +1565,8 @@ export default function CompleteBooking() {
                               🔑 {tm.inEarly ? 'Early check-in from ' : 'Check-in from '}{tm.inTime}{tm.inEarly ? ' (agreed)' : ''}{pencil('in')}
                             </div>
                             {beforeArrival && (tm.eta
-                              ? <div style={{color: tm.etaBeforeCheckin ? '#F59E0B' : '#85B7EB'}}>
-                                  🚗 Arrival ETA {tm.eta}{tm.etaBeforeCheckin ? ' — before check-in' : ''}{pencil('eta')}
+                              ? <div style={{color: tm.inDeclined ? 'var(--text-dim)' : tm.etaBeforeCheckin ? '#F59E0B' : '#85B7EB'}}>
+                                  🚗 Arrival ETA {tm.eta}{tm.inDeclined ? ' — early check-in declined' : tm.etaBeforeCheckin ? ' — before check-in' : ''}{pencil('eta')}
                                 </div>
                               : <div style={{color:'var(--text-dim)',opacity:0.8}}>🚗 Arrival ETA — not given yet{pencil('eta')}</div>)}
                             {feeIn && !s.early_checkin_time && nudge('in', 'Early check-in is charged, but no check-in time is recorded')}
@@ -1576,14 +1585,20 @@ export default function CompleteBooking() {
                               🧳 {tm.outLate ? 'Late check-out until ' : 'Check-out by '}{tm.outTime}{tm.outLate ? ' (agreed)' : ''}{pencil('out')}
                             </div>
                             {beforeArrival && (tm.etd
-                              ? <div style={{color: tm.etdAfterCheckout ? '#F59E0B' : '#85B7EB'}}>
-                                  ↗ Check-out ETA {tm.etd}{tm.etdAfterCheckout ? ' — after check-out time' : ''}{pencil('etd')}
+                              ? <div style={{color: tm.outDeclined ? 'var(--text-dim)' : tm.etdAfterCheckout ? '#F59E0B' : '#85B7EB'}}>
+                                  ↗ Check-out ETA {tm.etd}{tm.outDeclined ? ' — late check-out declined' : tm.etdAfterCheckout ? ' — after check-out time' : ''}{pencil('etd')}
                                 </div>
                               : <div style={{color:'var(--text-dim)',opacity:0.8}}>↗ Check-out ETA — not given yet{pencil('etd')}</div>)}
                             {feeOut && !s.late_checkout_time && nudge('out', `Late check-out is charged${lateFee > 0 ? ' (' + fmt(lateFee) + ')' : ''}, but no check-out time is recorded`)}
                             {heldOut && <div style={{color:'#F59E0B'}}>🔒 Holds the night of {dayMonth(heldOut.night)} — closed to new bookings</div>}
                           </div>
                         </div>
+                        {/* What the guest asked for, and what became of it: so "we had asked for an early check-in" can be answered. */}
+                        {tm.asks.length > 0 && (
+                          <div style={{gridColumn:'1 / -1'}}>
+                            <TimeAskHistory stay={s} />
+                          </div>
+                        )}
                         <div ref={phoneFieldRef}>
                           <div style={infoLabel}>Phone</div>
                           {s.guest_phone ? (
@@ -1623,7 +1638,7 @@ export default function CompleteBooking() {
                           <div style={{fontSize:'0.85rem',color:'var(--text)',fontWeight:'500',wordBreak:'break-all'}}>
                             {s.guest_email
                               ? <a href={`mailto:${s.guest_email}`} style={{color:'#85B7EB',textDecoration:'none'}}>{s.guest_email}</a>
-                              : <span style={{color:'var(--text-dim)'}}>—</span>}
+                              : <span style={{color:'var(--text-dim)'}}>—</span>}{pencil('email')}
                           </div>
                         </div>
                         <div style={{gridColumn:'1 / -1'}}>
@@ -1798,7 +1813,7 @@ export default function CompleteBooking() {
                     <div style={{marginTop:'10px',paddingTop:'10px',borderTop:'1px solid var(--border-dim)'}}>
                       {!!s.request_early_checkin && (
                         <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap',marginBottom:'6px'}}>
-                          <span style={reqPill}>{'⏰ Early check-in' + (s.early_checkin_time ? ` — ${formatTime12h(s.early_checkin_time)}` : '')}</span>
+                          <span style={reqPill}>{'⏰ Early check-in' + (s.early_checkin_time ? ` — ${formatTime12h(s.early_checkin_time)}` : stayTimes(s, villaTimeDefaults()).inDeclined ? ' — declined' : '')}</span>
                           {editingEarlyTime ? (
                             <>
                               <input type="time" value={earlyTimeDraft} onChange={e=>setEarlyTimeDraft(e.target.value)}
@@ -1820,7 +1835,7 @@ export default function CompleteBooking() {
                       )}
                       {!!s.request_late_checkout && (
                         <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap',marginBottom:'6px'}}>
-                          <span style={reqPill}>{'🌙 Late check-out' + (s.late_checkout_time ? ` — ${formatTime12h(s.late_checkout_time)}` : '')}</span>
+                          <span style={reqPill}>{'🌙 Late check-out' + (s.late_checkout_time ? ` — ${formatTime12h(s.late_checkout_time)}` : stayTimes(s, villaTimeDefaults()).outDeclined ? ' — declined' : '')}</span>
                           {editingLateTime ? (
                             <>
                               <input type="time" value={lateTimeDraft} onChange={e=>setLateTimeDraft(e.target.value)}

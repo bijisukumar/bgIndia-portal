@@ -20,7 +20,8 @@
 // (Arriving later, or leaving earlier, is just information.) It stays FLAGGED
 // until the stay is marked ready for check-in — by then the owner has either
 // approved it (it became the agreed time, so there is nothing left to ask for) or
-// chosen not to, and the guest's wish remains visible as a plain note.
+// declined it (Decline records that, see `timeAsks` below, and the flag goes), and
+// the guest's wish remains visible as a plain note, now marked declined.
 //
 // Pure functions with their options fixed inside — deliberately not the
 // fmtDate(date, options) shape: the production minifier has been seen dropping a
@@ -72,6 +73,42 @@ function field(stay, snake, camel) {
   return b === undefined || b === null ? '' : b
 }
 
+// What became of the times a guest asked for. The server attaches `timeAsks` to a stay row: each decision about the arrival or
+// departure the guest typed, oldest first, as { kind: 'arrival' | 'departure', time: 'HH:MM',
+// decision: 'declined' | 'approved' | 'agreed' | 'cleared', by, reason, at }. (The Worker keeps them in infra_processing_log,
+// event 'guest_time': nothing about them lives on the stay itself.) Only the newest decision about THE SAME clock time counts: a
+// guest who later asks for a different time is asking again, and an agreed time the owner takes back opens the ask again.
+function askList(stay) {
+  const a = stay && stay.timeAsks
+  return Array.isArray(a) ? a.filter(e => e && typeof e === 'object') : []
+}
+function lastDecision(stay, kind, askedMin) {
+  if (askedMin === null) return null
+  let found = null
+  for (const e of askList(stay)) if (e.kind === kind && toMinutes(e.time) === askedMin) found = e
+  return found
+}
+
+// One decision in words, for the history on Guest info and on Raman's screens (the date is the screen's: it knows the zone).
+//   { icon, text, tone: 'bad' | 'good' | 'dim', reason }     'Early check-in 2:00 PM — declined by Owner'
+export function askWords(e) {
+  const x = e || {}
+  const what = x.kind === 'departure' ? 'Late check-out' : 'Early check-in'
+  const time = fmtTime(x.time)
+  const by = String(x.by || '').replace(/^staff-/, '').split('-').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+  const who = by ? ` by ${by}` : ''
+  const reason = String(x.reason || '').trim()
+  switch (x.decision) {
+    case 'declined': return { icon: '🚫', text: `${what} ${time} — declined${who}`, tone: 'bad', reason }
+    case 'approved': return { icon: '✅', text: `${what} ${time} — approved${who}`, tone: 'good', reason }
+    case 'agreed':   return { icon: '✅', text: `${what} ${time} — agreed${who}`, tone: 'good', reason }
+    case 'cleared':  return { icon: '↩️', text: `${what} ${time} — taken back${who}`, tone: 'dim', reason }
+    // The guest's own time was typed over (the owner edited the ETA): the ask is kept, and what it became is in the words.
+    case 'changed':  return { icon: '✏️', text: `${what} ${time} — asked; ${reason || "the guest's time was changed"}${who}`, tone: 'dim', reason: '' }
+    default:         return { icon: '•', text: `${what} ${time}`, tone: 'dim', reason }
+  }
+}
+
 // defaults: { checkin: '4:00 PM', checkout: '11:00 AM' } — the villa's standard times.
 export function stayTimes(stay, defaults) {
   const s = stay || {}
@@ -99,8 +136,14 @@ export function stayTimes(stay, defaults) {
   const etaBeforeCheckin = etaMin !== null && effIn  !== null && etaMin < effIn
   const etdAfterCheckout = etdMin !== null && effOut !== null && etdMin > effOut
 
-  const arrivalFlag   = etaBeforeCheckin && reviewOpen
-  const departureFlag = etdAfterCheckout && reviewOpen
+  // The owner has already said no to exactly this time (see askList above): that is settled, not waiting for a decision.
+  const askIn  = lastDecision(s, 'arrival',   etaMin)
+  const askOut = lastDecision(s, 'departure', etdMin)
+  const inDeclined  = etaBeforeCheckin && !!askIn  && askIn.decision  === 'declined'
+  const outDeclined = etdAfterCheckout && !!askOut && askOut.decision === 'declined'
+
+  const arrivalFlag   = etaBeforeCheckin && reviewOpen && !inDeclined
+  const departureFlag = etdAfterCheckout && reviewOpen && !outDeclined
 
   // An agreed time only counts as "early" / "late" if it really is before the
   // standard check-in / after the standard check-out.
@@ -115,9 +158,9 @@ export function stayTimes(stay, defaults) {
     stdIn: fmtTime(stdIn), stdOut: fmtTime(stdOut),
     inAgreed: !!agreedIn, outAgreed: !!agreedOut,
     inEarly, outLate,
-    // A request with no agreed time still matters: a conversation is open.
-    inPending:  reqEarly && !agreedIn,
-    outPending: reqLate  && !agreedOut,
+    // A request with no agreed time still matters: a conversation is open. Not once the owner has said no to it.
+    inPending:  reqEarly && !agreedIn  && !inDeclined,
+    outPending: reqLate  && !agreedOut && !outDeclined,
     eta: fmtTime(eta), etd: fmtTime(etd),
     // The values the approve buttons would write, only when they are clean clock times.
     etaClock: etaMin !== null, etdClock: etdMin !== null,
@@ -125,6 +168,11 @@ export function stayTimes(stay, defaults) {
     reviewOpen,
     arrivalFlag, departureFlag,
     needsReview: arrivalFlag || departureFlag,
+    // The owner turned down the time the guest asked for (the guest's own time stays as they typed it), and that decision.
+    inDeclined, outDeclined,
+    declinedIn: inDeclined ? askIn : null, declinedOut: outDeclined ? askOut : null,
+    // Every decision made about this stay's times, oldest first, with the clock time spelled out.
+    asks: askList(s).map(e => ({ ...e, timeLabel: fmtTime(e.time) })),
   }
 }
 

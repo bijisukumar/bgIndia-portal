@@ -29,6 +29,7 @@ import CarFields, { emptyCar, carsToPayload } from './CarFields'
 import AddStayCars from './AddStayCars'
 import { villaTimeDefaults } from '../../utils/villaTimes'
 import StayTimesLine from '../../components/StayTimesLine'
+import TimeAskHistory from '../../components/TimeAskHistory'
 
 function formatDate(d) {
   if (!d) return '—'
@@ -609,28 +610,40 @@ export default function CheckIn() {
                         (and the guest's own typed ETA sometimes undercuts the
                         approved early-check-in time — e.g. approved Noon, but
                         guest says 11am — so both are shown for him to judge). */}
-                    {(!!selected.request_early_checkin || !!selected.request_late_checkout) && (
-                      <div style={{
-                        marginBottom:'12px', padding:'10px 14px', borderRadius:'10px',
-                        background:'rgba(200,144,58,0.1)', border:'1px solid rgba(200,144,58,0.35)',
-                      }}>
-                        {!!selected.request_early_checkin && (
-                          <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem'}}>
-                            {'⏰ Early check-in approved' + (selected.early_checkin_time ? ` — ${formatTime12h(selected.early_checkin_time)}` : ' — time not set yet')}
-                          </div>
-                        )}
-                        {!!selected.request_late_checkout && (
-                          <div style={{color:'var(--gold)', fontWeight:'700', fontSize:'0.85rem', marginTop: selected.request_early_checkin ? '4px' : 0}}>
-                            {'🌙 Late check-out approved' + (selected.late_checkout_time ? ` — ${formatTime12h(selected.late_checkout_time)}` : ' — time not set yet')}
-                          </div>
-                        )}
-                        {selected.eta && (
-                          <div style={{color:'var(--text-dim)', fontSize:'0.78rem', marginTop:'4px'}}>
-                            Guest's requested ETA: <strong style={{color:'var(--text)'}}>{selected.eta}</strong>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {(() => {
+                      // Declined means declined (the owner said no and the usual time stands), and a request nobody has agreed a
+                      // time for is not "approved": say which it is, so the manager never promises what was refused.
+                      const tt = stayTimes(selected, villaTimeDefaults())
+                      const early = !!selected.request_early_checkin || tt.inDeclined
+                      const late  = !!selected.request_late_checkout || tt.outDeclined
+                      if (!early && !late) return null
+                      return (
+                        <div style={{
+                          marginBottom:'12px', padding:'10px 14px', borderRadius:'10px',
+                          background:'rgba(200,144,58,0.1)', border:'1px solid rgba(200,144,58,0.35)',
+                        }}>
+                          {early && (
+                            <div style={{color: tt.inDeclined ? '#EF9A9A' : 'var(--gold)', fontWeight:'700', fontSize:'0.85rem'}}>
+                              {tt.inDeclined
+                                ? `🚫 Early check-in ${tt.eta} was asked for and DECLINED — check-in is from ${tt.inTime}`
+                                : '⏰ Early check-in ' + (selected.early_checkin_time ? `approved — ${formatTime12h(selected.early_checkin_time)}` : 'asked for — time not agreed yet')}
+                            </div>
+                          )}
+                          {late && (
+                            <div style={{color: tt.outDeclined ? '#EF9A9A' : 'var(--gold)', fontWeight:'700', fontSize:'0.85rem', marginTop: early ? '4px' : 0}}>
+                              {tt.outDeclined
+                                ? `🚫 Late check-out ${tt.etd} was asked for and DECLINED — check-out by ${tt.outTime}`
+                                : '🌙 Late check-out ' + (selected.late_checkout_time ? `approved — ${formatTime12h(selected.late_checkout_time)}` : 'asked for — time not agreed yet')}
+                            </div>
+                          )}
+                          {selected.eta && (
+                            <div style={{color:'var(--text-dim)', fontSize:'0.78rem', marginTop:'4px'}}>
+                              Guest's requested ETA: <strong style={{color:'var(--text)'}}>{selected.eta}</strong>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
 
                     {/* Breakfast the guest asked for, with how many of each once the host has
                         recorded it in Guest info: what Raman cooks and serves. */}
@@ -709,22 +722,26 @@ export default function CheckIn() {
                             {t.eta && (
                               <div className="field">
                                 <div className="field-label">Arrival ETA</div>
-                                <div className="field-input auto-filled" style={t.etaBeforeCheckin ? {color:'#F59E0B'} : undefined}>
-                                  {t.eta}{t.etaBeforeCheckin ? ' — before check-in' : ''}
+                                <div className="field-input auto-filled" style={t.inDeclined ? {color:'#EF9A9A'} : t.etaBeforeCheckin ? {color:'#F59E0B'} : undefined}>
+                                  {t.eta}{t.inDeclined ? ' — early check-in declined' : t.etaBeforeCheckin ? ' — before check-in' : ''}
                                 </div>
                               </div>
                             )}
                             {t.etd && (
                               <div className="field">
                                 <div className="field-label">Check-out ETA</div>
-                                <div className="field-input auto-filled" style={t.etdAfterCheckout ? {color:'#F59E0B'} : undefined}>
-                                  {t.etd}{t.etdAfterCheckout ? ' — after check-out time' : ''}
+                                <div className="field-input auto-filled" style={t.outDeclined ? {color:'#EF9A9A'} : t.etdAfterCheckout ? {color:'#F59E0B'} : undefined}>
+                                  {t.etd}{t.outDeclined ? ' — late check-out declined' : t.etdAfterCheckout ? ' — after check-out time' : ''}
                                 </div>
                               </div>
                             )}
                           </div>
                         )
                       })()}
+                      {/* What the guest asked for and what became of it, so the manager can answer "we had asked for an early check-in". */}
+                      {(selected.timeAsks || []).length > 0 && (
+                        <div style={{marginTop:'8px'}}><TimeAskHistory stay={selected} /></div>
+                      )}
                     </div>
 
                     {/* Directions & arrival steps — send a day or two before arrival */}
@@ -890,6 +907,7 @@ export default function CheckIn() {
                   {futureGuests.map((stay,i) => {
                     const m = STATUS_META[stay.status] || { label: stay.status, color:'#5C7080', icon:'📋' }
                     const d = daysFromNow(stay.checkin_date)
+                    const tdl = stayTimes(stay, villaTimeDefaults())   // declined asks are said once, by the line under the date
                     return (
                       <div key={stay.stay_id} style={{padding:'11px 16px',
                         borderBottom:i<futureGuests.length-1?'1px solid var(--border-dim)':'none',
@@ -911,11 +929,11 @@ export default function CheckIn() {
                               not just once the guest is Ready for Check-in —
                               so Raman can plan ahead of time, not find out the
                               same day. */}
-                          {(!!stay.request_early_checkin || !!stay.request_late_checkout) && (
+                          {((!!stay.request_early_checkin && !tdl.inDeclined) || (!!stay.request_late_checkout && !tdl.outDeclined)) && (
                             <div style={{fontSize:'0.7rem',color:'var(--gold)',marginTop:'2px',fontWeight:'600'}}>
-                              {!!stay.request_early_checkin && `⏰ Early check-in${stay.early_checkin_time ? ` — ${formatTime12h(stay.early_checkin_time)}` : ''}${stay.eta ? ` (asked for ${stay.eta})` : ''}`}
-                              {!!stay.request_early_checkin && !!stay.request_late_checkout && ' · '}
-                              {!!stay.request_late_checkout && `🌙 Late check-out${stay.late_checkout_time ? ` — ${formatTime12h(stay.late_checkout_time)}` : ''}`}
+                              {!!stay.request_early_checkin && !tdl.inDeclined && `⏰ Early check-in${stay.early_checkin_time ? ` — ${formatTime12h(stay.early_checkin_time)}` : ''}${stay.eta ? ` (asked for ${stay.eta})` : ''}`}
+                              {!!stay.request_early_checkin && !tdl.inDeclined && !!stay.request_late_checkout && !tdl.outDeclined && ' · '}
+                              {!!stay.request_late_checkout && !tdl.outDeclined && `🌙 Late check-out${stay.late_checkout_time ? ` — ${formatTime12h(stay.late_checkout_time)}` : ''}`}
                             </div>
                           )}
                         </div>

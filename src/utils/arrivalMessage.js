@@ -98,8 +98,9 @@ export function buildArrivalMessage(stay = {}, opts = {}) {
   // from the check-in form is added when it fits what the villa gives (a time the
   // owner has not agreed to is never quoted back as if it had been).
   const gt = guestFacingTimes(stay, { checkin: '4:00 PM', checkout: '11:00 AM' })
-  let ciTime = stay.request_early_checkin ? `early check-in as agreed${tail('alarm')}` : CHECKIN_TIME
-  let coTime = stay.request_late_checkout ? `late check-out as agreed${tail('moon')}` : CHECKOUT_TIME
+  // (A request the owner declined is not "agreed": the standard time stands, whatever the guest ticked.)
+  let ciTime = stay.request_early_checkin && !gt.inDeclined ? `early check-in as agreed${tail('alarm')}` : CHECKIN_TIME
+  let coTime = stay.request_late_checkout && !gt.outDeclined ? `late check-out as agreed${tail('moon')}` : CHECKOUT_TIME
   if (gt.inAgreed)  ciTime = `from ${gt.inTime} \u2014 early check-in as agreed${tail('alarm')}`
   if (gt.outAgreed) coTime = `until ${gt.outTime} \u2014 late check-out as agreed${tail('moon')}`
   if (gt.arrivalNote)   ciTime += ` (${gt.arrivalNote})`

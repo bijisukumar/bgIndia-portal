@@ -166,6 +166,7 @@ export const api = {
   updateStayGuestInfo: (data)    => post('updateStayGuestInfo', data),
   // Owner approves the arrival / departure time a guest asked for on the check-in form.
   approveGuestTimes:   (data)    => post('approveGuestTimes', data),
+  declineGuestTimes:   (data)    => post('declineGuestTimes', data),
   updateStayCheckinTimes: (data) => post('updateStayCheckinTimes', data),
   sendCheckoutEmailNow: (data) => post('sendCheckoutEmailNow', data),
   getFlexRequests:   (villaId) => get('getFlexRequests', { villaId }),

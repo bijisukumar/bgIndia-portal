@@ -2071,6 +2071,86 @@ async function attachStayPrefs(DB, rows) {
   return rows
 }
 
+// ── WHAT A GUEST ASKED FOR, AND WHAT BECAME OF IT (2026-11-15) ──────────────────────────────────────────────────────
+// A guest who types an arrival before check-in (or a departure after check-out) asks for more than the villa gives. The owner approves it
+// (approveGuestTimes), declines it (declineGuestTimes) or agrees a time by hand in Guest info, and each of those is kept as one line of
+// history on the stay, so "we had asked for early check-in" can be answered with what was asked, what was decided, when, by whom and why.
+// The lines live in infra_processing_log (event 'guest_time', one row each, keyed by the stay): no new table, and they go with the stay
+// when it is deleted. src/utils/stayTimes.js reads them: a declined ask is settled, no longer waiting for a decision.
+const GUEST_TIME_EVENT = 'guest_time'
+// Good enough to catch a typo, not a validator: something@something.tld, no spaces.
+const EMAIL_LOOKS_OK = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+// The statement that writes one line (not run): put it in a batch with the change it records, so the two stand or fall together.
+function guestTimeStatement(DB, stayId, e, at) {
+  const note = JSON.stringify({
+    kind: e.kind === 'departure' ? 'departure' : 'arrival',
+    time: String(e.time || '').slice(0, 5),
+    decision: e.decision,
+    by: e.by || null,
+    reason: e.reason ? String(e.reason).slice(0, 200) : null,
+  })
+  return DB.prepare(
+    `INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, '${GUEST_TIME_EVENT}', ?, ?, ?)`
+  ).bind(genId('GT'), stayId, note, at)
+}
+
+// Stored rows ({ note, created_at }) -> [{ kind, time, decision, by, reason, at }], in the order given. A row that is not ours is skipped.
+function guestTimeEvents(rows) {
+  const out = []
+  for (const r of rows || []) {
+    try {
+      const n = JSON.parse(r.note)
+      if (n && (n.kind === 'arrival' || n.kind === 'departure') && n.decision) {
+        out.push({ kind: n.kind, time: n.time || '', decision: n.decision, by: n.by || null, reason: n.reason || '', at: r.created_at || null })
+      }
+    } catch (e) { /* a line that is not ours */ }
+  }
+  return out
+}
+
+// What has been decided about one stay's times, oldest first. A database that cannot answer gives an empty history, never an error.
+async function guestTimeHistory(DB, stayId) {
+  try {
+    const { results } = await DB.prepare(
+      `SELECT note, created_at FROM infra_processing_log WHERE event_type = '${GUEST_TIME_EVENT}' AND stay_id = ? ORDER BY created_at ASC, rowid ASC`
+    ).bind(stayId).all()
+    return guestTimeEvents(results)
+  } catch (e) { console.error('guestTimeHistory:', e?.message || e); return [] }
+}
+
+// Puts `timeAsks` on every stay row, for the lists that show a guest's times (Complete booking, Needs attention, Raman's lists).
+async function attachTimeAsks(DB, rows) {
+  try {
+    const ids = [...new Set((rows || []).map(r => r.stay_id).filter(Boolean))]
+    const byId = {}
+    for (let i = 0; i < ids.length; i += 90) {
+      const part = ids.slice(i, i + 90)
+      // tenant-scope-exempt: only ever given ids of stays the caller has just read under villaScope.
+      const { results } = await DB.prepare(
+        `SELECT stay_id, note, created_at FROM infra_processing_log
+          WHERE event_type = '${GUEST_TIME_EVENT}' AND stay_id IN (${part.map(() => '?').join(',')}) ORDER BY created_at ASC, rowid ASC`
+      ).bind(...part).all()
+      for (const r of (results || [])) (byId[r.stay_id] = byId[r.stay_id] || []).push(r)
+    }
+    for (const r of rows || []) r.timeAsks = guestTimeEvents(byId[r.stay_id])
+  } catch (e) { console.error('attachTimeAsks:', e?.message || e) }
+  return rows
+}
+
+// What an edit did to the AGREED times (early check-in, late check-out): one { kind, time, decision: 'agreed' | 'cleared' } for each that
+// changed. `before` and `after` carry early_checkin_time / late_checkout_time; times compare as clock times ('14:00:00' = '14:00').
+function agreedTimeChanges(before, after) {
+  const norm = v => cleanTime(v) || null
+  const out = []
+  for (const [kind, col] of [['arrival', 'early_checkin_time'], ['departure', 'late_checkout_time']]) {
+    const was = norm(before && before[col]), is = norm(after && after[col])
+    if (was === is) continue
+    out.push(is ? { kind, time: is, decision: 'agreed' } : { kind, time: was, decision: 'cleared' })
+  }
+  return out
+}
+
 // ── BOOKING CHANGES WAITING FOR THE OWNER (2026-10-27) ──────────────────────────────────────────────────────────
 // A guest who asks to change how many people are coming (Airbnb's "<name> wants to change their reservation" email, or a
 // check-in form whose count is not the booked one) is parked in stayvibe_change_requests until the owner approves or declines
@@ -5042,6 +5122,7 @@ export async function onRequest(ctx) {
         })().all()
         await attachStayPrefs(DB, results)
         await attachPendingChanges(DB, results)
+        await attachTimeAsks(DB, results)
         return json({ success: true, data: results })
       }
 
@@ -5953,6 +6034,7 @@ export async function onRequest(ctx) {
         const { results: upcomingRows } = await DB.prepare(`SELECT stay_id, guest_name, checkin_date, checkout_date, nights, adults, source, status, early_checkin_time, late_checkout_time, request_early_checkin, request_late_checkout, eta, expected_arrival_at, ${DAYS_UNTIL} AS days_until FROM stayvibe_stays WHERE villa_id = ? AND status IN ('confirmed','booked','ready_for_checkin','pending_review','docs_uploaded') AND checkin_date >= ${TODAY_SQL} ORDER BY checkin_date ASC LIMIT 5`).bind(villaId).all()
         await attachStayPrefs(DB, overdueRows)
         await attachStayPrefs(DB, upcomingRows)
+        await attachTimeAsks(DB, upcomingRows)
         // Guests who have CHECKED OUT but are not closed yet. Raman closes a stay himself when he is ready (the owner no
         // longer has to), so whatever he has not closed waits on his to-do list. The last 30 days only, so an old
         // leftover does not bury today's list.
@@ -5973,6 +6055,7 @@ export async function onRequest(ctx) {
           requestLateCheckout: !!r.request_late_checkout,
           eta: r.eta || null,
           etd: r.etd || null,
+          timeAsks: r.timeAsks || [],
           expectedArrivalAt: r.expected_arrival_at || null,
         })
         // Same-day turnaround: someone checks out on the very day the next
@@ -6156,6 +6239,7 @@ export async function onRequest(ctx) {
           for (const r of withTimes) r.holds = stayHolds(r, rules)
         }
         await attachPendingChanges(DB, results)
+        await attachTimeAsks(DB, results)
         return json({ success: true, data: withRegistrationFromTwins(results) })
       }
 
@@ -7370,6 +7454,7 @@ export async function onRequest(ctx) {
         ).bind(...pr1.binds).all()
         await attachStayPrefs(DB, results)
         await attachPendingChanges(DB, results)
+        await attachTimeAsks(DB, results)
         return json({ success: true, data: results.map(r => ({
           stayId:          r.stay_id,
           guestName:       r.guest_name,
@@ -7394,6 +7479,7 @@ export async function onRequest(ctx) {
           lateCheckoutTime:     r.late_checkout_time || null,
           requestEarlyCheckin:  !!r.request_early_checkin,
           requestLateCheckout:  !!r.request_late_checkout,
+          timeAsks:             r.timeAsks || [],
         })) })
       }
 
@@ -9897,7 +9983,7 @@ export async function onRequest(ctx) {
         // acting on it. No-op for one tenant; blocks cross-tenant writes once
         // there are two.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
-        const cur = await DB.prepare(`SELECT villa_id, checkin_date, checkout_date, early_checkin_time, late_checkout_time FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        const cur = await DB.prepare(`SELECT villa_id, checkin_date, checkout_date, early_checkin_time, late_checkout_time, guest_email, eta FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!cur) return err('Stay not found', 404)
 
         const sets = [], vals = []
@@ -9909,7 +9995,13 @@ export async function onRequest(ctx) {
 
         if (guestName  !== undefined) put('guest_name',  scrub(guestName))
         if (guestPhone !== undefined) put('guest_phone', normalizeStoredPhone(scrub(guestPhone)))
-        if (guestEmail !== undefined) put('guest_email', scrub(guestEmail).toLowerCase() || null)
+        if (guestEmail !== undefined) {
+          // The check-in link and the guest's emails go to this address, so a typo here quietly loses them: an address that was just
+          // changed must look like one. (One that is saved as it already was is left alone, whatever it looks like.)
+          const mail = scrub(guestEmail).toLowerCase()
+          if (mail && mail !== String(cur.guest_email || '').toLowerCase() && !EMAIL_LOOKS_OK.test(mail)) return err('That email does not look right: it should be like name@example.com')
+          put('guest_email', mail || null)
+        }
         if (eta        !== undefined) put('eta',         scrub(eta) || null)
         if (adults     !== undefined) put('adults',      parseInt(adults)   || 0)
         if (children   !== undefined) put('children',    parseInt(children) || 0)
@@ -9958,10 +10050,32 @@ export async function onRequest(ctx) {
         }
         if (!sets.length && etd === undefined && breakfastText === undefined) return err('nothing to update')
 
+        // The guest's own estimates are overwritten by an edit. A time that asked for more than the villa gives is a fact worth keeping, so one
+        // that is typed over (the owner puts 4 PM where the guest said 2 PM) goes on the stay's history first: they did ask.
+        let askChanges = []
+        try {
+          if (eta !== undefined) {
+            const was = cleanTime(cur.eta), is = cleanTime(scrub(eta))
+            const effIn = cur.early_checkin_time ? clockMinutes(cur.early_checkin_time) : stdIn
+            if (was && was !== is && clockMinutes(was) < effIn) askChanges.push({ kind: 'arrival', time: was, decision: 'changed', reason: is ? `the guest's time was changed to ${fmt12(is)}` : "the guest's time was cleared" })
+          }
+          if (etd !== undefined) {
+            const p = await DB.prepare(`SELECT expected_departure_time FROM stayvibe_stay_prefs WHERE stay_id = ?`).bind(stayId).first()
+            const was = cleanTime(p?.expected_departure_time), is = cleanTime(scrub(etd))
+            const effOut = cur.late_checkout_time ? clockMinutes(cur.late_checkout_time) : stdOut
+            if (was && was !== is && clockMinutes(was) > effOut) askChanges.push({ kind: 'departure', time: was, decision: 'changed', reason: is ? `the guest's time was changed to ${fmt12(is)}` : "the guest's time was cleared" })
+          }
+        } catch (e) { console.error('guest time history:', e?.message || e) }
+
         if (sets.length) {
           put('updated_by', actor); put('updated_at', now())
           await DB.prepare(`UPDATE stayvibe_stays SET ${sets.join(', ')} WHERE stay_id = ?`).bind(...vals, stayId).run()
         }
+        // An agreed time that changed here goes on the stay's history: what was agreed, or taken back, by whom and when.
+        try {
+          const agreedChanges = [...askChanges, ...agreedTimeChanges(cur, { early_checkin_time: early, late_checkout_time: late })]
+          if (agreedChanges.length) { const decidedAt = now(); await DB.batch(agreedChanges.map(c => guestTimeStatement(DB, stayId, { ...c, by: actor }, decidedAt))) }
+        } catch (e) { console.error('guest time history:', e?.message || e) }
         // The guest's expected departure sits with their form answers.
         if (etd !== undefined) await recordGuestDeparture(DB, stayId, cur.villa_id, scrub(etd))
         if (breakfastText !== undefined) await recordBreakfast(DB, stayId, cur.villa_id, breakfastText)
@@ -10057,9 +10171,61 @@ export async function onRequest(ctx) {
           }
           if (warnings.length) return json({ success: true, data: { needsConfirm: true, warnings } })
         }
+        // The decision goes on the stay's history in the same batch: the time, and who approved it.
+        const decidedAt = now()
+        if (body.arrival)   writes.push(guestTimeStatement(DB, stayId, { kind: 'arrival',   time: early, decision: 'approved', by: actor }, decidedAt))
+        if (body.departure) writes.push(guestTimeStatement(DB, stayId, { kind: 'departure', time: late,  decision: 'approved', by: actor }, decidedAt))
         await DB.batch(writes)
         const holds = stayHolds({ ...stay, early_checkin_time: early, late_checkout_time: late }, await holdRules(DB, stay.villa_id))
         return json({ success: true, data: { stayId, arrival: !!body.arrival, departure: !!body.departure, holds } })
+      }
+
+      // ── DECLINING THE TIMES A GUEST ASKED FOR ────────────────────────────
+      // The other half of approveGuestTimes. Nothing about the stay's own times changes (the standard times stand, no night is closed); what
+      // is written is the decision, one line of the stay's history (guestTimeStatement): the time the guest asked for, who said no, when and
+      // why (the reason is optional). The ask stops waiting for a decision, Raman's screens say "declined" instead of "requested, not agreed
+      // yet", and the owner can still agree a time by hand later. Owner only, as approving is. Declining a time that is already declined
+      // writes nothing more, so a double tap leaves one line.
+      if (action === 'declineGuestTimes') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        if (!body.arrival && !body.departure) return err('Choose which time to decline')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(
+          `SELECT stay_id, villa_id, eta, early_checkin_time, late_checkout_time FROM stayvibe_stays WHERE stay_id = ?`
+        ).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        const reason = String(body.reason == null ? '' : body.reason).replace(/[​-‏‪-‮⁦-⁩]/g, '').trim().slice(0, 200)
+        const rules = await holdRules(DB, stay.villa_id)
+        const asked = []
+        if (body.arrival) {
+          const t = cleanTime(stay.eta)
+          if (!t) return err("The guest's arrival time is not a clock time, so there is nothing to decline.")
+          const effIn = stay.early_checkin_time ? clockMinutes(stay.early_checkin_time) : clockMinutes(rules.stdIn)
+          if (clockMinutes(t) >= effIn) return err('That arrival is not before check-in, so there is nothing to decline.', 409)
+          asked.push({ kind: 'arrival', time: t })
+        }
+        if (body.departure) {
+          const prefs = await DB.prepare(`SELECT expected_departure_time FROM stayvibe_stay_prefs WHERE stay_id = ?`).bind(stayId).first()
+          const t = cleanTime(prefs?.expected_departure_time)
+          if (!t) return err("The guest's departure time is not a clock time, so there is nothing to decline.")
+          const effOut = stay.late_checkout_time ? clockMinutes(stay.late_checkout_time) : clockMinutes(rules.stdOut)
+          if (clockMinutes(t) <= effOut) return err('That departure is not after check-out, so there is nothing to decline.', 409)
+          asked.push({ kind: 'departure', time: t })
+        }
+        // A time that is already declined (and not taken up since) is left as it is.
+        const history = await guestTimeHistory(DB, stayId)
+        const open = asked.filter(a => {
+          const last = history.filter(h => h.kind === a.kind && clockMinutes(h.time) === clockMinutes(a.time)).pop()
+          return !(last && last.decision === 'declined')
+        })
+        if (open.length) {
+          const decidedAt = now()
+          await DB.batch(open.map(a => guestTimeStatement(DB, stayId, { ...a, decision: 'declined', by: actor, reason }, decidedAt)))
+        }
+        return json({ success: true, data: { stayId, declined: true, arrival: !!body.arrival, departure: !!body.departure, recorded: open.length } })
       }
 
       // Actual approved times for early check-in / late check-out — the boolean
@@ -10077,8 +10243,14 @@ export async function onRequest(ctx) {
         // that does not exist yet, leaving the handler's own checks in charge.
         await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
         if (!stayId) return err('stayId required')
+        const timesBefore = await DB.prepare(`SELECT early_checkin_time, late_checkout_time FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         await DB.prepare(`UPDATE stayvibe_stays SET early_checkin_time = ?, late_checkout_time = ?, updated_by = ?, updated_at = ? WHERE stay_id = ?`)
           .bind(earlyCheckinTime || null, lateCheckoutTime || null, actor, now(), stayId).run()
+        // What changed goes on the stay's history, as it does when the times are edited in Guest info.
+        try {
+          const timeChanges = timesBefore ? agreedTimeChanges(timesBefore, { early_checkin_time: earlyCheckinTime || null, late_checkout_time: lateCheckoutTime || null }) : []
+          if (timeChanges.length) { const decidedAt = now(); await DB.batch(timeChanges.map(c => guestTimeStatement(DB, stayId, { ...c, by: actor }, decidedAt))) }
+        } catch (e) { console.error('guest time history:', e?.message || e) }
         // An agreed time off the standard one can take the neighbouring night out of
         // sale (src/utils/stayHolds.js); say which, so the screen can tell the owner.
         const st = await DB.prepare(`SELECT stay_id, villa_id, checkin_date, checkout_date FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()

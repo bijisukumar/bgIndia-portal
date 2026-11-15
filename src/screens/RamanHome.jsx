@@ -46,6 +46,8 @@ function stayTimes(s) {
     // A request with no agreed time still matters — it means a conversation
     // is open, and Raman should not be surprised at the door.
     inPending: t.inPending, outPending: t.outPending,
+    // The owner turned the request down: say so, instead of "requested, not agreed yet".
+    inDeclined: t.inDeclined, outDeclined: t.outDeclined,
     eta: t.eta || null, etd: t.etd || null,
     etaBefore: t.etaBeforeCheckin, etdAfter: t.etdAfterCheckout,
   }
@@ -277,6 +279,12 @@ function UpcomingBlock({ upcoming, turnaroundHours }) {
               {(t.inPending || t.outPending) && (
                 <div style={{ fontSize: '0.68rem', color: '#F59E0B', marginTop: '3px' }}>
                   ⏳ {t.inPending ? 'Early check-in' : 'Late check-out'} requested — time not agreed yet
+                </div>
+              )}
+              {(t.inDeclined || t.outDeclined) && (
+                <div style={{ fontSize: '0.68rem', color: '#EF9A9A', marginTop: '3px', lineHeight: 1.45 }}>
+                  {t.inDeclined && <div>🚫 Early check-in {t.eta} was asked for and declined — check-in is from {t.inTime}</div>}
+                  {t.outDeclined && <div>🚫 Late check-out {t.etd} was asked for and declined — check-out by {t.outTime}</div>}
                 </div>
               )}
 

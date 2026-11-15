@@ -23,6 +23,9 @@ export default function StayTimesLine({ stay, dim = 'var(--text-dim)', size = '0
       {before && t.eta && <span style={{ color: t.etaBeforeCheckin ? amber : blue }}>🚗 ETA {t.eta}</span>}
       {before && t.etd && <span style={{ color: t.etdAfterCheckout ? amber : blue }}>↗ leaving ~{t.etd}</span>}
       {t.needsReview && <span style={{ color: amber, fontWeight: '700' }}>⚠ review times</span>}
+      {/* The owner said no to what the guest asked for: the usual time stands (the detail is on the stay's Time requests). */}
+      {before && t.inDeclined && <span style={{ color: amber }}>🚫 early check-in declined</span>}
+      {t.outDeclined && <span style={{ color: amber }}>🚫 late check-out declined</span>}
     </div>
   )
 }

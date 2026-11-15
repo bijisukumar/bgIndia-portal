@@ -6495,9 +6495,16 @@ export async function onRequest(ctx) {
 
         if (zones.length === 0) return json({ success: true, data: { zones: [], lastRun: null } })
 
+        // not_watered_code marks a row that records a day when nothing was watered - land cleaning,
+        // a water shortage - rather than a watering. Counting one as water is how seven of nine zones
+        // came to read "3 days" on 15 Nov 2026 when the truth was seven, which would have held the
+        // dry-zone warning back four days. Rain carries no code and still counts, because rain waters
+        // every zone. Duration is deliberately NOT used: a real watering here often has none recorded.
         const zoneHealth = await Promise.all(zones.map(async (z) => {
           const { results: logs } = await ActiveDB.prepare(
-            `SELECT logged_date FROM estate360_irrigation_logs WHERE estate = ? AND zone_id = ? ORDER BY logged_date DESC LIMIT 5`
+            `SELECT logged_date FROM estate360_irrigation_logs
+              WHERE estate = ? AND zone_id = ? AND not_watered_code IS NULL
+              ORDER BY logged_date DESC LIMIT 5`
           ).bind(estateId, z.zone_id).all()
 
           const lastLogged   = logs[0]?.logged_date || null
@@ -6507,7 +6514,10 @@ export async function onRequest(ctx) {
           return { zone_id: z.zone_id, zone_name: z.zone_name, zone_label: z.zone_label, expected_freq_days: freq, last_logged: lastLogged, days_since: daysSince, consecutive_misses: consecutiveMisses, status }
         }))
 
-        const lastRun = await ActiveDB.prepare(`SELECT MAX(logged_date) as last FROM estate360_irrigation_logs WHERE estate = ?`).bind(estateId).first()
+        // "Last run" means the same thing: the last day water actually ran.
+        const lastRun = await ActiveDB.prepare(
+          `SELECT MAX(logged_date) as last FROM estate360_irrigation_logs WHERE estate = ? AND not_watered_code IS NULL`
+        ).bind(estateId).first()
         return json({ success: true, data: { zones: zoneHealth, lastRun: lastRun?.last || null } })
       }
 

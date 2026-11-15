@@ -158,6 +158,14 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   // watered, with the same code the Not watered picker uses, so it is added up with the rest. Only for a day
   // that is over: the server does not take today.
   const notWatered = selectedZones.length === 0 && !raining && (landCleaning || waterShortage)
+
+  // Every zone ticked, no duration, and a reason that says nothing was watered. That is how eight days
+  // in the backlog came to claim all nine zones had water on a day a tractor was working: ticking the lot
+  // meant "this day is accounted for", not "these nine were watered". Saved as it stands it would tell the
+  // zone screen the whole estate was watered, and hold back the dry-zone warning by days. So it is said
+  // out loud, with the one tap that fixes it, rather than being guessed at either way.
+  const allZonesTicked = zones.length > 1 && selectedZones.length === zones.length
+  const looksUnwatered = allZonesTicked && !raining && (landCleaning || waterShortage) && !(parseInt(duration) > 0)
   const dayOver    = !!date && date < localTodayStr()
   const canSave    = notWatered ? dayOver : selectedZones.length > 0
 
@@ -299,13 +307,36 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                   style={{width:'20px', height:'20px', accentColor:'#185FA5', flexShrink:0}}/>
                 🚱 {codeLabel('no_water', 'Water shortage')}
               </label>
-              {(landCleaning || waterShortage) && (
+              {(landCleaning || waterShortage) && !looksUnwatered && (
                 <div style={{marginTop:'8px', fontSize:'0.72rem', color:'var(--text-dim)', lineHeight:1.4}}>
                   {!notWatered
                     ? 'The reason is added to the note for the zones you tick.'
                     : dayOver
                       ? 'No zones ticked, so this day is saved as not watered, with this reason.'
                       : "Today isn't over yet. Tick the zones that were watered, or save this day as not watered tomorrow, from Missing days."}
+                </div>
+              )}
+
+              {/* Every zone ticked, no duration, and a reason that says nothing ran. Asked, not guessed:
+                  saved as it stands this tells the zone screen the whole estate was watered. */}
+              {looksUnwatered && (
+                <div style={{marginTop:'10px', padding:'10px 12px', borderRadius:'10px',
+                  background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.3)'}}>
+                  <div style={{fontSize:'0.76rem', lineHeight:1.5, color:'var(--text)'}}>
+                    All {zones.length} zones are ticked with no duration, and the reason says
+                    {' '}{dayReasons.join(' and ').toLowerCase()}.
+                  </div>
+                  <div style={{fontSize:'0.72rem', lineHeight:1.5, color:'var(--text-dim)', marginTop:'4px'}}>
+                    Saving it this way records every zone as watered that day, and the screen will say the
+                    estate has water when it has not. If water really did run on all {zones.length}, put the
+                    minutes in and this will go away.
+                  </div>
+                  <button onClick={() => setSelected({})}
+                    style={{marginTop:'8px', padding:'8px 12px', borderRadius:'8px', cursor:'pointer',
+                      fontSize:'0.76rem', fontWeight:700, border:'1px solid rgba(239,68,68,0.45)',
+                      background:'rgba(239,68,68,0.12)', color:'#EF9A9A'}}>
+                    Nothing was watered - untick them
+                  </button>
                 </div>
               )}
             </div>

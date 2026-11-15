@@ -185,6 +185,7 @@ export default function CompleteBooking() {
   const [guestNames, setGuestNames] = useState({ stayId: null, open: false, loading: false, data: null, error: '' })
   const [checkoutEmailBusy, setCheckoutEmailBusy] = useState(null) // stay_id currently sending, or null
   const [checkinEmailBusy, setCheckinEmailBusy] = useState(null)   // stay_id whose check-in email is going out, or null
+  const [checkinTestBusy, setCheckinTestBusy]   = useState(null)   // stay_id whose test copy is going to the owner, or null
   const [farewellAsked, setFarewellAsked] = useState({}) // stay_id -> when "Send farewell message" was tapped this session
 
   const showToast = (msg, type='success') => {
@@ -692,6 +693,17 @@ export default function CompleteBooking() {
       await loadStays()
     } catch (e) { showToast('Failed: ' + e.message, 'error') }
     finally { setCheckinEmailBusy(null) }
+  }
+
+  // The same email as a TEST copy to the owner's own address (Notification settings), to read before the guest gets the real one: nothing goes
+  // to the guest and nothing changes on the booking, so it can be tapped as often as wanted.
+  async function handleSendCheckinEmailTest(stay) {
+    setCheckinTestBusy(stay.stay_id)
+    try {
+      const res = await api.sendCheckinEmail({ stayId: stay.stay_id, test: true })
+      showToast(`Test sent to ${res && res.to ? res.to : 'you'} ✓ Check your inbox`)
+    } catch (e) { showToast('Failed: ' + e.message, 'error') }
+    finally { setCheckinTestBusy(null) }
   }
 
   // The farewell carries the review ask (it goes out on the way home, when a review gets written), so tapping it counts
@@ -2244,16 +2256,26 @@ export default function CompleteBooking() {
                   )
                   const last = lastCheckinEmail(selected)
                   const sending = checkinEmailBusy === selected.stay_id
+                  const testing = checkinTestBusy === selected.stay_id
                   return (
-                    <button onClick={() => handleSendCheckinEmail(selected)} disabled={sending}
-                      style={{
-                        display:'block', width:'100%', padding:'12px', borderRadius:'10px', textAlign:'center',
-                        background:'rgba(133,183,235,0.08)', border:'1px solid rgba(133,183,235,0.3)',
-                        color:'#85B7EB', fontWeight:'700', fontSize:'0.85rem',
-                        cursor: sending ? 'default' : 'pointer', opacity: sending ? 0.6 : 1, marginBottom:'14px',
-                      }}>
-                      {sending ? 'Sending…' : last ? `✉️ Email sent ${fmtStampZ(last.at)} · send again` : `✉️ Send email to ${name}`}
-                    </button>
+                    <>
+                      <button onClick={() => handleSendCheckinEmail(selected)} disabled={sending}
+                        style={{
+                          display:'block', width:'100%', padding:'12px', borderRadius:'10px', textAlign:'center',
+                          background:'rgba(133,183,235,0.08)', border:'1px solid rgba(133,183,235,0.3)',
+                          color:'#85B7EB', fontWeight:'700', fontSize:'0.85rem',
+                          cursor: sending ? 'default' : 'pointer', opacity: sending ? 0.6 : 1, marginBottom:'4px',
+                        }}>
+                        {sending ? 'Sending…' : last ? `✉️ Email sent ${fmtStampZ(last.at)} · send again` : `✉️ Send email to ${name}`}
+                      </button>
+                      <div style={{textAlign:'center', marginBottom:'14px'}}>
+                        <button onClick={() => handleSendCheckinEmailTest(selected)} disabled={testing}
+                          style={{background:'none', border:'none', padding:'6px 10px', cursor: testing ? 'default' : 'pointer',
+                            color:'#85B7EB', fontSize:'0.74rem', textDecoration:'underline', opacity: testing ? 0.6 : 1}}>
+                          {testing ? 'Sending the test…' : 'Send me a test copy first'}
+                        </button>
+                      </div>
+                    </>
                   )
                 })()}
 

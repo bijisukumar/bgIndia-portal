@@ -170,3 +170,18 @@ export function buildCheckinEmail({ stay = {}, host = {}, registered } = {}) {
 
   return { subject, text, html, link: url, done }
 }
+
+// The same email as a TEST COPY for the owner to read before the guest gets the real one: "[TEST] " in front of the subject and a plain
+// note at the very top (a yellow strip in the HTML) saying it is a test and went to nobody else. Nothing else changes, so what the owner
+// reads is what the guest will get. `guestName` is how the guest is greeted ("Prahlad").
+export function asTestCopy(mail, { guestName = '' } = {}) {
+  const who = String(guestName || '').trim() || 'the guest'
+  const note = `TEST COPY: this is the email ${who} would get. Nothing has been sent to ${who}.`
+  const strip = `<div style="margin:0 0 16px;padding:10px 14px;border-radius:8px;background:#fff7d6;border:1px solid #f0d36b;font-size:13px;line-height:1.5;color:#6b5200"><b>TEST COPY</b>: this is the email ${esc(who)} would get. Nothing has been sent to ${esc(who)}.</div>`
+  return {
+    ...mail,
+    subject: `[TEST] ${mail.subject}`,
+    text: `${note}\n\n${mail.text}`,
+    html: String(mail.html).replace(/^(<div[^>]*>)/, `$1${strip}`),
+  }
+}

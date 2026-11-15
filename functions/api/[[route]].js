@@ -86,7 +86,8 @@ import { carPhotoMonths, hasPlateNumber, cleanPlateList } from '../../src/utils/
 import { buildWebVisit, webVisitChip } from '../../src/utils/visitorInfo.js'
 import { priceReminderSettings, periodStartStamp, buildPriceReminder } from '../../src/utils/priceReminder.js'
 import { leaseReminderSettings, renewalRemindersDue, buildRenewalEmail } from '../../src/utils/leaseRenewal.js'
-import { buildCheckinEmail, canSendCheckinEmail, CHECKIN_EMAIL_KIND } from '../../src/utils/checkinEmail.js'
+import { buildCheckinEmail, canSendCheckinEmail, asTestCopy, CHECKIN_EMAIL_KIND } from '../../src/utils/checkinEmail.js'
+import { greetingName } from '../../src/utils/guestWording.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -514,7 +515,7 @@ function renderTemplate(template, vars) {
 // Separate from sendAlert (which is always host-Biji-facing, from a
 // "Security" sender) — this sends TO a guest, so it needs its own
 // guest-appropriate from-address. Shares the same Resend key/logging.
-async function sendGuestEmail(env, DB, { to, subject, text, html, villaId, category }) {
+async function sendGuestEmail(env, DB, { to, subject, text, html, villaId, category, noBcc }) {
   let ok = false, statusCode = null, detail = ''
   try {
     const apiKey = await getResendApiKey(DB, env)
@@ -525,7 +526,7 @@ async function sendGuestEmail(env, DB, { to, subject, text, html, villaId, categ
     // guest must never see an internal address on a mail addressed to them,
     // and the copy is omitted entirely when a host sets no address.
     const hostEmail = getHostConfig(villaId)?.email || {}
-    const bcc = hostEmail.guestBcc
+    const bcc = noBcc ? null : hostEmail.guestBcc   // a test copy for the owner is not copied to the villa inbox too
     // Local tests only (ALERT_DRY_RUN is never set in production): nothing is sent, and the START of the finished text is kept in the
     // delivery log (the check-in link is at the top of the check-in email).
     if (env.ALERT_DRY_RUN) detail = '[dry run] ' + `${subject} || ${text}`.slice(0, 470)
@@ -10341,9 +10342,11 @@ export async function onRequest(ctx) {
         const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
         assertPropertyAccess(payload, stay.villa_id)
+        // A TEST copy (test: true) goes to the OWNER's own address instead of the guest's, so the guest's address is not needed for it.
+        const isTest = body.test === true
         const to = String(stay.guest_email || '').trim()
-        if (!to) return err('No email on file for this guest. Add it in Guest info first.')
-        if (!EMAIL_LOOKS_OK.test(to)) return err('The email on file does not look right. Correct it in Guest info first.')
+        if (!isTest && !to) return err('No email on file for this guest. Add it in Guest info first.')
+        if (!isTest && !EMAIL_LOOKS_OK.test(to)) return err('The email on file does not look right. Correct it in Guest info first.')
         if (!canSendCheckinEmail(stay)) return err('This guest has already arrived, or the booking is closed, so a check-in email is no use.', 409)
         const { results: sameDates } = await DB.prepare(
           `SELECT * FROM stayvibe_stays WHERE villa_id = ? AND checkin_date = ? AND checkout_date = ?`
@@ -10351,6 +10354,19 @@ export async function onRequest(ctx) {
         const registered = !!((withRegistrationFromTwins(sameDates || []).find(s => s.stay_id === stayId) || stay).checkin_form_submitted)
         const mail = buildCheckinEmail({ stay, host: getHostConfig(stay.villa_id), registered })
         if (mail.error) return err(mail.error)
+        if (isTest) {
+          // The same email, to the owner's own alert address (Notification settings), marked TEST, so it can be read before the guest gets the
+          // real one. Nothing goes to the guest or to the villa inbox, no line is written on the stay and the button's "sent" state does not
+          // change; it can be sent as often as wanted.
+          const ownerTo = String((await getOwnerAlertEmail(DB, env, stay.villa_id)) || '').trim()
+          if (!EMAIL_LOOKS_OK.test(ownerTo)) return err('There is no email set up for you to send the test to. Add it in Notification settings first.')
+          const t = asTestCopy(mail, { guestName: greetingName(stay.guest_name) })
+          const sentTest = await sendGuestEmail(env, DB, {
+            to: ownerTo, subject: t.subject, text: t.text, html: t.html, villaId: stay.villa_id, category: 'guest_checkin_email_test', noBcc: true,
+          })
+          if (!sentTest.ok) return err('Test email failed: ' + (sentTest.detail || 'unknown error'))
+          return json({ success: true, data: { stayId, test: true, to: ownerTo, subject: t.subject, withLink: !mail.done } })
+        }
         const { results: recent } = await DB.prepare(
           `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? AND created_at > datetime('now', '-60 seconds') ORDER BY created_at DESC LIMIT 3`
         ).bind(GUEST_EMAIL_EVENT, stayId).all()

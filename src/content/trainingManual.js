@@ -11,7 +11,7 @@
 // Deliberately generic: no villa, manager or town names, because the same
 // manual is served on every host (dwarka, demo, and each customer's own).
 
-export const UPDATED = '28 October 2026'
+export const UPDATED = '17 November 2026'
 
 export const TITLE = 'Owner Training Manual'
 export const TAGLINE = 'Run your villa from one screen.'
@@ -335,7 +335,7 @@ export const TILES = [
         gain: `Revenue, profit and trends without building a single report.`,
         insideLabel: 'Tabs',
         inside: [
-          { name: '💰 Financials', text: `Pick a year (or **All**) and a month (or **All**) to see:`, bullets: [
+          { name: '💰 Financials', text: `At the top, whatever you pick below, **Projected income** lists the coming months: the nights and the income from the bookings you already have (after platform fees), what the same month brought in last year and how many nights are still open to sell. Only bookings in hand count, so a month far ahead looks thin until bookings arrive. Below it, pick a year (or **All**, which adds up every year; next year gets its own button as soon as it has a booking) and a month (or **All**) to see:`, bullets: [
             `**Four cards** — Gross revenue (with bookings and nights), Net to owner (and its share of gross), Commissions (paid to platforms) and Direct ratio (direct against platform bookings).`,
             `**P&L** for the full year — gross revenue, upsell (floor beds, extended check-out, add-ons), discounts, channel commission, staff commission and expenses, ending in **Net to owner**.`,
             `**Revenue breakdown** — room tariff, floor bed, other extras, car rental, kitchen, breakfast and events.`,
@@ -343,7 +343,7 @@ export const TILES = [
             `**Key insights** — best month, top channel, **direct booking savings** and average nights per stay.`,
           ] },
           { name: '📣 Marketing', text: `Where to put your marketing effort, and when:`, bullets: [
-            `**Plan ahead — next 3 months** — each month with its season tag and how full it is, with a warning when a peak month is under 60% booked.`,
+            `**Plan ahead — next 3 months** — each month with its season tag, how full it is and how many nights are still open (counted across the year end, so December leads on to January), with a warning when a peak month is under 60% booked.`,
             `**Occupancy** for the year, month by month.`,
             `**Peak-season calendar** — festivals and holidays that drive demand.`,
             `**Marketing playbook** — what to do four months, three months, two months, six weeks and two weeks before a peak.`,

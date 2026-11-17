@@ -4,6 +4,7 @@ import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
 import { parseLocalDate, localTodayStr, propertyYear, propertyMonth, stampDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import { againstLastYear, bookedShare, outlookTotals, rupees, yearChoices } from '../../utils/monthlyOutlook'
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -59,7 +60,9 @@ const STATUS_COLORS = {
   cancelled:   '#E53935',
 }
 
-const YEARS = [CUR_YEAR, CUR_YEAR-1, CUR_YEAR-2, CUR_YEAR-3, CUR_YEAR-4, CUR_YEAR-5]
+// The year buttons: this year and the five before it, plus any LATER year that already has a booking (yearChoices, from the stays
+// the screen has loaded), so a booking for 2027 gives a 2027 button.
+const PAST_YEARS = 5
 
 function fmt(n) {
   if (!n && n !== 0) return '—'
@@ -201,7 +204,7 @@ function StatusBadge({ status }) {
 
 // ── TAB: GUESTS ─────────────────────────────────────────────────────────────
 
-function GuestsTab({ stays, loading, year, onYearChange }) {
+function GuestsTab({ stays, loading, year, onYearChange, years }) {
   const [filter, setFilter] = useState('all')
   const [selMonth, setSelMonth] = useState(CUR_MONTH)
 
@@ -250,7 +253,7 @@ function GuestsTab({ stays, loading, year, onYearChange }) {
     <div>
       {/* Year selector */}
       <div style={{ display:'flex', gap:'6px', marginBottom:'16px', flexWrap:'wrap' }}>
-        {YEARS.map(y => (
+        {years.map(y => (
           <button key={y} onClick={() => onYearChange(y)}
             style={{ padding:'6px 14px', borderRadius:'20px', border:`1px solid ${year===y?'var(--gold)':'rgba(255,255,255,0.08)'}`,
               background: year===y ? 'rgba(200,144,58,0.15)' : 'transparent',
@@ -890,9 +893,81 @@ function MonthlyTrendChart({ stays, currentYear }) {
   )
 }
 
+// ── PROJECTED INCOME ─────────────────────────────────────────────────────────
+// Month by month, what the bookings you already have will bring in (income = net to owner: after the platform's commission, before
+// staff commission and expenses), the nights behind it, what the same month brought in last year, and how many nights are still open
+// to sell: where the marketing push is needed. Bookings, nights and money are the Financials cards' own (a stay counts in the month it
+// checks in). The bar is the month's nights: gold = booked, grey = closed (blocked or held), the rest open; "open" counts the nights
+// still free to sell from today. Bookings in hand, NOT a forecast, so a month far ahead looks thin until bookings arrive. `outlook` is
+// undefined while it loads and null when the call failed (the block is then just not there).
+function MonthlyOutlook({ outlook }) {
+  if (outlook === undefined) return <Skeleton h={220} />
+  const months = outlook?.months
+  if (!months?.length) return null
+  const totals = outlookTotals(months)
+  const many = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+  return (
+    <>
+      <div className="card-section-label">💰 PROJECTED INCOME · NEXT {months.length} MONTHS</div>
+      <div className="card">
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'4px 12px', flexWrap:'wrap' }}>
+          <div>
+            <span style={{ color:'var(--gold)', fontSize:'1.25rem', fontWeight:700 }}>{rupees(totals.net)}</span>
+            <span style={{ color:'var(--text-dim)', fontSize:'0.75rem' }}> · {many(totals.nights, 'night')} · {many(totals.bookings, 'booking')}</span>
+          </div>
+          {totals.lastYearNet > 0 && (
+            <div style={{ color:'var(--text-dim)', fontSize:'0.72rem' }}>Same months last year: {rupees(totals.lastYearNet)}</div>
+          )}
+        </div>
+        <div style={{ color:'var(--text-dim)', fontSize:'0.7rem', lineHeight:1.5, padding:'4px 0 8px', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+          From the bookings you already have, after platform fees ({rupees(totals.gross)} before fees). Staff commission and expenses are not taken off.
+        </div>
+        {months.map((m, i) => {
+          const v = againstLastYear(m)
+          const gap = v.unit === 'money' ? rupees(v.by) : many(v.by, 'night')
+          const booked = Math.min(100, (100 * m.occupied) / (m.days || 1))
+          const closed = Math.min(100 - booked, (100 * m.closed) / (m.days || 1))
+          return (
+            <div key={m.ym} style={{ padding:'10px 0', borderBottom: i < months.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:'8px' }}>
+                <div style={{ fontWeight:700, fontSize:'0.9rem', color:'var(--text)' }}>
+                  {MONTH_SHORT[m.month]} {m.year}
+                  <span style={{ fontWeight:400, fontSize:'0.8rem', color:'var(--text-dim)' }}> · {m.nights > 0 ? many(m.nights, 'night') : 'nothing booked yet'}</span>
+                  {m.current && <span style={{ marginLeft:'8px', fontSize:'0.62rem', fontWeight:600, letterSpacing:'1px', color:'var(--gold)' }}>THIS MONTH</span>}
+                </div>
+                <div style={{ fontWeight:700, fontSize:'1rem', color: m.net > 0 ? 'var(--gold)' : 'var(--text-dim)' }}>{m.net > 0 ? rupees(m.net) : '—'}</div>
+              </div>
+              <div style={{ display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:'2px 10px', color:'var(--text-dim)', fontSize:'0.72rem', marginTop:'2px' }}>
+                <span>{m.bookings > 0 ? `${many(m.bookings, 'booking')}${m.direct > 0 ? ` (${m.direct} direct)` : ''}` : ' '}</span>
+                <span>
+                  {v.kind === 'ahead' && <span style={{ color:'var(--green)', fontWeight:600 }}>▲ {gap} ahead of last year</span>}
+                  {v.kind === 'short' && <span>{gap} to match last year</span>}
+                  {v.kind === 'level' && <span>level with last year</span>}
+                  {v.kind === 'none' && <span>nothing booked last year</span>}
+                </span>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:'10px', marginTop:'6px' }}>
+                <div style={{ flex:1, height:'6px', borderRadius:'3px', background:'rgba(255,255,255,0.06)', display:'flex', overflow:'hidden' }}>
+                  <div style={{ width:`${booked}%`, background:'var(--gold)' }}/>
+                  <div style={{ width:`${closed}%`, background:'rgba(92,112,128,0.6)' }}/>
+                </div>
+                <div style={{ color:'var(--text-dim)', fontSize:'0.7rem', width:'62px', textAlign:'right', flexShrink:0 }}>{m.open} open</div>
+              </div>
+            </div>
+          )
+        })}
+        <div style={{ color:'var(--text-dim)', fontSize:'0.68rem', marginTop:'4px', lineHeight:1.5 }}>
+          Gold bar = nights booked · grey = nights closed (blocked or held) · open = nights still free to sell from today.
+          A month far ahead looks thin until bookings arrive.
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ── TAB: FINANCIALS ──────────────────────────────────────────────────────────
 
-function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthChange, year, onYearChange, stays }) {
+function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthChange, year, onYearChange, stays, years, outlook }) {
   // "All years" is a local override — it doesn't touch the shared `year`
   // state (Guests tab also reads that and expects a real numeric year).
   const [showAllYears, setShowAllYears] = useState(false)
@@ -999,6 +1074,8 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
 
   return (
     <div>
+      <MonthlyOutlook outlook={outlook} />
+
       {/* Year + Month selectors */}
       <div style={{ display:'flex', gap:'6px', marginBottom:'10px', flexWrap:'wrap' }}>
         <button onClick={() => setShowAllYears(true)}
@@ -1007,8 +1084,8 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
             color: showAllYears?'var(--gold)':'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer' }}>
           All
         </button>
-        {YEARS.map(y => (
-          <button key={y} onClick={() => { setShowAllYears(false); onYearChange(y) }}
+        {years.map(y => (
+          <button key={y} onClick={() => { setShowAllYears(false); onYearChange(y); if (y > CUR_YEAR) onMonthChange('fy') }}
             style={{ padding:'5px 12px', borderRadius:'20px', border:`1px solid ${!showAllYears && year===y?'var(--gold)':'rgba(255,255,255,0.08)'}`,
               background: !showAllYears && year===y?'rgba(200,144,58,0.15)':'transparent',
               color: !showAllYears && year===y?'var(--gold)':'var(--text-dim)', fontSize:'0.78rem', cursor:'pointer' }}>
@@ -1024,7 +1101,11 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
         ))}
       </div>
 
-      <div className="card-section-label">{typeof month==='number'?MONTHS_FULL[month]:'Full Year'} {year}</div>
+      <div className="card-section-label">
+        {showAllYears
+          ? (typeof month==='number' ? `${MONTHS_FULL[month]} · every year` : 'Every month · every year')
+          : `${typeof month==='number'?MONTHS_FULL[month]:'Full Year'} ${year}`}
+      </div>
       {/* Notice for years with no revenue */}
       {!loading && (monthData.revenue||0) === 0 && totalBookings > 0 && (
         <div style={{ background:'rgba(92,112,128,0.08)', border:'1px solid rgba(92,112,128,0.2)', borderRadius:'10px', padding:'12px 14px', marginBottom:'12px' }}>
@@ -1063,7 +1144,7 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
 
       {!loading && data?.pnl && (
         <>
-          <div className="card-section-label">P&L — NET TO OWNER · FULL YEAR {year}</div>
+          <div className="card-section-label">P&L — NET TO OWNER · {showAllYears ? 'ALL YEARS' : `FULL YEAR ${year}`}</div>
           <div className="card">
             <div className="net-row">
               <span className="net-label">Gross revenue (ledger)</span>
@@ -1143,7 +1224,7 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
 
       <NightsBookedStrip />
 
-      <div className="card-section-label">QUARTERLY NET PROFIT — {year}</div>
+      <div className="card-section-label">QUARTERLY NET PROFIT — {showAllYears ? 'ALL YEARS' : year}</div>
       {loading ? <Skeleton h={80}/> : (
         <div style={S.quarterRow}>
           {['Q1','Q2','Q3','Q4'].map(q => (
@@ -1177,7 +1258,7 @@ function StatisticsTab({ stays, year }) {
   return (
     <div>
       <MonthlyTrendChart stays={stays} currentYear={year} />
-      <EarningsComparisonChart allStays={stays} selectedYears={YEARS.filter(y => y !== 'all').slice(0,2)} />
+      <EarningsComparisonChart allStays={stays} selectedYears={[CUR_YEAR, CUR_YEAR - 1]} />
       <BookingLeadTimeChart allStays={stays} />
     </div>
   )
@@ -1185,7 +1266,7 @@ function StatisticsTab({ stays, year }) {
 
 // ── TAB: MARKETING ───────────────────────────────────────────────────────────
 
-function MarketingTab({ data, stays, loading, year }) {
+function MarketingTab({ data, stays, loading, year, outlook }) {
   const today      = new Date()
   const curMonth   = today.getMonth()
   const nextMonths = [0,1,2].map(i => (curMonth + i) % 12)
@@ -1204,19 +1285,27 @@ function MarketingTab({ data, stays, loading, year }) {
 
   const maxOcc = Math.max(...occupancy, 1)
 
+  // The next three months. With the outlook they are measured by the nights each month really holds and carry on across the year end
+  // (December, January, February); without it (the call failed) the old reckoning from the selected year's stays stands.
+  const planAhead = outlook?.months?.length
+    ? outlook.months.slice(0, 3).map(mo => ({
+        key: mo.ym, m: mo.month - 1, occ: bookedShare(mo), open: mo.open,
+        label: mo.year === outlook.months[0].year ? MONTHS_FULL[mo.month - 1] : `${MONTHS_FULL[mo.month - 1]} ${mo.year}`,
+      }))
+    : nextMonths.map(m => ({ key: m, m, label: MONTHS_FULL[m], occ: occupancy[m], open: null }))
+
   return (
     <div>
       {/* 3-month ahead planning */}
       <div className="card-section-label">🗓️ PLAN AHEAD — NEXT 3 MONTHS</div>
-      {nextMonths.map(m => {
+      {planAhead.map(({ key, m, label, occ, open }) => {
         const season = PEAK_SEASONS.find(p => p.months.includes(m))
-        const occ    = occupancy[m]
         return (
-          <div key={m} style={{ background:'var(--dark-card)', border:`1px solid ${season?SEASON_COLORS[season.type]+'44':'var(--border-dim)'}`,
+          <div key={key} style={{ background:'var(--dark-card)', border:`1px solid ${season?SEASON_COLORS[season.type]+'44':'var(--border-dim)'}`,
             borderRadius:'12px', padding:'14px 16px', marginBottom:'8px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
               <div style={{ fontWeight:'700', fontSize:'0.95rem', color:'var(--text)' }}>
-                {season?.icon} {MONTHS_FULL[m]}
+                {season?.icon} {label}
               </div>
               <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
                 {season && (
@@ -1226,7 +1315,7 @@ function MarketingTab({ data, stays, loading, year }) {
                   </span>
                 )}
                 <span style={{ fontSize:'0.78rem', color: occ>70?'var(--green)':occ>40?'var(--gold)':'var(--text-dim)', fontWeight:'600' }}>
-                  {occ}% booked
+                  {occ}% booked{open != null ? ` · ${open} open` : ''}
                 </span>
               </div>
             </div>
@@ -1332,6 +1421,7 @@ function VillaDashboardInner() {
   const [stays,    setStays]    = useState([])
   const [allStays, setAllStays] = useState([])
   const [loading,  setLoading]  = useState(true)
+  const [outlook,  setOutlook]  = useState(undefined)   // the coming months: undefined while loading, null when the call failed
 
   useEffect(() => {
     setLoading(true)
@@ -1351,6 +1441,13 @@ function VillaDashboardInner() {
       setAllStays(Array.isArray(all) ? all : [])
     })
   }, [])
+
+  // The coming months (booked so far, against last year): one call, shared by the Financials and Marketing tabs.
+  useEffect(() => {
+    api.getMonthlyOutlook(DEFAULT_VILLA_ID).then(d => setOutlook(d || null)).catch(() => setOutlook(null))
+  }, [])
+
+  const years = yearChoices(allStays, CUR_YEAR, PAST_YEARS)
 
   const TABS = [
     { key:'financials',  label:'Financials',  icon:'💰' },
@@ -1386,9 +1483,9 @@ function VillaDashboardInner() {
       </div>
 
       <div className="screen-body">
-        {tab === 'financials' && <FinancialsTab  data={data}  loading={loading} month={month} onMonthChange={setMonth} year={year} onYearChange={setYear} stays={allStays}/>}
-        {tab === 'marketing'  && <MarketingTab   data={data}  stays={stays} loading={loading} year={year}/>}
-        {tab === 'guests'     && <GuestsTab     stays={stays} loading={loading} year={year} onYearChange={setYear}/>}
+        {tab === 'financials' && <FinancialsTab  data={data}  loading={loading} month={month} onMonthChange={setMonth} year={year} onYearChange={setYear} stays={allStays} years={years} outlook={outlook}/>}
+        {tab === 'marketing'  && <MarketingTab   data={data}  stays={stays} loading={loading} year={year} outlook={outlook}/>}
+        {tab === 'guests'     && <GuestsTab     stays={stays} loading={loading} year={year} onYearChange={setYear} years={years}/>}
         {tab === 'statistics' && <StatisticsTab stays={allStays} year={year}/>}
       </div>
     </div>

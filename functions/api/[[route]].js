@@ -2723,6 +2723,15 @@ async function reconcileStayStamps(DB, stayId, status) {
 const DIRECT_SOURCES = ['direct', 'website', 'whatsapp']
 const isDirectSource = (src) => DIRECT_SOURCES.includes(String(src || '').toLowerCase())
 
+// ONE definition of how long a stay lasts and what it is worth, for every dashboard figure (the Financials cards, the Nights booked
+// strip, the channel mix and the monthly outlook), so the same month cannot read two ways on one screen. Many rows (especially
+// Airbnb-imported ones) have an empty nights or gross column: nights fall back to the dates, and a channel booking's gross is floored
+// at net + commission, so it is never below what the owner kept.
+const stayNightsOf = r => (r.nights && r.nights > 0)
+  ? r.nights
+  : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
+const stayGrossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
+
 function normalizeStoredPhone(raw) {
   const s = String(raw || '').trim()
   if (!s) return null
@@ -5223,15 +5232,13 @@ export async function onRequest(ctx) {
         // an empty nights/gross column — which made nights show 0 and net
         // exceed gross. Derive nights from the dates, and when gross is missing
         // treat gross as net + channel commission so gross is always >= net.
-        const nightsOf = r => (r.nights && r.nights > 0)
-          ? r.nights
-          : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
+        const nightsOf = stayNightsOf
         // A villa's gross for a channel booking = what it earns BEFORE the
         // channel's host commission = net + commission. Many Airbnb rows have a
         // stored gross that's understated (base tariff only), which made net
         // exceed gross. Floor gross at net+commission so gross is always >= net;
         // keep a legitimately larger stored gross where present.
-        const grossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
+        const grossOf = stayGrossOf
 
         const totalBookings  = stays.length
         const totalNights    = stays.reduce((s, r) => s + nightsOf(r), 0)
@@ -5419,9 +5426,7 @@ export async function onRequest(ctx) {
         const { results: stays } = await DB.prepare(
           `SELECT checkin_date, checkout_date, nights FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date >= ?`
         ).bind(villaId, `${fromYear}-01-01`).all()
-        const nightsOf = r => (r.nights && r.nights > 0)
-          ? r.nights
-          : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
+        const nightsOf = stayNightsOf
         const byYearMonth = {}
         stays.forEach(s => {
           if (!s.checkin_date) return
@@ -5459,7 +5464,7 @@ export async function onRequest(ctx) {
 
         // Same defensive gross derivation as getVillaDashboard — some
         // Airbnb-imported rows understate the stored `gross` column.
-        const grossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
+        const grossOf = stayGrossOf
 
         const byChannel = {}
         for (const s of stays) {
@@ -5540,6 +5545,100 @@ export async function onRequest(ctx) {
           }
         }
         return json({ success: true, data: { windowDays, gaps } })
+      }
+
+      // ── MONTHLY OUTLOOK (owner dashboard: "Projected income", the next 6 months) ──
+      // For each of the next few months, this one included: what is already booked, what the same month came to a year ago, and how
+      // many nights are still open to sell. "Booked" is exactly what the Financials tab shows for that month (a stay counts in the
+      // month it CHECKS IN, figured with stayNightsOf / stayGrossOf), so a month reads the same in both places. It is what is on the
+      // books, NOT a forecast: a booking made before 2026 carries its check-in date as the date it was made, so "where we stood at
+      // this time last year" cannot be worked out, only where that month ended. A night is booked by a stay, closed (held for an
+      // agreed late check-out / early check-in, closed by hand, or closed on a platform's own calendar) or open: the rule the enquiry
+      // availability check uses (takenNights). How many months: `dashboard.outlookMonths` in the host file (default 6, 1 to 12).
+      // Owners only. The owner's "Projected income" for a month is `net`: what is left after the platform's commission (what reaches the
+      // bank), before staff commission and expenses, summed exactly as the Financials "Net to owner" card sums it; `gross` is before the
+      // commission.
+      if (action === 'getMonthlyOutlook') {
+        const villaId = url.searchParams.get('villaId') || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const wanted = Math.round(Number(((getHostConfig(villaId) || {}).dashboard || {}).outlookMonths))
+        const count = Math.min(Math.max(wanted > 0 ? wanted : 6, 1), 12)
+        const todayStr = await todayOf(villaId)   // the property's today, not the database's UTC date
+        const ymOf = (y, m) => `${y}-${String(m).padStart(2, '0')}`
+        const startYear = Number(todayStr.slice(0, 4)), startIdx = Number(todayStr.slice(5, 7)) - 1
+        const monthAt = i => ({ year: startYear + Math.floor((startIdx + i) / 12), month: ((startIdx + i) % 12) + 1 })
+        const months = []
+        for (let i = 0; i < count; i++) {
+          const a = monthAt(i), z = monthAt(i + 1)
+          months.push({
+            ...a, ym: ymOf(a.year, a.month), start: `${ymOf(a.year, a.month)}-01`, end: `${ymOf(z.year, z.month)}-01`,
+            days: new Date(Date.UTC(a.year, a.month, 0)).getUTCDate(),
+          })
+        }
+        const winStart = months[0].start, winEnd = months[count - 1].end
+        const yearBefore = d => `${Number(d.slice(0, 4)) - 1}${d.slice(4)}`
+
+        // On the books, by check-in month: the dashboard's own bookings, nights and gross.
+        const onTheBooks = async (from, to) => {
+          const { results } = await DB.prepare(
+            `SELECT checkin_date, checkout_date, nights, gross, net, commission_amt, source
+               FROM stayvibe_stays
+              WHERE villa_id = ? AND status NOT IN ('cancelled','void') AND checkin_date >= ? AND checkin_date < ?`
+          ).bind(villaId, from, to).all()
+          const by = {}
+          for (const r of results || []) {
+            const k = String(r.checkin_date).slice(0, 7)
+            const t = by[k] || (by[k] = { bookings: 0, nights: 0, gross: 0, net: 0, direct: 0 })
+            t.bookings++
+            t.nights += stayNightsOf(r)
+            t.gross  += stayGrossOf(r)
+            t.net    += r.net || 0
+            if (isDirectSource(r.source)) t.direct++
+          }
+          return by
+        }
+        const thisYear = await onTheBooks(winStart, winEnd)
+        const aYearAgo = await onTheBooks(yearBefore(winStart), yearBefore(winEnd))
+
+        // Nights. Tonight is still for sale; a night that has gone is neither open nor closed.
+        const sellFrom = todayStr > winStart ? todayStr : winStart
+        const { results: nightRows } = await DB.prepare(
+          `SELECT stay_id, guest_name, checkin_date, checkout_date, early_checkin_time, late_checkout_time
+             FROM stayvibe_stays
+            WHERE villa_id = ? AND status NOT IN ('cancelled','void')
+              AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkout_date != ''
+              AND checkin_date <= ? AND checkout_date >= ?`
+        ).bind(villaId, winEnd, winStart).all()
+        const stayRows = nightRows || []
+        const bookedNights = takenNights({ ranges: stayRows.map(r => ({ start: r.checkin_date, end: r.checkout_date })) })
+        const closedNights = takenNights({
+          ranges: [
+            ...(await loadPlatformBlocks(DB, villaId, sellFrom, winEnd)).map(b => ({ start: b.checkin_date, end: b.checkout_date })),
+            ...(await loadDateBlocks(DB, villaId, sellFrom, winEnd)).map(b => ({ start: b.start_date, end: b.end_date })),
+          ],
+          nights: heldNights(stayRows, await holdRules(DB, villaId), sellFrom).map(h => h.night),
+        })
+
+        const nothing = { bookings: 0, nights: 0, gross: 0, net: 0, direct: 0 }
+        const rows = months.map((mo, i) => {
+          let occupied = 0, closed = 0, open = 0
+          for (let d = mo.start; d < mo.end; d = addDays(d, 1)) {
+            const booked = bookedNights.has(d)
+            if (booked) occupied++
+            if (booked || d < sellFrom) continue
+            if (closedNights.has(d)) closed++
+            else open++
+          }
+          const now = thisYear[mo.ym] || nothing, before = aYearAgo[ymOf(mo.year - 1, mo.month)] || nothing
+          return {
+            ym: mo.ym, year: mo.year, month: mo.month, current: i === 0, days: mo.days,
+            bookings: now.bookings, nights: now.nights, gross: Math.round(now.gross), net: Math.round(now.net), direct: now.direct,
+            occupied, closed, open,
+            lastYear: { bookings: before.bookings, nights: before.nights, gross: Math.round(before.gross), net: Math.round(before.net) },
+          }
+        })
+        return json({ success: true, data: { today: todayStr, months: rows } })
       }
 
       if (action === 'getRamanUnpaid') {

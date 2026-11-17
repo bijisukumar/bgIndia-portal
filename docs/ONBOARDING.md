@@ -79,6 +79,8 @@ by frontend routing.
    Set `leaseReminder` (`monthsBefore: [3, 2, 1]`) only on the host whose owner runs Rev360 rentals: it emails the owner when a lease
    reaches 3, 2 and 1 month before its end. The rental list is one list, not one per villa, so never on two hosts. A host without it gets
    no email (the Rev360 home's "(N months to renew)" and to-do block do not depend on it). Read from the file, like `priceReminder`.
+   Set `dashboard.outlookMonths` (1 to 12, the standard is 6) for how many months the owner dashboard's "Projected income" block looks
+   ahead, this one included; a host without it gets 6. Read from the file, so it works from the deploy.
    After any config edit, push it into the database
    (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
    `syncTenantConfig`): the live screens read the stored copy.

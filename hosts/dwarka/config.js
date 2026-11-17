@@ -44,6 +44,10 @@ export const CONFIG = {
   // villa, so set it on the one host whose owner runs Rev360. The server reads it from this file, so it works from the deploy.
   leaseReminder: { monthsBefore: [3, 2, 1] },
 
+  // Owner dashboard, Financials (top): how many months the "Projected income" block looks ahead, this month included (1 to 12; the standard
+  // is 6). The server reads it from this file, so it works from the deploy; a host without it gets 6.
+  dashboard: { outlookMonths: 6 },
+
   // Branding
   brandName:  'Guruvayur Estates',
   brandShort: 'GE Portal',

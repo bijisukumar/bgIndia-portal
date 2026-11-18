@@ -81,6 +81,11 @@ by frontend routing.
    no email (the Rev360 home's "(N months to renew)" and to-do block do not depend on it). Read from the file, like `priceReminder`.
    Set `dashboard.outlookMonths` (1 to 12, the standard is 6) for how many months the owner dashboard's "Projected income" block looks
    ahead, this one included; a host without it gets 6. Read from the file, so it works from the deploy.
+   Set `payments` (`{ split: false }`, and optionally `modes: ['UPI', 'Cash']`) to give the owner a Payments card on every booking the host
+   collects itself (direct, website, WhatsApp, agents): the day each payment came in, as one tap ("Mark as paid") or, with `split: true`, in
+   parts. A host without the block has no card. A platform whose guests pay at the property takes `guestPaysHost: true` under its entry in
+   `partners`. Read from the file, so it works from the deploy; the table behind it needs `migrations/2026-11-17-stay-payments.sql` run
+   once on the database.
    After any config edit, push it into the database
    (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
    `syncTenantConfig`): the live screens read the stored copy.

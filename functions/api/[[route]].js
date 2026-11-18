@@ -57,7 +57,7 @@ const MANUAL_JSON = JSON.stringify({ ...MANUAL })
 // platform's link and how it is written (see src/server/icalHub.js).
 import { channelKey, channelsMatch, sourceLabel, buildHubEvents, renderHubIcs, addDays } from '../../src/server/icalHub.js'
 // What a booking platform is, keeps and does is read from the partner files (/partners) and the host's own config, never written here.
-import { partnerFor, commissionPct, hostPartners } from '../../src/utils/partners.js'
+import { partnerFor, commissionPct, hostPartners, hostCollectsPayment } from '../../src/utils/partners.js'
 // Nights an agreed late check-out / early check-in takes out of sale - one rule
 // shared by the calendar, the enquiry check, the gap alerts and the platform links.
 import { stayHolds, stayFlags, holdPhrase, dayMonth } from '../../src/utils/stayHolds.js'
@@ -88,6 +88,8 @@ import { priceReminderSettings, periodStartStamp, buildPriceReminder } from '../
 import { leaseReminderSettings, renewalRemindersDue, buildRenewalEmail } from '../../src/utils/leaseRenewal.js'
 import { buildCheckinEmail, canSendCheckinEmail, asTestCopy, CHECKIN_EMAIL_KIND } from '../../src/utils/checkinEmail.js'
 import { greetingName } from '../../src/utils/guestWording.js'
+import { paymentSettings, paymentSummary, pickMode, cleanNote, validPaidDate, round2 as roundMoney, MAX_PAYMENT } from '../../src/utils/stayPayments.js'
+import { rupees } from '../../src/utils/monthlyOutlook.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -2731,6 +2733,61 @@ const stayNightsOf = r => (r.nights && r.nights > 0)
   ? r.nights
   : Math.max(0, Math.round((new Date(r.checkout_date) - new Date(r.checkin_date)) / 86400000))
 const stayGrossOf = r => Math.max(r.gross || 0, (r.net || 0) + (r.commission_amt || 0))
+
+// ── PAYMENTS RECEIVED AGAINST A BOOKING ("Payments" on Complete booking) ──────────────────────────────────────────────────────────
+// The day each payment came in, in parts if the host works that way (src/utils/stayPayments.js has the rules). One row per payment in
+// stayvibe_stay_payments (migrations/2026-11-17-stay-payments.sql): a table of its own, because stayvibe_stays is at 81 of D1's 100
+// columns. A database that has not had the migration yet simply has none: reads answer "no payments" with ready:false, writes answer
+// 503 with the reason, and nothing else (hard delete, merging duplicates) is affected.
+async function loadStayPayments(DB, stayId) {
+  try {
+    const { results } = await DB.prepare(
+      `SELECT payment_id, amount, paid_date, payment_mode, note, recorded_by, recorded_at
+         FROM stayvibe_stay_payments WHERE stay_id = ? AND removed_at IS NULL ORDER BY paid_date, recorded_at, payment_id`
+    ).bind(stayId).all()
+    return { ready: true, rows: (results || []).map(r => ({
+      paymentId: r.payment_id, amount: roundMoney(r.amount), paidDate: r.paid_date, mode: r.payment_mode || '', note: r.note || '',
+      recordedBy: r.recorded_by || '', recordedAt: r.recorded_at || '',
+    })) }
+  } catch (e) {
+    if (/no such table/i.test(e?.message || '')) return { ready: false, rows: [] }
+    throw e
+  }
+}
+
+// What the screen needs to draw one booking's Payments: the host's settings, whether this is a booking the host collects (a platform's is
+// not), the payments, and what they add up to against the booking's total (its saved gross).
+async function stayPaymentView(DB, stay) {
+  const host = getHostConfig(stay.villa_id)
+  const settings = paymentSettings(host)
+  const applies = settings.enabled && hostCollectsPayment(host, stay.source)
+  const view = { enabled: settings.enabled, applies, split: settings.split, modes: settings.modes, stayStatus: stay.status, ready: true, payments: [] }
+  if (!applies) return { ...view, summary: paymentSummary(0, []) }
+  const { ready, rows } = await loadStayPayments(DB, stay.stay_id)
+  return { ...view, ready, payments: rows, summary: paymentSummary(stayGrossOf(stay), rows) }
+}
+
+// How many payments are on record against a stay (0 without the table): a stay that has any is voided, never hard-deleted.
+async function countStayPayments(DB, stayId) {
+  try {
+    const row = await DB.prepare(`SELECT COUNT(*) AS c FROM stayvibe_stay_payments WHERE stay_id = ? AND removed_at IS NULL`).bind(stayId).first()
+    return (row && row.c) || 0
+  } catch (e) {
+    if (/no such table/i.test(e?.message || '')) return 0
+    throw e
+  }
+}
+
+// Merging a duplicate booking moves its money to the one that survives; the payments received go with it. Returns how many moved.
+async function movePayments(DB, fromStayId, toStayId) {
+  try {
+    const res = await DB.prepare(`UPDATE stayvibe_stay_payments SET stay_id = ? WHERE stay_id = ?`).bind(toStayId, fromStayId).run()
+    return (res && res.meta && res.meta.changes) || 0
+  } catch (e) {
+    if (/no such table/i.test(e?.message || '')) return 0
+    throw e
+  }
+}
 
 function normalizeStoredPhone(raw) {
   const s = String(raw || '').trim()
@@ -5639,6 +5696,19 @@ export async function onRequest(ctx) {
           }
         })
         return json({ success: true, data: { today: todayStr, months: rows } })
+      }
+
+      // ── PAYMENTS ON ONE BOOKING (Complete booking, "Payments") ───────────────────
+      // The host's settings, the payments recorded and what they add up to against the booking's saved total. Owners only. A booking
+      // the host does not collect (a platform's), or a host with Payments switched off, answers applies:false and nothing more.
+      if (action === 'getStayPayments') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const stayId = url.searchParams.get('stayId')
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT stay_id, villa_id, source, status, gross, net, commission_amt FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        return json({ success: true, data: { stayId, ...(await stayPaymentView(DB, stay)) } })
       }
 
       if (action === 'getRamanUnpaid') {
@@ -9086,6 +9156,8 @@ export async function onRequest(ctx) {
         if (!stay) return err('Stay not found', 404)
         const paidComm = await DB.prepare(`SELECT comm_id FROM stayvibe_manager_commissions WHERE stay_id = ? AND is_paid = 1 LIMIT 1`).bind(stayId).first()
         if (paidComm) return json({ success: false, code: 'paid_commission', error: 'This stay has a PAID commission — hard delete is blocked. Void it instead to preserve the financial record.' }, 409)
+        // Payments received are a financial record too: a stay that has any is voided, not deleted (and a database without the table has none).
+        if (await countStayPayments(DB, stayId) > 0) return json({ success: false, code: 'has_payments', error: 'This stay has payments recorded — hard delete is blocked. Void it instead to preserve the financial record.' }, 409)
         const reason = (body.reason || '').trim() || 'hard delete'
         await DB.batch([
           DB.prepare(`INSERT INTO infra_deletion_log (del_id, stay_id, villa_id, action, guest_name, checkin_date, checkout_date, reason, snapshot, actor) VALUES (?,?,?,?,?,?,?,?,?,?)`)
@@ -9106,6 +9178,8 @@ export async function onRequest(ctx) {
           DB.prepare(`UPDATE stayvibe_duplicate_bookings SET resolved = 1, resolved_by = ?, resolved_at = datetime('now'), resolution = 'stay deleted' WHERE existing_stay_id = ? AND (resolved IS NULL OR resolved = 0)`).bind(actor, stayId),
           DB.prepare(`DELETE FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId),
         ])
+        // Removed payments are on record only (the check above refused a stay with live ones): they go with the stay.
+        try { await DB.prepare(`DELETE FROM stayvibe_stay_payments WHERE stay_id = ?`).bind(stayId).run() } catch (e) { if (!/no such table/i.test(e?.message || '')) throw e }
         return json({ success: true, data: { stayId, deleted: true } })
       }
 
@@ -11400,8 +11474,14 @@ export async function onRequest(ctx) {
             .bind(genId('LOG'), targetStayId,
               `Absorbed financials from duplicate ${sourceStayId} (${src.guest_name}) into ${targetStayId} (${tgt.guest_name}); duplicate voided. Net moved: ${src.net || 0}.${bookedAs ? ` Booked by "${bookedAs}" kept on the stay.` : ''}`),
         ])
+        // What has been received against the duplicate belongs to the booking that survives: the money moved, and so did what has been paid of it.
+        const movedPayments = await movePayments(DB, sourceStayId, targetStayId)
+        if (movedPayments > 0) {
+          await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'merge', ?, ?, datetime('now'))`)
+            .bind(genId('LOG'), targetStayId, `Moved ${movedPayments} payment(s) received from duplicate ${sourceStayId}.`).run()
+        }
         await syncStayLedger(DB, targetStayId)
-        return json({ success: true, data: { targetStayId, sourceStayId, movedNet: src.net || 0, movedGross: src.gross || 0, bookedBy: bookedAs } })
+        return json({ success: true, data: { targetStayId, sourceStayId, movedNet: src.net || 0, movedGross: src.gross || 0, bookedBy: bookedAs, movedPayments } })
       }
 
       if (action === 'linkBookedBy') {
@@ -11574,6 +11654,89 @@ export async function onRequest(ctx) {
         const total = lines.reduce((n, l) => n + (Number(l && l.amount) || 0), 0)
         const received = lines.reduce((n, l) => n + (l && l.paid ? (Number(l.paidAmount != null ? l.paidAmount : l.amount) || 0) : 0), 0)
         return json({ success: true, data: { stayId, lines, changed, extraTotal: Math.round(total * 100) / 100, received: Math.round(received * 100) / 100 } })
+      }
+
+      // ── PAYMENTS: RECORD ONE, REMOVE ONE ────────────────────────────────────────
+      // addStayPayment: a payment came in on a day. With the host's `split` off the amount is always the balance (one tap, "Mark as
+      // paid"); with it on the amount is typed, and one above the balance asks first (allowOver:true confirms). The day is the
+      // property's and never later than today. A double tap does not record twice. removeStayPayment marks a payment removed (it stays
+      // on record). Owners only. Neither works without the table (503) and neither touches the stay's own amounts.
+      if (action === 'addStayPayment') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT stay_id, villa_id, source, status, gross, net, commission_amt FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        const host = getHostConfig(stay.villa_id)
+        const settings = paymentSettings(host)
+        if (!settings.enabled) return err('Payments are not switched on for this villa', 409)
+        if (!hostCollectsPayment(host, stay.source)) return err('This booking is paid through its platform: there is nothing to record here', 409)
+        if (['void', 'cancelled'].includes(stay.status)) return err('This stay is not active', 409)
+        const { ready, rows } = await loadStayPayments(DB, stayId)
+        if (!ready) return err('Payments are not set up in this database yet: the one-time migration (migrations/2026-11-17-stay-payments.sql) has not been run', 503)
+        const today = await todayOf(stay.villa_id)
+        const paidDate = validPaidDate(body.paidDate == null || body.paidDate === '' ? today : body.paidDate, today)
+        if (!paidDate) return err('Choose the day the payment came in (today or earlier)', 400)
+        const summary = paymentSummary(stayGrossOf(stay), rows)
+        let amount
+        if (!settings.split) {
+          amount = summary.balance
+          if (!(amount > 0)) return err(summary.total > 0 ? 'Nothing is left to pay on this booking' : 'Set the booking price first, then mark it paid', 409)
+        } else {
+          amount = roundMoney(body.amount)
+          if (!(amount > 0) || amount > MAX_PAYMENT) return err('Enter the amount that came in', 400)
+          if (summary.total > 0 && amount > summary.balance + 0.005 && body.allowOver !== true) {
+            return json({ success: false, code: 'over_balance', balance: summary.balance, error: `That is more than the balance of ${rupees(summary.balance)}. Record it anyway?` }, 409)
+          }
+        }
+        const mode = pickMode(settings.modes, body.paymentMode)
+        if (mode === null) return err('Choose how it was paid: ' + settings.modes.join(', '), 400)
+        const note = cleanNote(body.note)
+        // A double tap (the same payment again within a minute, by the same person) is the first one, not a second.
+        const twin = await DB.prepare(
+          `SELECT payment_id FROM stayvibe_stay_payments
+            WHERE stay_id = ? AND removed_at IS NULL AND amount = ? AND paid_date = ? AND COALESCE(payment_mode, '') = ? AND COALESCE(note, '') = ?
+              AND recorded_by = ? AND recorded_at >= datetime('now', '-60 seconds') LIMIT 1`
+        ).bind(stayId, amount, paidDate, mode, note, actor).first()
+        let paymentId = twin && twin.payment_id
+        if (!paymentId) {
+          paymentId = genId('PAY')
+          await DB.batch([
+            DB.prepare(`INSERT INTO stayvibe_stay_payments (payment_id, stay_id, villa_id, amount, paid_date, payment_mode, note, recorded_by, recorded_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+              .bind(paymentId, stayId, stay.villa_id, amount, paidDate, mode || null, note || null, actor, now()),
+            DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'stay_payment', ?, ?, ?)`)
+              .bind(genId('LOG'), stayId, `Payment ${rupees(amount)} received ${paidDate}${mode ? ' (' + mode + ')' : ''}${note ? ': ' + note : ''}, recorded by ${actor}`, now()),
+          ])
+        }
+        return json({ success: true, data: { stayId, paymentId, duplicate: !!twin, ...(await stayPaymentView(DB, stay)) } })
+      }
+
+      if (action === 'removeStayPayment') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { paymentId } = body
+        if (!paymentId) return err('paymentId required')
+        let row
+        try {
+          await assertRecordAccess(DB, payload, 'stayvibe_stay_payments', 'payment_id', paymentId)
+          row = await DB.prepare(`SELECT payment_id, stay_id, villa_id, amount, paid_date, removed_at FROM stayvibe_stay_payments WHERE payment_id = ?`).bind(paymentId).first()
+        } catch (e) {
+          if (/no such table/i.test(e?.message || '')) return err('Payments are not set up in this database yet', 503)
+          throw e
+        }
+        if (!row) return err('Payment not found', 404)
+        assertPropertyAccess(payload, row.villa_id)
+        if (!row.removed_at) {
+          await DB.batch([
+            DB.prepare(`UPDATE stayvibe_stay_payments SET removed_at = ?, removed_by = ? WHERE payment_id = ? AND removed_at IS NULL`).bind(now(), actor, paymentId),
+            DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'stay_payment', ?, ?, ?)`)
+              .bind(genId('LOG'), row.stay_id, `Payment ${rupees(row.amount)} of ${row.paid_date} REMOVED by ${actor}`, now()),
+          ])
+        }
+        const stay = await DB.prepare(`SELECT stay_id, villa_id, source, status, gross, net, commission_amt FROM stayvibe_stays WHERE stay_id = ?`).bind(row.stay_id).first()
+        if (!stay) return err('Stay not found', 404)
+        return json({ success: true, data: { stayId: row.stay_id, paymentId, removed: true, ...(await stayPaymentView(DB, stay)) } })
       }
 
       if (action === 'closeStayWithReview') {

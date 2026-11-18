@@ -204,6 +204,17 @@ export function isDirectSource(source) {
   return !s || (OWN('direct').names || []).includes(s)
 }
 
+// Does the HOST collect the money from the guest for a booking from this source ("Payments" on Complete booking)? True for the host's
+// own doors (direct, website, phone ...), an agent and anything else the host takes itself; false for a platform, which collects from
+// the guest and pays the host out. A partner file or a host's own entry can say otherwise with `guestPaysHost: true | false` (a platform's
+// "pay at the property" bookings). A booking with no source name is a direct one; a name nobody has described is treated as a platform.
+export function hostCollectsPayment(config, source) {
+  const group = sourceStyle(source).group   // doors (website, phone...), agent prefixes and the empty name are classed here, as on the calendar
+  const p = partnerFor(config, source) || (group !== 'channel' ? partnerFor(config, OWN(group).id) : null)
+  if (p && (p.guestPaysHost === true || p.guestPaysHost === false)) return p.guestPaysHost
+  return group !== 'channel'
+}
+
 // How a source reads on ANOTHER platform's calendar ("Unavailable (Airbnb)"): the platform's name; "Direct" for the host's own
 // doors, agents and anything else the host takes itself; null for a name nobody described.
 export function hubLabelFor(source) {

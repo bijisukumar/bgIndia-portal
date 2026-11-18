@@ -48,6 +48,13 @@ export const CONFIG = {
   // is 6). The server reads it from this file, so it works from the deploy; a host without it gets 6.
   dashboard: { outlookMonths: 6 },
 
+  // Payments received against a booking (the Payments card on Complete booking, src/utils/stayPayments.js): the day each came in. Only the
+  // host's own bookings (direct, website, WhatsApp, agents) get it: a platform's guest pays the platform. A host without this block has no
+  // Payments. `split: false` (the standard): one tap, "Mark as paid", records the balance on a day. `split: true`: any amount, as often as the
+  // guest pays. `modes` is the list offered for how it was paid (UPI, Bank transfer, Cash, Card, Other when left out). The server reads it from
+  // this file, so it works from the deploy.
+  payments: { split: false },
+
   // Branding
   brandName:  'Guruvayur Estates',
   brandShort: 'GE Portal',

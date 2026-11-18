@@ -142,6 +142,8 @@ export const api = {
   confirmCheckIn:       (data)   => post('confirmCheckIn', data),
   addStayCars:          (data)   => post('addStayCars', data),
   setExtraLinePaid:     (data)   => post('setExtraLinePaid', data),
+  addStayPayment:       (data)   => post('addStayPayment', data),
+  removeStayPayment:    (data)   => post('removeStayPayment', data),
   resolveStay:          (data)   => post('resolveStay', data),
   deleteStay:           (data)   => post('deleteStay', data),
   resolveDuplicate:     (data)   => post('resolveDuplicate', data),
@@ -311,6 +313,7 @@ export const api = {
   getChannelMixInsight: (villaId) => get('getChannelMixInsight', { villaId: villaId || DEFAULT_VILLA_ID }),
   getOccupancyGaps:     (villaId) => get('getOccupancyGaps', { villaId: villaId || DEFAULT_VILLA_ID }),
   getMonthlyOutlook:    (villaId) => get('getMonthlyOutlook', { villaId: villaId || DEFAULT_VILLA_ID }),
+  getStayPayments:      (stayId)  => get('getStayPayments', { stayId }),
   getStays:             (vId, y) => get('getStays', { villaId: vId, year: y }),
   getGuests:            ()       => get('getGuests'),
 

@@ -13,6 +13,10 @@ export const CONFIG = {
   // Months the car and plate photos stay in Drive (the standard plan is 1); see hosts/dwarka/config.js.
   carPhotos: { keepMonths: 1 },
 
+  // Payments received against a booking, in parts (the Payments card on Complete booking); see hosts/dwarka/config.js. The demo shows the
+  // split option, because a host evaluating it may ask for it.
+  payments: { split: true },
+
   // Branding
   brandName:  'Demo Test Villas',
   brandShort: 'Demo Portal',

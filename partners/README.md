@@ -90,6 +90,7 @@ all pick the new platform up.
 | `feeBreakdown` | `true` if its confirmation lists the fees in rupees (night fee, cleaning, host fee, you earn, guest fee, guest paid): Complete booking then shows those lines and the booking holds the real amounts. `false` for a platform that gives only a percentage. |
 | `bookingsFrom` | `email`: a confirmation email is read and a stay is made. `calendar`: only its calendar shows a blocked date (the owner is told and adds the stay). |
 | `reviewKey` | The key under `guestMessages.reviewRequest.platforms / .links` in the host's config. |
+| `guestPaysHost` | Who collects the money from the guest. Left out: the host's own doors, agents and "other" collect it themselves (the Payments card on Complete booking is for these), a `channel` platform does not (it pays the host out). Write `guestPaysHost: true` in the host's `partners` block for a platform whose guests pay at the property. |
 | `calendar` | How its calendar takes our link: `via` (`link`, or `google-bridge` for a platform that refuses our address), `whereToPaste`, `readsEvery`, a `note`, and `reservedPrefix` (how its own calendar names a real booking rather than a closed night). |
 | `doors`, `prefixes`, `doorLabels`, `enquiryDoors`, `hubLabel`, `guestFormLabel` | Only on the host's own kinds of booking (`direct.js`, `agent.js`, `other.js`). |
 

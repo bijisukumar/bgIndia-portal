@@ -40,6 +40,7 @@ import { EXTRA_ITEMS } from '../../utils/villaPricing'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { findTwinPairs } from '../../utils/twinStays'
 import ChangeRequestCard from '../../components/ChangeRequestCard'
+import StayPayments from '../../components/StayPayments'
 import { PhoneCountry } from '../../components/CountryFlag'
 import { carPhotoMonths } from '../../utils/carPhotos'
 
@@ -2120,6 +2121,11 @@ export default function CompleteBooking() {
                     <span className="net-val big">{fmt(net)}</span>
                   </div>
                 </div>
+
+                {/* Payments: the day the guest paid, in parts if the host works that way. Nothing shows for a booking a platform collects
+                    (Airbnb ...) or for a host that has not switched Payments on; the server decides, this only draws what it answers. */}
+                <StayPayments stayId={s.stay_id} screenTotal={gross}
+                  refreshKey={[s.stay_id, s.gross, s.net, s.extra_charges, s.tariff_per_night].join('|')} onToast={showToast} />
 
                 {/* Extended check-in numbers — a per-night reference, not the
                     multi-night total, so the figure stays correct regardless of

@@ -42,6 +42,13 @@ ON DELETE CASCADE: D1 does not guarantee `PRAGMA foreign_keys=ON`.
 Beware `SELECT *` on stayvibe_stays — 13 such sites exist, and a moved column
 silently stops appearing rather than erroring.
 
+**Column budget (checked 2026-11-17).** D1 refuses a table past 100 columns. `stayvibe_stays` is at **81** in both `bgindia-db` and
+`demovilla-db` (19 left; it has not grown since the 2026-08-25 split). Nothing else is close: `rev360_property_details` 61,
+`rev360_rental_props` 55, `stayvibe_enquiries` 41; `bgindiadb-estates` tops out at 42 and `caprock-db` at 14. **New data about a booking is a
+ROW in a child table (or a line in an existing JSON column), never an ALTER on `stayvibe_stays`**: payments went into
+`stayvibe_stay_payments` for that reason. Re-check any time, one database at a time (read-only):
+`npx wrangler d1 execute <database> --remote --command "SELECT m.name AS tbl, COUNT(p.name) AS cols FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_cf_%' GROUP BY m.name ORDER BY cols DESC"`.
+
 ## Money rules that are easy to get wrong
 - **Extended-stay quotes (25%/50%)** are a share of what the **guest paid**,
   not of what we net — and **occupancy tax is excluded** (government money,

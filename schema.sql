@@ -66,6 +66,24 @@ CREATE TABLE IF NOT EXISTS stayvibe_stay_ext (
 );
 CREATE INDEX IF NOT EXISTS idx_stay_ext_villa ON stayvibe_stay_ext(villa_id);
 
+-- Payments received against a booking (migrations/2026-11-17-stay-payments.sql): one ROW per payment, the day it came in, so a booking paid
+-- in parts needs no extra columns on stayvibe_stays (81 of D1's 100). removed_at is a soft delete.
+CREATE TABLE IF NOT EXISTS stayvibe_stay_payments (
+  payment_id   TEXT PRIMARY KEY,
+  stay_id      TEXT NOT NULL,
+  villa_id     TEXT NOT NULL,
+  amount       REAL NOT NULL,
+  paid_date    TEXT NOT NULL,
+  payment_mode TEXT,
+  note         TEXT,
+  recorded_by  TEXT,
+  recorded_at  TEXT DEFAULT (datetime('now')),
+  removed_at   TEXT,
+  removed_by   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stay_payments_stay  ON stayvibe_stay_payments(stay_id);
+CREATE INDEX IF NOT EXISTS idx_stay_payments_villa ON stayvibe_stay_payments(villa_id, paid_date);
+
 -- Form C is filed per foreign national, not per booking, so this is ONE ROW
 -- PER GUEST keyed (stay_id, guest_seq). guest_seq 1 is whoever filled the
 -- check-in form; 2..N are the companions they added. Domestic parties write

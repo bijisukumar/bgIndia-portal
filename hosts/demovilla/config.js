@@ -240,6 +240,25 @@ We're looking forward to hosting you and your family.
 Warm regards,
 Demo Villa`,
     },
+    // The invoice sent at check-out: same shape and {placeholders} as hosts/dwarka/config.js.
+    invoice: {
+      subject: 'Your invoice from {villaName}',
+      template:
+`Namaskaram {firstName}!
+
+Thank you for staying with us at {villaName}. Here is your invoice for what was paid at check-out.
+
+*YOUR INVOICE*
+{invoiceDetails}
+
+*PLAN YOUR NEXT KERALA HOLIDAY*
+{marketingLines}
+
+This is a payment invoice, not a GST tax invoice.
+
+Warm regards,
+{villaName}`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

@@ -513,6 +513,28 @@ We are truly looking forward to hosting you and your family!
 Snehapoorvam (സ്നേഹപൂർവ്വം),
 Biji | Guruvayur Villa (Dwarka)`,
     },
+    // The invoice sent at check-out (WhatsApp and email) once the guest has paid for the incidentals: the words around the details, which
+    // the code builds (guest, stay, check-out charges, tip, total paid, reference) and the marketing links (from `marketing` above and the
+    // review link in reviewRequest.links.default). The {placeholders} are listed in src/utils/checkoutInvoice.js. It is NOT a GST tax
+    // invoice, and says so. Read by the Worker from this file, so a change needs no seed run.
+    invoice: {
+      subject: 'Your invoice from {villaName}',
+      template:
+`Namaskaram {firstName}!
+
+Thank you for staying with us at {villaName}. Here is your invoice for what was paid at check-out.
+
+*YOUR INVOICE*
+{invoiceDetails}
+
+*PLAN YOUR NEXT KERALA HOLIDAY*
+{marketingLines}
+
+This is a payment invoice, not a GST tax invoice.
+
+Warm regards,
+{villaName}`,
+    },
     comfortCheck: {
       template:
 `Namaskaram {guestName}! 🙏

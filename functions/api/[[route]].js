@@ -90,6 +90,7 @@ import { buildCheckinEmail, canSendCheckinEmail, asTestCopy, CHECKIN_EMAIL_KIND 
 import { greetingName } from '../../src/utils/guestWording.js'
 import { paymentSettings, paymentSummary, pickMode, cleanNote, validPaidDate, round2 as roundMoney, MAX_PAYMENT } from '../../src/utils/stayPayments.js'
 import { rupees } from '../../src/utils/monthlyOutlook.js'
+import { buildCheckoutInvoice, validateCheckoutPayment, checkoutPaymentEvents, waNumber, CHECKOUT_PAYMENT_EVENT, CHECKOUT_INVOICE_KIND } from '../../src/utils/checkoutInvoice.js'
 
 // Sender for platform-level leads (demo/invite/host-registration requests) —
 // these aren't any one tenant's alert, so they shouldn't borrow dwarka's
@@ -11737,6 +11738,113 @@ export async function onRequest(ctx) {
         const stay = await DB.prepare(`SELECT stay_id, villa_id, source, status, gross, net, commission_amt FROM stayvibe_stays WHERE stay_id = ?`).bind(row.stay_id).first()
         if (!stay) return err('Stay not found', 404)
         return json({ success: true, data: { stayId: row.stay_id, paymentId, removed: true, ...(await stayPaymentView(DB, stay)) } })
+      }
+
+      // recordCheckoutPayment: at check-out the caretaker (or the owner) records how the guest paid for the incidentals and the tip they
+      // added for the team (the QR code on the screen carried both). No table of its own: one line in the stay's activity log (event
+      // 'checkout_payment', the amounts and items as JSON), like the guest-time history, so nothing has to be migrated. The amount is
+      // worked out from the items, and may not exceed the incidentals saved for the guest minus what was recorded before; the same payment
+      // again within a minute is the first one. The owner is emailed. Answers with the invoice's WhatsApp text, worded from the host's own
+      // guestMessages.invoice (src/utils/checkoutInvoice.js).
+      if (action === 'recordCheckoutPayment') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner' && payload.role !== 'manager') return err('Not allowed', 403)
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        if (!['checked_in', 'ready_for_checkout', 'checked_out', 'closed'].includes(String(stay.status || '').trim().toLowerCase())) return err('This booking is not at check-out.', 409)
+        const v = validateCheckoutPayment(body)
+        if (v.error) return err(v.error)
+        const p = v.value
+        const { results: priorRows } = await DB.prepare(
+          `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? ORDER BY created_at ASC, rowid ASC`
+        ).bind(CHECKOUT_PAYMENT_EVENT, stayId).all()
+        const prior = checkoutPaymentEvents(priorRows)
+        const { results: recentRows } = await DB.prepare(
+          `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? AND created_at > datetime('now', '-60 seconds') ORDER BY created_at DESC LIMIT 5`
+        ).bind(CHECKOUT_PAYMENT_EVENT, stayId).all()
+        let rec = checkoutPaymentEvents(recentRows).find(e => e.by === actor && e.mode === p.mode && Number(e.amount) === p.amount && Number(e.tip) === p.tip)
+        const duplicate = !!rec
+        if (!rec) {
+          // tenant-scope-exempt: the stay was read under assertRecordAccess just above; this adds up that one stay's saved incidentals
+          const chargedRow = await DB.prepare(`SELECT COALESCE(SUM(total), 0) AS t FROM stayvibe_incidentals WHERE stay_id = ?`).bind(stayId).first()
+          const charged = Number(chargedRow && chargedRow.t) || 0
+          const paid = prior.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+          if (p.amount > roundMoney(charged - paid) + 0.01) return err('That is more than the incidentals saved for this guest. Save the items first.', 409)
+          rec = {
+            v: 1, ref: 'CP-' + crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase(), mode: p.mode, amount: p.amount, tip: p.tip, total: p.total,
+            paidOn: await todayOf(stay.villa_id), items: p.items, by: actor,
+          }
+          await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, ?, ?, ?, ?)`)
+            .bind(genId('CP'), CHECKOUT_PAYMENT_EVENT, stayId, JSON.stringify(rec), now()).run()
+          ctx.waitUntil(sendAlert(env, `💳 bgIndia — Check-out payment recorded: ${inr(p.total)} by ${p.mode} (${stay.guest_name || 'guest'})`, [
+            'Source: Check-out incidentals screen',
+            'Action: Check-out payment recorded',
+            '',
+            `Guest:        ${stay.guest_name || '—'}`,
+            `Incidentals:  ${inr(p.amount)}`,
+            `Tip:          ${p.tip > 0 ? inr(p.tip) : 'none'}`,
+            `Total paid:   ${inr(p.total)} by ${p.mode}`,
+            `Reference:    ${rec.ref}`,
+            '',
+            `Recorded by: ${actor}`,
+            `Recorded at: ${now()}`,
+          ], await getOwnerAlertEmail(DB, env, stay.villa_id), DB, stay.villa_id))
+        }
+        const mail = buildCheckoutInvoice({ stay, host: getHostConfig(stay.villa_id), payment: rec })
+        return json({ success: true, data: {
+          stayId, ref: rec.ref, mode: rec.mode, amount: rec.amount, tip: rec.tip, total: rec.total, paidOn: rec.paidOn, duplicate,
+          whatsapp: mail.error ? '' : mail.whatsapp, invoiceError: mail.error || '',
+          waNumber: waNumber(stay.guest_phone), hasEmail: EMAIL_LOOKS_OK.test(String(stay.guest_email || '').trim()),
+        } })
+      }
+
+      // sendCheckoutInvoiceEmail: the same invoice as an email to the guest (copy to the villa inbox, like the check-in email). `test: true`
+      // sends it to the OWNER's own address instead, marked TEST (owner only). One line per send on the stay; a double tap is one send.
+      if (action === 'sendCheckoutInvoiceEmail') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner' && payload.role !== 'manager') return err('Not allowed', 403)
+        const { stayId } = body
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        const isTest = body.test === true
+        if (isTest && payload.role === 'manager') return err('Owner access only', 403)
+        const to = String(stay.guest_email || '').trim()
+        if (!isTest && !to) return err('No email on file for this guest. Add it in Guest info first.')
+        if (!isTest && !EMAIL_LOOKS_OK.test(to)) return err('The email on file does not look right. Correct it in Guest info first.')
+        const { results: payRows } = await DB.prepare(
+          `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? ORDER BY created_at ASC, rowid ASC`
+        ).bind(CHECKOUT_PAYMENT_EVENT, stayId).all()
+        const events = checkoutPaymentEvents(payRows)
+        const rec = (body.ref ? events.find(e => e.ref === body.ref) : null) || events[events.length - 1]
+        if (!rec) return err('No payment has been recorded for this guest yet.', 409)
+        const mail = buildCheckoutInvoice({ stay, host: getHostConfig(stay.villa_id), payment: rec })
+        if (mail.error) return err(mail.error)
+        if (isTest) {
+          const ownerTo = String((await getOwnerAlertEmail(DB, env, stay.villa_id)) || '').trim()
+          if (!EMAIL_LOOKS_OK.test(ownerTo)) return err('There is no email set up for you to send the test to. Add it in Notification settings first.')
+          const t = asTestCopy(mail, { guestName: greetingName(stay.guest_name) })
+          const sentTest = await sendGuestEmail(env, DB, { to: ownerTo, subject: t.subject, text: t.text, html: t.html, villaId: stay.villa_id, category: 'guest_invoice_email_test', noBcc: true })
+          if (!sentTest.ok) return err('Test email failed: ' + (sentTest.detail || 'unknown error'))
+          return json({ success: true, data: { stayId, test: true, to: ownerTo, subject: t.subject, ref: rec.ref } })
+        }
+        const { results: recentMail } = await DB.prepare(
+          `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? AND created_at > datetime('now', '-60 seconds') ORDER BY created_at DESC LIMIT 3`
+        ).bind(GUEST_EMAIL_EVENT, stayId).all()
+        // (read the lines directly: guestEmailEvents keeps only the fields the check-in email needs, not the payment's reference)
+        const dup = (recentMail || []).map(r => { try { return { ...JSON.parse(r.note), at: r.created_at } } catch { return null } })
+          .find(e => e && e.kind === CHECKOUT_INVOICE_KIND && String(e.to).toLowerCase() === to.toLowerCase() && e.ref === rec.ref)
+        if (dup) return json({ success: true, data: { stayId, to, alreadySent: true, sentAt: dup.at, ref: rec.ref } })
+        const result = await sendGuestEmail(env, DB, { to, subject: mail.subject, text: mail.text, html: mail.html, villaId: stay.villa_id, category: 'guest_invoice_email' })
+        if (!result.ok) return err('Email send failed: ' + (result.detail || 'unknown error'))
+        const sentAt = now()
+        await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, ?, ?, ?, ?)`)
+          .bind(genId('GE'), GUEST_EMAIL_EVENT, stayId, JSON.stringify({ kind: CHECKOUT_INVOICE_KIND, to, subject: mail.subject, by: actor, ref: rec.ref }), sentAt).run()
+        return json({ success: true, data: { stayId, to, subject: mail.subject, sentAt, ref: rec.ref } })
       }
 
       if (action === 'closeStayWithReview') {

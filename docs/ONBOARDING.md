@@ -86,6 +86,12 @@ by frontend routing.
    parts. A host without the block has no card. A platform whose guests pay at the property takes `guestPaysHost: true` under its entry in
    `partners`. Read from the file, so it works from the deploy; the table behind it needs `migrations/2026-11-17-stay-payments.sql` run
    once on the database.
+   The check-out screen (Raman's "Check-out incidentals") shows a UPI QR code for the guest to pay, with tip buttons: it pays the UPI ID in
+   `villas[].managerUpi` (shown as `managerName`), so a host without it has no QR code (cash and card can still be recorded). The payment and
+   its tip are kept as one line in the stay's activity log (event `checkout_payment`), so nothing needs migrating. Set `guestMessages.invoice`
+   (`subject`, `template`, optional `labels` and `marketing`: see src/utils/checkoutInvoice.js for the {placeholders}) to word the invoice that
+   goes to the guest on WhatsApp or by email; its Kerala/marketing lines come from `marketing` and `guestMessages.reviewRequest.links.default`.
+   It says it is not a GST tax invoice. Read from the file by the Worker, so it works from the deploy.
    After any config edit, push it into the database
    (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
    `syncTenantConfig`): the live screens read the stored copy.

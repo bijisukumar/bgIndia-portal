@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
+import { CONFIG } from '../../config'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
+import UpiQr from '../../components/UpiQr'
+import { upiLink, inr, PAY_MODES, TIP_PRESETS, MAX_TIP } from '../../utils/checkoutInvoice'
 
 // Low-stock threshold matches Inventory.jsx's Stock tab exactly (10% of
 // preferred level) so both screens agree on what counts as "low."
@@ -43,8 +46,27 @@ function buildInvoiceWaLink(stay, lines, total) {
   return `https://wa.me/${num}?text=${encodeURIComponent(message)}`
 }
 
+// A choice chip (tip amount, how it was paid).
+function Chip({ label, on, onClick }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={on}
+      style={{
+        padding: '8px 14px', borderRadius: '18px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer',
+        border: `1px solid ${on ? 'var(--gold)' : 'var(--border-dim)'}`,
+        background: on ? 'rgba(200,144,58,0.15)' : 'transparent',
+        color: on ? 'var(--gold)' : 'var(--text)',
+      }}>
+      {label}
+    </button>
+  )
+}
+
 export default function KitchenIncidentals() {
   const goBack = useBack()
+  // Whose UPI the QR code pays: the villa's manager (Raman) for now. He is the one at the gate who tallies the bill and collects.
+  const villa = CONFIG.villas.find(v => v.id === DEFAULT_VILLA_ID) || CONFIG.villas.find(v => v.active) || CONFIG.villas[0] || {}
+  const payeeUpi = villa.managerUpi || ''
+  const payeeName = villa.managerName || 'Manager'
   const [stay, setStay]     = useState(null)
   const [cart, setCart]     = useState({})
   // Live catalog (kitchen category, active items only) — was previously a
@@ -63,6 +85,14 @@ export default function KitchenIncidentals() {
   // after a new guest has already checked in and become the active stay.
   const [guestOptions, setGuestOptions] = useState([])
   const [custom, setCustom] = useState({ name: '', price: '', qty: 0 })
+  // Payment at check-out: the tip the guest adds for the team (0 = none, a preset, or 'other' with the typed amount), how it was
+  // paid, and what the last save recorded (the invoice the guest can be sent).
+  const [tipChoice, setTipChoice] = useState(0)
+  const [tipOther, setTipOther]   = useState('')
+  const [payMode, setPayMode]     = useState('')
+  const [receipt, setReceipt]     = useState(null)
+  const [emailBusy, setEmailBusy] = useState(false)
+  const [emailedTo, setEmailedTo] = useState('')
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
 
@@ -114,6 +144,13 @@ export default function KitchenIncidentals() {
   ]
   const invoiceWaLink = total > 0 ? buildInvoiceWaLink(stay, invoiceLines, total) : null
 
+  // What the guest pays now: the items plus the tip. The QR code carries exactly this amount.
+  const tip = tipChoice === 'other'
+    ? Math.max(0, Math.min(MAX_TIP, Math.round(Number(tipOther) || 0)))
+    : (Number(tipChoice) || 0)
+  const collect = total + tip
+  const upi = total > 0 ? upiLink({ vpa: payeeUpi, name: payeeName, amount: collect, note: `${villa.name || 'Villa'} check-out` }) : ''
+
   const handleSave = async () => {
     const items = [
       ...checkoutItems
@@ -131,6 +168,8 @@ export default function KitchenIncidentals() {
     ]
     if (!items.length) { showToast('Add at least one item', 'error'); return }
     setSaving(true)
+    // How the guest paid, and the tip they added, as they stand now (the form is cleared below).
+    const pay = payMode ? { mode: payMode, tip } : null
 
     // 1) Save the incidentals. If this fails, surface the real reason and stop.
     let saveResult
@@ -144,6 +183,8 @@ export default function KitchenIncidentals() {
 
     // Incidentals are saved — clear the form now so a checkout retry can't re-add them.
     setCart({}); setNotes(''); setCustom({ name: '', price: '', qty: 0 })
+    setPayMode(''); setTipChoice(0); setTipOther('')
+    setReceipt(null); setEmailedTo('')
 
     // 2) Check the guest out (skip for historical/retroactive sessions).
     try {
@@ -160,6 +201,20 @@ export default function KitchenIncidentals() {
       showToast(`Items saved, but checkout step failed: ${e?.message || 'error'}`, 'error')
     }
 
+    // 3) Record how it was paid and get the invoice ready. This never holds up the check-out above: if it fails the guest is still
+    //    checked out and Raman is told the payment note did not save.
+    if (pay && stay?.stayId) {
+      try {
+        const rec = await api.recordCheckoutPayment({
+          stayId: stay.stayId, mode: pay.mode, tip: pay.tip,
+          items: items.map(i => ({ name: i.name, qty: i.qty, pricePerUnit: i.pricePerUnit })),
+        })
+        setReceipt({ ...rec, guestName: stay.guestName, guestPhone: stay.guestPhone })
+      } catch (e) {
+        setTimeout(() => showToast(`The payment note did not save: ${e?.message || 'error'}. Tell the owner what was paid.`, 'error'), 1200)
+      }
+    }
+
     // Low-stock warnings from the save step.
     const lowStockAlerts = saveResult?.lowStockAlerts || []
     if (lowStockAlerts.length) {
@@ -167,6 +222,23 @@ export default function KitchenIncidentals() {
       setTimeout(() => showToast(`⚠️ Low stock: ${names}`, 'error'), 1200)
     }
     setSaving(false)
+  }
+
+  const receiptHere = receipt && stay && receipt.stayId === stay.stayId ? receipt : null
+  const receiptWaLink = receiptHere && receiptHere.whatsapp && receiptHere.waNumber
+    ? `https://wa.me/${receiptHere.waNumber}?text=${encodeURIComponent(receiptHere.whatsapp)}`
+    : null
+
+  const sendInvoiceEmail = async () => {
+    if (!receiptHere) return
+    setEmailBusy(true)
+    try {
+      const r = await api.sendCheckoutInvoiceEmail({ stayId: receiptHere.stayId, ref: receiptHere.ref })
+      setEmailedTo(r?.to || 'the guest')
+      showToast(r?.alreadySent ? `Already emailed to ${r.to}` : `Invoice emailed to ${r?.to || 'the guest'} ✓`)
+    } catch (e) {
+      showToast(e?.message || 'Could not send the email', 'error')
+    } finally { setEmailBusy(false) }
   }
 
   return (
@@ -296,10 +368,85 @@ export default function KitchenIncidentals() {
           </div>
         </div>
 
+        {total > 0 && (
+          <div className="card" data-testid="collect-payment">
+            <div className="card-section-label" style={{ marginTop: 0 }}>COLLECT PAYMENT</div>
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '4px 0 8px' }}>Tip for the team (optional)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              <Chip label="No tip" on={tipChoice === 0} onClick={() => setTipChoice(0)} />
+              {TIP_PRESETS.map(t => <Chip key={t} label={`₹${t}`} on={tipChoice === t} onClick={() => setTipChoice(t)} />)}
+              <Chip label="Other" on={tipChoice === 'other'} onClick={() => setTipChoice('other')} />
+            </div>
+            {tipChoice === 'other' && (
+              <input className="field-input" type="number" inputMode="numeric" min="0" max={MAX_TIP} placeholder="Tip in rupees"
+                value={tipOther} onChange={e => setTipOther(e.target.value)} style={{ marginTop: '8px' }} />
+            )}
+
+            <div style={{ textAlign: 'center', margin: '16px 0 8px' }}>
+              <div style={{ color: 'var(--text)', fontWeight: '700', fontSize: '1.3rem' }}>Collect <span className="rupee">₹</span>{collect.toLocaleString('en-IN')}</div>
+              {tip > 0 && <div style={{ color: '#5C7080', fontSize: '0.75rem' }}>₹{total.toLocaleString('en-IN')} items + ₹{tip.toLocaleString('en-IN')} tip</div>}
+            </div>
+
+            {upi ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                <div style={{ background: '#fff', padding: '8px', borderRadius: '10px', maxWidth: '100%' }}>
+                  <UpiQr value={upi} size={220} label={`UPI QR code to pay ${inr(collect)}`} />
+                </div>
+                <div style={{ color: '#5C7080', fontSize: '0.72rem', textAlign: 'center' }}>
+                  The guest scans this with any UPI app (GPay, PhonePe, Paytm). It pays {payeeName}.
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: '#EF9A9A', fontSize: '0.78rem', textAlign: 'center' }}>
+                No UPI ID is set up for this villa, so there is no QR code. You can still record cash or card below.
+              </div>
+            )}
+
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '14px 0 8px' }}>
+              How was it paid? Look for the payment alert on your own phone first.
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {PAY_MODES.map(m => <Chip key={m} label={m} on={payMode === m} onClick={() => setPayMode(payMode === m ? '' : m)} />)}
+            </div>
+            {payMode && (
+              <div style={{ color: '#34A853', fontSize: '0.75rem', marginTop: '10px' }}>
+                Save will record {inr(collect)} paid by {payMode}{tip > 0 ? `, tip ${inr(tip)} included` : ''}, and the invoice can then be sent.
+              </div>
+            )}
+          </div>
+        )}
+
         <button className="btn btn-gold" onClick={handleSave} disabled={saving || total === 0 || !stay}>
           {saving ? 'Saving...' : !stay ? 'Select a guest context above' : total > 0 ? <>Save · <span className="rupee">₹</span>{total.toLocaleString('en-IN')} →</> : 'Add items above'}
         </button>
         <p className="btn-email-note">📧 Owner notified on save</p>
+
+        {receiptHere && (
+          <div className="card" data-testid="invoice-ready" style={{ marginTop: '12px', border: '1px solid rgba(52,168,83,0.4)' }}>
+            <div style={{ color: '#34A853', fontWeight: '700', fontSize: '0.95rem' }}>
+              ✅ Paid {inr(receiptHere.total)} by {receiptHere.mode}{receiptHere.tip > 0 ? ` (includes ${inr(receiptHere.tip)} tip)` : ''}
+            </div>
+            <div style={{ color: '#5C7080', fontSize: '0.72rem', margin: '2px 0 10px' }}>Reference {receiptHere.ref} · {receiptHere.guestName}</div>
+            {receiptHere.invoiceError ? (
+              <p style={{ fontSize: '0.78rem', color: '#EF9A9A', margin: '0 0 8px' }}>{receiptHere.invoiceError}</p>
+            ) : receiptWaLink ? (
+              <a href={receiptWaLink} target="_blank" rel="noreferrer" className="btn"
+                style={{ display: 'block', textAlign: 'center', textDecoration: 'none', background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)', color: '#25D366', fontWeight: '700' }}>
+                📲 Send invoice on WhatsApp
+              </a>
+            ) : (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', margin: '0 0 8px' }}>No phone number on file — can't send on WhatsApp</p>
+            )}
+            {!receiptHere.invoiceError && (receiptHere.hasEmail ? (
+              <button type="button" className="btn" onClick={sendInvoiceEmail} disabled={emailBusy}
+                style={{ display: 'block', width: '100%', marginTop: '8px', textAlign: 'center', fontWeight: '700' }}>
+                {emailBusy ? 'Sending...' : emailedTo ? `✉️ Emailed to ${emailedTo} — send again` : '✉️ Send invoice by email'}
+              </button>
+            ) : (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', margin: '8px 0 0' }}>No email on file — can't send by email</p>
+            ))}
+          </div>
+        )}
 
         {total > 0 && (
           invoiceWaLink ? (
@@ -310,11 +457,11 @@ export default function KitchenIncidentals() {
                 background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)',
                 color: '#25D366', fontWeight: '700',
               }}>
-              📲 Send invoice on WhatsApp
+              📲 Send summary on WhatsApp
             </a>
           ) : (
             <p style={{ marginTop: '8px', textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-              No phone number on file — can't send invoice
+              No phone number on file — can't send a summary
             </p>
           )
         )}

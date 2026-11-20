@@ -4,7 +4,7 @@ Written for a host evaluating the product, and structured so it can later feed
 an in-app help section and a self-service bot. Every item below is **built and
 running on dwarka.stayvibe360.com today** — nothing here is roadmap.
 
-*Last updated 28 October 2026.* This guide is the overview; the **Training
+*Last updated 20 November 2026.* This guide is the overview; the **Training
 Manual** inside the app (`/Training-Manual`, on your own address) explains every
 screen step by step.
 
@@ -83,6 +83,8 @@ Your staff see, per booking, which guests still have no passport on file.
 | **Guests' own arrival and departure times** | The times a guest types on the form appear on every screen. When they ask for more than your standard times you are asked to approve; an approved time is the **agreed** one your caretaker and the WhatsApp messages then use. |
 | **Breakfast the way you serve it** | A guest can ask for breakfast on the form (up to two kinds); you can record exact counts ("5 Appam and 5 Idli") and your caretaker's screens and the breakfast charge follow them. Larger parties can have a group rate you set. |
 | **Booking completion & money** | Per-booking tariff, OTA fees, extra charges, occupancy tax and what you actually net. OTA fee structures are built in. Each extra charge can be ticked as received, with who and when, so you see what has been paid and what is pending. |
+| **Payments received on a booking** | A Payments card on Complete booking records the day each payment came in: one tap ("Mark as paid") or, for a host that wants it, in parts. Only the owner sees it, and only for bookings the host collects itself (not a platform's, where the guest pays the platform). It changes no figure in the Dashboard: it is the record of when the money arrived. |
+| **Check-out payment by QR, with a tip and an invoice** | At check-out your caretaker taps the incidentals, the page totals them and shows a UPI QR code with the amount filled in, so the guest pays like at any Indian shop. The guest can add a tip for the team, and the code grows with it. The caretaker reads the payment alert, taps UPI, cash or card and saves: the guest is checked out, the payment is recorded and you are emailed. The invoice (stay dates, check-out charges, tip, total paid, a reference, then your Kerala experiences, villa page, direct-booking number and review link) goes to the guest on WhatsApp or by email. The QR pays the UPI ID set for the villa's manager (a host can point it at its own account). It is an invoice for what was paid, not a GST tax invoice, and says so; the wording is yours (`guestMessages.invoice`). |
 | **Expenses and incidentals** | Villa expenses, kitchen incidentals, breakfast and car-rental entries, logged by staff as they happen. |
 | **Inventory and preferred stock** | What's in the villa, what to reorder. |
 | **Staff & access** | Add staff, set what they can see, and record salary or salary-plus-commission. Check-in and check-out actions are recorded against the person who did them. |

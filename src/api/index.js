@@ -316,6 +316,7 @@ export const api = {
   getOccupancyGaps:     (villaId) => get('getOccupancyGaps', { villaId: villaId || DEFAULT_VILLA_ID }),
   getMonthlyOutlook:    (villaId) => get('getMonthlyOutlook', { villaId: villaId || DEFAULT_VILLA_ID }),
   getStayPayments:      (stayId)  => get('getStayPayments', { stayId }),
+  getCheckoutPayments:  (stayId)  => get('getCheckoutPayments', { stayId }),
   getStays:             (vId, y) => get('getStays', { villaId: vId, year: y }),
   getGuests:            ()       => get('getGuests'),
 

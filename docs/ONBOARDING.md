@@ -92,6 +92,8 @@ by frontend routing.
    (`subject`, `template`, optional `labels` and `marketing`: see src/utils/checkoutInvoice.js for the {placeholders}) to word the invoice that
    goes to the guest on WhatsApp or by email; its Kerala/marketing lines come from `marketing` and `guestMessages.reviewRequest.links.default`.
    It says it is not a GST tax invoice. Read from the file by the Worker, so it works from the deploy.
+   The owner's Complete booking lists what was recorded (a "Check-out payments" card, `getCheckoutPayments`, owner only, shown once a payment
+   exists) with the tip kept apart, who recorded it, the invoice emails sent, and buttons to send the invoice again or a test copy to the owner.
    After any config edit, push it into the database
    (`node scripts/seed-tenant-config.mjs <hostId> --apply`, or the owner's
    `syncTenantConfig`): the live screens read the stored copy.

@@ -41,6 +41,7 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { findTwinPairs } from '../../utils/twinStays'
 import ChangeRequestCard from '../../components/ChangeRequestCard'
 import StayPayments from '../../components/StayPayments'
+import CheckoutPayments from '../../components/CheckoutPayments'
 import { PhoneCountry } from '../../components/CountryFlag'
 import { carPhotoMonths } from '../../utils/carPhotos'
 
@@ -2126,6 +2127,12 @@ export default function CompleteBooking() {
                     (Airbnb ...) or for a host that has not switched Payments on; the server decides, this only draws what it answers. */}
                 <StayPayments stayId={s.stay_id} screenTotal={gross}
                   refreshKey={[s.stay_id, s.gross, s.net, s.extra_charges, s.tariff_per_night].join('|')} onToast={showToast} />
+
+                {/* Check-out payments: what the caretaker recorded when the guest paid for the incidentals at check-out (the QR code on the
+                    Check-out incidentals screen), with the tip, and the invoice to send again on WhatsApp or by email. Owner only; nothing shows
+                    until one has been recorded; the server decides, this only draws what it answers. */}
+                <CheckoutPayments stayId={s.stay_id}
+                  refreshKey={[s.stay_id, s.status, s.guest_email, s.guest_phone].join('|')} onToast={showToast} />
 
                 {/* Extended check-in numbers — a per-night reference, not the
                     multi-night total, so the figure stays correct regardless of

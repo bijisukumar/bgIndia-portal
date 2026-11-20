@@ -2768,6 +2768,48 @@ async function stayPaymentView(DB, stay) {
   return { ...view, ready, payments: rows, summary: paymentSummary(stayGrossOf(stay), rows) }
 }
 
+// What the owner's "Check-out payments" card on Complete booking needs for one stay: every payment the caretaker recorded at check-out
+// (src/utils/checkoutInvoice.js: the amount for the items, the tip kept apart, how it was paid, who recorded it and when), the invoice
+// emails already sent for each one (the stay's own history lines), the invoice's words (for the WhatsApp link, and to read it) and how what
+// was recorded compares with the incidentals saved for the guest. A stay with nothing recorded answers payments: [] and the card shows nothing.
+async function checkoutPaymentsView(DB, stay) {
+  const { results: payRows } = await DB.prepare(
+    `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? ORDER BY created_at ASC, rowid ASC`
+  ).bind(CHECKOUT_PAYMENT_EVENT, stay.stay_id).all()
+  const events = checkoutPaymentEvents(payRows)
+  const email = String(stay.guest_email || '').trim()
+  const view = {
+    stayId: stay.stay_id, guestName: stay.guest_name || '', payments: [], totals: { amount: 0, tip: 0, total: 0 },
+    incidentalsSaved: 0, withoutPayment: 0, waNumber: waNumber(stay.guest_phone), guestEmail: EMAIL_LOOKS_OK.test(email) ? email : '',
+  }
+  if (!events.length) return view
+  const { results: mailRows } = await DB.prepare(
+    `SELECT note, created_at FROM infra_processing_log WHERE event_type = ? AND stay_id = ? ORDER BY created_at ASC, rowid ASC`
+  ).bind(GUEST_EMAIL_EVENT, stay.stay_id).all()
+  // (the lines are read directly: guestEmailEvents keeps only the fields the check-in email needs, not the payment's reference)
+  const sent = (mailRows || []).map(r => { try { return { ...JSON.parse(r.note), at: r.created_at } } catch { return null } })
+    .filter(e => e && e.kind === CHECKOUT_INVOICE_KIND && e.ref)
+  const host = getHostConfig(stay.villa_id)
+  const money = v => roundMoney(Number(v) || 0)
+  view.payments = events.map(e => {
+    const mail = buildCheckoutInvoice({ stay, host, payment: e })
+    return {
+      ref: e.ref, mode: e.mode || '', amount: money(e.amount), tip: money(e.tip), total: money(e.total), paidOn: e.paidOn || '',
+      by: e.by || '', recordedAt: e.at || '',
+      items: (Array.isArray(e.items) ? e.items : []).map(i => ({ name: String((i && i.name) || ''), qty: Number(i && i.qty) || 0, price: money(i && i.price), subtotal: money(i && i.subtotal) })),
+      emails: sent.filter(m => m.ref === e.ref).map(m => ({ to: m.to || '', at: m.at || '', by: m.by || '' })),
+      whatsapp: mail.error ? '' : mail.whatsapp, text: mail.error ? '' : mail.text, invoiceError: mail.error || '',
+    }
+  })
+  const sum = k => money(view.payments.reduce((s, p) => s + p[k], 0))
+  view.totals = { amount: sum('amount'), tip: sum('tip'), total: sum('total') }
+  // tenant-scope-exempt: the caller read the stay under assertRecordAccess; this adds up that one stay's saved incidentals
+  const chargedRow = await DB.prepare(`SELECT COALESCE(SUM(total), 0) AS t FROM stayvibe_incidentals WHERE stay_id = ?`).bind(stay.stay_id).first()
+  view.incidentalsSaved = money(chargedRow && chargedRow.t)
+  view.withoutPayment = Math.max(0, money(view.incidentalsSaved - view.totals.amount))
+  return view
+}
+
 // How many payments are on record against a stay (0 without the table): a stay that has any is voided, never hard-deleted.
 async function countStayPayments(DB, stayId) {
   try {
@@ -5710,6 +5752,21 @@ export async function onRequest(ctx) {
         const stay = await DB.prepare(`SELECT stay_id, villa_id, source, status, gross, net, commission_amt FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
         if (!stay) return err('Stay not found', 404)
         return json({ success: true, data: { stayId, ...(await stayPaymentView(DB, stay)) } })
+      }
+
+      // ── CHECK-OUT PAYMENTS ON ONE BOOKING (Complete booking, "Check-out payments") ───────────────
+      // What the caretaker recorded at check-out (recordCheckoutPayment), the invoice emails already sent for each payment and the invoice's
+      // words, so the owner can read it and send it again on WhatsApp or by email. Owners only: what a guest paid is the owner's to see, not
+      // the team's. A booking with nothing recorded answers payments: [] and nothing more.
+      if (action === 'getCheckoutPayments') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const stayId = url.searchParams.get('stayId')
+        if (!stayId) return err('stayId required')
+        await assertRecordAccess(DB, payload, 'stayvibe_stays', 'stay_id', stayId)
+        const stay = await DB.prepare(`SELECT * FROM stayvibe_stays WHERE stay_id = ?`).bind(stayId).first()
+        if (!stay) return err('Stay not found', 404)
+        assertPropertyAccess(payload, stay.villa_id)
+        return json({ success: true, data: await checkoutPaymentsView(DB, stay) })
       }
 
       if (action === 'getRamanUnpaid') {

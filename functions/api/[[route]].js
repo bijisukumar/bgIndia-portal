@@ -8654,6 +8654,23 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { feeds: results.length, results } })
       }
 
+      // The owner's "Sync" on ONE connected calendar: the same read as Sync now, for one platform, so the screen can say plainly what that
+      // platform's calendar held when it was read, and one slow or failing platform does not hold up the others. It READS the platform's
+      // calendar; it sends nothing to it. A paused calendar is refused (resume it first), as Sync now skips it.
+      if (action === 'runIcalFeedSyncNow') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)
+        const { feedId } = body
+        if (!feedId) return err('feedId required')
+        const feed = await DB.prepare(`SELECT * FROM stayvibe_ical_feeds WHERE feed_id = ?`).bind(feedId).first()
+        if (!feed) return err('Feed not found', 404)
+        assertPropertyAccess(payload, feed.villa_id)
+        if (!feed.is_active) return err('This calendar is paused: resume it first', 409)
+        const result = await syncOneIcalFeed(DB, feed)
+        // the same follow-up as Sync now: a booking that has just appeared on a platform whose bookings arrive as dates only is told to the owner
+        await afterFeedSync(env, DB, [result])
+        return json({ success: true, data: { result: { feedId: result.feedId, channel: result.channel, ok: !!result.ok, count: result.count ?? 0, error: result.error || null } } })
+      }
+
       // ════════════════ GUEST ENQUIRY MANAGEMENT (CRM) — POST ══════════════
 
       // Create or update an enquiry. On create, runs phone/email matching

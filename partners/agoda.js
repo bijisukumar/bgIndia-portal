@@ -20,6 +20,9 @@ export const AGODA = {
     staleAfterHours: 3,                  // the script reads our link every 15 minutes, so three quiet hours means it has stopped
     whereToPaste: 'Partner Portal → Calendar → Calendar connections → Other website link.',
     note: 'Only offered when the villa is listed as a single unit.',
+    // Said under this platform's row in Connected feeds, where its Sync button is: that button only READS the platform's own calendar and
+    // sends nothing to it. Here the nights reach the platform another way (the Google calendar above), which it imports on its own schedule.
+    pushNote: 'This reads Agoda’s own calendar; it sends nothing to Agoda. Your nights reach Agoda through your Google calendar, which Agoda imports by itself a few times a day. To get a new booking onto Agoda at once, press “Refresh connections” in Agoda (Calendar → Calendar connections).',
     bridgeExplain: 'it only takes addresses it has approved, so its link goes in through a Google Calendar',
     notReadYet: 'Not read yet. Agoda refuses addresses it has not approved, so this link goes in through a Google Calendar: set up the “StayVibe to Agoda” script (see the manual).',
     quietWarning: 'is the “StayVibe to Agoda” script still running?',

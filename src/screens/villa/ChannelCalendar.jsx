@@ -15,6 +15,8 @@ import CalendarExports from './CalendarExports'
 import BlockDates from './BlockDates'
 import { fmtStamp, parseLocalDate } from '../../utils/dates'
 import { instantMs } from '../../utils/tz'
+import { partnerFor } from '../../utils/partners'
+import { CONFIG } from '../../config'
 import CalendarHealthBlock from '../../components/CalendarHealthBlock'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -314,6 +316,7 @@ export default function ChannelCalendar() {
   const [dateBlocks, setDateBlocks] = useState([])   // nights the owner closed by hand (Block dates)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [syncingFeed, setSyncingFeed] = useState(null)   // the feed_id whose own Sync is running
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ channel: '', label: '', icsUrl: '' })
   const [saving, setSaving] = useState(false)
@@ -385,6 +388,20 @@ export default function ChannelCalendar() {
       load()
     } catch (e) { showToast('Sync failed: ' + e.message, 'error') }
     finally { setSyncing(false) }
+  }
+
+  // Sync ONE platform: read just its calendar and say what it held. (Reads the platform's calendar; sends nothing to it.)
+  async function handleSyncFeed(f) {
+    const name = channelLabel(f.channel)
+    setSyncingFeed(f.feed_id)
+    try {
+      const res = await api.runIcalFeedSyncNow({ feedId: f.feed_id })
+      const r = (res && res.result) || {}
+      if (r.ok) showToast(`✅ ${name}: its calendar was read · ${r.count} block${r.count === 1 ? '' : 's'} on it`)
+      else showToast(`${name}: could not read its calendar${r.error ? ': ' + r.error : ''}`, 'error')
+      load()
+    } catch (e) { showToast(`${name}: sync failed: ${e.message}`, 'error') }
+    finally { setSyncingFeed(null) }
   }
 
   // The scheduled sync runs only a few times a day at best, so what is on screen
@@ -505,6 +522,12 @@ export default function ChannelCalendar() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                {!!f.is_active && (
+                  <button onClick={() => handleSyncFeed(f)} disabled={syncing || !!syncingFeed} data-testid={`sync-feed-${f.channel}`}
+                    style={{ padding: '5px 10px', borderRadius: '7px', border: '1px solid rgba(200,144,58,0.35)', background: 'rgba(200,144,58,0.1)', color: 'var(--gold)', fontSize: '0.72rem', fontWeight: '600', cursor: 'pointer', opacity: syncing || syncingFeed ? 0.5 : 1 }}>
+                    {syncingFeed === f.feed_id ? 'Syncing…' : '🔄 Sync'}
+                  </button>
+                )}
                 <button onClick={() => handleToggle(f.feed_id)}
                   style={{ padding: '5px 10px', borderRadius: '7px', border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'var(--text-dim)', fontSize: '0.72rem', cursor: 'pointer' }}>
                   {f.is_active ? 'Pause' : 'Resume'}
@@ -515,6 +538,11 @@ export default function ChannelCalendar() {
                 </button>
               </div>
             </div>
+            {(((partnerFor(CONFIG, f.channel) || {}).calendar || {}).pushNote) ? (
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', lineHeight: 1.5 }}>
+                {partnerFor(CONFIG, f.channel).calendar.pushNote}
+              </div>
+            ) : null}
           </div>
         ))}
 

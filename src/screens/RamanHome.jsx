@@ -6,6 +6,9 @@ import { partnerFor } from '../utils/partners'
 import TopBar from '../components/TopBar'
 import { parseLocalDate } from '../utils/dates'
 import { stayTimes as sharedStayTimes } from '../utils/stayTimes'
+import { turnoverItem } from '../utils/sameDayTurnover'
+import { villaTimeDefaults } from '../utils/villaTimes'
+import TurnoverFlag from '../components/TurnoverFlag'
 import { DEFAULT_VILLA_ID } from '../utils/villaContext'
 import { useAuth } from '../hooks/useAuth'
 import { breakfastRateFor } from '../utils/breakfast'
@@ -353,6 +356,8 @@ export default function RamanHome() {
         overdue:  todoData?.overdue  || [],
         upcoming: todoData?.upcoming || [],
         toClose:  todoData?.toClose  || [],
+        // The villa's own turnaround hours came with the answer but were dropped here, so the arrivals box below always compared against 6.
+        turnaroundHours: todoData?.turnaroundHours,
       })
       setLoadingStay(false)
     }).catch(() => setLoadingStay(false))
@@ -366,6 +371,14 @@ export default function RamanHome() {
   // not for the number of guests. Types without counts are shown, but there is nothing to total.
   const bfWanted    = activeStay && activeStay.request_breakfast ? (activeStay.breakfast_choice || '') : ''
   const bfTotal     = bfWanted ? parseBreakfast(bfWanted).total : null
+
+  // The guest in the house leaves the day another arrives: the same box as the owner's guest list (utils/sameDayTurnover.js), on the banner. It is
+  // worked out from Raman's own next arrivals and the villa's turnaround hours that come with them.
+  const activeOut = activeStay ? (activeStay.checkOutDate || activeStay.checkout_date || '') : ''
+  const activeTurnovers = activeStay && activeOut
+    ? (todo.upcoming || []).filter(u => u.checkInDate === activeOut)
+        .map(u => ({ ...turnoverItem(activeStay, u, villaTimeDefaults(), todo.turnaroundHours), role: 'out' }))
+    : []
 
   const activeLabel = activeStay
     ? `Linked to ${guestName}`
@@ -469,6 +482,7 @@ export default function RamanHome() {
                 <div className="active-stay-sub">
                   Check-in {checkInDate} · {adultCount} guests
                 </div>
+                <TurnoverFlag items={activeTurnovers} />
               </div>
               <span style={{ color: 'var(--gold)', fontSize: '1.1rem' }}>›</span>
             </div>

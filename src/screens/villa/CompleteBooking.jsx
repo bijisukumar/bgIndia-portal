@@ -23,8 +23,10 @@ import { stayTimes, PRE_ARRIVAL_STATUSES, toClock, feeLineKind, fmtTime } from '
 import { stayHolds, dayMonth, heldSummary } from '../../utils/stayHolds'
 import { changeNoun, changeDetail } from '../../utils/changeRequestDates'
 import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
+import { sameDayTurnovers } from '../../utils/sameDayTurnover'
 import GuestTimesReview from '../../components/GuestTimesReview'
 import StayTimesLine from '../../components/StayTimesLine'
+import TurnoverFlag from '../../components/TurnoverFlag'
 import TimeAskHistory from '../../components/TimeAskHistory'
 import { canSendCheckinEmail, lastCheckinEmail } from '../../utils/checkinEmail'
 import { CONFIG } from '../../config'
@@ -852,6 +854,9 @@ export default function CompleteBooking() {
   })
   // In merge mode both stays must stay selectable/tickable as top-level rows.
   const visibleStays = mergeMode ? stays : stays.filter(s => !absorbedIds.has(s.stay_id))
+  // One guest leaving on the day another arrives (utils/sameDayTurnover.js): flagged on both rows of the list below. The booker's own
+  // placeholder rows nested under a guest are left out, so one visit is never counted twice.
+  const turnovers = sameDayTurnovers(stays.filter(x => !absorbedIds.has(x.stay_id)), villaTimeDefaults(), villaHoldRules().turnaroundHours)
   // One visit, two records: the Airbnb booking with the money and the record the guest's check-in form made
   // with none (utils/twinStays.js). Offered as a one-tap merge, never done on its own.
   const twinPairs = mergeMode ? [] : findTwinPairs(stays).filter(p => !twinSkipped.includes(p.target.stay_id))
@@ -1138,6 +1143,8 @@ export default function CompleteBooking() {
                           )}
                         </div>
                         <StayTimesLine stay={stay} />
+                        {/* Someone leaves the day this guest arrives, or arrives the day this guest leaves: the villa has hours, not a night */}
+                        <TurnoverFlag items={turnovers[stay.stay_id]} />
                         {/* What its platform takes on this booking, in total: the reason to bring a guest back direct. */}
                         {(() => {
                           const take = platformTake(stay, CONFIG)

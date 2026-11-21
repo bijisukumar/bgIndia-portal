@@ -27,8 +27,10 @@ import { breakfastList, parseBreakfast } from '../../utils/breakfastSplit'
 import { checkinDateStatus, daysEarly, MAX_DAYS_EARLY } from '../../utils/checkinDate'
 import CarFields, { emptyCar, carsToPayload } from './CarFields'
 import AddStayCars from './AddStayCars'
-import { villaTimeDefaults } from '../../utils/villaTimes'
+import { villaTimeDefaults, villaHoldRules } from '../../utils/villaTimes'
+import { sameDayTurnovers } from '../../utils/sameDayTurnover'
 import StayTimesLine from '../../components/StayTimesLine'
+import TurnoverFlag from '../../components/TurnoverFlag'
 import TimeAskHistory from '../../components/TimeAskHistory'
 
 function formatDate(d) {
@@ -111,6 +113,8 @@ export default function CheckIn() {
   const [stays,    setStays]    = useState([])
   const [futureGuests, setFutureGuests] = useState([])
   const [selected, setSelected] = useState(null)
+  // One guest leaving on the day another arrives, by stay id (utils/sameDayTurnover.js): flagged on both guests, in the lists and on the open guest.
+  const [turnovers, setTurnovers] = useState({})
   const [tab,      setTab]      = useState('checkin')  // 'checkin' | 'inhouse'
 
   // Held after a check-out so the review prompt can appear before the guest
@@ -190,6 +194,7 @@ export default function CheckIn() {
       // Load all upcoming stays (any non-closed/cancelled status, checkin >= today)
       const active = await api.getUpcomingStays(DEFAULT_VILLA_ID)
       const allUpcoming = Array.isArray(active) ? active : []
+      setTurnovers(sameDayTurnovers(allUpcoming, villaTimeDefaults(), villaHoldRules().turnaroundHours))
       const inhouse = allUpcoming.filter(s => ['checked_in','ready_for_checkout'].includes(s.status))
 
       // Future guests block: anyone upcoming who isn't already actionable
@@ -545,6 +550,7 @@ export default function CheckIn() {
                               {formatDate(stay.checkin_date)} · {calcNights(stay.checkin_date,stay.checkout_date)}N
                             </div>
                             <StayTimesLine stay={stay} />
+                            <TurnoverFlag items={turnovers[stay.stay_id]} />
                           </div>
                           <span style={{fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',
                             borderRadius:'10px',background:'rgba(52,168,83,0.15)',color:'#34A853'}}>
@@ -644,6 +650,11 @@ export default function CheckIn() {
                         </div>
                       )
                     })()}
+
+                    {/* The guest leaving the day this one arrives: the villa has hours, not a night, to be turned around (utils/sameDayTurnover.js) */}
+                    {(turnovers[selected.stay_id] || []).length > 0 && (
+                      <div style={{marginBottom:'12px'}}><TurnoverFlag items={turnovers[selected.stay_id]} marginTop="0" /></div>
+                    )}
 
                     {/* Breakfast the guest asked for, with how many of each once the host has
                         recorded it in Guest info: what Raman cooks and serves. */}
@@ -925,6 +936,7 @@ export default function CheckIn() {
                             {d !== null && d > 0 && <span> · in {d} day{d!==1?'s':''}</span>}
                           </div>
                           <StayTimesLine stay={stay} />
+                          <TurnoverFlag items={turnovers[stay.stay_id]} />
                           {/* Early check-in / late check-out flagged here too,
                               not just once the guest is Ready for Check-in —
                               so Raman can plan ahead of time, not find out the
@@ -988,6 +1000,7 @@ export default function CheckIn() {
                                 Out: {formatDate(stay.checkout_date)}
                               </div>
                               <StayTimesLine stay={stay} />
+                              <TurnoverFlag items={turnovers[stay.stay_id]} />
                             </div>
                             <span style={{fontSize:'0.68rem',fontWeight:'700',padding:'2px 8px',
                               borderRadius:'10px',background:m.color+'22',color:m.color}}>
@@ -1007,6 +1020,10 @@ export default function CheckIn() {
 
                 {selected && ['checked_in','ready_for_checkout'].includes(selected.status) && (
                   <>
+                    {/* A guest arrives the day this one leaves: the villa has hours, not a night, to be turned around (utils/sameDayTurnover.js) */}
+                    {(turnovers[selected.stay_id] || []).length > 0 && (
+                      <div style={{marginBottom:'12px'}}><TurnoverFlag items={turnovers[selected.stay_id]} marginTop="0" /></div>
+                    )}
                     <div className="card-section-label">GUEST</div>
                     <div className="card">
                       <div className="grid-2">

@@ -117,107 +117,111 @@ export default function EstateManagerHome() {
           ))}
         </div>
 
-        {/* ── QUICK INFO ── */}
+        {/* ── QUICK INFO AND MARKET PRICE: ONE BOX ──
+             Next harvest and what a kilo fetches on the Coconut Board are read together (Biji, 22 Nov 2026), so the
+             price shares the box with the quick facts instead of being a second card under it. */}
         <div className="card-section-label" style={{ marginTop: 20 }}>QUICK INFO</div>
-        <div style={s.infoStrip}>
+        <div style={s.infoBox}>
+          <div style={s.infoStrip}>
 
-          {/* Next harvest date */}
-          <div style={s.infoItem}>
-            <div style={{
-              ...s.infoVal,
-              color: harvestDays !== null && harvestDays < 7 ? '#EF9A9A'
-                   : harvestDays !== null && harvestDays < 14 ? '#FFCC80'
-                   : '#C8903A',
-              fontSize: '0.82rem',
-            }}>
-              {info?.nextHarvestDate ? fmtDate(info.nextHarvestDate) : '—'}
-            </div>
-            <div style={s.infoLabel}>
-              Next harvest
-              {harvestDays !== null && (
-                <div style={{ color: harvestDays < 0 ? '#EF9A9A' : '#5C7080' }}>
-                  {harvestDays < 0 ? `${Math.abs(harvestDays)}d overdue` : `in ${harvestDays}d`}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div style={s.infoDivider} />
-
-          {/* Irrigation status */}
-          <div style={s.infoItem}>
-            <div style={{
-              ...s.infoVal,
-              color: info?.irrigationAlert ? '#EF9A9A' : '#4CAF50',
-              fontSize: '0.85rem',
-            }}>
-              {irrigationDays === null ? 'Never' : `${irrigationDays}d ago`}
-            </div>
-            <div style={{
-              ...s.infoLabel,
-              color: info?.irrigationAlert ? '#EF9A9A' : '#5C7080',
-            }}>
-              Irrigation
-              {info?.irrigationAlert && <div>⚠ Log now</div>}
-            </div>
-          </div>
-
-          <div style={s.infoDivider} />
-
-          {/* Last coconut price */}
-          <div style={s.infoItem}>
-            <div style={s.infoVal}>
-              {lastPrice ? `₹${lastPrice}/kg` : '—'}
-            </div>
-            <div style={s.infoLabel}>Last price</div>
-          </div>
-
-        </div>
-
-        {/* ── COCONUT MARKET PRICE ──
-             It used to say TODAY. The board quotes on the days it quotes, and the figure under that
-             heading was three days old; the age now comes from the board's own date. */}
-        <div className="card-section-label" style={{ marginTop: 16 }}>
-          🥥 MARKET PRICE
-          {(() => {
-            const age = ageLabel(marketAge(
-              [marketPrice?.pollachiGreen, marketPrice?.pollachiBlack, marketPrice?.thrissur],
-              localTodayStr(),
-            ).daysOld)
-            return age ? <span style={{ textTransform:'none', letterSpacing:0, marginLeft:8, opacity:0.75 }}>· {age}</span> : null
-          })()}
-        </div>
-        <div style={s.marketCard}>
-          {marketLoading ? (
-            <div style={s.marketLoading}>Fetching live prices…</div>
-          ) : !marketPrice || (!marketPrice.pollachiGreen && !marketPrice.pollachiBlack && !marketPrice.thrissur) ? (
-            <div style={s.marketLoading}>Price data unavailable</div>
-          ) : (
-            <>
-              <div style={s.marketGrid}>
-                {[
-                  { label: 'Pollachi (Green)', data: marketPrice.pollachiGreen },
-                  { label: 'Pollachi (Black)', data: marketPrice.pollachiBlack },
-                  { label: 'Thrissur',         data: marketPrice.thrissur },
-                ].map(({ label, data }) => (
-                  <div key={label} style={s.marketItem}>
-                    <div style={s.marketPrice}>
-                      {data ? `₹${data.price}/kg` : '—'}
-                    </div>
-                    <div style={s.marketLabel}>{label}</div>
-                    {data?.date && (
-                      <div style={s.marketDate}>{data.date}</div>
-                    )}
-                  </div>
-                ))}
+            {/* Next harvest date */}
+            <div style={s.infoItem}>
+              <div style={{
+                ...s.infoVal,
+                color: harvestDays !== null && harvestDays < 7 ? '#EF9A9A'
+                     : harvestDays !== null && harvestDays < 14 ? '#FFCC80'
+                     : '#C8903A',
+                fontSize: '0.82rem',
+              }}>
+                {info?.nextHarvestDate ? fmtDate(info.nextHarvestDate) : '—'}
               </div>
-              {marketPrice.fetchedAt && (
-                <div style={s.marketFetched}>
-                  Source: coconutboard.in · fetched {fmtClock(marketPrice.fetchedAt)}
+              <div style={s.infoLabel}>
+                Next harvest
+                {harvestDays !== null && (
+                  <div style={{ color: harvestDays < 0 ? '#EF9A9A' : '#5C7080' }}>
+                    {harvestDays < 0 ? `${Math.abs(harvestDays)}d overdue` : `in ${harvestDays}d`}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={s.infoDivider} />
+
+            {/* Irrigation status */}
+            <div style={s.infoItem}>
+              <div style={{
+                ...s.infoVal,
+                color: info?.irrigationAlert ? '#EF9A9A' : '#4CAF50',
+                fontSize: '0.85rem',
+              }}>
+                {irrigationDays === null ? 'Never' : `${irrigationDays}d ago`}
+              </div>
+              <div style={{
+                ...s.infoLabel,
+                color: info?.irrigationAlert ? '#EF9A9A' : '#5C7080',
+              }}>
+                Irrigation
+                {info?.irrigationAlert && <div>⚠ Log now</div>}
+              </div>
+            </div>
+
+            <div style={s.infoDivider} />
+
+            {/* Last coconut price */}
+            <div style={s.infoItem}>
+              <div style={s.infoVal}>
+                {lastPrice ? `₹${lastPrice}/kg` : '—'}
+              </div>
+              <div style={s.infoLabel}>Last price</div>
+            </div>
+
+          </div>
+
+          {/* ── COCONUT MARKET PRICE ──
+               It used to say TODAY. The board quotes on the days it quotes, and the figure under that
+               heading was three days old; the age now comes from the board's own date. */}
+          <div style={s.marketInBox}>
+            <div className="card-section-label" style={{ margin: '0 0 10px' }}>
+              🥥 MARKET PRICE
+              {(() => {
+                const age = ageLabel(marketAge(
+                  [marketPrice?.pollachiGreen, marketPrice?.pollachiBlack, marketPrice?.thrissur],
+                  localTodayStr(),
+                ).daysOld)
+                return age ? <span style={{ textTransform:'none', letterSpacing:0, marginLeft:8, opacity:0.75 }}>· {age}</span> : null
+              })()}
+            </div>
+            {marketLoading ? (
+              <div style={s.marketLoading}>Fetching live prices…</div>
+            ) : !marketPrice || (!marketPrice.pollachiGreen && !marketPrice.pollachiBlack && !marketPrice.thrissur) ? (
+              <div style={s.marketLoading}>Price data unavailable</div>
+            ) : (
+              <>
+                <div style={s.marketGrid}>
+                  {[
+                    { label: 'Pollachi (Green)', data: marketPrice.pollachiGreen },
+                    { label: 'Pollachi (Black)', data: marketPrice.pollachiBlack },
+                    { label: 'Thrissur',         data: marketPrice.thrissur },
+                  ].map(({ label, data }) => (
+                    <div key={label} style={s.marketItem}>
+                      <div style={s.marketPrice}>
+                        {data ? `₹${data.price}/kg` : '—'}
+                      </div>
+                      <div style={s.marketLabel}>{label}</div>
+                      {data?.date && (
+                        <div style={s.marketDate}>{data.date}</div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              )}
-            </>
-          )}
+                {marketPrice.fetchedAt && (
+                  <div style={s.marketFetched}>
+                    Source: coconutboard.in · fetched {fmtClock(marketPrice.fetchedAt)}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         <button className="logout-btn" onClick={logout} style={{ marginTop: 8 }}>Log out</button>
@@ -277,21 +281,24 @@ const s = {
     background: 'rgba(52,168,83,0.15)', color: '#81C995', fontWeight: 700,
   },
 
-  infoStrip: {
+  infoBox: {
     background: '#1E2535',
     borderRadius: 12,
     border: '1px solid rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  infoStrip: {
     padding: '14px 10px',
     display: 'flex',
     alignItems: 'flex-start',
-    marginBottom: 8,
   },
   infoItem:    { flex: 1, textAlign: 'center' },
   infoVal:     { color: '#C8903A', fontSize: '0.92rem', fontWeight: 700 },
   infoLabel:   { color: '#5C7080', fontSize: '0.65rem', marginTop: 3, lineHeight: 1.4 },
   infoDivider: { width: 1, height: 48, background: 'rgba(255,255,255,0.06)', flexShrink: 0 },
 
-  marketCard:    { background: '#1E2535', borderRadius: 12, border: '1px solid rgba(15,110,86,0.25)', padding: '14px 12px', marginBottom: 8 },
+  marketInBox:   { borderTop: '1px solid rgba(255,255,255,0.06)', padding: '12px 12px 14px' },
   marketGrid:    { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: 6 },
   marketItem:    { textAlign: 'center', background: 'rgba(15,110,86,0.06)', borderRadius: 8, padding: '10px 6px', border: '1px solid rgba(15,110,86,0.12)' },
   marketPrice:   { color: '#4CAF50', fontSize: '1rem', fontWeight: 700 },

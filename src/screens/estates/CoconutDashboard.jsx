@@ -237,7 +237,10 @@ export default function CoconutDashboard() {
 
       <div className="screen-body">
 
-        {/* ── NEXT HARVEST BANNER ── */}
+        {/* ── NEXT HARVEST AND MARKET PRICE: ONE BOX ──
+             The manager reads when the next picking is due and what a kilo fetches in one glance, so the two share a
+             box (Biji, 22 Nov 2026) instead of two stacked cards. The box keeps the harvest's colour (red inside a
+             week); the board's price sits under a thin rule. */}
         <div style={{
           ...s.nextBanner,
           borderColor: daysToNext !== null && daysToNext <= 7 ? 'rgba(200,80,80,0.5)' : 'rgba(200,144,58,0.3)',
@@ -276,61 +279,60 @@ export default function CoconutDashboard() {
               )}
             </div>
           )}
-        </div>
 
-
-        {/* ── MARKET PRICE — what the Coconut Board says a kilo fetches, beside what we last got ──
-             Not headed "today": the board quotes on the days it quotes, and the figure can be several
-             days old. The age is on the card so nobody reads a stale number as this morning's. */}
-        {(market || marketFailed) && (() => {
-          const rows = [
-            { label: 'Pollachi (Green)', data: market?.pollachiGreen },
-            { label: 'Pollachi (Black)', data: market?.pollachiBlack },
-            { label: 'Thrissur',         data: market?.thrissur },
-          ]
-          const any = rows.some(r => r.data && r.data.price)
-          const { newest, daysOld } = marketAge(rows.map(r => r.data), localTodayStr())
-          const age = ageLabel(daysOld)
-          return (
-            <div style={s.mktCard}>
-              <div style={s.mktHead}>
-                <span style={s.mktTitle}>🥥 MARKET PRICE</span>
-                {any && age && (
-                  <span style={{ ...s.mktAge, color: daysOld > 2 ? '#FFCC80' : '#5C7080' }}>{age}</span>
+          {/* ── MARKET PRICE, in the same box — what the Coconut Board says a kilo fetches, beside what we last got ──
+               Not headed "today": the board quotes on the days it quotes, and the figure can be several
+               days old. The age is on the box so nobody reads a stale number as this morning's. */}
+          {(market || marketFailed) && (() => {
+            const rows = [
+              { label: 'Pollachi (Green)', data: market?.pollachiGreen },
+              { label: 'Pollachi (Black)', data: market?.pollachiBlack },
+              { label: 'Thrissur',         data: market?.thrissur },
+            ]
+            const any = rows.some(r => r.data && r.data.price)
+            const { newest, daysOld } = marketAge(rows.map(r => r.data), localTodayStr())
+            const age = ageLabel(daysOld)
+            return (
+              <div style={s.mktInBox}>
+                <div style={s.mktHead}>
+                  <span style={s.mktTitle}>🥥 MARKET PRICE</span>
+                  {any && age && (
+                    <span style={{ ...s.mktAge, color: daysOld > 2 ? '#FFCC80' : '#5C7080' }}>{age}</span>
+                  )}
+                </div>
+                {!any ? (
+                  <div style={s.mktNone}>
+                    The Coconut Board's page did not give a price just now. Nothing is wrong with our own figures below.
+                  </div>
+                ) : (
+                  <>
+                    <div style={s.mktGrid}>
+                      {rows.map(({ label, data }) => (
+                        <div key={label} style={s.mktItem}>
+                          <div style={s.mktPrice}>{data && data.price ? `₹${data.price}` : '—'}</div>
+                          <div style={s.mktPer}>{data && data.price ? 'per kg' : 'no quote'}</div>
+                          <div style={s.mktLabel}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Our own last price next to theirs. Deliberately not a subtraction: what a harvest
+                        fetched and what the board quotes are not guaranteed to be the same measure, and a
+                        confident difference between two unlike numbers is worse than two honest ones. */}
+                    {latestHarvest?.pricePerKg > 0 && (
+                      <div style={s.mktOurs}>
+                        Our last harvest fetched <strong style={{ color:'#C8903A' }}>₹{latestHarvest.pricePerKg}/kg</strong>
+                        {latestHarvest.date ? ` on ${fmtDate(latestHarvest.date)}` : ''}
+                      </div>
+                    )}
+                    <div style={s.mktSrc}>
+                      Source: coconutboard.in{newest ? ` · board's own date ${fmtDate(newest)}` : ''}
+                    </div>
+                  </>
                 )}
               </div>
-              {!any ? (
-                <div style={s.mktNone}>
-                  The Coconut Board's page did not give a price just now. Nothing is wrong with our own figures below.
-                </div>
-              ) : (
-                <>
-                  <div style={s.mktGrid}>
-                    {rows.map(({ label, data }) => (
-                      <div key={label} style={s.mktItem}>
-                        <div style={s.mktPrice}>{data && data.price ? `₹${data.price}` : '—'}</div>
-                        <div style={s.mktPer}>{data && data.price ? 'per kg' : 'no quote'}</div>
-                        <div style={s.mktLabel}>{label}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Our own last price next to theirs. Deliberately not a subtraction: what a harvest
-                      fetched and what the board quotes are not guaranteed to be the same measure, and a
-                      confident difference between two unlike numbers is worse than two honest ones. */}
-                  {latestHarvest?.pricePerKg > 0 && (
-                    <div style={s.mktOurs}>
-                      Our last harvest fetched <strong style={{ color:'#C8903A' }}>₹{latestHarvest.pricePerKg}/kg</strong>
-                      {latestHarvest.date ? ` on ${fmtDate(latestHarvest.date)}` : ''}
-                    </div>
-                  )}
-                  <div style={s.mktSrc}>
-                    Source: coconutboard.in{newest ? ` · board's own date ${fmtDate(newest)}` : ''}
-                  </div>
-                </>
-              )}
-            </div>
-          )
-        })()}
+            )
+          })()}
+        </div>
 
         {/* ── EMAIL REPORT — owner only: irrigation compliance + expenses logged, for any date range ── */}
         {isOwner && (
@@ -727,7 +729,7 @@ export default function CoconutDashboard() {
 }
 
 const s = {
-  mktCard:  { background:'#1E2535', borderRadius:12, border:'1px solid rgba(15,110,86,0.25)', padding:'12px', marginBottom:12 },
+  mktInBox: { marginTop:14, paddingTop:12, borderTop:'1px solid rgba(255,255,255,0.08)', textAlign:'left' },
   mktHead:  { display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:10 },
   mktTitle: { color:'#8A9BAE', fontSize:'0.62rem', letterSpacing:'0.1em', fontWeight:700 },
   mktAge:   { fontSize:'0.62rem' },

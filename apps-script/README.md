@@ -12,10 +12,24 @@ editor's own URL) and an `appsscript.json` manifest.
 
 ## Before anything else: log in
 
-    npx clasp login
+    npx --yes @google/clasp@3.4.1 login
 
-This opens a browser and writes a credential to your home directory. It is
-never stored in this repo, and nobody should paste it anywhere.
+Once per computer. This opens a browser and writes a credential to your home
+directory. It is never stored in this repo, and nobody should paste it
+anywhere. (If clasp is already installed on the computer, `clasp login` does
+the same.)
+
+Always give the package its full name, `@google/clasp`. Plain `npx clasp`
+fetches an unrelated npm alias that has no program in it and fails with "could
+not determine executable to run" (what happened the first time `npm run
+gas:status` was tried on the main computer, 22 Nov 2026). The `npm run gas:*`
+commands below already do this for you: they use an installed clasp if there is
+one, otherwise the pinned `@google/clasp` named on the `CLASP_PACKAGE` line of
+`scripts/gas.mjs`.
+
+If a push says "User has not enabled the Apps Script API", switch it on at
+https://script.google.com/home/usersettings (a setting on the Google account,
+not something in this repo).
 
 ## The one rule: pull before you push
 

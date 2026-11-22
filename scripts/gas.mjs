@@ -5,6 +5,10 @@
  *   node scripts/gas.mjs status   show what a push would send
  *   node scripts/gas.mjs push     overwrite the live scripts
  *
+ * Which clasp: one already installed on the computer, otherwise Google's own
+ * package fetched by its full name (CLASP_PACKAGE below). Never `npx clasp`:
+ * the short name on npm is an unrelated alias with no program in it.
+ *
  * Why this exists rather than running clasp by hand: there are three projects,
  * and the dangerous one is push. Doing it per-directory invites pushing the
  * wrong project, or pushing one and forgetting the others.
@@ -67,25 +71,41 @@ if (cmd === 'push') {
   console.log('  Pushing OVERWRITES the live scripts. Pull first if unsure.\n')
 }
 
+// WHICH clasp to run. NEVER `npx clasp`: the short name on npm is an old alias that ships no program (its install script only tries
+// `npm i -g @google/clasp`), so on a computer without clasp it fails with "could not determine executable to run" (the first time this
+// was run on the main computer, 22 Nov 2026). Use a clasp that is already installed; otherwise fetch Google's own package by its full
+// name, pinned so a new release cannot quietly change what a push does. Move the pin on purpose, after a `status` and a `pull` look right.
+const CLASP_PACKAGE = '@google/clasp@3.4.1'
+const claspInstalled = (() => {
+  try { execFileSync('clasp', ['--version'], { shell: true, stdio: 'ignore' }); return true } catch { return false }
+})()
+const runner = claspInstalled ? { file: 'clasp', pre: [] } : { file: 'npx', pre: ['--yes', CLASP_PACKAGE] }
+console.log(`  clasp: ${claspInstalled ? 'the one installed on this computer' : `fetched on demand (${CLASP_PACKAGE}), the first run downloads it`}\n`)
+
 let failed = 0
+let needsLogin = false
 for (const name of configured) {
   const dir = join(base, name)
-  const args = cmd === 'status' ? ['clasp', 'status']
-    : cmd === 'pull' ? ['clasp', 'pull']
-    : ['clasp', 'push', '--force']
+  const args = [...runner.pre, ...(cmd === 'status' ? ['status'] : cmd === 'pull' ? ['pull'] : ['push', '--force'])]
   try {
-    const out = execFileSync('npx', args, { encoding: 'utf8', cwd: dir, shell: true, stdio: 'pipe' })
+    const out = execFileSync(runner.file, args, { encoding: 'utf8', cwd: dir, shell: true, stdio: 'pipe' })
     console.log(`  ${name}`)
     console.log(out.split('\n').filter(Boolean).map(l => '    ' + l).join('\n'))
   } catch (e) {
     failed++
     const msg = String(e.stderr || e.stdout || e.message)
+    if (/log ?in|logged|credential/i.test(msg)) needsLogin = true
     console.error(`  ${name}  FAILED`)
     console.error(msg.split('\n').filter(Boolean).slice(0, 6).map(l => '    ' + l).join('\n'))
   }
 }
 
-if (cmd === 'pull') {
+if (needsLogin) {
+  console.error('\n  This computer is not signed in to Google for clasp. Once per computer (it opens a browser):')
+  console.error(`    ${claspInstalled ? 'clasp login' : `npx --yes ${CLASP_PACKAGE} login`}`)
+}
+
+if (cmd === 'pull' && failed < configured.length) {
   console.log('\n  Pulled. Now read `git diff` before trusting the repo:')
   console.log('  anything that appears is something the editor had and the repo did not.')
 }

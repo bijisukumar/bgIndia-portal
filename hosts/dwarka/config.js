@@ -120,7 +120,11 @@ export const CONFIG = {
     // Guest-facing sender (checkout-day mail, and anything added later)
     guestFrom: 'Guruvayur Estates <stay@luxuryvillasofguruvayur.com>',
     // Internal alert sender (failed logins, check-outs, worker errors)
-    alertFrom: 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
+    alertFrom: 'bgIndia Saas Alert <alerts@luxuryvillasofguruvayur.com>',
+    // What each alert email calls itself in its subject: "<emoji> <brand> <Log|Alert|Reminder|... Report> — <what happened>"
+    // (src/utils/emailNaming.js). villa = this host's villa, estate = the estates, rental = the rental properties. Anything left out
+    // reads as the default there (Villa, Estate360, Rental360, bgIndia).
+    brands: { villa: 'GVR Villa', estate: 'Estate360', rental: 'Rental360' },
     // Silent copy of every guest email, so the villa inbox holds the same
     // record the guest received. BCC, never CC — the guest must not see an
     // internal address on a message addressed to them.

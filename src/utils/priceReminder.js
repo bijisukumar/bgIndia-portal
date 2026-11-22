@@ -128,7 +128,7 @@ const NO_SEASONS = 'No seasons are set for this period. If a festival or busy ti
 
 // Everything the email says. labels: the platforms' names ('Airbnb', 'VRBO' ...); today: the property's date; seasons: active rows;
 // rateCard: the base card; link: where Rates & seasons opens ('' = no link); time: a printed time for the footer ('' = none).
-// -> { subject, lines (plain text), html }
+// -> { subject, emoji, title, lines (plain text), html }   (the Worker names the mail from emoji + title, src/utils/emailNaming.js)
 export function buildPriceReminder({ labels = [], today, horizonMonths = 6, everyMonths = 3, seasons = [], rateCard = [], link = '', time = '' }) {
   const win = reminderWindow(today, horizonMonths)
   const sites = joinNames((labels || []).filter(Boolean)) || 'your booking sites'
@@ -141,7 +141,8 @@ export function buildPriceReminder({ labels = [], today, horizonMonths = 6, ever
   const ask = `Open ${sites} and make sure your nightly prices and open dates cover the next ${months}${until ? ` (until ${until})` : ''}, and match your price list in StayVibe. Use the same price as your direct price on every site.`
   const footer = `You get this reminder ${everyText(everyMonths)}${next ? ` (next: ${next})` : ''}. To change how far ahead it asks you to look, or which sites it names, ask us: it is a setting for your property.`
 
-  const subject = `🗓️ Time to check your prices on ${sites} (next ${months})`
+  const title = `Time to check your prices on ${sites} (next ${months})`
+  const subject = `🗓️ ${title}`
   const lines = [
     'Source: Price check',
     `Action: ${ask}`,
@@ -174,5 +175,5 @@ export function buildPriceReminder({ labels = [], today, horizonMonths = 6, ever
   <div style="font-size:12px;color:#9ca3af;line-height:1.6">${esc(footer)}${time ? '<br>' + esc(time) : ''}</div>
 </div>`
 
-  return { subject, lines, html, window: win, seasonCount: inWindow.length }
+  return { subject, emoji: '🗓️', title, lines, html, window: win, seasonCount: inWindow.length }
 }

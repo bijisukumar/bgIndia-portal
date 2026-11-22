@@ -87,6 +87,7 @@ import { buildWebVisit, webVisitChip } from '../../src/utils/visitorInfo.js'
 import { priceReminderSettings, periodStartStamp, buildPriceReminder } from '../../src/utils/priceReminder.js'
 import { leaseReminderSettings, renewalRemindersDue, buildRenewalEmail } from '../../src/utils/leaseRenewal.js'
 import { buildCheckinEmail, canSendCheckinEmail, asTestCopy, CHECKIN_EMAIL_KIND } from '../../src/utils/checkinEmail.js'
+import { ownerSubject, reportKind, relayedOwnerSubject } from '../../src/utils/emailNaming.js'
 import { greetingName } from '../../src/utils/guestWording.js'
 import { paymentSettings, paymentSummary, pickMode, cleanNote, validPaidDate, round2 as roundMoney, MAX_PAYMENT } from '../../src/utils/stayPayments.js'
 import { rupees } from '../../src/utils/monthlyOutlook.js'
@@ -393,9 +394,17 @@ const __REBUILD_MARKER_2 = 'resend-secret-retest-' + Date.now()
 // Last-resort sender on a domain that is verified on the same Resend team as
 // the API key. Only used to retry a send Resend refused for the sender's
 // domain - see the 403 retry below.
-const SAFE_ALERT_FROM = 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>'
+const SAFE_ALERT_FROM = 'bgIndia Saas Alert <alerts@luxuryvillasofguruvayur.com>'
+
+// A subject given as { domain, kind, text, emoji } is named here, in the one house style (src/utils/emailNaming.js), with the brand words of the host the
+// alert belongs to (email.brands in hosts/<id>/config.js): "🚪 GVR Villa Log — Guest checked out: ...". A plain string is sent as written (mail to a
+// guest, a platform lead). The dedupe queries that look an alert up by its subject call this same function, so what they look for is what was sent.
+function composeOwnerSubject(subject, villaId) {
+  return subject && typeof subject === 'object' ? ownerSubject({ ...subject, config: getHostConfig(villaId) }) : subject
+}
 
 async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fromOverride, bccEmail, html) {
+  subject = composeOwnerSubject(subject, villaId)
   const recipient = toEmail || env.OWNER_EMAIL || 'bijits@hotmail.com'
   let ok = false, statusCode = null, detail = ''
   try {
@@ -413,7 +422,7 @@ async function sendAlert(env, subject, lines, toEmail, DB, villaId, category, fr
       // shouldn't borrow dwarka's villa branding. Per-host sender still
       // wins for genuine tenant alerts: a second tenant's owner must not
       // receive security alerts from this villa's brand.
-      from: fromOverride || getHostConfig(villaId)?.email?.alertFrom || 'bgIndia Security <alerts@luxuryvillasofguruvayur.com>',
+      from: fromOverride || getHostConfig(villaId)?.email?.alertFrom || SAFE_ALERT_FROM,
       to: [recipient],
       subject: localiseStamps(subject, tz),
       text: lines.map(l => localiseStamps(l, tz)).join('\n'),
@@ -516,7 +525,7 @@ function renderTemplate(template, vars) {
 
 // ── GUEST-FACING EMAIL via Resend ────────────────────────────
 // Separate from sendAlert (which is always host-Biji-facing, from a
-// "Security" sender) — this sends TO a guest, so it needs its own
+// "Saas Alert" sender) — this sends TO a guest, so it needs its own
 // guest-appropriate from-address. Shares the same Resend key/logging.
 async function sendGuestEmail(env, DB, { to, subject, text, html, villaId, category, noBcc }) {
   let ok = false, statusCode = null, detail = ''
@@ -1179,7 +1188,10 @@ async function buildEstateWeeklyDigest(DBE, estate, today, span = 7, endDate = n
   L.push('', `Source: Estate360 weekly digest (every Monday, ${zoneAbbr(tz)})`)
 
   const sev = counts.critical + counts.never + counts.alert
-  const subject = `💧 Estate360 ${span === 7 ? 'weekly' : span + '-day'} report — ${label}: ${issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} need attention` : 'all on track'}, ${expNew.length} expense${expNew.length === 1 ? '' : 's'} (${inr(expTotal)})${sev ? ` · ${sev} zone${sev > 1 ? 's' : ''} overdue` : ''}`
+  // Named in the house style ("Estate360 Weekly Report — ..."): a scheduled summary reads Daily / Weekly / Monthly Report, a range the owner picked
+  // just "Report" with its length.
+  const digestKind = reportKind(span)
+  const subject = { domain: 'estate', kind: digestKind, emoji: '💧', text: `${digestKind === 'report' ? `${label}, ${span} days` : label}: ${issues.length ? `${issues.length} item${issues.length > 1 ? 's' : ''} need attention` : 'all on track'}, ${expNew.length} expense${expNew.length === 1 ? '' : 's'} (${inr(expTotal)})${sev ? ` · ${sev} zone${sev > 1 ? 's' : ''} overdue` : ''}` }
   return { subject, lines: L }
 }
 
@@ -1623,13 +1635,15 @@ async function alertCalendarHealth(env, DB, villaId) {
   const health = await loadCalendarHealth(DB, villaId)
   const risks = health.problems.filter(p => p.severity === 'risk')
   if (!risks.length) return
-  const subject = `⚠️ Calendars out of step: ${risks.map(p => p.short).join('; ')}`.slice(0, 220)
+  const callText = `Calendars out of step: ${risks.map(p => p.short).join('; ')}`
+  const legacySubject = `⚠️ ${callText}`.slice(0, 220)   // its name before 22 Nov 2026: a warning already sent under it still counts as sent
+  const subject = composeOwnerSubject({ domain: 'villa', kind: 'alert', emoji: '⚠️', text: callText.slice(0, 200) }, villaId)
   // Sent in the last day, or TRIED in the last half hour: a send that failed is tried again, but not at every five-minute report while a
   // mail outage lasts.
   const dup = await DB.prepare(
-    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'calendar_health' AND subject = ?
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'calendar_health' AND subject IN (?, ?)
        AND ((success = 1 AND created_at > datetime('now', '-24 hours')) OR created_at > datetime('now', '-30 minutes')) LIMIT 1`
-  ).bind(villaId, subject).first()
+  ).bind(villaId, subject, legacySubject).first()
   if (dup) return
   const zone = await zoneFor(DB, villaId)
   await sendAlert(env, subject, [
@@ -1673,13 +1687,15 @@ async function maybeSendPriceReminder(env, DB, villaId) {
     seasons: await loadSeasons(DB, villaId), rateCard: cardRows || [],
     link: base ? `${base}/owner/villa/rates` : '', time: stampLong(Date.now(), zone),
   })
-  await sendAlert(env, mail.subject, mail.lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'price_reminder', undefined, undefined, mail.html)
+  await sendAlert(env, { domain: 'villa', kind: 'reminder', emoji: mail.emoji, text: mail.title }, mail.lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'price_reminder', undefined, undefined, mail.html)
 }
 
 // The reminders to renew a lease (src/utils/leaseRenewal.js): one email when a running lease, or a separate parking lease, reaches 3, then 2,
 // then 1 month before its end. Only for a host whose config asks for it (`leaseReminder`; the Rev360 rental list is one list, not one per
 // villa, so that is the one host whose owner runs it). Each lease is told about once per mark: the subject names the lease, its end date and
-// the mark, so it is the same at every run and different for a renewed term, and the log says whether it already went. A send that failed is
+// the mark, so it is the same at every run and different for a renewed term, and the log says whether it already went (since 22 Nov 2026 the
+// subject carries the house name, "Rental360 Reminder — ...", and the lookup also accepts the earlier name, so nothing sent before is sent again).
+// A send that failed is
 // tried again at a later run, but not within half an hour. A lease that is month-to-month, let to nobody, no longer running or already over
 // gets no email (the to-do block on the Rev360 home still shows an overdue one). It asks the owner to talk to the tenant and changes nothing.
 async function maybeSendLeaseReminders(env, DB, villaId) {
@@ -1697,12 +1713,15 @@ async function maybeSendLeaseReminders(env, DB, villaId) {
   let sent = 0
   for (const item of due) {
     const mail = buildRenewalEmail(item, { time: stampLong(Date.now(), zone), marks: settings.monthsBefore })
+    // Named in the house style ("Rental360 Reminder — ..."). The dedupe also knows the name this reminder had before 22 Nov 2026 (mail.subject), so a
+    // reminder already sent under it is not sent a second time.
+    const subject = composeOwnerSubject({ domain: 'rental', kind: 'reminder', emoji: mail.emoji, text: mail.title }, villaId)
     const dup = await DB.prepare(
-      `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'lease_renewal' AND subject = ?
+      `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'lease_renewal' AND subject IN (?, ?)
          AND (success = 1 OR created_at > datetime('now', '-30 minutes')) LIMIT 1`
-    ).bind(villaId, mail.subject).first()
+    ).bind(villaId, subject, mail.subject).first()
     if (dup) continue
-    await sendAlert(env, mail.subject, mail.lines, to, DB, villaId, 'lease_renewal')
+    await sendAlert(env, subject, mail.lines, to, DB, villaId, 'lease_renewal')
     if (++sent >= 12) break   // a runaway cap: no portfolio has this many leases reaching a mark on the same day
   }
 }
@@ -1782,12 +1801,14 @@ async function alertOnePlatformDateMismatch(env, DB, villaId, b, partner) {
   const nightsOf = (a, z) => Math.max(1, Math.round((Date.parse(z + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000))
   const platformRange = `${dayMonth(b.checkin_date)} to ${dayMonth(b.checkout_date)}`
   const stayRange = `${dayMonth(s.checkin_date)} to ${dayMonth(s.checkout_date)}`
-  const subject = `⚠️ ${platform} has different dates for ${s.guest_name || 'a guest'}: ${platformRange} (StayVibe: ${stayRange})`
+  const mailText = `${platform} has different dates for ${s.guest_name || 'a guest'}: ${platformRange} (StayVibe: ${stayRange})`
+  const subject = composeOwnerSubject({ domain: 'villa', kind: 'alert', emoji: '⚠️', text: mailText }, villaId)
+  const legacySubject = `⚠️ ${mailText}`   // its name before 22 Nov 2026: a warning already sent under it still counts as sent
   const since = new Date(Date.now() - 7 * 864e5).toISOString()
   const dup = await DB.prepare(
     // (airbnb_dates is what this category was called until 2026-11-03: emails already sent under that name still count)
-    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category IN ('platform_dates', 'airbnb_dates') AND subject = ? AND created_at > ? LIMIT 1`
-  ).bind(villaId, subject, since).first()
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category IN ('platform_dates', 'airbnb_dates') AND subject IN (?, ?) AND created_at > ? LIMIT 1`
+  ).bind(villaId, subject, legacySubject, since).first()
   if (dup) return
   await sendAlert(env, subject, [
     `Source: ${platform} calendar > StayVibe calendar sync`,
@@ -1860,13 +1881,15 @@ async function alertNewPlatformBooking(env, DB, feedResult, block) {
     if (h.night >= block.checkin && h.night < block.checkout) clashes.push(`the night of ${dayMonth(h.night)} is held for ${h.guest || 'a guest'}'s ${holdPhrase(h)}`)
   }
 
-  const subject = clashes.length
-    ? `⚠️ ${platform} shows nights you already have: ${range}`
-    : `📅 New ${platform} booking on your calendar: ${range} (${nights} night${nights === 1 ? '' : 's'})`
+  const mailPart = clashes.length
+    ? { kind: 'alert', emoji: '⚠️', text: `${platform} shows nights you already have: ${range}` }
+    : { kind: 'log', emoji: '📅', text: `New ${platform} booking on your calendar: ${range} (${nights} night${nights === 1 ? '' : 's'})` }
+  const subject = composeOwnerSubject({ domain: 'villa', ...mailPart }, villaId)
+  const legacySubject = `${mailPart.emoji} ${mailPart.text}`   // its name before 22 Nov 2026: a mail already sent under it still counts as sent
   const since = new Date(Date.now() - 7 * 864e5).toISOString()
   const dup = await DB.prepare(
-    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'platform_booking' AND subject = ? AND created_at > ? LIMIT 1`
-  ).bind(villaId, subject, since).first()
+    `SELECT 1 FROM infra_alert_log WHERE villa_id = ? AND category = 'platform_booking' AND subject IN (?, ?) AND created_at > ? LIMIT 1`
+  ).bind(villaId, subject, legacySubject, since).first()
   if (dup) return
   const lines = [
     `Source: ${platform} calendar > StayVibe calendar sync`,
@@ -2373,7 +2396,7 @@ async function alertChangeRequest(env, DB, villaId, c) {
     // what the subject says was asked: the head count and/or the dates (a change of the reservation with neither reads as before)
     const what = [c.requested != null ? `guests ${c.original ?? '?'} → ${c.requested}` : '', dc ? `dates ${dateWords}` : ''].filter(Boolean).join(' and ')
       || `guests ${c.original ?? '?'} → ${c.requested ?? '?'}`
-    await sendAlert(env, `✋ ${c.guestName || 'A guest'}: ${what} — decide before check-in`, [
+    await sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '✋', text: `${c.guestName || 'A guest'}: ${what} — decide before check-in` }, [
       `Guest:        ${c.guestName || '?'}${c.stayId ? ` (${c.stayId})` : ''}`,
       ...(c.checkin ? [`Dates:        ${c.checkin} → ${c.checkout || '?'}`] : []),
       ...(dc ? [`Asks:         new dates, ${dateWords} (${dc.requestedNights} nights, was ${dc.originalNights})`] : []),
@@ -3092,7 +3115,7 @@ export async function onRequest(ctx) {
 
     const rl = checkRateLimit(ip)
     if (rl.limited) {
-      await sendAlert(env, '🔒 bgIndia — Login LOCKED (rate limit hit)', [
+      await sendAlert(env, { domain: 'platform', kind: 'alert', emoji: '🔒', text: 'Login LOCKED (rate limit hit)' }, [
         'Source: Login screen (rate limiter)',
         'Action: Login LOCKED after too many failed attempts',
         '',
@@ -3148,7 +3171,7 @@ export async function onRequest(ctx) {
     }
 
     if (!found) {
-      await sendAlert(env, '⚠️ bgIndia — Failed login attempt', [
+      await sendAlert(env, { domain: 'platform', kind: 'alert', emoji: '⚠️', text: 'Failed login attempt' }, [
         'Source: Login screen',
         'Action: Wrong PIN entered',
         '',
@@ -3176,7 +3199,7 @@ export async function onRequest(ctx) {
     // real, intended use of that PIN. Every other PIN belongs to exactly the
     // one tenant it was issued for.
     if (found.tenantId && hostVillaId && found.tenantId !== hostVillaId) {
-      await sendAlert(env, '🚨 bgIndia — PIN used on the wrong tenant\'s domain', [
+      await sendAlert(env, { domain: 'platform', kind: 'alert', emoji: '🚨', text: 'PIN used on the wrong tenant\'s domain' }, [
         'Source: Login screen',
         `A valid PIN for "${found.tenantId}" was entered on "${hostVillaId}"'s own site — refused.`,
         '',
@@ -3551,7 +3574,7 @@ export async function onRequest(ctx) {
           `UPDATE stayvibe_stays SET status='pending_review', notes = TRIM(COALESCE(notes,'') || ' | ' || ?), updated_at = datetime('now') WHERE stay_id = ?`
         ).bind(`Overlaps existing stay ${dupOtherStay.stay_id} (${dupOtherStay.guest_name}) ${dupOtherStay.checkin_date}→${dupOtherStay.checkout_date} — possible double booking.`, stayId).run()
         try {
-          await sendAlert(env, '🚨 Possible double booking (check-in form) — ' + villaId, [
+          await sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '🚨', text: 'Possible double booking (check-in form) — ' + villaId }, [
             'Source: Guest check-in form (submitGuestCheckIn)',
             `New guest:  ${safeGuestName} | ${checkInDate} → ${checkOutDate || '?'}`,
             `Existing:   ${dupOtherStay.stay_id} | ${dupOtherStay.guest_name} | ${dupOtherStay.checkin_date} → ${dupOtherStay.checkout_date}`,
@@ -4227,7 +4250,7 @@ export async function onRequest(ctx) {
         shown: est.quotable ? `<b>≈ ₹${est.approxTotal.toLocaleString('en-IN')}</b> <span style="color:#6b7280">(system total ₹${est.exactTotal.toLocaleString('en-IN')})</span>` : 'No price (party too large for the estimate)',
         seasons: est.seasons.length ? est.seasons.map(x => `${escHtml(x.name)} ×${x.nights}`).join(', ') : '',
       })
-      ctx.waitUntil(sendAlert(env, `📩 Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)${visit?.city ? ' · ' + visit.city : ''}`, [
+      ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '📩', text: `Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)${visit?.city ? ' · ' + visit.city : ''}` }, [
         'A guest asked for a final quote from the website estimate page.',
         '',
         `Name:       ${name}${isRepeat ? '  (returning guest)' : ''}`,
@@ -4265,7 +4288,7 @@ export async function onRequest(ctx) {
       const msg = e?.message || String(e)
       console.error('submitQuoteRequest failed:', msg)
       await updateWebLead(DB, logId, 'failed', { error: msg })
-      ctx.waitUntil(sendAlert(env, `⚠️ Website quote request FAILED to save — follow up with ${String(f.guestName || 'a guest').slice(0, 60)}`, [
+      ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '⚠️', text: `Website quote request FAILED to save — follow up with ${String(f.guestName || 'a guest').slice(0, 60)}` }, [
         'A guest tried to request a quote on the website estimate page, but it could not be saved as an enquiry.',
         'Their details are below (and in the stayvibe_web_leads table) — please contact them directly.',
         '',
@@ -4405,7 +4428,7 @@ export async function onRequest(ctx) {
     // trigger that would surface a new row.
     try {
       const to = await getOwnerAlertEmail(DB, env, villaId)
-      await sendAlert(env, '🕐 Flexibility request — ' + String(guestName).trim(), [
+      await sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🕐', text: 'Flexibility request — ' + String(guestName).trim() }, [
         'A guest asked about early check-in / late check-out.',
         '',
         `Guest:    ${String(guestName).trim()}`,
@@ -4531,14 +4554,14 @@ export async function onRequest(ctx) {
     for (const estate of estates) {
       try {
         const d = await buildEstateWeeklyDigest(DB_ESTATES, estate, today, Math.min(Math.max(parseInt(dBody.days) || 7, 1), 35), null, tz)
-        if (dBody.dryRun) { out.push({ estate, subject: d.subject, text: d.lines.join('\n') }); continue }
+        if (dBody.dryRun) { out.push({ estate, subject: composeOwnerSubject(d.subject, estate), text: d.lines.join('\n') }); continue }
         await sendAlert(env, d.subject, d.lines, await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_weekly')
         out.push({ estate, sent: true })
       } catch (e) {
         // A silent failure would read as "all clear" — tell the owner the report broke.
         console.error('runEstateWeeklyDigest failed:', estate, e?.message || e)
         if (!dBody.dryRun) {
-          await sendAlert(env, `⚠️ Estate360 weekly report FAILED (${ESTATE_LABELS[estate] || estate})`,
+          await sendAlert(env, { domain: 'estate', kind: 'alert', emoji: '⚠️', text: `Weekly report FAILED (${ESTATE_LABELS[estate] || estate})` },
             ['The weekly irrigation / expense report could not be built, so nothing below was checked.', '', `Error: ${e?.message || e}`],
             await getEstateAlertEmail(DB, env, estate), DB, estate, 'estate_weekly')
         }
@@ -8962,7 +8985,11 @@ export async function onRequest(ctx) {
       if (action === 'sendGuestEmail') {
         const { to, subject, body: emailBody, villaId, category } = body
         if (!to || !subject || !emailBody) return err('to, subject, and body required')
-        await sendGuestEmail(env, DB, { to, subject, text: emailBody, villaId: villaId || null, category: category || 'guest_checkin' })
+        // The Google scripts compose the owner's own mails (a booking, a cancellation, a review, a guest's check-in form, an enquiry follow-up) with their
+        // own "[GVR Portal]" tag. They are named here in the house style, from the host's config, so a name never needs a script push (emailNaming.js);
+        // every other category (a guest's mail) goes out exactly as written.
+        const named = relayedOwnerSubject(subject, category, getHostConfig(villaId || DEFAULT_VILLA_ID))
+        await sendGuestEmail(env, DB, { to, subject: named, text: emailBody, villaId: villaId || null, category: category || 'guest_checkin' })
         return json({ success: true })
       }
 
@@ -9522,7 +9549,7 @@ export async function onRequest(ctx) {
 
         if (cls.otherOverlap) {
           const conflict = cls.otherOverlap
-          const alertSubject = '🚨 URGENT — Double booking detected! ' + (body.checkInDate || '')
+          const alertSubject = { domain: 'villa', kind: 'alert', emoji: '🚨', text: 'URGENT — Double booking detected! ' + (body.checkInDate || '') }
           const alertVillaId = body.villaId || DEFAULT_VILLA_ID
           const alertLines = [
             'Source: New Booking screen (createBooking)',
@@ -9777,7 +9804,7 @@ export async function onRequest(ctx) {
             dateWarn = { stayId, guestName: due.guest_name, bookedFor: due.checkin_date, bookedUntil: due.checkout_date, today: todayHere }
             if (body.dateOverride !== true) {
               const guardVilla = body.villaId || DEFAULT_VILLA_ID
-              ctx.waitUntil(sendAlert(env, `⚠️ bgIndia — Check-in attempted on the wrong date: ${due.guest_name}`, [
+              ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '⚠️', text: `Check-in attempted on the wrong date: ${due.guest_name}` }, [
                 `Source: Raman > Check-in screen`,
                 `Action: Check-in ATTEMPTED for a guest who is not due yet. Nothing was changed.`,
                 '',
@@ -9799,7 +9826,7 @@ export async function onRequest(ctx) {
             const ahead = daysEarly(due.checkin_date, todayHere)
             if (ahead > MAX_DAYS_EARLY && payload.role !== 'owner' && payload.role !== 'master_owner') {
               const guardVilla = body.villaId || DEFAULT_VILLA_ID
-              ctx.waitUntil(sendAlert(env, `⚠️ bgIndia — Check-in refused, guest not due for ${ahead} days: ${due.guest_name}`, [
+              ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '⚠️', text: `Check-in refused, guest not due for ${ahead} days: ${due.guest_name}` }, [
                 `Source: ${actor} > Check-in screen`,
                 `Action: Check-in REFUSED for a guest booked ${ahead} days from today, even after the on-screen confirmation. Nothing was changed.`,
                 '',
@@ -9883,7 +9910,7 @@ export async function onRequest(ctx) {
         }
 
         const alertVillaId = body.villaId || DEFAULT_VILLA_ID
-        ctx.waitUntil(sendAlert(env, `${dateWarn ? '⚠️ ' : ''}🔑 bgIndia — Guest checked in${dateWarn ? ' BEFORE their booking date' : ''}: ${body.guestName || body.bookerName || 'Guest'}`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: `${dateWarn ? '⚠️ ' : ''}🔑`, text: `Guest checked in${dateWarn ? ' BEFORE their booking date' : ''}: ${body.guestName || body.bookerName || 'Guest'}` }, [
           `Source: Raman > Check-in screen`,
           `Action: Guest checked in`,
           ...(dateWarn ? [
@@ -9950,7 +9977,7 @@ export async function onRequest(ctx) {
             .bind(all.join(', '), actor, now(), stayId).run()
         }
         const zone = await zoneFor(DB, stay.villa_id)
-        ctx.waitUntil(sendAlert(env, `🚗 bgIndia — Car details added after check-in: ${stay.guest_name}`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🚗', text: `Car details added after check-in: ${stay.guest_name}` }, [
           `Source: Raman > Check-in screen > In-house`,
           `Action: Car photos / numbers added after check-in`,
           '',
@@ -9993,7 +10020,7 @@ export async function onRequest(ctx) {
             const nights = parseInt(stay.nights) || 1; const ramanComm = managerCommissionFor(stay, stayExt, rates)
             await DB.prepare(`INSERT INTO stayvibe_manager_commissions (comm_id, stay_id, guest_name, checkin_date, nights, commission, is_paid, created_by, updated_by, created_at, updated_at, villa_id) VALUES (?, ?, ?, ?, ?, ?, 0, 'system', 'system', ?, ?, (SELECT villa_id FROM stayvibe_stays WHERE stay_id = ?))`).bind(genId('RC'), stayId, stay.guest_name, stay.checkin_date, nights, ramanComm, now(), now(), stayId).run()
 
-            ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay.guest_name || 'Guest'}`, [
+            ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🚪', text: `Guest checked out: ${stay.guest_name || 'Guest'}` }, [
               `Source: Raman > Check-in screen (check-out)`,
               `Action: Guest checked out`,
               '',
@@ -10012,7 +10039,7 @@ export async function onRequest(ctx) {
           }
         }
 
-        ctx.waitUntil(sendAlert(env, `🚪 bgIndia — Guest checked out: ${stay?.guest_name || 'Guest'}`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🚪', text: `Guest checked out: ${stay?.guest_name || 'Guest'}` }, [
           `Source: Raman > Check-in screen (check-out)`,
           `Action: Guest checked out`,
           '',
@@ -10291,7 +10318,7 @@ export async function onRequest(ctx) {
             }
           }
         }
-        ctx.waitUntil(sendAlert(env, `🛒 bgIndia — Kitchen incidentals logged: ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🛒', text: `Kitchen incidentals logged: ₹${Number(body.totalAmount || 0).toLocaleString('en-IN')}` }, [
           `Source: Raman > Kitchen incidentals screen`,
           `Action: Kitchen incidentals logged`,
           '',
@@ -10773,7 +10800,7 @@ export async function onRequest(ctx) {
 
         const cocoEstate = body.estate || 'pollachi'
         const cocoLabel  = ESTATE_LABELS[cocoEstate] || cocoEstate
-        ctx.waitUntil(sendAlert(env, `🥥 Estate360 — New coconut harvest: ${(parseInt(body.totalNuts)||0).toLocaleString('en-IN')} nuts, net ${inr(body.netIncome)} (${cocoLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '🥥', text: `New coconut harvest: ${(parseInt(body.totalNuts)||0).toLocaleString('en-IN')} nuts, net ${inr(body.netIncome)} (${cocoLabel})` }, [
           'Source: Estate360 > Coconut Tracker',
           'Action: New coconut harvest logged',
           '',
@@ -10848,7 +10875,7 @@ export async function onRequest(ctx) {
         `).bind(id, estateId, harvestDate, weightKg, pricePerKg, gross, expense, net, body.notes||null, actor, now(), actor, now()).run()
 
         const rubberEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
-        ctx.waitUntil(sendAlert(env, `🌳 Estate360 — New rubber harvest: ₹${net.toLocaleString('en-IN')} net (${rubberEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '🌳', text: `New rubber harvest: ₹${net.toLocaleString('en-IN')} net (${rubberEstateLabel})` }, [
           'Source: Estate360 > Rubber Tracker',
           'Action: New rubber harvest logged',
           '',
@@ -10934,7 +10961,7 @@ export async function onRequest(ctx) {
         await upsertWeeklyWages(estateId, weekStartDate, sumWages, sumTree, [...workerSet])
 
         const prodEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
-        ctx.waitUntil(sendAlert(env, `🌳 Estate360 — Rubber production: ${sumSheet} sheets, ${sumTree} trees (${prodEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '🌳', text: `Rubber production: ${sumSheet} sheets, ${sumTree} trees (${prodEstateLabel})` }, [
           'Source: Estate360 > Rubber Tracker (daily production)',
           `Action: Saved ${saved} worker-day record(s)`,
           '',
@@ -11011,7 +11038,7 @@ export async function onRequest(ctx) {
         `).bind(id, estateId, managerName, payerName, paymentDate, amount, body.method || 'cash', body.note || null, actor, now()).run()
 
         const settleLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estateId] || estateId
-        ctx.waitUntil(sendAlert(env, `💸 Estate360 — ${payerName} paid ${managerName} ₹${amount.toLocaleString('en-IN')} (${settleLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '💸', text: `${payerName} paid ${managerName} ₹${amount.toLocaleString('en-IN')} (${settleLabel})` }, [
           'Source: Estate360 > Manager Settlement',
           `Action: ${payerName} → ${managerName} payment recorded`,
           '',
@@ -11050,7 +11077,7 @@ export async function onRequest(ctx) {
 
         const mangoEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
         const mangoRevenue = parseFloat(totalRevenue) || 0
-        ctx.waitUntil(sendAlert(env, `🥭 Estate360 — New mango harvest: ₹${mangoRevenue.toLocaleString('en-IN')} (${mangoEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '🥭', text: `New mango harvest: ₹${mangoRevenue.toLocaleString('en-IN')} (${mangoEstateLabel})` }, [
           'Source: Estate360 > Mango Harvest',
           'Action: New mango harvest logged',
           '',
@@ -11944,7 +11971,7 @@ export async function onRequest(ctx) {
           }
           await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, ?, ?, ?, ?)`)
             .bind(genId('CP'), CHECKOUT_PAYMENT_EVENT, stayId, JSON.stringify(rec), now()).run()
-          ctx.waitUntil(sendAlert(env, `💳 bgIndia — Check-out payment recorded: ${inr(p.total)} by ${p.mode} (${stay.guest_name || 'guest'})`, [
+          ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '💳', text: `Check-out payment recorded: ${inr(p.total)} by ${p.mode} (${stay.guest_name || 'guest'})` }, [
             'Source: Check-out incidentals screen',
             'Action: Check-out payment recorded',
             '',
@@ -12083,7 +12110,7 @@ export async function onRequest(ctx) {
             WHERE txn_id = ?
           `).bind(date, category, amt, paidTo || null, description || null, actor, now(), txnId).run()
 
-          ctx.waitUntil(sendAlert(env, `🧾 bgIndia — Villa expense updated: ₹${amt.toLocaleString('en-IN')} (${category})`, [
+          ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🧾', text: `Villa expense updated: ₹${amt.toLocaleString('en-IN')} (${category})` }, [
             `Source: Owner/Raman > Villa Expenses screen`,
             `Action: Expense entry updated`,
             '',
@@ -12108,7 +12135,7 @@ export async function onRequest(ctx) {
           VALUES (?,?,?,?,?,?,?,?,?,?,?)
         `).bind(id, vId, date, category, amt, paidTo || null, description || null, actor, actor, now(), now()).run()
 
-        ctx.waitUntil(sendAlert(env, `🧾 bgIndia — New villa expense: ₹${amt.toLocaleString('en-IN')} (${category})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '🧾', text: `New villa expense: ₹${amt.toLocaleString('en-IN')} (${category})` }, [
           `Source: Owner/Raman > Villa Expenses screen`,
           `Action: New expense entry logged`,
           '',
@@ -12339,7 +12366,7 @@ export async function onRequest(ctx) {
         if (txnId) {
           await ActiveDB.prepare(`UPDATE estate360_estate_transactions SET type=?, date=?, category=?, amount=?, paid_to=?, description=?, updated_by=?, updated_at=? WHERE txn_id=?`).bind(type, date, category, amt, paidTo||null, description||null, actor, now(), txnId).run()
 
-          ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — ${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
+          ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji, text: `${typeLabel} updated: ₹${amt.toLocaleString('en-IN')} (${estateLabel})` }, [
             `Source: Estate360 > ${estateLabel} > Income/Expense screen`,
             `Action: ${typeLabel} entry updated`,
             '',
@@ -12361,7 +12388,7 @@ export async function onRequest(ctx) {
           const id = 'ET_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)
           await ActiveDB.prepare(`INSERT INTO estate360_estate_transactions (txn_id, estate, type, date, category, amount, paid_to, description, created_by, updated_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, estate, type, date, category, amt, paidTo||null, description||null, actor, actor, now(), now()).run()
 
-          ctx.waitUntil(sendAlert(env, `${emoji} Estate360 — New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})`, [
+          ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji, text: `New ${typeLabel.toLowerCase()}: ₹${amt.toLocaleString('en-IN')} (${estateLabel})` }, [
             `Source: Estate360 > ${estateLabel} > Income/Expense screen`,
             `Action: New ${typeLabel.toLowerCase()} entry logged`,
             '',
@@ -12511,7 +12538,7 @@ export async function onRequest(ctx) {
         ).bind(id, estate, loggedDate, notes||null, actor, now(), parseInt(durationMins)||0).run()
 
         const irrEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
-        ctx.waitUntil(sendAlert(env, `💧 Estate360 — Irrigation logged (${irrEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '💧', text: `Irrigation logged (${irrEstateLabel})` }, [
           'Source: Estate360 > Irrigation Log',
           'Action: Irrigation entry logged',
           '',
@@ -12539,7 +12566,7 @@ export async function onRequest(ctx) {
         ).bind(id, estate, loggedDate, notes||null, actor, now(), zoneId, zoneName||null, parseInt(durationMins)||0).run()
 
         const zoneEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
-        ctx.waitUntil(sendAlert(env, `💧 Estate360 — Irrigation logged: ${zoneName || zoneId} (${zoneEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '💧', text: `Irrigation logged: ${zoneName || zoneId} (${zoneEstateLabel})` }, [
           'Source: Estate360 > Irrigation Log (zone)',
           'Action: Irrigation zone entry logged',
           '',
@@ -12581,7 +12608,7 @@ export async function onRequest(ctx) {
         const names  = zoneList.map(z => z.zoneName || z.zoneId)
         // Typed in after the day it is for? Then it is a catch-up: say so, and how late, in the owner's email.
         const lateBy = lateDays(loggedDate, await todayOf())
-        ctx.waitUntil(sendAlert(env, `${rained ? '🌧' : '💧'} Estate360 — Irrigation logged: ${names.length} zone${names.length > 1 ? 's' : ''} (${batchEstateLabel})${lateBy ? ` — LATE, for ${loggedDate}` : ''}`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: rained ? '🌧' : '💧', text: `Irrigation logged: ${names.length} zone${names.length > 1 ? 's' : ''} (${batchEstateLabel})${lateBy ? ` — LATE, for ${loggedDate}` : ''}` }, [
           'Source: Estate360 > Irrigation Log',
           `Action: ${rained ? 'Rain day — all selected zones logged' : 'Irrigation logged'}`,
           '',
@@ -12622,7 +12649,7 @@ export async function onRequest(ctx) {
         ).bind(id, estate, plannedDate, actualDate||null, fertilizerType||null, parseFloat(quantityKg)||0, parseFloat(cost)||0, doneBy||null, notes||null, actor, now()).run()
 
         const fertEstateLabel = ({ pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' })[estate] || estate
-        ctx.waitUntil(sendAlert(env, `🌱 Estate360 — Fertilization logged (${fertEstateLabel})`, [
+        ctx.waitUntil(sendAlert(env, { domain: 'estate', kind: 'log', emoji: '🌱', text: `Fertilization logged (${fertEstateLabel})` }, [
           'Source: Estate360 > Fertilization Log',
           'Action: Fertilization entry logged',
           '',

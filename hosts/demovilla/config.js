@@ -60,6 +60,8 @@ export const CONFIG = {
   email: {
     guestFrom: 'Demo Test Villas <stay@luxuryvillasofguruvayur.com>',
     alertFrom: 'Demo Test Villas (alerts) <alerts@luxuryvillasofguruvayur.com>',
+    // How its alert emails name themselves in the subject (src/utils/emailNaming.js)
+    brands:    { villa: 'Demo Villa' },
     guestBcc:  null,
   },
 

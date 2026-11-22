@@ -114,7 +114,9 @@ function money(amount, currency) {
   return currency === 'USD' ? `$${n.toLocaleString('en-US')}` : `₹${n.toLocaleString('en-IN')}`
 }
 
-// The email for one reminder from renewalRemindersDue(): { subject, lines }. The subject names the lease, its end date and the mark, so it is
+// The email for one reminder from renewalRemindersDue(): { subject, emoji, title, lines }. The Worker names the mail in the house style from emoji + title
+// (src/utils/emailNaming.js: "Rental360 Reminder — ..."); `subject` is the name it had before 22 Nov 2026 and stays because it is how a reminder already
+// sent is recognised. The title names the lease, its end date and the mark, so it is
 // the same every time that lease reaches that mark and different for the next term: the Worker uses it to send each reminder once.
 export function buildRenewalEmail(item, { time = '', marks = LEASE_REMINDER_DEFAULTS.monthsBefore } = {}) {
   const what = item.unit === 'parking' ? 'parking' : 'lease'
@@ -125,7 +127,8 @@ export function buildRenewalEmail(item, { time = '', marks = LEASE_REMINDER_DEFA
     : `Rev360 > Agreements > ${item.name}, change the LEASE END and save.`
   const list = [...new Set((marks || []).map(Number).filter(n => Number.isFinite(n) && n >= 1))].sort((a, b) => b - a)
   const markText = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]} months` : `${list[0] || item.mark} ${(list[0] || item.mark) === 1 ? 'month' : 'months'}`
-  const subject = `📋 Renew in ${plural(item.mark, 'month')}: ${item.name} ${what}${item.who ? ` (${item.who})` : ''} ends ${ymdLabel(item.end)}`
+  const title = `Renew in ${plural(item.mark, 'month')}: ${item.name} ${what}${item.who ? ` (${item.who})` : ''} ends ${ymdLabel(item.end)}`
+  const subject = `📋 ${title}`
   const lines = [
     'Source: Rev360 > lease renewals',
     `Action: ${theLease} ends within ${plural(item.mark, 'month')}. Talk to the tenant now about renewing it, or plan the move-out.`,
@@ -141,5 +144,5 @@ export function buildRenewalEmail(item, { time = '', marks = LEASE_REMINDER_DEFA
     `This reminder comes ${markText} before a lease ends, once each. The to-do list on the Rev360 home shows what is due.`,
     ...(time ? [`Time: ${time}`] : []),
   ]
-  return { subject, lines }
+  return { subject, emoji: '📋', title, lines }
 }

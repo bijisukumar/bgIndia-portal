@@ -16,7 +16,7 @@ import { hostPartners, partnerFor } from '../../utils/partners'
 import { CONFIG } from '../../config'
 import { guestBaseUrl } from '../../utils/guestMessages'
 import { timeAgo } from '../../utils/localWhen'
-import { linkStaleHours, spanText } from '../../utils/calendarHealth'
+import { linkStaleHours, spanText, describeBridge } from '../../utils/calendarHealth'
 import { instantMs } from '../../utils/tz'
 
 
@@ -108,7 +108,9 @@ export default function CalendarExports({ feeds, showToast }) {
 
   // A platform that refuses our address (its partner file says calendar.via 'google-bridge': Agoda only imports addresses from sites
   // on its own approved list) has its link read by a Google script instead, which keeps a private Google Calendar for the platform
-  // to import (apps-script/agoda-bridge/src/Code.js). That row's "Read N ago" is that script reading the link.
+  // to import (apps-script/agoda-bridge/src/Code.js). That row's "Read N ago" is that script reading the link, and a second line under
+  // it ("Google calendar copied N min ago") is what the script reported about writing the calendar (describeBridge, the same limits as
+  // the warning on Home). What the platform then imports from that calendar happens on its own timetable and is not visible here.
   function status(l) {
     const name = channelLabel(l.channel)
     const cal = (partnerFor(CONFIG, l.channel) || {}).calendar || {}
@@ -157,6 +159,7 @@ export default function CalendarExports({ feeds, showToast }) {
       {rows.map(r => {
         const l = r.link
         const st = l ? status(l) : null
+        const bridgeLine = l ? describeBridge(CONFIG, l.channel, l.bridge, { ago: timeAgo, linkRead: !!l.lastFetchedAt }) : null
         const working = busy === r.key
         return (
           <div key={r.key} style={{ background: 'var(--dark-card)', border: '1px solid rgba(200,144,58,0.2)', borderRadius: '12px', padding: '12px 14px', marginBottom: '8px' }}>
@@ -186,6 +189,10 @@ export default function CalendarExports({ feeds, showToast }) {
                   …/api/ical/{l.token.slice(0, 6)}…{l.token.slice(-4)}.ics
                 </div>
                 <div title={l.lastFetchAgent || ''} style={{ fontSize: '0.68rem', marginTop: '3px', color: st.warn ? '#F59E0B' : 'var(--text-dim)' }}>{st.text}</div>
+                {bridgeLine && (
+                  <div data-testid={`bridge-line-${r.key}`} title={l.bridge && l.bridge.version ? `Script version ${l.bridge.version}` : ''}
+                    style={{ fontSize: '0.68rem', marginTop: '3px', lineHeight: 1.45, color: bridgeLine.warn ? '#F59E0B' : 'var(--text-dim)' }}>{bridgeLine.text}</div>
+                )}
               </>
             )}
           </div>

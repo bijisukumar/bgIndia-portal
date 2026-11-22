@@ -26,10 +26,11 @@ approved list.
 | `AGODA_FEED_URL` | **by hand** | The StayVibe export link for the Agoda row. Carries an access token, which is why it is not in the repo. Nothing is copied while it is missing, and the calendar Agoda already reads is left alone rather than emptied. |
 | `BRIDGE_CALENDAR_ID` | the script | Which Google Calendar it owns. Written on first `setup()`. |
 | `BRIDGE_LAST_OK` | the script | Last successful run. |
-| `BRIDGE_LAST_SUMMARY` | the script | Last outcome, success or failure, shown on the Channel calendar screen. |
+| `BRIDGE_LAST_SUMMARY` | the script | Last outcome, success or failure (also reported to StayVibe from v1.1, see below). |
+| `BRIDGE_TIMEZONE` | **by hand, optional** | The property's own time zone, e.g. `America/Chicago`; India's when it is not set. It only decides which night counts as "today". |
 
-Only the first is yours to set. The other three are the script's own bookkeeping
-and should be left alone.
+Only the first is yours to set (and the last when the property is not in India).
+The three in between are the script's own bookkeeping and should be left alone.
 
 ### Trigger
 
@@ -40,6 +41,26 @@ and should be left alone.
 `setup()` is the single entry point: it checks the feed URL, creates the
 calendar, installs the trigger and runs one sync. Run it once per project, then
 never again.
+
+### Reports in (v1.1)
+
+After every run, success or failure, it sends a small report to the Agoda link's
+own address with `/report` in place of `.ics`
+(`POST https://<host>/api/ical/<token>/report`). The link's token is the
+credential, so there is nothing to set, and no system token or tenant id is
+involved: this is the one script that is the same for every host. It sends
+counts (blocks, nights, added, moved, removed, held back) and, after a failure,
+a short error with any web address taken out; never names or contacts.
+
+The Channel calendar shows it under the Agoda link ("Google calendar copied 6
+min ago · 28 nights blocked") and the calendar warning watches it: a red
+warning and an email when it has been silent for four runs (an hour) or keeps
+failing, a notice when it is holding cancellations back. It needs the
+`infra_job_heartbeats` table (`migrations/2026-11-03-job-heartbeats.sql`; in
+`schema.sql` for a new host). Until that table exists, or until the Worker is
+updated, the report is ignored and the script carries on: a report that cannot
+be sent never stops the copy. An older script (v1.0) simply never reports, and
+the screen says so without a warning.
 
 ---
 

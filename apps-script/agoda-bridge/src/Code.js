@@ -1,5 +1,5 @@
 // ============================================================
-// AgodaCalendarBridge.gs   v1.0   (2026-10-10)
+// AgodaCalendarBridge.gs   v1.1   (2026-11-22)
 // StayVibe360 calendar  ->  a private Google Calendar  ->  Agoda
 // ============================================================
 // WHY THIS EXISTS
@@ -37,8 +37,30 @@
 //
 // AFTER THAT it runs by itself every 15 minutes. How to tell it is alive:
 //   StayVibe shows "Read N min ago" under the Agoda link (this script is the
-//   one reading it). If that says hours or days, open the script's
-//   Executions page.
+//   one reading it) and, from v1.1, a second line, "Google calendar copied N min
+//   ago", that this script sends after every run (see REPORTS IN below). If
+//   either says hours or days, open the script's Executions page.
+//
+// REPORTS IN (v1.1)
+//   After every run, whether it worked or not, the script tells StayVibe how it
+//   went: one small web request to the Agoda link's own address with "/report"
+//   in place of ".ics". There is nothing new to set: the token already in
+//   AGODA_FEED_URL is the credential, and it only lets this script say how ITS
+//   copy went (it opens nothing else). What it sends is counts (blocks, nights,
+//   added, moved, removed) and, if a run failed, a short error with any web
+//   address taken out. No names, no contacts. A report that cannot be sent
+//   never stops the copy, and a StayVibe that has not been updated yet simply
+//   ignores it. StayVibe turns the line amber, shows the red warning on Home and
+//   emails the owner when the script has been silent for an hour or keeps
+//   failing. What it cannot show is what Agoda has imported from the Google
+//   calendar: Agoda does that on its own timetable.
+//
+// ANOTHER TIME ZONE
+//   Dates are read in India's time unless the property is somewhere else. For
+//   a property in another zone set the optional script property
+//   BRIDGE_TIMEZONE (for example America/Chicago): it only decides which
+//   night counts as "today", so a stay that ended is dropped on the right
+//   morning. Nothing else in this file is about one property.
 //
 // IF SOMETHING LOOKS WRONG
 //   status()     prints when it last copied successfully and how many nights.
@@ -74,8 +96,9 @@ function feedUrl_() {
 }
 // ──────────────────────────────────────────────────────────────
 
+var BRIDGE_VERSION       = '1.1';
 var CALENDAR_NAME        = 'StayVibe to Agoda';
-var CALENDAR_TZ          = 'Asia/Kolkata';
+var DEFAULT_TIMEZONE     = 'Asia/Kolkata';   // used unless the BRIDGE_TIMEZONE script property names the property's own zone
 var BLOCK_TITLE          = 'Not available';
 var SYNC_EVERY_MINUTES   = 15;     // Apps Script accepts 1, 5, 10, 15 or 30
 var WINDOW_PAST_DAYS     = 400;    // how far back it looks to tidy old events
@@ -85,6 +108,7 @@ var MASS_REMOVE_FRACTION = 0.6;    // ...and when a single run would remove more
 var PROP_CALENDAR_ID     = 'BRIDGE_CALENDAR_ID';
 var PROP_LAST_OK         = 'BRIDGE_LAST_OK';
 var PROP_LAST_SUMMARY    = 'BRIDGE_LAST_SUMMARY';
+var PROP_TIMEZONE        = 'BRIDGE_TIMEZONE';
 
 // ── ENTRY POINTS ──────────────────────────────────────────────
 
@@ -96,7 +120,7 @@ function setup() {
   installTrigger_();
   var result = runSync_(false);
   if (result && result.ok) {
-    Logger.log('Done. "' + CALENDAR_NAME + '" now holds ' + result.nights + ' night block(s) and will refresh every ' + SYNC_EVERY_MINUTES + ' minutes.');
+    Logger.log('Done. "' + CALENDAR_NAME + '" now holds ' + result.blocks + ' night block(s) and will refresh every ' + SYNC_EVERY_MINUTES + ' minutes.');
     Logger.log('NEXT: Google Calendar (web) -> ' + CALENDAR_NAME + ' -> Settings and sharing -> Integrate calendar -> copy "Secret address in iCal format", and paste it into Agoda\'s Calendar connections -> Import.');
   } else {
     Logger.log('Set up, but the first copy did not complete. See the lines above, fix, and run syncNow.');
@@ -120,7 +144,16 @@ function status() {
 
 // ── THE COPY ──────────────────────────────────────────────────
 
+// One run: copy, then tell StayVibe how it went (v1.1). A run that found another copy still going returns null and reports
+// nothing: that other run reports for itself.
 function runSync_(allowMassRemove) {
+  var started = Date.now();
+  var result = copyOnce_(allowMassRemove);
+  if (result) reportToStayVibe_(result, started);
+  return result;
+}
+
+function copyOnce_(allowMassRemove) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(25000)) { Logger.log('Another copy is still running; skipping this one.'); return null; }
   try {
@@ -129,7 +162,7 @@ function runSync_(allowMassRemove) {
     var today = todayIso_();
 
     // 1. Ask StayVibe. Anything other than a calendar changes nothing.
-    var res = UrlFetchApp.fetch(feedUrl_(), { muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': 'StayVibe-Agoda-Bridge/1.0' } });
+    var res = UrlFetchApp.fetch(feedUrl_(), { muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': 'StayVibe-Agoda-Bridge/' + BRIDGE_VERSION } });
     var code = res.getResponseCode();
     var body = res.getContentText();
     if (code !== 200 || !/BEGIN:VCALENDAR/i.test(body)) {
@@ -181,14 +214,14 @@ function runSync_(allowMassRemove) {
       api_(function () { Calendar.Events.remove(cal.id, e.id); });
     });
 
-    var nights = desired.length;
-    var summary = nights + ' block(s) in the feed; +' + plan.inserts.length + ' added, ' + plan.patches.length + ' moved, -' + plan.removes.length +
+    var blocks = desired.length;
+    var summary = blocks + ' block(s) in the feed; +' + plan.inserts.length + ' added, ' + plan.patches.length + ' moved, -' + plan.removes.length +
       ' removed' + (held ? ', ' + held + ' removal(s) held back' : '') + '.';
     var props = PropertiesService.getScriptProperties();
     props.setProperty(PROP_LAST_SUMMARY, new Date().toISOString() + ' ' + summary);
     if (!held) props.setProperty(PROP_LAST_OK, new Date().toISOString());
     Logger.log(summary);
-    return { ok: true, nights: nights, inserted: plan.inserts.length, patched: plan.patches.length, removed: plan.removes.length, held: held };
+    return { ok: true, blocks: blocks, nights: nightsIn_(desired), inserted: plan.inserts.length, patched: plan.patches.length, removed: plan.removes.length, held: held };
   } catch (e) {
     return fail_('Stopped: ' + (e && e.message ? e.message : e));
   } finally {
@@ -197,6 +230,7 @@ function runSync_(allowMassRemove) {
 }
 
 function fail_(message) {
+  message = cleanText_(message, 300);   // an error from Google or the network can quote the feed address, token included
   Logger.log(message);
   try { PropertiesService.getScriptProperties().setProperty(PROP_LAST_SUMMARY, new Date().toISOString() + ' ' + message); } catch (e) { /* not fatal */ }
   return { ok: false, error: message };
@@ -268,7 +302,91 @@ function planMirror_(desired, existing) {
   return plan;
 }
 
+// ── REPORTING BACK: THE PURE PART (v1.1) ──────────────────────
+
+// How many nights a list of {start, end} blocks covers (end exclusive, plain "YYYY-MM-DD" dates).
+function nightsIn_(events) {
+  var total = 0;
+  (events || []).forEach(function (ev) {
+    var a = String(ev.start).split('-');
+    var b = String(ev.end).split('-');
+    var days = Math.round((Date.UTC(Number(b[0]), Number(b[1]) - 1, Number(b[2])) - Date.UTC(Number(a[0]), Number(a[1]) - 1, Number(a[2]))) / 86400000);
+    if (days > 0) total += days;
+  });
+  return total;
+}
+
+// One line of text that is safe to send and to show: any web address is taken out (an error message can carry the one that holds the
+// token), control characters go, and it is cut to `max` characters.
+function cleanText_(text, max) {
+  return String(text == null ? '' : text)
+    .replace(/https?:\/\/\S+/gi, '<link>')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max || 160);
+}
+
+// Where the report goes: the feed link with ".ics" replaced by "/report" (same address, same token). Anything that is not a StayVibe
+// calendar link gives '' and nothing is sent.
+function reportUrlFor_(feedUrl) {
+  var m = /^(https:\/\/[^\s\/]+\/api\/ical\/[A-Za-z0-9_-]{20,80})\.ics$/.exec(String(feedUrl || '').trim());
+  return m ? m[1] + '/report' : '';
+}
+
+// What a finished run tells StayVibe. `result` is what copyOnce_ returned: { ok:true, blocks, nights, inserted, patched, removed, held }
+// or { ok:false, error }.
+function buildReport_(result, ms) {
+  var r = result || {};
+  var report = { ok: r.ok === true, ms: Math.max(0, Math.round(ms || 0)), version: BRIDGE_VERSION, everyMinutes: SYNC_EVERY_MINUTES };
+  if (report.ok) {
+    report.blocks = r.blocks || 0;
+    report.nights = r.nights || 0;
+    report.added = r.inserted || 0;
+    report.moved = r.patched || 0;
+    report.removed = r.removed || 0;
+    report.held = r.held || 0;
+  } else {
+    report.error = cleanText_(r.error || 'The copy did not finish.', 160);
+  }
+  return report;
+}
+
 // ── GOOGLE SERVICES ───────────────────────────────────────────
+
+// Tells StayVibe how the run went (v1.1). The credential is the feed link itself: the report goes to its address with "/report" in
+// place of ".ics". Best effort: a report that cannot be sent (StayVibe not updated yet, a network blip) changes nothing, because the
+// copy has already been done.
+function reportToStayVibe_(result, started) {
+  try {
+    var url = reportUrlFor_(feedUrl_());
+    if (!url) return;
+    var res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      muteHttpExceptions: true,
+      followRedirects: true,
+      payload: JSON.stringify(buildReport_(result, Date.now() - started)),
+      headers: { 'User-Agent': 'StayVibe-Agoda-Bridge/' + BRIDGE_VERSION }
+    });
+    var code = res.getResponseCode();
+    if (code !== 200) Logger.log('StayVibe did not take the report (HTTP ' + code + '). The copy itself is not affected.');
+  } catch (e) {
+    Logger.log('Could not report to StayVibe: ' + cleanText_(e && e.message ? e.message : e, 160) + ' The copy itself is not affected.');
+  }
+}
+
+// The time zone dates are read in: the property's own (the BRIDGE_TIMEZONE script property), India's when it is not set. A zone name
+// Google does not know is logged and ignored rather than stopping every copy.
+function zone_() {
+  var z = '';
+  try { z = String(PropertiesService.getScriptProperties().getProperty(PROP_TIMEZONE) || '').trim(); } catch (e) { z = ''; }
+  if (z) {
+    try { Utilities.formatDate(new Date(), z, 'yyyy-MM-dd'); return z; }
+    catch (e) { Logger.log('BRIDGE_TIMEZONE "' + z + '" is not a time zone Google knows; using ' + DEFAULT_TIMEZONE + ' instead.'); }
+  }
+  return DEFAULT_TIMEZONE;
+}
 
 function assertFeedUrl_() {
   if (!/^https:\/\/[^\s\/]+\/api\/ical\/[A-Za-z0-9_-]{20,80}\.ics$/.test(feedUrl_())) {
@@ -286,7 +404,7 @@ function assertCalendarService_() {
 }
 
 function todayIso_() {
-  return Utilities.formatDate(new Date(), CALENDAR_TZ, 'yyyy-MM-dd');
+  return Utilities.formatDate(new Date(), zone_(), 'yyyy-MM-dd');
 }
 
 // The calendar this script writes to: the one it made before, or a new one.
@@ -300,7 +418,7 @@ function getOrCreateCalendar_() {
     Logger.log('The calendar this script made earlier is gone; making a new one (the secret address will change: paste it into Agoda again).');
   }
   var created = CalendarApp.createCalendar(CALENDAR_NAME, {
-    timeZone: CALENDAR_TZ,
+    timeZone: zone_(),
     summary: 'Nights blocked elsewhere, copied from StayVibe360 for Agoda to import. Written by a script; do not edit.'
   });
   props.setProperty(PROP_CALENDAR_ID, created.getId());

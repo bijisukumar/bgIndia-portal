@@ -26,5 +26,13 @@ export const AGODA = {
     bridgeExplain: 'it only takes addresses it has approved, so its link goes in through a Google Calendar',
     notReadYet: 'Not read yet. Agoda refuses addresses it has not approved, so this link goes in through a Google Calendar: set up the “StayVibe to Agoda” script (see the manual).',
     quietWarning: 'is the “StayVibe to Agoda” script still running?',
+    // The words for what that script reports back after every copy (apps-script/agoda-bridge, v1.1): the line "Google calendar copied N min ago"
+    // under this platform's link on the Channel calendar, and the warning when the script goes quiet or keeps failing. calendar = what it
+    // keeps up to date, script = what it is called, then = what the platform does with it next (StayVibe cannot see that step).
+    bridge: {
+      calendar: 'Google calendar',
+      script: 'the “StayVibe to Agoda” script',
+      then: 'Agoda imports it by itself a few times a day',
+    },
   },
 }

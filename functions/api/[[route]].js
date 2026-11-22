@@ -1529,12 +1529,14 @@ async function loadCalendarHealth(DB, villaId, nowMs = Date.now()) {
     `SELECT channel, created_at, rotated_at, last_fetched_at FROM stayvibe_ical_exports WHERE villa_id = ?`
   ).bind(villaId))
   const heartbeatRows = await optional(() => DB.prepare(
-    `SELECT job, label, every_minutes, last_run_at, last_ok_at, last_status FROM infra_job_heartbeats WHERE villa_id = ?`
+    `SELECT job, label, every_minutes, last_run_at, last_ok_at, last_status, last_ms, last_summary FROM infra_job_heartbeats WHERE villa_id = ?`
   ).bind(villaId))
-  // The table holds two kinds of row: a Google script reporting in, and (job "feed:<feed id>") the last good read of a calendar feed.
+  // The table holds three kinds of row: a Google script reporting in, (job "feed:<feed id>") the last good read of a calendar feed, and
+  // (job "bridge:<platform>") the go-between script that keeps a Google calendar for a platform that refuses our address.
   const isFeedRow = j => String(j.job).startsWith('feed:')
+  const isBridgeRow = j => String(j.job).startsWith('bridge:')
   const feedOk = new Map(heartbeatRows.filter(isFeedRow).map(j => [String(j.job).slice(5), j.last_ok_at]))
-  const jobRows = heartbeatRows.filter(j => !isFeedRow(j))
+  const jobRows = heartbeatRows.filter(j => !isFeedRow(j) && !isBridgeRow(j))
   return evaluateCalendarHealth({
     config: getHostConfig(villaId), now: nowMs,
     feeds: feedRows.map(f => ({
@@ -1543,7 +1545,74 @@ async function loadCalendarHealth(DB, villaId, nowMs = Date.now()) {
     })),
     links: linkRows.map(l => ({ channel: l.channel, createdAt: l.created_at, rotatedAt: l.rotated_at, lastFetchedAt: l.last_fetched_at })),
     jobs: jobRows.map(j => ({ job: j.job, label: j.label, everyMinutes: j.every_minutes, lastRunAt: j.last_run_at, lastOkAt: j.last_ok_at, lastStatus: j.last_status })),
+    bridges: heartbeatRows.filter(isBridgeRow).map(b => ({ channel: String(b.job).slice(7), ...bridgeShape(b) })),
   })
+}
+
+// ── A GO-BETWEEN SCRIPT REPORTING IN (2026-11-22) ─────────────────────────
+// A platform that refuses our address (Agoda only imports from sites on its own approved list) reads our link through a Google script
+// that keeps a private Google Calendar for it to import (apps-script/agoda-bridge). We can see that script READ our link, but not whether
+// it then managed to write the calendar, which is the step that goes quiet. So after every run it tells us (POST /api/ical/<token>/report).
+// The row is the same kind a script reporting in uses (infra_job_heartbeats, one row per script per villa, overwritten by each run), under
+// the job name "bridge:<platform>". The link's own token is the credential, so a host needs nothing more than the link it already holds,
+// and a report can only ever touch its own link's row.
+
+// How a bridge's last report reads, for the owner's screen and for the calendar warning. The numbers it sent are kept as one small JSON
+// line in last_summary; a line that does not parse leaves them out and never fails.
+function bridgeShape(b) {
+  if (!b) return null
+  let s = {}
+  try { s = JSON.parse(b.last_summary || '{}') || {} } catch (e) { s = {} }
+  const n = v => { const x = parseInt(v, 10); return Number.isFinite(x) && x >= 0 ? x : 0 }
+  return {
+    reportedAt: manualIso(b.last_run_at), okAt: manualIso(b.last_ok_at), status: b.last_status === 'error' ? 'error' : 'ok',
+    everyMinutes: b.every_minutes || 15, ms: b.last_ms || 0,
+    blocks: n(s.blocks), nights: n(s.nights), added: n(s.added), moved: n(s.moved), removed: n(s.removed), held: n(s.held),
+    error: typeof s.error === 'string' ? s.error : null, version: typeof s.v === 'string' ? s.v : null,
+  }
+}
+
+// Writes one script's latest report (migrations/2026-11-03-job-heartbeats.sql). A failed run keeps the last good time. Answers false,
+// instead of failing the script, when the database does not have the table yet.
+async function saveJobHeartbeat(DB, { villaId, job, label, everyMinutes, ok, ms, summary }) {
+  const t = new Date().toISOString().slice(0, 19).replace('T', ' ')
+  try {
+    await DB.prepare(
+      `INSERT INTO infra_job_heartbeats (villa_id, job, label, every_minutes, last_run_at, last_ok_at, last_status, last_ms, last_summary, runs)
+       VALUES (?,?,?,?,?,?,?,?,?,1)
+       ON CONFLICT(villa_id, job) DO UPDATE SET label = excluded.label, every_minutes = excluded.every_minutes,
+         last_run_at = excluded.last_run_at,
+         last_ok_at = CASE WHEN excluded.last_status = 'ok' THEN excluded.last_run_at ELSE infra_job_heartbeats.last_ok_at END,
+         last_status = excluded.last_status, last_ms = excluded.last_ms, last_summary = excluded.last_summary,
+         runs = infra_job_heartbeats.runs + 1`
+    ).bind(villaId, job, label, everyMinutes, t, ok ? t : null, ok ? 'ok' : 'error', ms, summary).run()
+    return true
+  } catch (e) {
+    if (/no such table/i.test(e?.message || '')) return false
+    throw e
+  }
+}
+
+// One report from the bridge for the link `link` (a stayvibe_ical_exports row already matched to this host). `raw` is the request text.
+// Everything in it is untrusted: counts are clamped, text loses any web address (an error can quote the link, token included) and control
+// characters, and "ok" must be exactly true. Returns { recorded, reason? } or { status, error }.
+async function recordBridgeReport(DB, link, raw) {
+  if (typeof raw !== 'string' || raw.length > 4000) return { status: 413, error: 'Too large' }
+  let rep = null
+  try { rep = JSON.parse(raw) } catch (e) { rep = null }
+  if (!rep || typeof rep !== 'object' || Array.isArray(rep)) return { status: 400, error: 'Not a report' }
+  const count = v => Math.max(0, Math.min(100000, parseInt(v, 10) || 0))
+  const clean = (v, max) => String(v == null ? '' : v).replace(/https?:\/\/\S+/gi, '<link>').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max)
+  const ok = rep.ok === true
+  const version = String(rep.version == null ? '' : rep.version).replace(/[^0-9A-Za-z._-]/g, '').slice(0, 12)
+  const summary = JSON.stringify(ok
+    ? { blocks: count(rep.blocks), nights: count(rep.nights), added: count(rep.added), moved: count(rep.moved), removed: count(rep.removed), held: count(rep.held), v: version || undefined }
+    : { error: clean(rep.error, 160) || 'The last copy did not finish.', v: version || undefined })
+  const saved = await saveJobHeartbeat(DB, {
+    villaId: link.villa_id, job: `bridge:${link.channel_key || channelKey(link.channel)}`, label: sourceLabel(link.channel),
+    everyMinutes: Math.min(1440, Math.max(1, parseInt(rep.everyMinutes, 10) || 15)), ok, ms: Math.min(600000, Math.max(0, parseInt(rep.ms, 10) || 0)), summary,
+  })
+  return saved ? { recorded: true } : { recorded: false, reason: 'the heartbeat table has not been created yet' }
 }
 
 // The email that goes with the warning. The subject names the faults, never how long they have lasted, so the same faults are the
@@ -4562,7 +4631,11 @@ export async function onRequest(ctx) {
   // the villa's own host answers for it. The content is dates and nothing else:
   // no guest names, contacts or booking ids.
   if (action.startsWith('ical/')) {
-    if (method !== 'GET' && method !== 'HEAD') {
+    // POST /api/ical/<token>/report is not a platform reading the calendar: it is the go-between script that keeps a Google calendar for a
+    // platform that refuses our address (the Agoda bridge) saying how its last copy went. The same token is its credential, and it opens
+    // nothing but that one link's own report (see recordBridgeReport).
+    const reportMatch = method === 'POST' ? action.match(/^ical\/([A-Za-z0-9_-]{20,80})\/report$/) : null
+    if (!reportMatch && method !== 'GET' && method !== 'HEAD') {
       return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } })
     }
     const plain = (status, text, extra = {}) => new Response(method === 'HEAD' ? null : text, {
@@ -4570,12 +4643,12 @@ export async function onRequest(ctx) {
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
     if (icalLinkFailures.limited(ip)) return plain(429, 'Too many attempts', { 'Retry-After': '900' })
     try {
-      const tokenMatch = action.match(/^ical\/([A-Za-z0-9_-]{20,80})\.ics$/)
+      const tokenMatch = reportMatch || action.match(/^ical\/([A-Za-z0-9_-]{20,80})\.ics$/)
       let link = null
       if (tokenMatch) {
         try {
           link = await DB.prepare(
-            `SELECT export_id, villa_id, channel FROM stayvibe_ical_exports WHERE token = ?`
+            `SELECT export_id, villa_id, channel, channel_key FROM stayvibe_ical_exports WHERE token = ?`
           ).bind(tokenMatch[1]).first()
         } catch (e) {
           // A database that has not had the migration yet has no links.
@@ -4585,6 +4658,14 @@ export async function onRequest(ctx) {
       if (!link || (hostVillaId && link.villa_id !== hostVillaId)) {
         icalLinkFailures.note(ip)
         return plain(404, 'Not found')
+      }
+
+      if (reportMatch) {
+        const done = await recordBridgeReport(DB, link, await request.text())
+        if (done.error) return json({ success: false, error: done.error }, done.status)
+        // Every report is a good moment to look at the calendars; after the reply, so the script never waits for it.
+        if (done.recorded) ctx.waitUntil(alertCalendarHealth(env, DB, link.villa_id).catch(e => console.warn('calendar health alert:', e?.message || e)))
+        return json({ success: true, data: { recorded: done.recorded, ...(done.reason ? { reason: done.reason } : {}) } })
       }
 
       try { await refreshFeedsBeforeExport(DB, ctx, link.villa_id, link.channel) }
@@ -7557,7 +7638,17 @@ export async function onRequest(ctx) {
         } catch (e) {
           if (!/no such table/i.test(e?.message || '')) throw e
         }
-        return json({ success: true, data: rows.map(icalExportShape) })
+        // The go-between script's last report for each link that has one (the Agoda bridge); a table that is not there yet means no reports.
+        let beats = new Map()
+        try {
+          const found = await DB.prepare(
+            `SELECT job, last_run_at, last_ok_at, last_status, every_minutes, last_ms, last_summary FROM infra_job_heartbeats WHERE villa_id = ? AND job LIKE 'bridge:%'`
+          ).bind(villaId).all()
+          beats = new Map((found.results || []).map(b => [String(b.job).slice(7), b]))
+        } catch (e) {
+          if (!/no such table/i.test(e?.message || '')) throw e
+        }
+        return json({ success: true, data: rows.map(r => ({ ...icalExportShape(r), bridge: bridgeShape(beats.get(r.channel_key || channelKey(r.channel))) })) })
       }
 
       // Are the calendars in step? The rows behind the red warning on Home and on the Channel calendar (see loadCalendarHealth).
@@ -13273,23 +13364,11 @@ export async function onRequest(ctx) {
         assertPropertyAccess(payload, villaId)
         const job = String(body.job || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 60)
         if (!job) return err('job required')
-        const status = body.ok === false ? 'error' : 'ok'
-        const t = now()
-        try {
-          await DB.prepare(
-            `INSERT INTO infra_job_heartbeats (villa_id, job, label, every_minutes, last_run_at, last_ok_at, last_status, last_ms, last_summary, runs)
-             VALUES (?,?,?,?,?,?,?,?,?,1)
-             ON CONFLICT(villa_id, job) DO UPDATE SET label = excluded.label, every_minutes = excluded.every_minutes,
-               last_run_at = excluded.last_run_at,
-               last_ok_at = CASE WHEN excluded.last_status = 'ok' THEN excluded.last_run_at ELSE infra_job_heartbeats.last_ok_at END,
-               last_status = excluded.last_status, last_ms = excluded.last_ms, last_summary = excluded.last_summary,
-               runs = infra_job_heartbeats.runs + 1`
-          ).bind(villaId, job, String(body.label || job).slice(0, 60), parseInt(body.everyMinutes) || 5, t, status === 'ok' ? t : null, status,
-                 Math.max(0, parseInt(body.ms) || 0), String(body.summary || '').slice(0, 400)).run()
-        } catch (e) {
-          if (/no such table/i.test(e?.message || '')) return json({ success: true, data: { recorded: false, reason: 'the heartbeat table has not been created yet' } })
-          throw e
-        }
+        const saved = await saveJobHeartbeat(DB, {
+          villaId, job, label: String(body.label || job).slice(0, 60), everyMinutes: parseInt(body.everyMinutes) || 5, ok: body.ok !== false,
+          ms: Math.max(0, parseInt(body.ms) || 0), summary: String(body.summary || '').slice(0, 400),
+        })
+        if (!saved) return json({ success: true, data: { recorded: false, reason: 'the heartbeat table has not been created yet' } })
         // The script comes back every five minutes whether or not GitHub's schedule fired: a good moment to look at the calendars.
         ctx.waitUntil(alertCalendarHealth(env, DB, villaId).catch(e => console.warn('calendar health alert:', e?.message || e)))
         return json({ success: true, data: { recorded: true } })

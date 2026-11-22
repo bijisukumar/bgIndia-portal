@@ -179,6 +179,17 @@ by frontend routing.
    does not state the retention it deletes nothing, and `previewOldCarPhotos`
    (run from the editor) lists what would go without deleting anything. Both
    scripts reach Google with `npm run gas:push` (see `apps-script/README.md`).
+   The Agoda bridge (`apps-script/agoda-bridge`, v1.1 or later) is the one
+   script that is the same for every host: its only setting is the host's own
+   Agoda link (`AGODA_FEED_URL`), with no system token and no tenant id. After
+   every copy it tells the Worker how it went, using that link's token as its
+   credential (`POST /api/ical/<token>/report`), so a new host needs nothing
+   more than its own link: the Channel calendar then shows "Google calendar
+   copied N min ago" under the Agoda link, and the calendar warning watches it
+   (silent for an hour, or failing). For a property outside India set the
+   optional script property `BRIDGE_TIMEZONE` (for example `America/Chicago`);
+   it only decides which night counts as today. It needs
+   `infra_job_heartbeats` (in `schema.sql`, so a new host has it).
    In the check-in **Form editor** (not the responses sheet — that setting
    lives on the Form itself, not in any script), mark the ID/passport
    upload question **Required** — easy to forget per-host, and without it

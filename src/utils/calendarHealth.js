@@ -4,7 +4,9 @@
 //   - a platform has stopped reading OUR link (it is the only way it learns of bookings made elsewhere),
 //   - we cannot read a platform's calendar (a booking made there would not block the others),
 //   - a calendar we read has been paused, or a platform whose bookings come only as calendar dates has no calendar connected,
-//   - a job that works from your mailbox (the Airbnb email reader) has stopped reporting in.
+//   - a job that works from your mailbox (the Airbnb email reader) has stopped reporting in,
+//   - the go-between script that keeps a Google calendar for a platform that refuses our address has stopped reporting in, or its copies
+//     keep failing (the platform then reads a calendar that is going out of date).
 // Pure (no clock of its own, no database): the Worker feeds it rows, the screens and the tests share it. No platform is named here:
 // names, how often a platform reads, and how long a silence is tolerated come from the partner files (calendar.readsEvery,
 // calendar.staleAfterHours) and the host's own config (`calendarWatch`, below).
@@ -48,16 +50,115 @@ export function spanText(ms) {
 
 const HOUR = 3600000, MINUTE = 60000
 
+// ── THE GO-BETWEEN SCRIPT (2026-11-22) ────────────────────────────────────
+// A platform that refuses our address (its partner file says calendar.via 'google-bridge') reads our link through a script in the host's own
+// Google account, which keeps a private Google Calendar for the platform to import. We see that script READ our link; this is about the step
+// after it, which the script reports to us after every run (the Worker's recordBridgeReport). Nothing here names a platform: the words come
+// from the partner file's calendar.bridge ({ calendar, script, then }), and the limits from the same settings as every other script.
+
+// The words for a platform's go-between: what it keeps up to date, what the script is called, and what the platform does with it next.
+export function bridgeWords(config, channel) {
+  const b = ((partnerFor(config, channel) || {}).calendar || {}).bridge || {}
+  return { calendar: b.calendar || 'go-between calendar', script: b.script || 'the go-between script', then: b.then || '' }
+}
+
+// How long a go-between may go without a report before it counts as silent: four of its own runs, never under the shared floor.
+export function bridgeQuietMinutes(config, bridge) {
+  const w = watchSettings(config)
+  return Math.max(w.jobMinMinutes, w.jobMissedRuns * positive(bridge && bridge.everyMinutes, 15))
+}
+
+// What goes wrong with one platform's go-between, from its last report ({ reportedAt, okAt, status, everyMinutes, held, error }).
+function bridgeProblems({ config, nowMs, channel, label, report }) {
+  const key = channelKey(channel)
+  const words = bridgeWords(config, channel)
+  const every = positive(report.everyMinutes, 15)
+  const limit = bridgeQuietMinutes(config, report) * MINUTE
+  const ran = toMs(report.reportedAt)
+  if (!Number.isFinite(ran)) return []
+  const remove = `If you no longer use ${label}, remove its link on the Channel calendar.`
+  const quiet = nowMs - ran
+  if (quiet > limit) {
+    return [{
+      key: `bridge_silent:${key}`, kind: 'bridge_silent', platform: label,
+      short: `The ${words.calendar} for ${label} has stopped updating`,
+      title: `The ${words.calendar} that feeds ${label} has not been updated for ${spanText(quiet)}`,
+      detail: `${label} learns of nights booked elsewhere only through it, so until it updates again ${label} can sell a night that is already taken: a double booking. It usually reports every ${every} minutes. Open ${words.script} at script.google.com and look at its executions and its trigger. ${remove}`,
+    }]
+  }
+  if (report.status === 'error') {
+    const lastOk = toMs(report.okAt)
+    if (!Number.isFinite(lastOk) || nowMs - lastOk > limit) {
+      return [{
+        key: `bridge_failing:${key}`, kind: 'bridge_failing', platform: label,
+        short: `The ${words.calendar} for ${label} is not being updated`,
+        title: Number.isFinite(lastOk)
+          ? `The ${words.calendar} that feeds ${label} has not been updated for ${spanText(nowMs - lastOk)}`
+          : `${words.script[0].toUpperCase()}${words.script.slice(1)} has never managed to update the ${words.calendar} that feeds ${label}`,
+        detail: `It is running but ending in an error${report.error ? ` (${String(report.error).slice(0, 160)})` : ''}, so ${label} is not hearing about nights booked elsewhere and can sell one that is already taken. Open ${words.script} at script.google.com and read the latest execution. ${remove}`,
+      }]
+    }
+    return []
+  }
+  const held = Number(report.held) || 0
+  if (held > 0) {
+    return [{
+      key: `bridge_held:${key}`, kind: 'bridge_held', severity: 'notice', platform: label,
+      short: `Cancellations are held back from the ${words.calendar} for ${label}`,
+      title: `${words.script[0].toUpperCase()}${words.script.slice(1)} is holding back ${held} cancellation${held === 1 ? '' : 's'}`,
+      detail: `It saw ${held === 1 ? 'a block' : held + ' blocks'} disappear from your calendar at once and took that for a broken calendar rather than real cancellations, so those nights are still blocked on ${label}. If the cancellations are real, run forceSync in the script (the steps are at the top of its code).`,
+    }]
+  }
+  return []
+}
+
+// The line under a go-between platform's link on the Channel calendar ("Google calendar copied 6 min ago · 28 nights blocked"), or null when
+// there is nothing to say. The same limits as the warning above, so the line and the banner never disagree. `ago` turns a time into
+// "6 min ago" (the screen passes its own), `linkRead` is whether the platform's script has read our link at all (before that the link row
+// above already says what to do).
+export function describeBridge(config, channel, bridge, { now = Date.now(), ago, linkRead = false } = {}) {
+  const cal = (partnerFor(config, channel) || {}).calendar || {}
+  const words = bridgeWords(config, channel)
+  const say = t => (ago ? ago(t) : `${spanText(now - toMs(t))} ago`)
+  if (!bridge) {
+    if (cal.via !== 'google-bridge' || !linkRead) return null
+    return { warn: false, text: `${words.calendar}: not reporting yet. Update ${words.script} to its latest version and this line will say when it last copied your nights.` }
+  }
+  const ran = toMs(bridge.reportedAt)
+  const lastOk = toMs(bridge.okAt)
+  const limit = bridgeQuietMinutes(config, bridge) * MINUTE
+  if (Number.isFinite(ran) && now - ran > limit) {
+    return {
+      warn: true,
+      text: `${words.calendar} ${Number.isFinite(lastOk) ? `last copied ${say(bridge.okAt)}` : 'has not been copied'} · no report for ${spanText(now - ran)}, longer than it should be: ${cal.quietWarning || 'is the script still running?'}`,
+    }
+  }
+  if (bridge.status === 'error') {
+    return {
+      warn: true,
+      text: `${words.calendar} ${Number.isFinite(lastOk) ? `last copied ${say(bridge.okAt)}` : 'has not been copied yet'} · the last try failed${bridge.error ? `: ${bridge.error}` : ''}`,
+    }
+  }
+  const nights = Number(bridge.nights) || 0
+  const held = Number(bridge.held) || 0
+  return {
+    warn: held > 0,
+    text: `${words.calendar} copied ${say(bridge.okAt || bridge.reportedAt)} · ${nights === 0 ? 'no nights blocked' : `${nights} night${nights === 1 ? '' : 's'} blocked`}` +
+      (held > 0 ? ` · ${held} cancellation${held === 1 ? '' : 's'} held back` : '') + (words.then ? ` · ${words.then}` : ''),
+  }
+}
+
 /**
  * feeds: [{ channel, isActive, status ('ok'|'error'|null), error, lastGoodAt, createdAt }]   our reads of a platform's calendar
  *        (lastGoodAt = the last time a read WORKED; the caller works it out, a failed attempt does not move it)
  * links: [{ channel, createdAt, rotatedAt, lastFetchedAt }]                                  a platform reading OUR link
  * jobs:  [{ job, label, everyMinutes, lastRunAt, lastOkAt, lastStatus }]                      a Google script reporting in
+ * bridges: [{ channel, reportedAt, okAt, status ('ok'|'error'), everyMinutes, held, error }]   a go-between script's last report (see above)
  * Returns { checkedAt, worst: 'ok' | 'notice' | 'risk', ok, problems: [{ key, kind, severity, platform, short, title, detail }] }
  *   `short` is the same every time the same thing is wrong (it names no duration), so an alert can be sent once per problem;
  *   `title` says how long.
  */
-export function evaluateCalendarHealth({ config, now, feeds = [], links = [], jobs = [] }) {
+export function evaluateCalendarHealth({ config, now, feeds = [], links = [], jobs = [], bridges = [] }) {
   const nowMs = Number.isFinite(now) ? now : Date.now()
   const w = watchSettings(config)
   const problems = []
@@ -162,6 +263,13 @@ export function evaluateCalendarHealth({ config, now, feeds = [], links = [], jo
         detail: `${label} bookings reach StayVibe only as dates on its calendar, and none is connected here, so a booking made on ${label} will not block your other platforms. Add its calendar link with + Feed on the Channel calendar.`,
       })
     }
+  }
+
+  // A go-between script is judged only while its platform's link exists (a link that was removed leaves nothing to warn about), and only
+  // once it has reported at all: a script that has never reported is the older version, which the screen says plainly but is no risk.
+  for (const l of links) {
+    const report = bridges.find(b => channelKey(b.channel) === channelKey(l.channel))
+    if (report) for (const p of bridgeProblems({ config, nowMs, channel: l.channel, label: channelLabel(l.channel), report })) add(p)
   }
 
   for (const j of jobs) {

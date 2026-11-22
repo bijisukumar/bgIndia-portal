@@ -11,13 +11,8 @@
 // ============================================================
 import { localTodayStr } from './dates'
 import { createPdfWithCursor, triggerPdfDownload, fmtLongDate } from './pdfGenHelpers'
+import { DEFAULT_ROOMS } from './docGenHelpers'
 import { rgb } from 'pdf-lib'
-
-const DEFAULT_ROOMS = [
-  'Living Room', 'Kitchen', 'Bedroom 1', 'Bedroom 2', 'Bathroom 1', 'Bathroom 2',
-  'Balcony / Utility', 'Doors & Windows', 'Electrical Fixtures & Switches',
-  'Plumbing & Fixtures', 'Walls & Paint', 'Flooring',
-]
 
 function drawChecklistTable(cursor, rooms) {
   const widths = [180, 100, 218]
@@ -36,8 +31,19 @@ function drawChecklistTable(cursor, rooms) {
   })
   cursor.moveDown(headerHeight)
 
-  rooms.forEach(room => {
-    cursor.page.drawText(room, { x: cursor.x + 4, y: cursor.y - rowHeight + 5, size: fontSize, font: cursor.fonts.regular, color: rgb(0,0,0) })
+  // rooms is either a flat list of names (blank cells) or
+  // {room, condition, notes} objects from a saved rev360_room_inspections
+  // capture -- pre-filling the real captured condition instead of blank.
+  // Notes truncated to 60 chars: this table has a fixed row height with
+  // no text-wrapping (unlike drawRuns elsewhere in this file), so a long
+  // note degrades to a clipped one rather than overflowing into the next row.
+  rooms.forEach(entry => {
+    const name = typeof entry === 'string' ? entry : entry.room
+    const condition = typeof entry === 'string' ? '' : (entry.condition === 'Damaged' ? 'Damaged' : entry.condition === 'Good' ? 'Good' : '')
+    const notes = typeof entry === 'string' ? '' : (entry.notes || '')
+    cursor.page.drawText(name, { x: cursor.x + 4, y: cursor.y - rowHeight + 5, size: fontSize, font: cursor.fonts.regular, color: rgb(0,0,0) })
+    if (condition) cursor.page.drawText(condition, { x: cursor.x + widths[0] + 4, y: cursor.y - rowHeight + 5, size: fontSize, font: cursor.fonts.regular, color: entry.condition === 'Damaged' ? rgb(0.7,0.2,0.2) : rgb(0,0,0) })
+    if (notes) cursor.page.drawText(notes.slice(0, 60), { x: cursor.x + widths[0] + widths[1] + 4, y: cursor.y - rowHeight + 5, size: fontSize, font: cursor.fonts.regular, color: rgb(0,0,0) })
     cursor.moveDown(rowHeight)
   })
 
@@ -166,15 +172,16 @@ async function buildMoveReportPdf({ kind, property, tenantName, eventDate, rooms
 
 /**
  * @param {'move-in'|'move-out'} kind
+ * @param {Array} [rooms] - optional captured {room,condition,notes} rows (rev360_room_inspections) to pre-fill the checklist with; falls back to DEFAULT_ROOMS with blank cells
  */
-export async function downloadMoveReportPdf(kind, agreement, property, eventDate) {
+export async function downloadMoveReportPdf(kind, agreement, property, eventDate, rooms) {
   if (!agreement?.tenant_name) {
     throw new Error('Cannot generate move report — tenant name is required. Fill this in and save first.')
   }
   const photosUrl = kind === 'move-out' ? agreement?.move_out_photos_url : agreement?.move_in_photos_url
   const doc = await buildMoveReportPdf({
     kind, property, tenantName: agreement.tenant_name,
-    eventDate: eventDate || localTodayStr(), rooms: DEFAULT_ROOMS, photosUrl,
+    eventDate: eventDate || localTodayStr(), rooms: (rooms && rooms.length) ? rooms : DEFAULT_ROOMS, photosUrl,
   })
   const label = kind === 'move-out' ? 'Move-Out Report' : 'Move-In Report'
   await triggerPdfDownload(doc, `${label} - ${property.name} - ${agreement.tenant_name}.pdf`)

@@ -28,8 +28,8 @@ export async function generateRentReceipt(isPdf, rentTxn, agreement, property) {
   return isPdf ? downloadRentReceiptPdf(rentTxn, agreement, property) : downloadRentReceipt(rentTxn, agreement, property)
 }
 
-export async function generateMoveReportAny(isPdf, kind, agreement, property, eventDate) {
-  return isPdf ? downloadMoveReportPdf(kind, agreement, property, eventDate) : downloadMoveReport(kind, agreement, property, eventDate)
+export async function generateMoveReportAny(isPdf, kind, agreement, property, eventDate, rooms) {
+  return isPdf ? downloadMoveReportPdf(kind, agreement, property, eventDate, rooms) : downloadMoveReport(kind, agreement, property, eventDate, rooms)
 }
 
 export async function generateLeaseDeedAny(isPdf, agreement, property) {

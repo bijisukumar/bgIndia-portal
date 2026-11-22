@@ -31,6 +31,7 @@ import TenantProfileCard from './TenantProfileCard'
 import DocumentEngineCard from './DocumentEngineCard'
 import FinancialsReceiptCard from './FinancialsReceiptCard'
 import MoveExpensesCard from './MoveExpensesCard'
+import RoomInspectionCard from './RoomInspectionCard'
 import MetaDiagnosticsCard from './MetaDiagnosticsCard'
 import { usePropertyList } from './usePropertyList'
 import TenancyHistoryCard from './TenancyHistoryCard'
@@ -1069,6 +1070,7 @@ export default function RentalAgreement() {
             </button>
 
             <DocumentEngineCard
+              propId={selectedProp}
               agreement={agreements[selectedProp]}
               property={prop}
               country={form.country}
@@ -1088,6 +1090,15 @@ export default function RentalAgreement() {
             />
 
             <MoveExpensesCard
+              propId={selectedProp}
+              agreement={agreements[selectedProp]}
+              property={prop}
+              saved={saved}
+              readOnly={false}
+              showToast={showToast}
+            />
+
+            <RoomInspectionCard
               propId={selectedProp}
               agreement={agreements[selectedProp]}
               property={prop}

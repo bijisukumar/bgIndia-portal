@@ -71,6 +71,15 @@ export function fmtCurrencyWords(n, currency = 'INR') {
 
 export const FONT = 'Arial'
 
+// Canonical room list for move-in/move-out inspections — shared by the
+// .docx/PDF checklist generators and RoomInspectionCard.jsx's capture UI,
+// so the printed document and the stored data never drift out of sync.
+export const DEFAULT_ROOMS = [
+  'Living Room', 'Kitchen', 'Bedroom 1', 'Bedroom 2', 'Bathroom 1', 'Bathroom 2',
+  'Balcony / Utility', 'Doors & Windows', 'Electrical Fixtures & Switches',
+  'Plumbing & Fixtures', 'Walls & Paint', 'Flooring',
+]
+
 export function p(children, opts = {}) {
   return new Paragraph({
     alignment: opts.align || AlignmentType.LEFT,

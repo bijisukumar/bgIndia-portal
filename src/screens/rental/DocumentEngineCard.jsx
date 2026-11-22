@@ -19,6 +19,8 @@
 // ============================================================
 import { useState } from 'react'
 import FormatToggle from './FormatToggle'
+import { api } from '../../api'
+import { DEFAULT_ROOMS } from '../../utils/docGenHelpers'
 
 // formatChoice.js pulls in docx/pdf-lib, which reference Node.js builtins
 // (stream, process.binding) that don't exist in a browser — bundled
@@ -52,7 +54,7 @@ function GenButton({ label, busyLabel, busy, disabled, onClick, color }) {
   )
 }
 
-export default function DocumentEngineCard({ agreement, property, country, saved, readOnly, showToast }) {
+export default function DocumentEngineCard({ propId, agreement, property, country, saved, readOnly, showToast }) {
   const [busy, setBusy] = useState(null)
   const [useDocxLease, setUseDocxLease] = useState(false)
   const [useDocxMoveIn, setUseDocxMoveIn] = useState(false)
@@ -69,6 +71,23 @@ export default function DocumentEngineCard({ agreement, property, country, saved
     } finally {
       setBusy(null)
     }
+  }
+
+  // Pulls the saved room-by-room capture (RoomInspectionCard) and merges
+  // it with the default room list, so a room nobody has touched yet still
+  // appears on the printed checklist (blank cells), while a captured one
+  // shows its real condition/notes instead of leaving them for the tenant
+  // to fill in by hand.
+  async function fetchRooms(eventType) {
+    let captured = []
+    try {
+      const data = await api.getRoomInspections(propId, eventType)
+      captured = Array.isArray(data) ? data : []
+    } catch (e) { /* fall through to the plain default list */ }
+    const byRoom = {}
+    captured.forEach(row => { byRoom[row.room] = row })
+    const names = [...DEFAULT_ROOMS, ...captured.map(r => r.room).filter(r => !DEFAULT_ROOMS.includes(r))]
+    return names.map(name => byRoom[name] || name)
   }
 
   return (
@@ -107,8 +126,9 @@ export default function DocumentEngineCard({ agreement, property, country, saved
         disabled={readOnly || !saved}
         color="#34A853"
         onClick={() => run('movein', async () => {
+              const rooms = await fetchRooms('move_in')
               const { generateMoveReportAny } = await import('../../utils/formatChoice')
-              return generateMoveReportAny(!useDocxMoveIn, 'move-in', agreement, property)
+              return generateMoveReportAny(!useDocxMoveIn, 'move-in', agreement, property, undefined, rooms)
             }, `🔑 Move-in report generated for ${agreement?.tenant_name}`)}
       />
       <FormatToggle useDocx={useDocxMoveIn} onChange={setUseDocxMoveIn} idSuffix="movein" />
@@ -120,8 +140,9 @@ export default function DocumentEngineCard({ agreement, property, country, saved
         disabled={readOnly || !saved}
         color="#5C7080"
         onClick={() => run('moveout', async () => {
+              const rooms = await fetchRooms('move_out')
               const { generateMoveReportAny } = await import('../../utils/formatChoice')
-              return generateMoveReportAny(!useDocxMoveOut, 'move-out', agreement, property)
+              return generateMoveReportAny(!useDocxMoveOut, 'move-out', agreement, property, undefined, rooms)
             }, `📦 Move-out report generated for ${agreement?.tenant_name}`)}
       />
       <FormatToggle useDocx={useDocxMoveOut} onChange={setUseDocxMoveOut} idSuffix="moveout" />

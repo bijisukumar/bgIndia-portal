@@ -8299,6 +8299,15 @@ export async function onRequest(ctx) {
         return json({ success: true, data: results })
       }
 
+      if (action === 'getRoomInspections') {
+        const propId = url.searchParams.get('propId') || ''
+        const eventType = url.searchParams.get('eventType') || ''
+        if (!propId) return err('propId required')
+        if (!['move_in','move_out'].includes(eventType)) return err('eventType must be move_in or move_out')
+        const { results } = await DB.prepare(`SELECT * FROM rev360_room_inspections WHERE prop_id = ? AND event_type = ? ORDER BY room`).bind(propId, eventType).all()
+        return json({ success: true, data: results })
+      }
+
       // INCOMING TENANT read — the forward-looking mirror of
       // getTenancyHistory. Holds a queued future tenant's intake data
       // separately from rental_props' single live slot, for the real
@@ -12962,6 +12971,46 @@ export async function onRequest(ctx) {
         return json({ success: true, data: { expenseId, deleted: true } })
       }
 
+      // Room-by-room condition capture at move-in/move-out. Upserted on
+      // (prop_id, event_type, room) -- toggling a room's condition or
+      // editing its notes just updates the same row rather than piling
+      // up duplicates. loss_id is only overwritten when the caller
+      // actually supplies one (linking a damaged room to a claim just
+      // raised in Claims Ledger); a plain condition/notes save must not
+      // silently clear an existing link.
+      if (action === 'saveRoomInspection') {
+        const { propId, eventType, room, condition, notes, photoUrl, tenantSnapshot, lossId } = body
+        if (!propId) return err('propId required')
+        if (!['move_in','move_out'].includes(eventType)) return err('eventType must be move_in or move_out')
+        if (!room || !room.trim()) return err('room required')
+        if (!['Good','Damaged'].includes(condition)) return err('condition must be Good or Damaged')
+        const id = 'rmi_' + Date.now() + '_' + Math.floor(Math.random()*1000)
+        await DB.prepare(`
+          INSERT INTO rev360_room_inspections (
+            inspection_id, prop_id, event_type, tenant_snapshot, room, condition, notes, photo_url, loss_id, created_by, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(prop_id, event_type, room) DO UPDATE SET
+            tenant_snapshot = excluded.tenant_snapshot,
+            condition = excluded.condition,
+            notes = excluded.notes,
+            photo_url = excluded.photo_url,
+            loss_id = COALESCE(excluded.loss_id, rev360_room_inspections.loss_id),
+            updated_at = excluded.updated_at
+        `).bind(
+          id, propId, eventType, tenantSnapshot || null, room.trim(), condition, notes || null, photoUrl || null, lossId || null,
+          actor, now(), now()
+        ).run()
+        const row = await DB.prepare(`SELECT * FROM rev360_room_inspections WHERE prop_id = ? AND event_type = ? AND room = ?`).bind(propId, eventType, room.trim()).first()
+        return json({ success: true, data: row })
+      }
+
+      if (action === 'deleteRoomInspection') {
+        const { inspectionId } = body
+        if (!inspectionId) return err('inspectionId required')
+        await DB.prepare(`DELETE FROM rev360_room_inspections WHERE inspection_id = ?`).bind(inspectionId).run()
+        return json({ success: true, data: { inspectionId, deleted: true } })
+      }
+
       // RENT LEDGER — "Paid on Time" / late-fee exception POST lands here.
       // (getRentTransactions, the matching read, lives in the GET block
       // above — it was originally misplaced here too, which is exactly
@@ -13298,6 +13347,11 @@ export async function onRequest(ctx) {
         // Step 3 — the incoming record is now consumed.
         batch.push(DB.prepare(`DELETE FROM rev360_incoming_tenants WHERE prop_id = ?`).bind(propId))
 
+        // Step 4 — clear the outgoing tenant's room-inspection rows so
+        // the incoming tenant's move-in inspection starts blank, same
+        // treatment as move_in/move_out_photos_url above.
+        batch.push(DB.prepare(`DELETE FROM rev360_room_inspections WHERE prop_id = ?`).bind(propId))
+
         await DB.batch(batch)
         return json({ success: true, data: { propId, movedInTenant: incoming.tenant_name, archivedOutgoing: !!(current && current.tenant_name) } })
       }
@@ -13357,6 +13411,7 @@ export async function onRequest(ctx) {
               updated_by=?, updated_at=?
             WHERE prop_id=?
           `).bind(actor, now(), propId),
+          DB.prepare(`DELETE FROM rev360_room_inspections WHERE prop_id = ?`).bind(propId),
         ])
         return json({ success: true, data: { propId, closedOutTenant: current.tenant_name } })
       }

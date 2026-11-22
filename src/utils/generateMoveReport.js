@@ -16,13 +16,7 @@ import {
   AlignmentType, BorderStyle, WidthType, ShadingType,
 } from 'docx'
 import { localTodayStr } from './dates'
-import { fmtLongDate, p, r, centerLabel, twoColRow, linkParagraph, FONT } from './docGenHelpers'
-
-const DEFAULT_ROOMS = [
-  'Living Room', 'Kitchen', 'Bedroom 1', 'Bedroom 2', 'Bathroom 1', 'Bathroom 2',
-  'Balcony / Utility', 'Doors & Windows', 'Electrical Fixtures & Switches',
-  'Plumbing & Fixtures', 'Walls & Paint', 'Flooring',
-]
+import { fmtLongDate, p, r, centerLabel, twoColRow, linkParagraph, DEFAULT_ROOMS, FONT } from './docGenHelpers'
 
 function checklistTable(rooms) {
   const border = { style: BorderStyle.SINGLE, size: 1, color: '999999' }
@@ -38,9 +32,17 @@ function checklistTable(rooms) {
       })
     ),
   })
-  const dataRows = rooms.map(room =>
-    new TableRow({
-      children: [room, '', ''].map((cell, i) =>
+  // rooms is either a flat list of names (blank cells, the original
+  // printable-template behaviour) or {room, condition, notes} objects
+  // from a saved rev360_room_inspections capture -- pre-filling the
+  // document with the real captured condition instead of leaving it
+  // for the tenant/owner to fill in by hand.
+  const dataRows = rooms.map(entry => {
+    const name = typeof entry === 'string' ? entry : entry.room
+    const condition = typeof entry === 'string' ? '' : (entry.condition === 'Damaged' ? '⚠ Damaged' : entry.condition === 'Good' ? '✓ Good' : '')
+    const notes = typeof entry === 'string' ? '' : (entry.notes || '')
+    return new TableRow({
+      children: [name, condition, notes].map((cell, i) =>
         new TableCell({
           borders, width: { size: widths[i], type: WidthType.DXA },
           margins: { top: 70, bottom: 70, left: 100, right: 100 },
@@ -48,7 +50,7 @@ function checklistTable(rooms) {
         })
       ),
     })
-  )
+  })
   return new Table({
     width: { size: 9360, type: WidthType.DXA },
     columnWidths: widths,
@@ -194,8 +196,9 @@ async function triggerDownload(doc, filename) {
  * @param {object} agreement - saved rental_props row
  * @param {object} property  - a row from getAllProperties (usePropertyList), same field shape as the old CONFIG.rentalProperties entries
  * @param {string} [eventDate] - defaults to today if not given
+ * @param {Array} [rooms] - optional captured {room,condition,notes} rows (rev360_room_inspections) to pre-fill the checklist with; falls back to DEFAULT_ROOMS with blank cells
  */
-export async function downloadMoveReport(kind, agreement, property, eventDate) {
+export async function downloadMoveReport(kind, agreement, property, eventDate, rooms) {
   if (!agreement?.tenant_name) {
     throw new Error('Cannot generate move report — tenant name is required. Fill this in and save first.')
   }
@@ -205,7 +208,7 @@ export async function downloadMoveReport(kind, agreement, property, eventDate) {
     property,
     tenantName: agreement.tenant_name,
     eventDate: eventDate || localTodayStr(),
-    rooms: DEFAULT_ROOMS,
+    rooms: (rooms && rooms.length) ? rooms : DEFAULT_ROOMS,
     photosUrl,
   })
   const label = kind === 'move-out' ? 'Move-Out Report' : 'Move-In Report'

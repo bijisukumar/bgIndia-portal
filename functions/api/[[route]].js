@@ -821,7 +821,7 @@ function quoteRequestHtml(d) {
   const row = (k, v) => (v ? `<tr><td style="padding:6px 16px 6px 0;color:#6b7280;white-space:nowrap;vertical-align:top;font-size:14px">${k}</td><td style="padding:6px 0;color:#111827;font-size:14px">${v}</td></tr>` : '')
   const btn = (href, label, bg, fg) => `<a href="${href}" style="display:inline-block;background:${bg};color:${fg};text-decoration:none;font-weight:600;font-size:15px;padding:13px 24px;border-radius:999px;margin:0 10px 10px 0">${label}</a>`
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827">
-  <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#9a7b1f;font-weight:700">New website quote request</div>
+  <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#9a7b1f;font-weight:700">${d.via && /chat/.test(d.via) ? 'Web Enquiry · Price Assistant' : 'Web Enquiry · Estimate Page'}</div>
   <div style="font-size:22px;font-weight:700;margin:6px 0 4px">${escHtml(d.name)}${d.repeat ? ' <span style="font-size:12px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:10px;vertical-align:middle">returning guest</span>' : ''}</div>
   <div style="font-size:14px;color:#6b7280;margin-bottom:18px">${escHtml(d.dates)} &middot; ${escHtml(d.nights)} night${d.nights > 1 ? 's' : ''} &middot; ${escHtml(d.guests)}</div>
   <div style="margin-bottom:18px">${btn(d.enquiryUrl, 'Open enquiry in StayVibe &rarr;', '#C9A84C', '#111827')}${btn(d.waUrl, 'Reply on WhatsApp &rarr;', '#16a34a', '#ffffff')}</div>
@@ -837,7 +837,7 @@ function quoteRequestHtml(d) {
     ${row('Message', d.message ? escHtml(d.message) : '')}
     ${(d.visit?.facts || []).map(f => row(escHtml(f.label), escHtml(f.value) + (f.warn ? ' <b style="color:#b91c1c">(' + escHtml(f.warn) + ')</b>' : '') + (f.lines?.length ? '<br><span style="color:#6b7280;font-size:13px">' + f.lines.map(escHtml).join('<br>') + '</span>' : ''))).join('')}
   </table>
-  <div style="font-size:12px;color:#9ca3af;line-height:1.6">Started by: Customer (website estimate page)<br>${d.visit ? '' : 'From: ' + escHtml(d.where || 'unknown location') + ' &middot; '}IP ${escHtml(d.ip)}<br>Enquiry ${escHtml(d.enquiryId)} &middot; sign in with your PIN if asked and you will land on it</div>
+  <div style="font-size:12px;color:#9ca3af;line-height:1.6">Started by: Customer (${escHtml(d.via || 'website estimate page')})<br>${d.visit ? '' : 'From: ' + escHtml(d.where || 'unknown location') + ' &middot; '}IP ${escHtml(d.ip)}<br>Enquiry ${escHtml(d.enquiryId)} &middot; sign in with your PIN if asked and you will land on it</div>
 </div>`
 }
 
@@ -4206,8 +4206,12 @@ export async function onRequest(ctx) {
       const shownLine = est.quotable
         ? `Approximate price shown to the guest: ₹${est.approxTotal.toLocaleString('en-IN')} (about ₹${est.approxPerNight.toLocaleString('en-IN')}/night)${est.seasons.length ? ' — includes ' + est.seasons.map(s => `${s.name} (${s.nights} night${s.nights > 1 ? 's' : ''})`).join(', ') : ''}.`
         : 'Party is above what the estimate covers — guest was asked to wait for a personal quote.'
+      // Which website door it came through: the Price Assistant chat on every page (js/price-chat.js sends
+      // source 'chat') or the estimate page. The owner's subject line says which.
+      const viaChat = String(f.source || '') === 'chat'
+      const via = viaChat ? 'website Price Assistant chat' : 'website estimate page'
       const notes = [
-        'Requested a final quote from the website estimate page.',
+        `Requested a final quote from the ${via}.`,
         askedFor
           ? `They asked for ${datePair(askedFor)}, which is NOT free (taken: ${askedFor.taken.join(', ') || 'see calendar'}). They picked from the open dates the page offered, so this quote is for ${datePair(est)}.`
           : est.available ? 'Dates were AVAILABLE when requested.' : `Dates were NOT fully available when requested (taken: ${est.takenNights.join(', ') || 'see calendar'}).`,
@@ -4230,8 +4234,8 @@ export async function onRequest(ctx) {
         est.checkIn, est.checkOut, est.nights, est.adults + est.children + infants, est.adults, est.children, infants,
         est.quotable ? est.exactTotal : 0, isRepeat ? 1 : 0, guest?.total_stays || 0, notes
       ).run()
-      await DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'internal_note', 'Enquiry received via the website estimate page', 'website', ?)`)
-        .bind(genId('COMM'), enquiryId, villaId).run()
+      await DB.prepare(`INSERT INTO stayvibe_communication_log (comm_id, enquiry_id, type, notes, created_by, villa_id) VALUES (?, ?, 'internal_note', ?, 'website', ?)`)
+        .bind(genId('COMM'), enquiryId, `Enquiry received via the ${via}`, villaId).run()
       await updateWebLead(DB, logId, 'created', { enquiryId, available: est.available, approxTotal: est.approxTotal })
 
       const waNumber = (phoneDigits.length === 10 ? '91' : '') + phoneDigits
@@ -4239,7 +4243,7 @@ export async function onRequest(ctx) {
       const visit = await loadWebVisit(DB, villaId, enquiryId)   // null if the log cannot be read: the email then keeps the plain "From" line
       const enquiryUrl = `${new URL(request.url).origin}/owner/villa/enquiries/${enquiryId}`
       const quoteHtml = quoteRequestHtml({
-        name, repeat: isRepeat, phone: phoneRaw, email, message, where, visit, ip: meta.ip, enquiryId, enquiryUrl,
+        name, repeat: isRepeat, phone: phoneRaw, email, message, where, visit, ip: meta.ip, enquiryId, enquiryUrl, via,
         waUrl: `https://wa.me/${waNumber}`,
         dates: `${dayMonth(est.checkIn)} → ${dayMonth(est.checkOut)}`, nights: est.nights,
         guests: `${est.adults} adults, ${est.children} children${infants ? `, ${infants} infants` : ''}`,
@@ -4250,8 +4254,8 @@ export async function onRequest(ctx) {
         shown: est.quotable ? `<b>≈ ₹${est.approxTotal.toLocaleString('en-IN')}</b> <span style="color:#6b7280">(system total ₹${est.exactTotal.toLocaleString('en-IN')})</span>` : 'No price (party too large for the estimate)',
         seasons: est.seasons.length ? est.seasons.map(x => `${escHtml(x.name)} ×${x.nights}`).join(', ') : '',
       })
-      ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: '📩', text: `Website quote request: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)${visit?.city ? ' · ' + visit.city : ''}` }, [
-        'A guest asked for a final quote from the website estimate page.',
+      ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'log', emoji: viaChat ? '💬' : '📩', text: `Web Enquiry · ${viaChat ? 'Price Assistant' : 'Estimate Page'}: ${name} — ${dayMonth(est.checkIn)} to ${dayMonth(est.checkOut)} (${est.nights}n, ${est.adults + est.children} guests)${visit?.city ? ' · ' + visit.city : ''}` }, [
+        `A guest asked for a final quote from the ${via}.`,
         '',
         `Name:       ${name}${isRepeat ? '  (returning guest)' : ''}`,
         `Phone:      ${phoneRaw}   → WhatsApp: https://wa.me/${waNumber}`,
@@ -4270,7 +4274,7 @@ export async function onRequest(ctx) {
         ...(visit
           ? [...visit.facts.flatMap(f => [`${(f.label + ': ').padEnd(12)}${f.value}${f.warn ? '  (' + f.warn + ')' : ''}`, ...(f.lines || []).map(l => `            ${l}`)]), `IP:         ${meta.ip}`]
           : [`From:       ${where || 'unknown location'}  (IP ${meta.ip})`]),
-        `Started by: Customer (website estimate page)`,
+        `Started by: Customer (${via})`,
         '',
         `Open this enquiry in StayVibe (review, then send the quote):`,
         `${new URL(request.url).origin}/owner/villa/enquiries/${enquiryId}`,
@@ -4288,8 +4292,8 @@ export async function onRequest(ctx) {
       const msg = e?.message || String(e)
       console.error('submitQuoteRequest failed:', msg)
       await updateWebLead(DB, logId, 'failed', { error: msg })
-      ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '⚠️', text: `Website quote request FAILED to save — follow up with ${String(f.guestName || 'a guest').slice(0, 60)}` }, [
-        'A guest tried to request a quote on the website estimate page, but it could not be saved as an enquiry.',
+      ctx.waitUntil(sendAlert(env, { domain: 'villa', kind: 'alert', emoji: '⚠️', text: `Web Enquiry FAILED to save — follow up with ${String(f.guestName || 'a guest').slice(0, 60)}` }, [
+        `A guest tried to request a quote on the ${String(f.source || '') === 'chat' ? 'website Price Assistant chat' : 'website estimate page'}, but it could not be saved as an enquiry.`,
         'Their details are below (and in the stayvibe_web_leads table) — please contact them directly.',
         '',
         `Name:     ${clipStr(f.guestName, 120) || '—'}`,

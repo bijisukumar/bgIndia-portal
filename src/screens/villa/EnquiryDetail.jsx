@@ -11,6 +11,7 @@ import { addDays } from '../../utils/stayHolds'
 import AvailabilityNote from '../../components/AvailabilityNote'
 import InitiatorBadge, { initiatedBy } from '../../components/InitiatorBadge'
 import { groupNights } from '../../utils/seasonRates'
+import { quoteTimes, labelWithTimes, dateNotes } from '../../utils/quoteTimes'
 import {
   getSeasonalEstimate, estimateNotes, describeEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
   getBedroomEstimate,
@@ -77,7 +78,10 @@ function quoteCore(e) {
   const billableGuests = (e.adults || 0) + (e.children || 0)
   let extraLines = []
   try { extraLines = e.extra_lines ? JSON.parse(e.extra_lines) : [] } catch { extraLines = [] }
-  extraLines = extraLines.filter(l => (parseFloat(l.amount) || 0) > 0)
+  // The early check-in / late check-out the guest asked for, read from ALL the lines: a complimentary one has no fee line but is still a time.
+  const times = quoteTimes(extraLines)
+  // Only the lines that cost something are printed, each with the hour it was asked for ("Early Check-in (from 12:00 PM)").
+  extraLines = extraLines.filter(l => (parseFloat(l.amount) || 0) > 0).map(l => ({ ...l, label: labelWithTimes(l) }))
   const extraTotal = extraLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
   const roomOnlyTotal = (e.quote_amount || 0) - (e.discount_amount || 0)
   return {
@@ -89,6 +93,7 @@ function quoteCore(e) {
     perNight: Math.round(roomOnlyTotal / nights),
     extraLines,
     extraTotal,
+    dateNotes: dateNotes(times, villa),   // the brackets of the Check-in / Check-out lines: the standard time, or the early / late one asked for
     bedroomCount: getBedroomEstimate(e.villa_id || DEFAULT_VILLA_ID, billableGuests),
     firstName: (e.guest_name || '').trim().split(' ')[0] || 'there',
     fullName: (e.guest_name || '').trim() || 'there',
@@ -219,8 +224,8 @@ function buildQuoteDefault(e, rich) {
     ``,
     ...villaPicturesBlock(ic),
     `We have checked your dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (${c.dateNotes.inNote})`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (${c.dateNotes.outNote})`,
     ``,
     ...(CONFIG.marketing?.faqUrl
       ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
@@ -252,8 +257,8 @@ function buildQuoteRepeatDiscount(e, rich) {
     ``,
     ...villaPicturesBlock(ic),
     `We have checked your dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (${c.dateNotes.inNote})`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (${c.dateNotes.outNote})`,
     ``,
     ...(CONFIG.marketing?.faqUrl
       ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
@@ -287,8 +292,8 @@ function buildQuoteB2B(e, rich) {
     ``,
     ...villaPicturesBlock(ic),
     `We have checked the dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (after ${villa.checkinTime})`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (by ${villa.checkoutTime})`,
+    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (${c.dateNotes.inNote})`,
+    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (${c.dateNotes.outNote})`,
     ``,
     ...(CONFIG.marketing?.faqUrl
       ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
@@ -392,6 +397,9 @@ export default function EnquiryDetail() {
   const lateLine  = extraLines.find(l => (l.label || '').includes('Late Check-out'))
   const requestedEarlyTime = earlyLine?.earlyCheckinTime || ''
   const requestedLateTime  = lateLine?.lateCheckoutTime || ''
+  // Charges and times typed on this screen reach the quote only once they are SAVED: the quote is built from the saved enquiry.
+  const savedExtraJson = (() => { try { return JSON.stringify(e?.extra_lines ? JSON.parse(e.extra_lines) : []) } catch { return '[]' } })()
+  const extrasDirty = !!e && JSON.stringify(extraLines) !== savedExtraJson
 
   // Live cleaning-turnaround check as soon as a specific time is set on an
   // Early Check-in / Late Check-out line — flags whether there's enough
@@ -869,6 +877,15 @@ export default function EnquiryDetail() {
                       )}
                     </div>
                   )}
+                  {(() => {
+                    // The hour is what the quote and the booking will say; without it the quote can only name the fee.
+                    const missing = [isEarly && !line.earlyCheckinTime && 'arrival', isLate && !line.lateCheckoutTime && 'departure'].filter(Boolean)
+                    return missing.length ? (
+                      <div style={{ fontSize: '0.68rem', color: '#C8903A', marginTop: '3px', paddingLeft: '2px' }}>
+                        Add the {missing.join(' and ')} time{missing.length > 1 ? 's' : ''} and press Save: the quote then says it, and the booking keeps it.
+                      </div>
+                    ) : null
+                  })()}
                 </div>
               )
             })}
@@ -883,10 +900,17 @@ export default function EnquiryDetail() {
                 )}
               </div>
             )}
-            {extraLines.length > 0 && (
-              <button type="button" className="btn" onClick={handleSaveExtras} disabled={extraBusy} style={{ width: '100%', marginTop: '4px' }}>
-                {extraBusy ? 'Saving...' : `Save extra charges (₹${extraTotal.toLocaleString('en-IN')})`}
-              </button>
+            {(extraLines.length > 0 || extrasDirty) && (
+              <>
+                {extrasDirty && (
+                  <div style={{ fontSize: '0.7rem', color: '#C8903A', margin: '2px 0 4px' }}>
+                    Not saved yet: the quote is built from what is saved, so press Save before you copy or send it.
+                  </div>
+                )}
+                <button type="button" className="btn" onClick={handleSaveExtras} disabled={extraBusy} style={{ width: '100%', marginTop: '4px' }}>
+                  {extraBusy ? 'Saving...' : `Save extra charges (₹${extraTotal.toLocaleString('en-IN')})`}
+                </button>
+              </>
             )}
           </div>
 

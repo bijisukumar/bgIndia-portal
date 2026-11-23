@@ -165,7 +165,13 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
   // zone screen the whole estate was watered, and hold back the dry-zone warning by days. So it is said
   // out loud, with the one tap that fixes it, rather than being guessed at either way.
   const allZonesTicked = zones.length > 1 && selectedZones.length === zones.length
-  const looksUnwatered = allZonesTicked && !raining && (landCleaning || waterShortage) && !(parseInt(duration) > 0)
+  // Any all-zones save with no minutes, whatever the note says. It used to need one of the two
+  // reason tick-boxes, which let 22 Nov through: every zone ticked, no minutes, and the words
+  // "Off day" typed in the note - so no warning, and nine zones recorded as watered on a day
+  // nothing ran. A note is prose; it cannot be counted and it cannot be checked.
+  //
+  // Rain is the one exception, and stays one: rain does water every zone.
+  const looksUnwatered = allZonesTicked && !raining && !(parseInt(duration) > 0)
   const dayOver    = !!date && date < localTodayStr()
   const canSave    = notWatered ? dayOver : selectedZones.length > 0
 
@@ -323,14 +329,23 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                 <div style={{marginTop:'10px', padding:'10px 12px', borderRadius:'10px',
                   background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.3)'}}>
                   <div style={{fontSize:'0.76rem', lineHeight:1.5, color:'var(--text)'}}>
-                    All {zones.length} zones are ticked with no duration, and the reason says
-                    {' '}{dayReasons.join(' and ').toLowerCase()}.
+                    All {zones.length} zones are ticked with no duration
+                    {dayReasons.length ? ', and the reason says ' + dayReasons.join(' and ').toLowerCase() : ''}.
                   </div>
                   <div style={{fontSize:'0.72rem', lineHeight:1.5, color:'var(--text-dim)', marginTop:'4px'}}>
                     Saving it this way records every zone as watered that day, and the screen will say the
                     estate has water when it has not. If water really did run on all {zones.length}, put the
                     minutes in and this will go away.
                   </div>
+                  {/* The note is where "Off day" went. Worth saying plainly that typing a reason there
+                      does not record one: only a tick-box becomes a code anything can count. */}
+                  {!dayReasons.length && notes.trim() && (
+                    <div style={{fontSize:'0.72rem', lineHeight:1.5, color:'var(--text-dim)', marginTop:'4px'}}>
+                      Writing "{notes.trim().slice(0, 28)}" in the note does not record a reason. Tick
+                      {' '}{codeLabel('land_cleaning', 'Land cleaning')} or {codeLabel('no_water', 'Water shortage')},
+                      or untick the zones below.
+                    </div>
+                  )}
                   <button onClick={() => setSelected({})}
                     style={{marginTop:'8px', padding:'8px 12px', borderRadius:'8px', cursor:'pointer',
                       fontSize:'0.76rem', fontWeight:700, border:'1px solid rgba(239,68,68,0.45)',

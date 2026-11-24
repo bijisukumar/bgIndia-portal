@@ -994,6 +994,23 @@ const IRRIGATION_MISS_REASONS = [
   { code: 'not_known',      label: 'Not known', ownerOnly: true },
 ]
 const IRRIGATION_MISS_REASON_LABEL = Object.fromEntries(IRRIGATION_MISS_REASONS.map(r => [r.code, r.label]))
+
+// Days the estate does not work, so no entry is expected and none is chased. 0 = Sunday.
+//
+// Twelve Sundays to 23 Nov 2026 and not one zone was watered on any of them: six had no entry at
+// all and the rest were nine-zone, nought-minute rows wearing whatever label came to hand that week
+// - "Maintaince work", "Land cleaning", "Rain" over half a millimetre, and finally "Off day". The
+// day off was real all along; the system simply had no way to be told, so it asked again every week
+// and got a different fiction each time. A rule it knows about is worth more than an excuse typed
+// fifty-two times a year.
+//
+// It bars nothing: an entry MADE on a Sunday is saved and counted like any other. Only the
+// expectation changes.
+const IRRIGATION_REST_DAYS = new Set([0])
+const IRRIGATION_REST_DAY_NAMES = { 0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday' }
+// The calendar weekday of a YYYY-MM-DD, read in UTC so the string decides it and no server clock does.
+const isRestDay = ymd => IRRIGATION_REST_DAYS.has(new Date(ymd + 'T00:00:00Z').getUTCDay())
+const REST_DAY_LABEL = [...IRRIGATION_REST_DAYS].map(d => IRRIGATION_REST_DAY_NAMES[d]).join(' and ')
 const IRRIGATION_MISS_REASON_OWNER_ONLY = new Set(IRRIGATION_MISS_REASONS.filter(r => r.ownerOnly).map(r => r.code))
 
 const addMonthsISO = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10) }
@@ -7109,10 +7126,14 @@ export async function onRequest(ctx) {
         // Yesterday backwards: today is still in progress, so an entry not made
         // yet is not a miss.
         const missing = []
+        let restDays = 0
         for (let i = 1; i <= days; i++) {
           const d = addDaysISO(today, -i)
           if (has.has(d)) continue
           const a = ack.get(d) || null
+          // The estate's day off. Not missing, so not listed and not counted - unless somebody has
+          // already explained it, in which case the row stays visible so it can be taken back.
+          if (!a && isRestDay(d)) { restDays++; continue }
           missing.push({
             date: d, approved: !!a,
             reason: a ? a.reason : null,
@@ -7137,6 +7158,9 @@ export async function onRequest(ctx) {
           outstanding: missing.filter(d => !d.approved).length,
           reasonCodes: IRRIGATION_MISS_REASONS.filter(r => !r.ownerOnly || canSayUnknown),
           byCode,
+          // Said out loud rather than left as a silent subtraction: the window is N days, this many
+          // of them were the day off, and the rest are what the counts above are about.
+          restDays, restDayLabel: REST_DAY_LABEL,
         }})
       }
 
@@ -12552,6 +12576,10 @@ export async function onRequest(ctx) {
 
         const today = await todayOf()
         if (date >= today) return err('That day is not over yet, so there is nothing to approve')
+
+        // A day the estate does not work needs no explaining. Refused rather than quietly accepted,
+        // so nobody spends a tap on it or wonders later why it carries a reason.
+        if (isRestDay(date)) return err(`${REST_DAY_LABEL} is the estate's day off, so there is nothing to explain`)
 
         // Refuse to mark a day missing when it plainly is not: the list is only
         // worth trusting if it cannot be made to disagree with the logs.

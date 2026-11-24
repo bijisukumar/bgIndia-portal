@@ -427,7 +427,17 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
 
             {!missing && <p style={{color:'var(--text-dim)', fontSize:'0.85rem'}}>Loading...</p>}
 
-            {missing && missing.missing.length === 0 && (
+            {missing && missing.missing.length === 0 && missing.restDays > 0 && (
+              <div style={{color:'#34A853', fontSize:'0.85rem', lineHeight:1.5}}>
+                An entry on every working day of the last {missing.days}. Nothing missing.
+                <div style={{color:'var(--text-dim)', fontSize:'0.76rem', marginTop:'4px'}}>
+                  {missing.restDays} {missing.restDayLabel || 'rest day'}{missing.restDays === 1 ? '' : 's'} in
+                  that window are the estate's day off and are not expected.
+                </div>
+              </div>
+            )}
+
+            {missing && missing.missing.length === 0 && !missing.restDays && (
               <p style={{color:'#34A853', fontSize:'0.88rem'}}>
                 An entry on every one of the last {missing.days} days. Nothing missing.
               </p>
@@ -442,6 +452,11 @@ export default function IrrigationLog({ estate = 'pollachi' }) {
                   </strong>
                   {missing.missing.length - missing.outstanding > 0 &&
                     ', ' + (missing.missing.length - missing.outstanding) + ' explained'}.
+                  {/* A subtraction the reader can see, rather than one that quietly happened. */}
+                  {missing.restDays > 0 && (
+                    <> {missing.restDays} {missing.restDayLabel || 'rest day'}
+                    {missing.restDays === 1 ? '' : 's'} not counted.</>
+                  )}
                 </p>
 
                 {missing.outstanding > 0 && (

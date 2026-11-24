@@ -940,6 +940,9 @@ async function loadWebVisitChips(DB, villaId) {
 // runEstateWeeklyDigest (GitHub Actions cron, CRON_SECRET-guarded).
 // Dates and times are the property's own zone (src/utils/tz.js). Pure helpers first, then the builder.
 const ESTATE_LABELS = { pollachi: 'Pollachi Estate', pavutumuri: 'Pavutumuri Estate' }
+// What each one grows. Read from the estate, not guessed from who is asking: a manager who holds
+// both would otherwise have one of them described as the other's crop.
+const ESTATE_TYPES  = { pollachi: 'coconut', pavutumuri: 'rubber' }
 
 // Estates belong to the one owner, so an estate with no alert address of its
 // own uses the default villa's (the owner's) before the env/last-resort one.
@@ -4906,14 +4909,26 @@ export async function onRequest(ctx) {
     throw e
   }
 
-  // Same principle for estates: raman/pradosh each only work one estate.
-  // Previously the client-supplied ?estate= param was trusted outright;
-  // now it's validated against the actor's actual assignment.
-  const ESTATE_BY_ACTOR = { raman: 'pavutumuri', pradosh: 'pollachi' }
+  // Same principle for estates: the client-supplied ?estate= param is not trusted, it is checked
+  // against what this person actually works.
+  //
+  // A LIST, not one estate each. It was one, which was true while Pradosh had Pollachi and Raman had
+  // Pavutumuri and neither crossed over. Handing Pollachi on means somebody carries both for a while,
+  // and a one-estate map has no way to say that.
+  const ESTATE_BY_ACTOR = {
+    raman:   ['pavutumuri', 'pollachi'],
+    pradosh: ['pollachi'],
+  }
+  // The owner works everything. Everyone else works what they are given, in the order given: the
+  // first is their home estate, the one their screen opens on.
+  function estatesFor(payload) {
+    if (payload.role === 'owner' || payload.role === 'master_owner') return Object.keys(ESTATE_LABELS)
+    return ESTATE_BY_ACTOR[payload.actor] || []
+  }
   function assertEstateAccess(payload, estateId) {
     if (!estateId) return
     if (payload.role === 'owner' || payload.role === 'master_owner') return
-    if (ESTATE_BY_ACTOR[payload.actor] === estateId) return
+    if (estatesFor(payload).includes(estateId)) return
     throw new Error('FORBIDDEN_PROPERTY')
   }
 
@@ -6882,10 +6897,51 @@ export async function onRequest(ctx) {
       }
 
       // MANAGER HOME — Quick Info Stats Block (Aligned to exact Schema Fields)
+      // Answers for EVERY estate this person works, not for the one their name used to be wired to.
+      // The top-level fields stay, holding the first estate, so a screen written before this still reads.
       if (action === 'getManagerQuickInfo') {
-        const estateId   = actor === 'pradosh' ? 'pollachi' : (actor === 'raman' ? 'pavutumuri' : 'pollachi')
-        const estateType = actor === 'raman' ? 'rubber' : 'coconut'
+        const mine       = estatesFor(payload)
+        const estateId   = mine[0] || 'pollachi'
+        const estateType = ESTATE_TYPES[estateId] || 'coconut'
         const today      = await todayOf()
+        // Their own name, off their login, rather than a literal that only ever fitted one person.
+        // Labels read "Staff-Estate-Pradosh"; the part worth showing is the end of it.
+        const managerName = String(payload.name || actor || '')
+          .replace(/^staff[-\s]*(estate|villa)[-\s]*/i, '').trim() || 'Manager'
+
+        // One block per estate, so a person holding two gets two.
+        const estateCards = []
+        for (const eid of mine) {
+          const type = ESTATE_TYPES[eid] || 'coconut'
+          if (type === 'rubber') {
+            const h = await ActiveDB.prepare(
+              `SELECT harvest_date, price_per_kg FROM estate360_rubber_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
+            ).bind(eid).first()
+            estateCards.push({
+              estateId: eid, estateType: type, label: ESTATE_LABELS[eid] || eid,
+              lastPricePerKg: h?.price_per_kg || null, lastHarvestDate: h?.harvest_date || null,
+              irrigationAlert: false,
+            })
+            continue
+          }
+          const h = await ActiveDB.prepare(
+            `SELECT harvest_date, price_per_kg, scheduled_harvest_date FROM estate360_coconut_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
+          ).bind(eid).first()
+          const irr = await ActiveDB.prepare(
+            `SELECT logged_date FROM estate360_irrigation_logs WHERE estate = ? ORDER BY logged_date DESC LIMIT 1`
+          ).bind(eid).first()
+          const lastIrr = irr?.logged_date || null
+          const irrDays = lastIrr ? Math.round((new Date(today) - new Date(lastIrr)) / 86400000) : null
+          estateCards.push({
+            estateId: eid, estateType: type, label: ESTATE_LABELS[eid] || eid,
+            nextHarvestDate: h?.scheduled_harvest_date || null,
+            harvestDaysAway: h?.scheduled_harvest_date ? Math.round((new Date(h.scheduled_harvest_date) - new Date(today)) / 86400000) : null,
+            lastPricePerKg: h?.price_per_kg || null,
+            lastIrrigationDate: lastIrr,
+            irrigationDaysAgo: irrDays,
+            irrigationAlert: irrDays === null || irrDays > 14,
+          })
+        }
 
         if (estateType === 'coconut') {
           const harvest = await ActiveDB.prepare(
@@ -6903,7 +6959,7 @@ export async function onRequest(ctx) {
           const harvestDays    = nextHarvest ? Math.round((new Date(nextHarvest) - new Date(today)) / 86400000) : null
 
           return json({ success: true, data: {
-            managerName: actor === 'pradosh' ? 'Pradosh' : 'Manager', estateId, estateType,
+            managerName, estateId, estateType, estates: estateCards,
             nextHarvestDate:    nextHarvest,
             harvestDaysAway:    harvestDays,
             lastPricePerKg:      lastPrice,
@@ -6917,7 +6973,7 @@ export async function onRequest(ctx) {
           `SELECT harvest_date, price_per_kg FROM estate360_rubber_harvests WHERE estate_id = ? ORDER BY harvest_date DESC LIMIT 1`
         ).bind(estateId).first()
         return json({ success: true, data: {
-          managerName: 'RamanKutty', estateId, estateType,
+          managerName, estateId, estateType, estates: estateCards,
           lastPricePerKg:  harvest?.price_per_kg || null,
           lastHarvestDate: harvest?.harvest_date || null,
           irrigationAlert: false,

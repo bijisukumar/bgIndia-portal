@@ -33,29 +33,36 @@ export default function EstateManagerHome() {
 
   const handleIrrigationTap = () => navigate('/pollachi/irrigation')
 
-  const rows = [
-    {
-      icon: '🌴', title: 'Irrigation log', sub: 'Daily zone tracking',
-      action: handleIrrigationTap,
-      alert: info?.irrigationAlert,
-    },
-    {
-      icon: '🌿', title: 'Income / expense', sub: 'Monthly ledger',
-      action: () => navigate('/pollachi/ledger'),
-    },
-    {
-      icon: '🥥', title: 'Coconut tracker', sub: 'Harvest · count · weight · revenue',
-      action: () => navigate('/pollachi/coconut'),
-    },
-    {
-      icon: '🥭', title: 'Mango harvest', sub: 'Box tracking · varieties · season totals',
-      action: () => navigate('/pollachi/mango'),
-    },
-    {
-      icon: '📊', title: 'Pollachi dashboard', sub: 'Harvest history · income · expenses',
-      action: () => navigate('/pollachi/dashboard'),
-    },
-  ]
+  // Every estate this person works, from the Worker. One each for Pradosh today; two for whoever
+  // carries both through the handover. The fallback keeps the screen whole while it loads, and for
+  // a Worker older than this change.
+  const estates = info?.estates?.length
+    ? info.estates
+    : [{ estateId: 'pollachi', estateType: 'coconut', label: 'Pollachi Estate', irrigationAlert: info?.irrigationAlert }]
+
+  // What there is to do on an estate depends on what grows there, not on who is logged in.
+  function rowsFor(e) {
+    if (e.estateType === 'rubber') return [
+      { icon: '🌳', title: 'Rubber tracker', sub: 'Tapping · weight · revenue',
+        action: () => navigate('/' + e.estateId + '/rubber') },
+      { icon: '🌿', title: 'Income / expense', sub: 'Monthly ledger',
+        action: () => navigate('/' + e.estateId + '/ledger') },
+      { icon: '📊', title: 'Rubber dashboard', sub: 'Production history · income · expenses',
+        action: () => navigate('/' + e.estateId + '/dashboard') },
+    ]
+    return [
+      { icon: '🌴', title: 'Irrigation log', sub: 'Daily zone tracking',
+        action: () => navigate('/' + e.estateId + '/irrigation'), alert: e.irrigationAlert },
+      { icon: '🌿', title: 'Income / expense', sub: 'Monthly ledger',
+        action: () => navigate('/' + e.estateId + '/ledger') },
+      { icon: '🥥', title: 'Coconut tracker', sub: 'Harvest · count · weight · revenue',
+        action: () => navigate('/' + e.estateId + '/coconut') },
+      { icon: '🥭', title: 'Mango harvest', sub: 'Box tracking · varieties · season totals',
+        action: () => navigate('/' + e.estateId + '/mango') },
+      { icon: '📊', title: 'Estate dashboard', sub: 'Harvest history · income · expenses',
+        action: () => navigate('/' + e.estateId + '/dashboard') },
+    ]
+  }
 
   const irrigationDays = info?.irrigationDaysAgo ?? null
   const harvestDays    = info?.harvestDaysAway    ?? null
@@ -83,39 +90,48 @@ export default function EstateManagerHome() {
           </div>
         )}
 
-        {/* ── MENU ── */}
-        <div className="card-section-label">POLLACHI COCONUT ESTATE</div>
-        <div style={s.estateCard}>
-          <div style={s.estateHeader}>
-            <span style={s.estateName}>Pollachi Estate</span>
-            <span style={s.estateTag}>Active</span>
-          </div>
-          {rows.map((row, i) => (
-            <div
-              key={i}
-              className="menu-row"
-              onClick={row.action}
-              style={{
-                ...(i === rows.length - 1 ? { borderBottom: 'none' } : {}),
-                position: 'relative',
-              }}
-            >
-              <div className="menu-icon" style={{ background: 'rgba(59,109,17,0.08)' }}>
-                {row.icon}
+        {/* ── MENU — one block per estate this person works ── */}
+        {estates.map(e => {
+          const rows = rowsFor(e)
+          return (
+            <div key={e.estateId}>
+              <div className="card-section-label">
+                {(e.label || e.estateId).toUpperCase()} · {(e.estateType || 'coconut').toUpperCase()}
               </div>
-              <div className="menu-label">
-                <div className="menu-title" style={{ display:'flex', alignItems:'center', gap:6 }}>
-                  {row.title}
-                  {row.alert && (
-                    <span style={s.alertDot}>!</span>
-                  )}
+              <div style={s.estateCard}>
+                <div style={s.estateHeader}>
+                  <span style={s.estateName}>{e.label || e.estateId}</span>
+                  <span style={s.estateTag}>Active</span>
                 </div>
-                <div className="menu-sub">{row.sub}</div>
+                {rows.map((row, i) => (
+                  <div
+                    key={i}
+                    className="menu-row"
+                    onClick={row.action}
+                    style={{
+                      ...(i === rows.length - 1 ? { borderBottom: 'none' } : {}),
+                      position: 'relative',
+                    }}
+                  >
+                    <div className="menu-icon" style={{ background: 'rgba(59,109,17,0.08)' }}>
+                      {row.icon}
+                    </div>
+                    <div className="menu-label">
+                      <div className="menu-title" style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        {row.title}
+                        {row.alert && (
+                          <span style={s.alertDot}>!</span>
+                        )}
+                      </div>
+                      <div className="menu-sub">{row.sub}</div>
+                    </div>
+                    <div className="menu-arrow" style={{ background: '#3B6D11' }}>›</div>
+                  </div>
+                ))}
               </div>
-              <div className="menu-arrow" style={{ background: '#3B6D11' }}>›</div>
             </div>
-          ))}
-        </div>
+          )
+        })}
 
         {/* ── QUICK INFO AND MARKET PRICE: ONE BOX ──
              Next harvest and what a kilo fetches on the Coconut Board are read together (Biji, 22 Nov 2026), so the

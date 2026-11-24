@@ -58,6 +58,13 @@ function ProtectedRoutes() {
         <Route path="/pollachi/ledger"          element={<EstateLedger estate="pollachi" />} />
         <Route path="/pollachi/irrigation"      element={<IrrigationLog estate="pollachi" />} />
         <Route path="/pollachi/mango"           element={<MangoHarvest estate="pollachi" />} />
+        {/* Pavutumuri, for a manager who works it. The Worker still decides: every one of these
+            screens asks it for data and is refused unless the estate is actually theirs, so a
+            route here grants nothing on its own. Settlement is left out - what a manager is paid
+            is the owner's screen. */}
+        <Route path="/pavutumuri/rubber"        element={<RubberTracker />} />
+        <Route path="/pavutumuri/dashboard"     element={<RubberDashboard />} />
+        <Route path="/pavutumuri/ledger"        element={<EstateLedger estate="pavutumuri" />} />
       </>}
 
       <Route path="*" element={<Navigate to="/" replace />} />

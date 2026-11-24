@@ -31,7 +31,12 @@ export default function EstateManagerHome() {
       .finally(() => setMarketLoading(false))
   }, [])
 
-  const handleIrrigationTap = () => navigate('/pollachi/irrigation')
+  // The estate whose irrigation has gone quiet, if any - not Pollachi by assumption. A manager
+  // holding two estates would otherwise have the banner point at the wrong one, or stay dark while
+  // the estate that needs water is the one he does not open first.
+  const alertEstate = (info?.estates || []).find(e => e.irrigationAlert)
+    || (info?.irrigationAlert ? { estateId: info.estateId || 'pollachi', label: null, irrigationDaysAgo: info.irrigationDaysAgo } : null)
+  const handleIrrigationTap = () => navigate('/' + (alertEstate?.estateId || 'pollachi') + '/irrigation')
 
   // Every estate this person works, from the Worker. One each for Pradosh today; two for whoever
   // carries both through the handover. The fallback keeps the screen whole while it loads, and for
@@ -75,15 +80,17 @@ export default function EstateManagerHome() {
       <div className="screen-body">
 
         {/* ── IRRIGATION ALERT BANNER ── */}
-        {info?.irrigationAlert && (
+        {alertEstate && (
           <div style={s.alertBanner} onClick={handleIrrigationTap}>
             <span style={s.alertIcon}>🚨</span>
             <div style={s.alertText}>
-              <div style={s.alertTitle}>Irrigation data missing</div>
+              <div style={s.alertTitle}>
+                Irrigation data missing{alertEstate.label ? ' — ' + alertEstate.label : ''}
+              </div>
               <div style={s.alertSub}>
-                {irrigationDays === null
+                {alertEstate.irrigationDaysAgo == null
                   ? 'No irrigation log found — please log today'
-                  : `Last logged ${irrigationDays} days ago — over 2 weeks`}
+                  : `Last logged ${alertEstate.irrigationDaysAgo} days ago — over 2 weeks`}
               </div>
             </div>
             <span style={s.alertArrow}>›</span>

@@ -4915,9 +4915,12 @@ export async function onRequest(ctx) {
   // A LIST, not one estate each. It was one, which was true while Pradosh had Pollachi and Raman had
   // Pavutumuri and neither crossed over. Handing Pollachi on means somebody carries both for a while,
   // and a one-estate map has no way to say that.
+  // Keyed on the ESTATE login, never the villa one. Raman has two accounts, as Pradosh does:
+  // `raman` is Staff-Villa-Raman at Dwarka and has no business on an estate, and `estate-raman`
+  // is Staff-Estate-RamanKutty. Pollachi first because that is where the daily entry is.
   const ESTATE_BY_ACTOR = {
-    raman:   ['pavutumuri', 'pollachi'],
-    pradosh: ['pollachi'],
+    'estate-raman': ['pollachi', 'pavutumuri'],
+    pradosh:        ['pollachi'],
   }
   // The owner works everything. Everyone else works what they are given, in the order given: the
   // first is their home estate, the one their screen opens on.

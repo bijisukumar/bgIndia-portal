@@ -9,9 +9,11 @@
 //    partnerSide(stay, config)        the platform side, from the money saved on the booking: what the guest paid for the stay, what the platform
 //                                     keeps (host fee plus any guest fee, the same figure the stay list shows as "Airbnb takes"), what we receive.
 //                                     Taxes the guest paid on top are left out on purpose: they are government money, not the value of the stay.
-//    directSide({ estimate, ... })    the direct side: the rate-card price for these dates and this many guests (busy seasons night by night),
-//                                     an optional discount in percent, and the extras the guest wants (early check-in, breakfast, ...). No platform
-//                                     fee, so what the guest pays is what we receive.
+//    roomPrice({ basis, ... })        which number the direct side starts from: the SAME price the guest paid the platform (the usual), the rate card
+//                                     for these dates and party, or a figure typed on the card.
+//    directSide({ estimate, ... })    the direct side: that room price, an optional discount in percent, and the extras the guest wants (early
+//                                     check-in, breakfast, ...). No platform fee, so what the guest pays is what we receive.
+//    extraGuests({ ... })             what the rate card adds when the party is bigger than the booking (the platform takes 12, the villa more).
 //    compare(partner, direct)         what the guest saves and what we keep more, and the same for the room alone (before any extras).
 //    flexShares(perNight)             a quarter and a half of a night, the usual price of an early check-in or a late check-out.
 //    flexHints(stay, defaults)        the early / late times the guest has already asked for on this booking (never one the owner has declined).
@@ -19,6 +21,11 @@
 //    quoteFor({ ... })                the enquiry-shaped object the shared quote builder (src/utils/enquiryQuote.js) turns into the WhatsApp message.
 //
 //  WHAT CHANGED (newest first)
+//    2026-11-27  (later, Biji: "I should be able to update the numbers. I will mostly charge the same as Airbnb. The main difference is early
+//                check-in / check-out, which Airbnb does not offer. Airbnb allows only 12 guests, we can go up to 15"): the room price is no longer
+//                only the rate card. roomPrice() starts from the platform's own price (same as Airbnb), or the rate card, or a typed figure, and
+//                directSide() takes it as roomTotal; extraGuests() prices guests beyond the booking; quoteFor() takes the basis and marks a total
+//                that does not divide by the nights. Everything else is as it was.
 //    2026-11-27  New, for the Complete booking "Go direct?" card (Biji: "build the comparison card first; we will send the quote like Enquiry does").
 //  Related: src/utils/partners.js (platformTake: what a platform takes), src/utils/villaPricing.js (the rate-card estimate),
 //  src/utils/quoteTimes.js (the early / late hours worded in the quote).
@@ -65,12 +72,40 @@ export function partnerSide(stay, config) {
   }
 }
 
+// ── THE ROOM PRICE: WHICH NUMBER THE DIRECT SIDE STARTS FROM ──────────────
+// basis 'same'   = what the guest paid the platform for the stay (the usual: "I will mostly charge the same as Airbnb"), in whole rupees;
+//       'card'   = our rate card for these dates and this party (busy seasons night by night), estimate.total;
+//       'custom' = a figure typed on the card (custom).
+// 'same' needs the booking's money: with none saved the rate card is used instead, so the answer always carries the basis it really used.
+// -> { basis, total }   (a typed figure that is blank or not above 0 is a total of 0: the card shows it and holds the quote back)
+export function roomPrice({ basis = 'same', partner, estimate, custom } = {}) {
+  if (basis === 'custom') {
+    const typed = parseFloat(custom)
+    return { basis: 'custom', total: typed > 0 ? Math.round(typed) : 0 }
+  }
+  const same = partner && partner.hasMoney && partner.room > 0 ? Math.round(partner.room) : 0
+  if (basis === 'same' && same > 0) return { basis: 'same', total: same }
+  return { basis: 'card', total: money(estimate && estimate.total) }
+}
+
+// ── GUESTS BEYOND WHAT WAS BOOKED ─────────────────────────────────────────
+// The platform takes at most 12 guests (Biji: the villa can take up to 15), so a party bigger than the booking can only come direct. What the
+// rate card adds for the extra guests is the card's price for the new party minus its price for the booked party, same dates: the step for each
+// guest, and the floor-bed rate for those above the card's top row. Never negative: a smaller party keeps the price.
+// estimateNow / estimateBooked = getSeasonalEstimate(...) for the party now on the card / the party on the booking.   -> { more, amount }
+export function extraGuests({ bookedGuests, nowGuests, estimateNow, estimateBooked } = {}) {
+  const more = Math.max(0, (Number(nowGuests) || 0) - (Number(bookedGuests) || 0))
+  if (!more || !estimateNow || !estimateBooked) return { more, amount: 0 }
+  return { more, amount: Math.max(0, Math.round(money(estimateNow.total) - money(estimateBooked.total))) }
+}
+
 // ── THE DIRECT SIDE ───────────────────────────────────────────────────────
-// estimate = getSeasonalEstimate(...) for these dates and this many guests ({ total, nights, ... }); discountPct a number 0 to 100;
-// lines = the extras [{ label, amount, earlyCheckinTime?, lateCheckoutTime? }].
+// estimate = getSeasonalEstimate(...) for these dates and this many guests ({ total, nights, ... }), which also gives the number of nights;
+// roomTotal = the room price to start from (roomPrice().total); left out, it is the rate card's (estimate.total), as it was before the card could
+// start from the platform's price. discountPct a number 0 to 100; lines = the extras [{ label, amount, earlyCheckinTime?, lateCheckoutTime? }].
 // The discount is a percentage of the room price in WHOLE rupees (the Enquiry screen keeps paise; a quote reads cleaner without them); extras are not discounted.
-export function directSide({ estimate, discountPct = 0, lines = [] } = {}) {
-  const total = money(estimate && estimate.total)
+export function directSide({ estimate, roomTotal, discountPct = 0, lines = [] } = {}) {
+  const total = money(roomTotal != null && roomTotal !== '' ? roomTotal : estimate && estimate.total)
   const pct = Math.min(100, Math.max(0, Number(discountPct) || 0))
   const discountAmount = Math.round(total * pct / 100)
   const roomAfter = money(total - discountAmount)
@@ -144,10 +179,13 @@ export function startingLines(stay) {
 // ── THE QUOTE ─────────────────────────────────────────────────────────────
 // The enquiry-shaped object the shared builder (buildQuote / buildQuoteWaLink in src/utils/enquiryQuote.js) writes the message from. With a discount the
 // builder uses its DIRECT OFFER version (discount_category 'direct_offer'); without one, the first-contact version with the booked-through-a-platform
-// opening (_partnerLabel). Seasons are passed as the nights in runs of one price, as the Enquiry screen does.
-export function quoteFor({ stay, label, villaId, adults, children, estimate, direct, lines }) {
+// opening (_partnerLabel). Seasons are passed as the nights in runs of one price, as the Enquiry screen does, but only when the room price IS the
+// rate card's (basis 'card'): a price taken from the platform or typed by hand is one figure for the stay, not the card's night-by-night sum.
+// A room total that does not divide evenly by the nights is marked (_totalOnly) so the quote shows the total instead of a rate a rupee out.
+export function quoteFor({ stay, label, villaId, adults, children, estimate, direct, lines, basis = 'card' }) {
   const s = stay || {}
   const withDiscount = direct.pct > 0
+  const fromCard = basis === 'card'
   const kept = (Array.isArray(lines) ? lines : []).filter(l => l && l.label)
   return {
     guest_name: s.guest_name || '',
@@ -165,7 +203,8 @@ export function quoteFor({ stay, label, villaId, adults, children, estimate, dir
     repeat_discount_pct: 0,
     extra_lines: kept.length ? JSON.stringify(kept) : null,
     extra_charges: direct.extrasTotal,
-    _seasonGroups: estimate && estimate.seasonal ? groupNights(estimate.perNight) : null,
+    _seasonGroups: fromCard && estimate && estimate.seasonal ? groupNights(estimate.perNight) : null,
+    _totalOnly: !fromCard && direct.roomAfter % direct.nights !== 0,
     _partnerLabel: label,
   }
 }

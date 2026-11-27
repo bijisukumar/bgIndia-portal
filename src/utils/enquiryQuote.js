@@ -11,6 +11,9 @@
 //  card (src/components/GoDirectCard.jsx), so both send the same quote.
 //
 //  WHAT CHANGED (newest first)
+//    2026-11-27  (later) For the "Go direct?" card's own prices (the same price as the platform, or a figure typed by hand): when e._totalOnly is set
+//                the room line reads "₹41,960 for 3 nights" instead of "₹13,987/night × 3 nights = ₹41,960", because a total that does not divide
+//                evenly by the nights would show arithmetic that is a rupee out. Enquiries never set it, so their quotes are unchanged.
 //    2026-11-27  For the "Go direct?" card: (1) when e._partnerLabel is set (the platform the guest already booked through) the opening and closing
 //                lines fit a guest who already holds a booking instead of a first enquiry; (2) a fourth version, the DIRECT OFFER (e.discount_category
 //                === 'direct_offer'), with a discount line. Enquiries never set either, so their quotes are unchanged.
@@ -86,6 +89,9 @@ function quoteCore(e) {
     // Set only by the Complete booking "Go direct?" card: the platform this guest already booked through ("Airbnb"). It changes the opening and
     // closing lines of the quote (this is not a first enquiry), nothing about the prices.
     partnerLabel: e._partnerLabel || '',
+    // Set only by the same card, when the room price is the platform's price or a typed figure that does not divide evenly by the nights: the room
+    // line then shows the total for the stay instead of a per-night rate times the nights.
+    totalOnly: !!e._totalOnly,
   }
 }
 
@@ -107,7 +113,9 @@ function pricingLines(c, iconPrefix, rateLabel) {
   // season's. With a discount on top the nights are shown higher up (seasonLines) and this keeps its one summary line.
   const lines = c.seasonGroups && !c.discountAmount
     ? [`${iconPrefix}${rateLabel}:`, ...seasonRateLines(c.seasonGroups), `Room total: ${fmt(c.roomOnlyTotal)}`]
-    : [`${iconPrefix}${rateLabel}: ${fmt(c.perNight)}/night × ${c.nights} night${c.nights !== 1 ? 's' : ''} = ${fmt(c.roomOnlyTotal)}`]
+    : [c.totalOnly
+        ? `${iconPrefix}${rateLabel}: ${fmt(c.roomOnlyTotal)} for ${c.nights} night${c.nights !== 1 ? 's' : ''}`
+        : `${iconPrefix}${rateLabel}: ${fmt(c.perNight)}/night × ${c.nights} night${c.nights !== 1 ? 's' : ''} = ${fmt(c.roomOnlyTotal)}`]
   for (const l of c.extraLines) {
     lines.push(`+ ${l.label}: ${fmt(l.amount)}`)
   }

@@ -11,6 +11,19 @@
  * After ready_for_checkin: Raman's CheckIn screen takes over.
  *
  * Route: /owner/villa/income  (kept same route so no App.jsx change needed)
+ *
+ * WHAT CHANGED (newest first)
+ *   2026-11-27  "Go direct?" card above Channel & tariff on a platform booking that has not arrived yet: the platform's side and a direct booking
+ *               side by side, who saves what, and the same WhatsApp quote the Enquiry screen sends (src/components/GoDirectCard.jsx). It only reads.
+ *   2026-11-21  Same-day turnaround flag on the guest list (7ac8d96).
+ *   2026-11-20  Check-out payments card: what was collected, and send the invoice again (94ebdd2).
+ *   2026-11-17  Payments card: the day each payment came in, in one tap or in parts (640140f).
+ *   2026-11-15  Send email and a test copy of the check-in email (d3dbeb1, 0a01be7); Decline and a history of time requests (5e9f334).
+ *   2026-11-03  Car photos kept in Drive for a retention; plate rules (ecb02b1, 012b636).
+ *   2026-10-30  No platform rule in the code (b46b346); an approved Airbnb date change is applied to the stay (15877df).
+ *   2026-10-28  The flag and country beside a guest's phone number (961b50b).
+ *   2026-10-27  Booking changes the owner must decide; guest names and ages; purpose of visit (aea1366).
+ *   Older history: git log --follow src/screens/villa/CompleteBooking.jsx
  */
 
 import { useState, useEffect, useRef } from 'react'
@@ -43,6 +56,7 @@ import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { findTwinPairs } from '../../utils/twinStays'
 import ChangeRequestCard from '../../components/ChangeRequestCard'
 import StayPayments from '../../components/StayPayments'
+import GoDirectCard from '../../components/GoDirectCard'
 import CheckoutPayments from '../../components/CheckoutPayments'
 import { PhoneCountry } from '../../components/CountryFlag'
 import { carPhotoMonths } from '../../utils/carPhotos'
@@ -1928,6 +1942,13 @@ export default function CompleteBooking() {
 
                 {/* Form C — one per foreign national, per Indian law */}
                 <FormCPanel stayId={s.stay_id} partySize={(parseInt(s.adults)||0) + (parseInt(s.children)||0)} />
+
+                {/* Go direct? What this platform booking would be worth if the guest booked with us directly, side by side, and the quote to send
+                    (src/components/GoDirectCard.jsx). Only for a booking through a platform that has not arrived yet; it reads the saved money and
+                    the rate card and saves nothing. key = the stay, so opening another booking starts a fresh card. */}
+                {partnerFor(CONFIG, s.source)?.group === 'channel' && PRE_ARRIVAL_STATUSES.includes(s.status) && (
+                  <GoDirectCard key={s.stay_id} stay={s} />
+                )}
 
                 {/* Channel & Tariff */}
                 <div className="card-section-label">CHANNEL & TARIFF</div>

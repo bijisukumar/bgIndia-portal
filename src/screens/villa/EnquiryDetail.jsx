@@ -1,8 +1,28 @@
+/**
+ * EnquiryDetail.jsx   (route /owner/villa/enquiries/:enquiryId)
+ *
+ * What it is: everything for ONE enquiry: pricing from the rate card, seasons and discounts, extra charges (with the early check-in / late check-out
+ * hours), the WhatsApp quote (copy it or send it), the communication log, status changes, and Confirm Booking (make the stay, or link the enquiry to
+ * the guest's existing one). The words of the quote are in src/utils/enquiryQuote.js.
+ *
+ * WHAT CHANGED (newest first)
+ *   2026-11-27  The quote text moved out to src/utils/enquiryQuote.js so the Complete booking "Go direct?" card sends the same quote. Nothing an
+ *               enquiry's quote says has changed (checked word for word against the old code).
+ *   2026-11-23  The quote says the early check-in / late check-out hour the guest asked for; a "Not saved yet" note for typed-but-unsaved extras;
+ *               the Save button stays when the last extra line is removed (5e095a9).
+ *   2026-11-08  Website visit card: where a website guest was, what they used and what they checked first (9f3f94f).
+ *   2026-11-07  "Started by" label next to names; the owner's email links straight to the enquiry (47d5a23).
+ *   2026-10-30  No platform rule in the code: one config file per booking platform (b46b346).
+ *   2026-10-28  Busy-season prices night by night in every quote; the regular price beside a season's (df0dea2, c817620).
+ *   2026-10-15  The "not available" reply also lives here, and sending it is logged (3c01caa).
+ *   2026-10-05  The quote leads with the villa-pictures link (f1b54b0).
+ *   Older history: git log --follow src/screens/villa/EnquiryDetail.jsx
+ */
+
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
 import { api } from '../../api'
-import { CONFIG } from '../../config'
 import { STATUS_META, enquirySourceLabel, LOST_REASONS } from './EnquiryTracker'
 import { parseLocalDate, localTodayStr, fmtStampYear } from '../../utils/dates'
 import DatePicker from '../../components/DatePicker'
@@ -11,14 +31,11 @@ import { addDays } from '../../utils/stayHolds'
 import AvailabilityNote from '../../components/AvailabilityNote'
 import InitiatorBadge, { initiatedBy } from '../../components/InitiatorBadge'
 import { groupNights } from '../../utils/seasonRates'
-import { quoteTimes, labelWithTimes, dateNotes } from '../../utils/quoteTimes'
+import { buildQuote, buildQuoteWaLink } from '../../utils/enquiryQuote'
 import {
   getSeasonalEstimate, estimateNotes, describeEstimate, FALLBACK_RATE_CARDS, DISCOUNT_CATEGORIES, getDefaultDiscountPct,
-  getBedroomEstimate,
   EXTRA_ITEMS,
 } from '../../utils/villaPricing'
-
-const villa = CONFIG.villas[0]
 
 function fmt(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 // occurred_at is a stored moment (UTC): shown as the clock at the property (utils/tz.js)
@@ -49,284 +66,6 @@ const COMM_TYPES = [
 // do extra work (create a stay record, capture booking value/lost reason) that a
 // plain status change here would silently skip.
 const MANUAL_STATUSES = ['new', 'quoted', 'follow_up_needed', 'negotiating']
-
-// Builds a wa.me deep-link pre-filled with the quote text, so the owner can
-// open the guest's WhatsApp chat with it ready to send (not auto-sent).
-// Uses the emoji-safe version — WhatsApp Desktop/Windows renders 4-byte
-// (astral-plane) emoji as '�' when text arrives via this URI path.
-function buildQuoteWaLink(e) {
-  const phone = e.phone
-  if (!phone) return null
-  const raw = String(phone).replace(/\D/g, '')
-  const num = raw.startsWith('91') ? raw : (raw.length === 10 ? `91${raw}` : raw)
-  return `https://wa.me/${num}?text=${encodeURIComponent(buildQuote(e, false))}`
-}
-
-function fmtQuoteDate(d) {
-  const parsed = parseLocalDate(d)
-  if (!parsed) return '—'
-  return parsed.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-// Shared pieces every quote variant needs, computed once.
-// roomOnlyTotal/perNight deliberately exclude extraLines — those are
-// one-time add-ons (event services, cleaning fee, extra guest, etc.), not
-// a nightly recurring cost, so folding them in inflates the per-night rate
-// shown to the guest.
-function quoteCore(e) {
-  const nights = e.nights || 1
-  const billableGuests = (e.adults || 0) + (e.children || 0)
-  let extraLines = []
-  try { extraLines = e.extra_lines ? JSON.parse(e.extra_lines) : [] } catch { extraLines = [] }
-  // The early check-in / late check-out the guest asked for, read from ALL the lines: a complimentary one has no fee line but is still a time.
-  const times = quoteTimes(extraLines)
-  // Only the lines that cost something are printed, each with the hour it was asked for ("Early Check-in (from 12:00 PM)").
-  extraLines = extraLines.filter(l => (parseFloat(l.amount) || 0) > 0).map(l => ({ ...l, label: labelWithTimes(l) }))
-  const extraTotal = extraLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
-  const roomOnlyTotal = (e.quote_amount || 0) - (e.discount_amount || 0)
-  return {
-    nights,
-    finalTotal: e.final_offer_amount || e.quote_amount || 0,
-    quoteAmount: e.quote_amount || 0,
-    discountAmount: e.discount_amount || 0,
-    roomOnlyTotal,
-    perNight: Math.round(roomOnlyTotal / nights),
-    extraLines,
-    extraTotal,
-    dateNotes: dateNotes(times, villa),   // the brackets of the Check-in / Check-out lines: the standard time, or the early / late one asked for
-    bedroomCount: getBedroomEstimate(e.villa_id || DEFAULT_VILLA_ID, billableGuests),
-    firstName: (e.guest_name || '').trim().split(' ')[0] || 'there',
-    fullName: (e.guest_name || '').trim() || 'there',
-    guestCount: e.guests_count || billableGuests || 1,
-    seasonGroups: e._seasonGroups || null,   // the nights in runs of the same season and price, when the quote is the seasonal estimate
-    nightsLabel: nights === 1 ? 'the night' : `${nights} nights`,
-  }
-}
-
-// "• ₹14,025/night × 2 nights" then "• Christmas / New Year: ₹18,233/night × 2 nights (regular ₹14,025)"
-function seasonRateLines(groups) {
-  return groups.map(g => `• ${g.name || 'Regular'}: ${fmt(g.rate)}/night × ${g.nights} night${g.nights !== 1 ? 's' : ''}${g.name && g.rate !== g.regular ? ` (regular ${fmt(g.regular)})` : ''}`)
-}
-// the same nights as a block of their own, for the discount variants (which then show the discount on the total)
-function seasonLines(c, ic) {
-  return c.seasonGroups ? [`${ic.money}Pricing night by night:`, ...seasonRateLines(c.seasonGroups), ``] : []
-}
-
-// Pricing block lines shared by all 3 quote variants — per-night rate ×
-// nights = subtotal, one-time extras itemized separately, total last (so
-// the guest sees the per-night rate first, not one big lump number).
-// iconPrefix already includes the trailing space (e.g. ic.money, ic.sparkle).
-function pricingLines(c, iconPrefix, rateLabel) {
-  // A stay that runs into a season (a busy one, or an off-season offer) is shown night by night with the regular price beside the
-  // season's. With a discount on top the nights are shown higher up (seasonLines) and this keeps its one summary line.
-  const lines = c.seasonGroups && !c.discountAmount
-    ? [`${iconPrefix}${rateLabel}:`, ...seasonRateLines(c.seasonGroups), `Room total: ${fmt(c.roomOnlyTotal)}`]
-    : [`${iconPrefix}${rateLabel}: ${fmt(c.perNight)}/night × ${c.nights} night${c.nights !== 1 ? 's' : ''} = ${fmt(c.roomOnlyTotal)}`]
-  for (const l of c.extraLines) {
-    lines.push(`+ ${l.label}: ${fmt(l.amount)}`)
-  }
-  if (c.extraLines.length > 0) {
-    lines.push(`Total: ${fmt(c.finalTotal)} (all inclusive)`)
-  }
-  return lines
-}
-
-// rich=true (Generate & copy): full colorful emoji — safe for copy/paste,
-// which doesn't go through the URI-decode path that corrupts them on
-// WhatsApp Desktop/Windows. rich=false (Send quote in WhatsApp button):
-// only ☎. ❓ was in the "safe" set, but a sent quote showed it as "�" in front of
-// "FAQs:" (2026-10-05), and ✅ did the same on the arrival message (2026-10-15), so all
-// three pictographs (❓ ✅ ✨) are rich-only now — if a "�" ever shows next to ☎, drop
-// that one the same way.
-function icons(rich) {
-  return {
-    pray:      rich ? '🙏 ' : '',
-    calendar:  rich ? '📅 ' : '',
-    link:      rich ? '🔗 ' : '',
-    villa:     rich ? '🏡 ' : '',
-    guests:    rich ? '👨‍👩‍👧‍👦 ' : '',
-    money:     rich ? '💰 ' : '',
-    leaf:      rich ? '🌿 ' : '',
-    camera:    rich ? '📸 ' : '',
-    gift:      rich ? '🎁 ' : '',
-    handshake: rich ? '🤝 ' : '',
-    phone:     rich ? '📞 ' : '☎ ',
-    // Rich-only like the rest: ✅ was seen arriving as "�" through wa.me on 2026-10-15 (on the
-    // arrival message), so the "safe BMP symbols" assumption below did not hold for it, and ✨
-    // is the same kind of character.
-    sparkle:   rich ? '✨ ' : '',
-    check:     rich ? '✅ ' : '',
-    question:  rich ? '❓ ' : '',
-  }
-}
-
-function familiesBlock(ic) {
-  return [
-    `${ic.leaf}Why families choose us in Guruvayur`,
-    `Luxury Villas of Guruvayur is designed specifically for families who want:`,
-    ``,
-    `* A peaceful, private villa close to the temple`,
-    `* Comfortable shared spaces for large family groups`,
-    `* A safe, homely environment (not a hotel crowd setup)`,
-    `* Support for smooth local travel and Kerala experience planning`,
-    ``,
-    `We also help many families plan their Kerala stay beyond Guruvayur — Wildlife, Hill Station, Ayurvedic experiences, Kerala martial arts programs, temple visits, and curated local experiences through our trusted network.`,
-    ``,
-    // Per tenant: another host's guests should not be sent to this villa's
-    // website. Omitted entirely when the tenant has no experiences link.
-    ...(CONFIG.marketing?.experiencesUrl
-      ? [`${ic.link}${CONFIG.marketing.experiencesLabel || 'Explore local experiences'}: ${CONFIG.marketing.experiencesUrl}`]
-      : []),
-  ]
-}
-
-// Up front, before the dates, so the guest sees what they would be getting
-// before they read what it costs. WhatsApp builds its link-preview card from
-// the FIRST link in a message, so this is also what the card shows. Per
-// tenant: left out (along with its spacer line) when the tenant has no villa
-// page, so another host's guests are never sent to this villa's website.
-function villaPicturesBlock(ic) {
-  return CONFIG.marketing?.villaDetailsUrl
-    ? [`${ic.camera}Villa pictures and details: ${CONFIG.marketing.villaDetailsUrl}`, ``]
-    : []
-}
-
-function linksBlock(ic) {
-  return [
-    ...(CONFIG.marketing?.faqUrl
-      ? [`${ic.question}FAQs: ${CONFIG.marketing.faqUrl}`] : []),
-  ]
-}
-
-function signoffBlock(ic, closingLine) {
-  return [
-    ``,
-    closingLine,
-    ``,
-    `സസ്നേഹം (Sasneham)`,
-    ...(CONFIG.ownerName ? [`${CONFIG.ownerName}`] : []),
-    `${CONFIG.brandName}`,
-    ...(CONFIG.checkinAddress?.phone
-      ? [`${ic.phone}${CONFIG.checkinAddress.phone}  (GPay available)`] : []),
-  ]
-}
-
-// ── Default: no discount, no B2B — standard first-contact quote ──
-function buildQuoteDefault(e, rich) {
-  const c = quoteCore(e)
-  const ic = icons(rich)
-  return [
-    `Namaskaram ${c.firstName},`,
-    ``,
-    `This is Biji from Luxury Villas of Guruvayur. Thank you for reaching out.`,
-    ``,
-    `Your family friendly villa closest to the Guruvayur Temple in an Upscale neighborhood with ample parking - A Private Villa`,
-    ``,
-    ...villaPicturesBlock(ic),
-    `We have checked your dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (${c.dateNotes.inNote})`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (${c.dateNotes.outNote})`,
-    ``,
-    ...(CONFIG.marketing?.faqUrl
-      ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
-    ``,
-    `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `${ic.guests}Guests: ${c.guestCount}`,
-    ...pricingLines(c, ic.money, 'Your Direct Booking Rate'),
-    `(Can include early check-in / late check-out flexibility where possible with minimal charges)`,
-    ``,
-    ...familiesBlock(ic),
-    ``,
-    ...linksBlock(ic),
-    ...signoffBlock(ic, `If this works for your plans, I can go ahead and block the dates for you. We make every effort to respond to you with the best experience throughout your journey, so please respond to us with whatever decision you may make. We look forward to making your stay a memorable one.${rich ? ' 🙏' : ''}`),
-  ].join('\n')
-}
-
-// ── Repeat / loyalty guest — lead with the discount, make it feel special ──
-function buildQuoteRepeatDiscount(e, rich) {
-  const c = quoteCore(e)
-  const ic = icons(rich)
-  const label = e.discount_category
-    ? (DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Valued Guest')
-    : 'Returning Guest'
-  const pct = e.discount_category ? e.discount_pct : e.repeat_discount_pct
-  return [
-    `Namaskaram ${c.firstName},`,
-    ``,
-    `This is Biji from Luxury Villas of Guruvayur. Wonderful to hear from you again — it's always a pleasure to welcome back our guests!`,
-    ``,
-    ...villaPicturesBlock(ic),
-    `We have checked your dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (${c.dateNotes.inNote})`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (${c.dateNotes.outNote})`,
-    ``,
-    ...(CONFIG.marketing?.faqUrl
-      ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
-    ``,
-    `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `${ic.guests}Guests: ${c.guestCount}`,
-    ``,
-    ...seasonLines(c, ic),
-    `${ic.gift}As a ${label}, we're delighted to offer you a special discounted rate this time!`,
-    `${ic.money}Regular Tariff: ${fmt(c.quoteAmount)}`,
-    `${ic.gift}${label} Discount (${pct}%): −${fmt(c.discountAmount)}`,
-    ...pricingLines(c, ic.sparkle, 'Your Special Rate'),
-    `(Can include early check-in / late check-out flexibility where possible with minimal charges)`,
-    ``,
-    `Thank you for continuing to choose us — we truly value your loyalty and look forward to hosting you again.${rich ? ' 🌿' : ''}`,
-    ``,
-    ...linksBlock(ic),
-    ...signoffBlock(ic, `If this works for your plans, I can go ahead and block the dates for you.`),
-  ].join('\n')
-}
-
-// ── B2B / travel partner — call out the commission clearly and positively ──
-function buildQuoteB2B(e, rich) {
-  const c = quoteCore(e)
-  const ic = icons(rich)
-  const label = DISCOUNT_CATEGORIES.find(cat => cat.id === e.discount_category)?.label || 'Partner'
-  return [
-    `Namaskaram ${c.fullName},`,
-    ``,
-    `This is Biji from Luxury Villas of Guruvayur. Thank you for checking availability with us for your guest's stay in Guruvayur.`,
-    ``,
-    ...villaPicturesBlock(ic),
-    `We have checked the dates and the villa is available:`,
-    `${ic.calendar}Check-in: ${fmtQuoteDate(e.checkin_date)} (${c.dateNotes.inNote})`,
-    `${ic.calendar}Check-out: ${fmtQuoteDate(e.checkout_date)} (${c.dateNotes.outNote})`,
-    ``,
-    ...(CONFIG.marketing?.faqUrl
-      ? [`${ic.link}Timings: ${CONFIG.marketing.faqUrl}`] : []),
-    ``,
-    `${ic.villa}Villa: ${c.bedroomCount} Bedrooms | Fully A/C | Private family villa`,
-    `${ic.guests}Guests: ${c.guestCount}`,
-    ``,
-    ...seasonLines(c, ic),
-    `${ic.handshake}As our valued ${label}, here's your special partner pricing:`,
-    `${ic.money}Guest-facing Tariff: ${fmt(c.quoteAmount)}`,
-    `${ic.handshake}Your Commission (${e.discount_pct}%): ${fmt(c.discountAmount)}`,
-    ...pricingLines(c, ic.check, 'Net Payable to Us'),
-    ``,
-    `You're welcome to quote your guest up to ${fmt(c.quoteAmount)} — your margin is built right in. Looking forward to a great partnership on this booking!${rich ? ' 🌿' : ''}`,
-    ``,
-    ...linksBlock(ic),
-    ...signoffBlock(ic, `If this works, let me know and I'll go ahead and block the dates.`),
-  ].join('\n')
-}
-
-// rich=true for "Generate & copy" (colorful, safe for copy/paste),
-// rich=false for the "Send quote in WhatsApp" wa.me link (BMP-safe only —
-// see buildQuoteWaLink).
-function buildQuote(e, rich = true) {
-  const isB2B = e.discount_category === 'b2b_india' || e.discount_category === 'b2b_intl'
-  const isRepeatDiscount = !isB2B && (
-    ['loyal_patron', 'elite_guest', 'platinum_guest'].includes(e.discount_category) ||
-    (!e.discount_category && (e.repeat_discount_pct || 0) > 0)
-  )
-  if (isB2B) return buildQuoteB2B(e, rich)
-  if (isRepeatDiscount) return buildQuoteRepeatDiscount(e, rich)
-  return buildQuoteDefault(e, rich)
-}
 
 export default function EnquiryDetail() {
   const navigate = useNavigate()

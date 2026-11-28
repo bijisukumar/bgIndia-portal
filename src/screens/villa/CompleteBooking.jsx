@@ -13,6 +13,8 @@
  * Route: /owner/villa/income  (kept same route so no App.jsx change needed)
  *
  * WHAT CHANGED (newest first)
+ *   2026-11-28  The "<platform> takes ₹X (Y%)" line under every booking in the guest list is switched off (commented out, not deleted): the list was getting too
+ *               cluttered (Biji). The figure is read per month on the Dashboard now (Financials > a month > Commissions), and the booking's own card still has it.
  *   2026-11-27  "Go direct?" card above Channel & tariff on a platform booking that has not arrived yet: the platform's side and a direct booking
  *               side by side, who saves what, and the same WhatsApp quote the Enquiry screen sends (src/components/GoDirectCard.jsx). It only reads.
  *   2026-11-21  Same-day turnaround flag on the guest list (7ac8d96).
@@ -1159,7 +1161,11 @@ export default function CompleteBooking() {
                         <StayTimesLine stay={stay} />
                         {/* Someone leaves the day this guest arrives, or arrives the day this guest leaves: the villa has hours, not a night */}
                         <TurnoverFlag items={turnovers[stay.stay_id]} />
-                        {/* What its platform takes on this booking, in total: the reason to bring a guest back direct. */}
+                        {/* SWITCHED OFF 2026-11-28 (Biji: "comment out what Airbnb makes and % under each booking, the space is getting too cluttered").
+                            This was the line "<platform> takes ₹X (Y%)" under every booking in this list: what the booking's platform takes in total, the reason to
+                            bring a guest back direct. The same figure is read per month on the Dashboard now (Financials > pick a month > Commissions, with its share
+                            of the platform bookings), and the opened booking's own card further down still shows it in full. To bring the line back, delete the two
+                            comment marks: the opening one in front of the first line of this note and the closing one after the block.
                         {(() => {
                           const take = platformTake(stay, CONFIG)
                           return take ? (
@@ -1168,6 +1174,7 @@ export default function CompleteBooking() {
                             </div>
                           ) : null
                         })()}
+                        */}
                         {requestSummary(stay) && (
                           <div style={{fontSize:'0.68rem',color:'#C8903A',marginTop:'2px',
                             overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>

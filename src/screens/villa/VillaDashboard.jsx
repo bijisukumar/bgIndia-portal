@@ -1,3 +1,11 @@
+// ============================================================
+//  VillaDashboard.jsx: the owner's Dashboard (the Financials tab with its month and year pickers, and the others).
+//
+//  WHAT CHANGED (newest first; older history: git log --follow src/screens/villa/VillaDashboard.jsx)
+//    2026-11-28  Financials > Commissions now also says what share of the platform bookings those commissions are ("Paid to channels · 15.4% of their bookings"),
+//                for the month or year picked. Biji took the "<platform> takes ₹X (Y%)" line off every booking in the Complete booking list (too cluttered)
+//                and wants that figure here, per month. Nothing else on this screen changed.
+// ============================================================
 import { useState, useEffect, useRef, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBack } from '../../utils/navTrail'
@@ -5,6 +13,8 @@ import { api } from '../../api'
 import { parseLocalDate, localTodayStr, propertyYear, propertyMonth, stampDate } from '../../utils/dates'
 import { DEFAULT_VILLA_ID } from '../../utils/villaContext'
 import { againstLastYear, bookedShare, outlookTotals, rupees, yearChoices } from '../../utils/monthlyOutlook'
+import { CONFIG } from '../../config'
+import { platformTake } from '../../utils/partners'
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
@@ -1052,6 +1062,17 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
   })
   const roomOnly = periodStays.reduce((s, r) => s + (grossOf(r) - (parseFloat(r.extra_charges) || 0)), 0)
 
+  // What the platforms keep, as a share of the bookings they brought in this period: the commissions in the Commissions card over the room price (night fee +
+  // cleaning fee) of each platform booking that has a commission on it. A platform booking with no commission saved yet is left out of both, so it cannot water the
+  // share down. (Biji 2026-11-28: this is where "what Airbnb makes, and the %" is read now, per month, instead of under every booking in the Complete booking list.)
+  let channelKept = 0, channelBase = 0
+  periodStays.forEach(s => {
+    const kept = parseFloat(s.commission_amt) || 0
+    const take = kept > 0 ? platformTake(s, CONFIG) : null
+    if (take && take.base) { channelKept += kept; channelBase += take.base }
+  })
+  const channelShare = channelBase > 0 ? Math.round(channelKept / channelBase * 1000) / 10 : null
+
   const breakdown = { ...(monthData.breakdown || {}), tariff: roomOnly, floorBed, otherExtras }
   const breakdownVals = Object.values(breakdown).map(v => parseFloat(v)||0).filter(v => !isNaN(v))
   const maxBreakdown = breakdownVals.length > 0 ? Math.max(...breakdownVals, 1) : 1
@@ -1132,7 +1153,7 @@ function FinancialsTab({ data: dataProp, loading: loadingProp, month, onMonthCha
           <div className="stat-card">
             <div className="stat-label">Commissions</div>
             <div className="stat-val red">{fmt(monthData.fees)}</div>
-            <div className="stat-sub">Paid to channels</div>
+            <div className="stat-sub">Paid to channels{channelShare != null ? ` · ${channelShare}% of their bookings` : ''}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Direct ratio</div>

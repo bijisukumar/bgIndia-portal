@@ -339,7 +339,7 @@ export const TILES = [
         insideLabel: 'Tabs',
         inside: [
           { name: '💰 Financials', text: `At the top, whatever you pick below, **Projected income** lists the coming months: the nights and the income from the bookings you already have (after platform fees), what the same month brought in last year and how many nights are still open to sell. Only bookings in hand count, so a month far ahead looks thin until bookings arrive. Below it, pick a year (or **All**, which adds up every year; next year gets its own button as soon as it has a booking) and a month (or **All**) to see:`, bullets: [
-            `**Four cards** — Gross revenue (with bookings and nights), Net to owner (and its share of gross), Commissions (paid to platforms) and Direct ratio (direct against platform bookings).`,
+            `**Four cards** — Gross revenue (with bookings and nights), Net to owner (and its share of gross), Commissions (paid to platforms, and what share of the bookings they brought that is, for the month or year you pick) and Direct ratio (direct against platform bookings).`,
             `**P&L** for the full year — gross revenue, upsell (floor beds, extended check-out, add-ons), discounts, channel commission, staff commission and expenses, ending in **Net to owner**.`,
             `**Revenue breakdown** — room tariff, floor bed, other extras, car rental, kitchen, breakfast and events.`,
             `**Revenue per guest** for a chosen month.`,

@@ -67,7 +67,8 @@ the screen says so without a warning.
 ## PollNewReservationAndProcess — `apps-script/poll-reservations`
 
 Reads Airbnb's mail: new reservations, cancellations, alteration requests and
-reviews.
+reviews. From v1.5 it also reads the booking, cancellation and change emails of the
+other platforms the portal knows how to read (Agoda today), see below.
 
 ### Properties
 
@@ -84,13 +85,28 @@ reviews.
 ### Reports in, and keeps time (v1.4)
 
 After every run it calls the Worker's `recordJobRun` (job `poll-reservations`,
-"Airbnb email reader", every 5 minutes). The app shows when it last ran and
+"Booking email reader", every 5 minutes; it was called "Airbnb email reader" before v1.5). The app shows when it last ran and
 warns, and emails the owner, if it has been silent for four runs or keeps
 failing. That needs the `infra_job_heartbeats` table
 (`migrations/2026-11-03-job-heartbeats.sql`) and nothing else: no new property
 and no new trigger. It also stops starting work after 4 minutes of a run
 (Google kills one at 6) and keeps the villa's settings in the script cache for
 an hour.
+
+### Other platforms' booking emails (v1.5, `pollPlatformEmails`)
+
+A step of the same run, timed like the others ("platform emails 120ms" in the last-ran report). It asks the Worker which senders to look for
+(`getPlatformEmailSources`, kept in the script cache for an hour; they come from the `email` block of each platform's file in `partners/`), finds
+their emails and hands each to the Worker (`ingestPlatformEmail`), which reads the wording, makes or cancels the stay and emails the owner. The
+script knows no platform and no wording, so a new platform's emails never need a push here.
+
+- **Gmail label** `portal-platform-mail-done` marks a thread whose emails were all dealt with. **Do not rename it**: it is the record of what was
+  handled. Threads not yet marked are looked at for 14 days back (the first run after an install therefore also picks up what arrived before it), and
+  every thread with activity in the last 3 days is looked at again even when marked, so a cancellation arriving in the booking's own thread is not
+  missed. The Worker remembers each email by its Gmail id (`infra_processing_log`, event `platform_email`): looking twice never does anything twice.
+- **Needs nothing new**: no property, no trigger, no table (it uses the `infra_processing_log` that exists). The Worker must be live first (a script
+  that asks for a source list the Worker does not know yet logs it and reads nothing).
+- A failed call leaves the thread unmarked (tried again in 5 minutes) and tells the owner once per email.
 
 ### Hardcoded, not properties
 

@@ -24,6 +24,7 @@
 //   6. Backs up to Sheets
 //   7. Emails bijisukumar@gmail.com with full booking summary
 //   8. Marks email as read
+//   9. (v1.5) Reads the booking / cancellation / change emails of the other platforms the portal knows (Agoda today) and hands them to the Worker
 //
 // DOES NOT handle:
 //   Reviews — those run from bijisukumar@gmail.com (V21 script)
@@ -32,6 +33,18 @@
 // ============================================================
 
 // ── CHANGELOG (newest first — this file is the source of truth for live) ────
+// v1.5  2026-11-27
+//   • pollPlatformEmails(): reads the booking emails of every OTHER platform whose partner file says how (today Agoda: "New booking confirmed for 5 - 6 Dec
+//     2026" from its no-reply address) and hands each one to the Worker (ingestPlatformEmail), which makes the stay, cancels it, or tells the owner. This
+//     script knows no platform and no wording: which senders to look for comes from the Worker (getPlatformEmailSources, kept for an hour), and the reading of
+//     the email is done there. A new platform's emails therefore never need a change or a push here. Before this, an Agoda booking reached StayVibe only as a
+//     blocked date on its calendar, hours late, with no guest, no price and no check-in link (5-6 Dec 2026, Suresh Kumar, never became a stay).
+//   • Dedupe is the Gmail label portal-platform-mail-done (read state is no marker, see REVIEW_DONE_LABEL), the last 14 days are looked at for threads not yet
+//     marked, and every thread with activity in the last 3 days is looked at again even when marked: a cancellation arriving in the booking's own thread must
+//     not be missed. The Worker remembers each email by its Gmail id, so looking twice never does anything twice. Oldest email first, so a cancellation is
+//     applied after the booking it cancels. The mail system's own sender verdict (Authentication-Results) goes with each email, so a made-up "Agoda" email is refused.
+//   • The step is timed like the others ("platform emails 120ms" in the last-ran report); the report's label is now "Booking email reader".
+//   Nothing about reading or parsing Airbnb's emails changed.
 // v1.4  2026-11-03
 //   • Hardened after one run was killed at Google's six-minute limit on 2026-11-02 (DEADLINE_EXCEEDED), with nothing recorded about
 //     which step was slow:
@@ -167,7 +180,7 @@ function reportRun_(started, steps, failure) {
   try {
     var failedStep = steps.some(function(s) { return s.ok === false; });
     callWorker('POST', 'recordJobRun', {
-      villaId: TENANT_ID, job: 'poll-reservations', label: 'Airbnb email reader', everyMinutes: 5,
+      villaId: TENANT_ID, job: 'poll-reservations', label: 'Booking email reader', everyMinutes: 5,
       ok: !failure && !failedStep, ms: Date.now() - started,
       summary: (failure ? 'FAILED: ' + failure + '. ' : '') + stepsSummary_(steps) +
         (GUARD_HELD ? '; the time guard held back ' + GUARD_HELD + ' email(s) for the next run' : ''),
@@ -217,6 +230,8 @@ function pollNewReservations() {
       sendAlert('🚨 Poller error', e.message + '\n' + (e.stack||''));
     });
     runStep_(steps, 'cancellations', pollAirbnbCancellations);
+    // The other platforms' booking emails (Agoda today): which ones is the Worker's to say, see pollPlatformEmails().
+    runStep_(steps, 'platform emails', pollPlatformEmails);
     runStep_(steps, 'changes', pollAirbnbChangeRequests);
     runStep_(steps, 'reviews', pollAirbnbReviews);
     Logger.log('=== pollNewReservations END ' + stepsSummary_(steps) + ' ===');
@@ -286,6 +301,151 @@ function pollAirbnbCancellations() {
     } catch(e) {
       Logger.log('Error processing cancellation "' + subject + '": ' + e.message);
     }
+  });
+}
+
+// ── OTHER PLATFORMS' BOOKING EMAILS (v1.5) ───────────────────────────────────────
+// Agoda (and any platform whose partner file in the portal has an `email` block) tells the villa about a booking, a cancellation or a change by email to
+// this mailbox. This reads those emails and hands each to the Worker's ingestPlatformEmail, which reads the wording (nothing about a platform is written here),
+// makes or cancels the stay and emails the owner. What this does: ask the Worker which senders to look for, find their emails, send the oldest first, and mark
+// a thread done only when every email in it was dealt with (a failed call leaves it for the next run, and tells the owner once).
+var PLATFORM_MAIL_DONE_LABEL   = 'portal-platform-mail-done';   // do not rename: the label IS the record of what has been handled (see REVIEW_DONE_LABEL)
+var PLATFORM_MAIL_SOURCES_KEY  = 'platformMailSources-v1';
+var PLATFORM_MAIL_NEW_DAYS     = 14;   // threads not yet marked done: this many days back (also what a fresh install picks up from before it)
+var PLATFORM_MAIL_RECHECK_DAYS = 3;    // threads with activity this recently are looked at again even when marked done
+var PLATFORM_MAIL_MAX_THREADS  = 20;   // per search
+
+// Which platforms' emails to read: [{ platform, label, from: [addresses], searchWords: [] }] from the Worker, kept for an hour like the villa's settings.
+// A failed answer is an empty list (nothing is read this run) and is not kept, so the next run asks again.
+function getPlatformMailSources_() {
+  var cache = null;
+  try {
+    cache = CacheService.getScriptCache();
+    var hit = cache.get(PLATFORM_MAIL_SOURCES_KEY + ':' + TENANT_ID);
+    if (hit) return JSON.parse(hit);
+  } catch(e) { Logger.log('platform mail sources cache read: ' + e.message + ' — asking the Worker'); }
+  var resp = callWorker('POST', 'getPlatformEmailSources', { villaId: TENANT_ID });
+  if (resp && resp.success && resp.data && Array.isArray(resp.data.sources)) {
+    try { if (cache) cache.put(PLATFORM_MAIL_SOURCES_KEY + ':' + TENANT_ID, JSON.stringify(resp.data.sources), CONFIG_CACHE_SECONDS); }
+    catch(ce) { Logger.log('platform mail sources cache write: ' + ce.message); }
+    return resp.data.sources;
+  }
+  Logger.log('getPlatformEmailSources failed: ' + JSON.stringify(resp));
+  return [];
+}
+
+// The Gmail search for one platform's emails, from what the Worker said: its sender addresses, and the words its subject must have.
+function platformMailQuery_(source, extra) {
+  var q = 'from:(' + (source.from || []).join(' OR ') + ')';
+  if (source.searchWords && source.searchWords.length) q += ' subject:(' + source.searchWords.join(' OR ') + ')';
+  return q + ' ' + extra;
+}
+
+// Is this message from one of the platform's senders? (A thread can also hold the villa's own replies.)
+function platformMailFromMatches_(from, addresses) {
+  var f = String(from || '').toLowerCase();
+  return (addresses || []).some(function(a) { return a && f.indexOf(String(a).toLowerCase()) !== -1; });
+}
+
+// The mail system's own verdict on the sender (the Authentication-Results and Received-SPF headers Gmail adds when it receives a message), for the Worker to
+// check: a made-up email can SAY it is from Agoda, this is the one thing that says whether it was. '' when the headers cannot be read (the Worker then cannot tell,
+// which is not a refusal). Only the receiving server's own headers: ARC copies from earlier servers are left out.
+function platformMailAuth_(msg) {
+  try {
+    var raw  = msg.getRawContent();
+    var head = String(raw).slice(0, 40000);
+    var end  = head.search(/\r?\n\r?\n/);
+    if (end > 0) head = head.slice(0, end);
+    head = head.replace(/\r?\n[ \t]+/g, ' ');
+    var keep = [];
+    head.split(/\r?\n/).forEach(function(line) {
+      if (/^(Authentication-Results|Received-SPF):/i.test(line)) keep.push(line);
+    });
+    return keep.join(' | ').slice(0, 1500);
+  } catch(e) { Logger.log('platformMailAuth_: ' + e.message); return ''; }
+}
+
+// One email to the Worker. true = dealt with (whatever the answer: a stay made, a duplicate, ignored, refused, unreadable: the Worker has told the owner what
+// needs telling); false = the Worker could not be reached or failed, so it is tried again on the next run.
+function handlePlatformMail_(source, msg) {
+  var subject = msg.getSubject();
+  var resp = callWorker('POST', 'ingestPlatformEmail', {
+    villaId:     TENANT_ID,
+    messageId:   msg.getId(),
+    from:        msg.getFrom(),
+    subject:     subject,
+    text:        String(msg.getPlainBody() || '').slice(0, 150000),
+    html:        String(msg.getBody() || '').slice(0, 250000),
+    authResults: platformMailAuth_(msg),
+    receivedAt:  msg.getDate().toISOString(),
+  });
+  if (!resp || !resp.success) {
+    Logger.log('ingestPlatformEmail failed for "' + subject + '": ' + JSON.stringify(resp));
+    // It will be tried again in five minutes: say so once, not every time.
+    try {
+      var cache = CacheService.getScriptCache();
+      var key   = 'pm-fail-' + msg.getId();
+      if (!cache.get(key)) {
+        cache.put(key, '1', 6 * 60 * 60);
+        sendAlert('⚠️ ' + source.label + ' email not processed',
+          'An email from ' + source.label + ' could not be handled just now (' + (resp && resp.error ? resp.error : 'the portal did not answer') + ').' +
+          '\nSubject: ' + subject + '\nIt will be tried again on the next run; if this keeps happening, add the booking by hand.');
+      }
+    } catch(ce) { Logger.log('platform mail failure alert: ' + ce.message); }
+    return false;
+  }
+  var d = resp.data || {};
+  Logger.log('Platform email "' + subject + '": ' + (d.action || '?') + (d.stayId ? ' ' + d.stayId : ''));
+  // A new stay gets its Drive folder, as an Airbnb booking does (non-fatal: it can be made by hand).
+  if ((d.action === 'created' || d.action === 'merged') && d.stayId) {
+    try {
+      var folder = getOrCreateGuestFolder(d.guestName, d.stayId, d.checkIn);
+      callWorker('POST', 'updateDriveFolder', { stayId: d.stayId, driveFolderId: folder.getId(), driveFolderUrl: folder.getUrl() });
+    } catch(fe) { Logger.log('Drive folder error: ' + fe.message); }
+  }
+  return true;
+}
+
+function pollPlatformEmails() {
+  var sources = getPlatformMailSources_();
+  if (!sources.length) { Logger.log('Platform emails: no platform has its emails read'); return; }
+  var label = GmailApp.getUserLabelByName(PLATFORM_MAIL_DONE_LABEL) || GmailApp.createLabel(PLATFORM_MAIL_DONE_LABEL);
+  var oldest = Date.now() - PLATFORM_MAIL_NEW_DAYS * 864e5;
+
+  sources.forEach(function(source) {
+    if (pastRunBudget_()) return;     // out of time: these emails wait for the next run
+    var seen = {}, threads = [];
+    [
+      platformMailQuery_(source, '-label:' + PLATFORM_MAIL_DONE_LABEL + ' newer_than:' + PLATFORM_MAIL_NEW_DAYS + 'd'),
+      platformMailQuery_(source, 'newer_than:' + PLATFORM_MAIL_RECHECK_DAYS + 'd'),
+    ].forEach(function(q) {
+      GmailApp.search(q, 0, PLATFORM_MAIL_MAX_THREADS).forEach(function(t) {
+        if (!seen[t.getId()]) { seen[t.getId()] = true; threads.push(t); }
+      });
+    });
+    Logger.log(source.label + ' email threads to look at: ' + threads.length);
+    if (!threads.length) return;
+
+    // Every email of those threads, the oldest first: a cancellation must be applied after the booking it cancels.
+    var items = [];
+    threads.forEach(function(t) {
+      t.getMessages().forEach(function(m) { items.push({ thread: t, msg: m, at: m.getDate().getTime() }); });
+    });
+    items.sort(function(a, b) { return a.at - b.at; });
+
+    var notDone = {};
+    items.forEach(function(it) {
+      if (it.at < oldest) return;                                            // an old email in a recent thread: long since dealt with
+      if (!platformMailFromMatches_(it.msg.getFrom(), source.from)) return;  // the villa's own reply, or someone else
+      if (pastRunBudget_()) { notDone[it.thread.getId()] = true; return; }   // out of time: left for the next run, thread not marked
+      try {
+        if (!handlePlatformMail_(source, it.msg)) notDone[it.thread.getId()] = true;
+      } catch(e) {
+        notDone[it.thread.getId()] = true;
+        Logger.log('Error handling ' + source.label + ' email "' + it.msg.getSubject() + '": ' + e.message);
+      }
+    });
+    threads.forEach(function(t) { if (!notDone[t.getId()]) t.addLabel(label); });
   });
 }
 

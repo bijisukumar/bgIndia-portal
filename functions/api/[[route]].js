@@ -1,6 +1,12 @@
 // ============================================================
 //   bgIndia Portal — Cloudflare Pages Function (D1 Worker)
 //   v2.0 — JWT authentication (PINs server-side only)
+//
+//   WHAT CHANGED (newest first; the full history is in git: git log -- "functions/api/[[route]].js")
+//     2026-11-27  Booking emails from platforms other than Airbnb (Agoda first): ingestPlatformEmail and getPlatformEmailSources read what the inbox reader
+//                 (apps-script/poll-reservations v1.5) hands over; the body of the createBooking action moved, line for line, into createBookingRecord() so a
+//                 booking that arrives by email is made the same way as one typed in; and the calendar-block alert (notifyNewPlatformBookings) for a platform
+//                 whose emails are read is told only when no stay of that platform already holds the nights.
 // ============================================================
 
 // This worker is one shared deployment across every tenant (unlike the
@@ -67,6 +73,7 @@ import { otherDates, takenNights } from '../../src/utils/openDates.js'
 import { fmtTime as fmt12, toMinutes as clockMinutes, checkoutTimeNote } from '../../src/utils/stayTimes.js'
 // The biggest party the check-in form takes without asking the guest to confirm the number with the host.
 import { partyLimit, partyOf } from '../../src/utils/partySize.js'
+import { senderMatches, emailKind, bodyLines, parseBookingEmail, senderAuthFailed } from '../../src/utils/platformEmail.js'
 // How a breakfast split is written down and checked (Guest info's editor).
 import { cleanBreakfast, formatBreakfast } from '../../src/utils/breakfastSplit.js'
 // A guest booked for a LATER date than today (India) needs a deliberate yes at check-in.
@@ -1855,11 +1862,15 @@ async function notifyNewPlatformBookings(env, DB, results) {
   if (!env) return
   for (const r of results || []) {
     if (!r || !r.ok || r.baseline || !r.newBlocks?.length) continue
-    // a platform whose bookings arrive as emails already becomes a stay (partner file: bookingsFrom 'email')
-    if ((partnerFor(getHostConfig(r.villaId), r.channel) || {}).bookingsFrom === 'email') continue
+    // a platform whose bookings arrive as emails already becomes a stay (partner file: bookingsFrom 'email'), UNLESS its emails are read by the inbox reader
+    // (an `email` block in its partner file): that reader can be stopped, or meet an email it cannot read, so a block with no stay of that platform
+    // behind it is still told. (Airbnb has no such block: nothing changes for it.)
+    const partner = partnerFor(getHostConfig(r.villaId), r.channel) || {}
+    if (partner.bookingsFrom === 'email' && !partner.email) continue
     const today = todayInZone(await zoneFor(DB, r.villaId))
     for (const b of r.newBlocks) {
       if (!b.checkout || b.checkout <= today) continue          // already over
+      if (partner.email && await platformStayHolds(DB, r.villaId, partner, b)) continue   // the stay made from its booking email already holds these nights
       try { await alertNewPlatformBooking(env, DB, r, b) }
       catch (e) { console.warn('new platform booking alert:', e?.message || e) }
     }
@@ -1930,6 +1941,317 @@ async function alertNewPlatformBooking(env, DB, feedResult, block) {
     `Time: ${new Date().toISOString()}`,
   ]
   await sendAlert(env, subject, lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'platform_booking')
+}
+
+// ── CREATING A STAY: THE ONE PLACE (2026-11-27) ───────────────────────────
+// What the "New booking" screen, the Airbnb inbox reader and every platform whose emails are read (below) do to make a stay: work out the commission, refuse nights
+// another guest already holds (and say so, loudly), fold the booking into a stay the same guest already has, or insert it. It was written inline in the
+// createBooking action; it is here, line for line, so a booking that arrives by email takes exactly the same road as one typed in. This file's module-level
+// functions cannot see the request's own variables: the villa to use when the booking names none and the actor come in as arguments, and `now` is this one's own.
+// -> { invalid }                       the dates make no sense (the message)
+//    { stayId, merged, wasStatus }     it was folded into the same guest's existing stay
+//    { error, conflict }               another guest holds those nights (the owner has been told; nothing was saved)
+//    { stayId }                        a new stay
+async function createBookingRecord(DB, env, body, actor, defaultVilla) {
+  const now = () => new Date().toISOString().slice(0, 19).replace('T', ' ')
+  const stayId = genStayId(body.villaId)
+  const nights = parseInt(body.nights) || 1
+  // The rate stored with the stay. The AMOUNT is the fact and the percentage only describes it: when the caller gives both a
+  // gross and a commission amount, the rate is worked out from them, so the two can never disagree (the email poller sent a
+  // constant 3 for years, which went wrong overnight on 2026-10-10 when Airbnb moved to host-only fees at 15.5%). With no amount
+  // yet it is the host's rule for the platform as of the booking's date (the partner's file plus the host's own config); a
+  // source nobody has described keeps what the caller sent.
+  const ruleHost = getHostConfig(body.villaId || defaultVilla)
+  const bkGross = Number(body.gross) || 0
+  const bkCommAmt = Number(body.commissionAmt) || 0
+  const bkCommPct = (bkGross > 0 && bkCommAmt > 0)
+    ? Math.round((bkCommAmt / bkGross) * 1000) / 10
+    : (partnerFor(ruleHost, body.source) ? commissionPct(ruleHost, body.source, body.checkInDate) : (Number(body.commissionPct) || 0))
+
+  // Guard against a checkout <= checkin pair reaching the DB at all —
+  // this exact shape (auto-imported Airbnb booking, correct nights,
+  // checkout_date silently equal to checkin_date) happened once via
+  // the email-parsing Apps Script mis-reading a reservation's dates.
+  // Reject loudly here instead of silently storing a degenerate
+  // 0-night stay that only shows up later as a calendar artifact.
+  if (body.checkInDate && body.checkOutDate && body.checkOutDate <= body.checkInDate) {
+    return { invalid: `checkOutDate (${body.checkOutDate}) must be after checkInDate (${body.checkInDate})` }
+  }
+
+  // Identity + overlap classification (Phase 2b) — replaces the fragile
+  // exact-checkin_date "provisional" match. A same-guest overlap is this
+  // guest's existing hold/enquiry stay → enrich it with the Airbnb data
+  // (no duplicate even if the dates shifted). A different-guest overlap
+  // is a real double booking → alert + log + block.
+  const cls = await classifyStayConflicts(DB, {
+    villaId: body.villaId || defaultVilla,
+    checkinDate: body.checkInDate, checkoutDate: body.checkOutDate,
+    phone: body.guestPhone, email: body.guestEmail,
+    guestName: body.guestName || body.bookerName,
+  })
+
+  if (cls.ownOverlap) {
+    const provisional = cls.ownOverlap
+    await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.source || '', body.airbnbConf || null, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
+    await syncStayLedger(DB, provisional.stay_id)
+    return { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status }
+  }
+
+  if (cls.otherOverlap) {
+    const conflict = cls.otherOverlap
+    const alertSubject = { domain: 'villa', kind: 'alert', emoji: '🚨', text: 'URGENT — Double booking detected! ' + (body.checkInDate || '') }
+    const alertVillaId = body.villaId || defaultVilla
+    const alertLines = [
+      'Source: New Booking screen (createBooking)',
+      'Action: New booking BLOCKED — overlapping dates detected',
+      '',
+      'IMMEDIATE ACTION REQUIRED — the villa is already booked for these dates.',
+      '',
+      `EXISTING: ${conflict.stay_id} | ${conflict.guest_name} | ${conflict.checkin_date} -> ${conflict.checkout_date}`,
+      `NEW ATTEMPT: ${body.guestName} | ${body.checkInDate} -> ${body.checkOutDate}`,
+      '',
+      `Attempted by: ${actor}`,
+      `Time:         ${now()}`,
+    ]
+    await sendAlert(env, alertSubject, alertLines, await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId)
+
+    try {
+      const overlapNights = body.checkInDate && body.checkOutDate ? Math.max(0, Math.round((Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) - Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000)) : 0
+      await DB.prepare(`INSERT INTO stayvibe_duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`).bind(`DUP-${Date.now()}`, body.villaId || defaultVilla, conflict.stay_id, conflict.guest_name, conflict.checkin_date, conflict.checkout_date, conflict.source || 'unknown', conflict.created_at || null, body.guestName || 'unknown', body.checkInDate, body.checkOutDate, body.source || 'unknown', body.airbnbConf || null, overlapNights).run()
+    } catch(logErr) {}
+
+    return { error: `Double booking detected: ${conflict.guest_name} is already booked`, conflict }
+  }
+
+  await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || defaultVilla, body.source || 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.guestPhone), body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
+  await syncStayLedger(DB, stayId)
+  return { stayId }
+}
+
+// ── BOOKING PLATFORM EMAILS (2026-11-27) ──────────────────────────────────
+// A platform whose partner file has an `email` block (partners/agoda.js) tells us about a booking, a cancellation or a change by email to the villa's inbox.
+// The inbox reader (apps-script/poll-reservations, v1.5) asks getPlatformEmailSources which senders to look for, hands each email it finds to
+// ingestPlatformEmail below, and marks the thread done when the answer says it was dealt with. The email is read by src/utils/platformEmail.js, which knows
+// no platform: who sends it, what a subject means and the words in front of each value are the partner file's. A new platform's emails are a new `email`
+// block there, not new code here.
+//   confirmed -> a stay (createBookingRecord above), and the owner is told what was added and what is still to do
+//   cancelled -> that stay is set to cancelled (never one whose guest has already arrived), and the owner is told
+//   modified  -> only the owner is told: a change is for a person to apply, and the wording of one is not known yet
+//   unreadable, or a failed sender check -> the owner is emailed, nothing is guessed and nothing is changed
+// Every email is remembered by its Gmail id (infra_processing_log, event 'platform_email'), so a retry, or a thread read twice, never repeats anything.
+
+// What the inbox reader must search for: one entry per platform that sends booking emails.
+function platformEmailSources(villaId) {
+  return hostPartners(getHostConfig(villaId))
+    .filter(p => p.email && Array.isArray(p.email.from) && p.email.from.length)
+    .map(p => ({ platform: p.id, label: p.label, from: p.email.from, searchWords: Array.isArray(p.email.searchWords) ? p.email.searchWords : [] }))
+}
+
+// The partner whose emails these are: the first that lists the sender.
+function platformByEmailSender(villaId, from) {
+  return hostPartners(getHostConfig(villaId)).find(p => p.email && senderMatches(from, p.email.from)) || null
+}
+
+// An email remembered by its Gmail id (the stay it made or changed, when there is one), and asked about again before anything is done.
+async function recordPlatformEmail(DB, messageId, stayId, what) {
+  await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'platform_email', ?, ?, datetime('now'))`)
+    .bind(genId('LOG'), stayId || null, `msg:${messageId} ${what}`.slice(0, 480)).run()
+}
+async function platformEmailSeen(DB, messageId) {
+  const row = await DB.prepare(`SELECT 1 AS seen FROM infra_processing_log WHERE event_type = 'platform_email' AND note LIKE ? LIMIT 1`).bind(`msg:${messageId} %`).first()
+  return !!row
+}
+
+// What the booking is worth, from the email's "total price". The platform's own rate (its partner file, as of the check-in date) turns the price the guest pays
+// into what the villa receives, or the other way round when the partner file says the email's price is what the platform pays out. A price in another
+// currency than the villa's, or none at all, is not stored as money: the owner is told to enter it.
+function platformEmailMoney(parsed, partner, host) {
+  const spec = partner.email || {}
+  const rate = commissionPct(host, partner.id, parsed.checkIn)
+  const wantCurrency = String(spec.currency || 'INR').toUpperCase()
+  const sameCurrency = !parsed.currency || String(parsed.currency).toUpperCase() === wantCurrency
+  if (!(parsed.total > 0) || !sameCurrency) return { usable: false, rate, gross: 0, commissionAmt: 0, net: 0 }
+  const r2 = x => Math.round(x * 100) / 100
+  const total = r2(parsed.total)
+  if (spec.totalPriceIs === 'net') {
+    const gross = rate > 0 && rate < 100 ? r2(total / (1 - rate / 100)) : total
+    return { usable: true, rate, gross, commissionAmt: r2(gross - total), net: total, totalIs: 'net' }
+  }
+  const commissionAmt = Math.round(total * rate) / 100
+  return { usable: true, rate, gross: total, commissionAmt, net: r2(total - commissionAmt), totalIs: 'gross' }
+}
+
+// One owner email about a platform email. Never allowed to fail the handling of the email itself.
+async function alertPlatformEmail(env, DB, villaId, subject, lines) {
+  try {
+    await sendAlert(env, { domain: 'villa', ...subject }, lines, await getOwnerAlertEmail(DB, env, villaId), DB, villaId, 'platform_email')
+  } catch (e) { console.warn('platform email alert:', e?.message || e) }
+}
+
+// A stay that the guest has already arrived for is not cancelled by an email: a person decides.
+const PLATFORM_STAY_ARRIVED = ['checked_in', 'ready_for_checkout', 'checked_out', 'closed']
+
+// One platform email in, what was done out: { action, ... } where action is 'created' | 'merged' | 'conflict' | 'duplicate' | 'cancelled' | 'already_cancelled'
+// | 'cancel_unmatched' | 'cancel_refused' | 'modified_alert' | 'unparsed' | 'refused' | 'ignored', or { error }. body = { villaId, messageId, from, subject, text,
+// html, authResults } as the inbox reader sends it.
+async function ingestPlatformEmail(env, DB, body) {
+  const villaId = String(body.villaId || '').trim() || env.DEFAULT_VILLA_ID || 'dwarka'
+  const messageId = String(body.messageId || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 120)
+  if (!messageId) return { error: 'messageId required' }
+  const subject = String(body.subject || '').replace(/\s+/g, ' ').trim().slice(0, 300)
+  const partner = platformByEmailSender(villaId, String(body.from || ''))
+  if (!partner) return { action: 'ignored', reason: 'sender' }
+  const spec = partner.email
+  const label = partner.label
+  if (await platformEmailSeen(DB, messageId)) return { action: 'duplicate', reason: 'message' }
+
+  // What the email is about, from its subject. Anything else the platform sends (a payment note, a promotion) is none of our business.
+  const kind = emailKind(subject, spec.kinds)
+  if (kind === 'other') { await recordPlatformEmail(DB, messageId, null, `${partner.id} ignored: subject`); return { action: 'ignored', reason: 'subject' } }
+
+  const text = String(body.text || '').slice(0, 200000), html = String(body.html || '').slice(0, 300000)
+  const stamp = `Time: ${new Date().toISOString()}`
+  const inr = n => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
+
+  // A made-up email can say it is from a platform. The mail system's own verdict on the sender is the one thing that says whether it was.
+  if (senderAuthFailed(body.authResults)) {
+    await alertPlatformEmail(env, DB, villaId, { kind: 'alert', emoji: '⚠️', text: `An email that says it is from ${label} was not used: its sender check failed` }, [
+      `Source: ${label} email > StayVibe`,
+      `Action: an email that looks like a ${label} booking email failed the mail system's check that it really came from ${label}. Nothing was changed.`,
+      '', `Subject:  ${subject}`, '',
+      `What to do: if you do not recognise it, ignore it. If it is a real ${label} booking, add it by hand (New booking, source ${label}) and tell your developer.`,
+      stamp,
+    ])
+    await recordPlatformEmail(DB, messageId, null, `${partner.id} ${kind} refused: sender check`)
+    return { action: 'refused', reason: 'sender_check' }
+  }
+
+  // Read it. A new booking needs the id and both dates; a cancellation or a change is found by its id.
+  const parsed = parseBookingEmail({ subject, text, html }, spec, { need: kind === 'confirmed' ? ['bookingId', 'checkIn', 'checkOut'] : ['bookingId'] })
+  const readable = kind === 'confirmed' ? parsed.ok : parsed.missing.length === 0
+  if (!readable) {
+    const excerpt = bodyLines({ text, html }).slice(0, 40).join('\n').slice(0, 1800)
+    await alertPlatformEmail(env, DB, villaId, { kind: 'alert', emoji: '⚠️', text: `${label} email could not be read: ${subject.slice(0, 70)}` }, [
+      `Source: ${label} email > StayVibe`,
+      `Action: an email about a ${label} booking could not be turned into a stay. Nothing was changed.`,
+      '', `Subject:  ${subject}`, `Missing:  ${parsed.missing.join(', ') || '-'}${parsed.problem ? ' (' + parsed.problem + ')' : ''}`, '',
+      `What to do: open the email and add the booking by hand (New booking, source ${label}). Then send this email to your developer, so the reader can learn its wording: the start of the text, as StayVibe read it, is below.`,
+      '', ...excerpt.split('\n').map(l => '  | ' + l), '', stamp,
+    ])
+    await recordPlatformEmail(DB, messageId, null, `${partner.id} ${kind} unread: ${parsed.missing.join(',') || parsed.problem}`)
+    return { action: 'unparsed', kind, missing: parsed.missing, problem: parsed.problem }
+  }
+
+  const bookingId = parsed.bookingId
+  const found = await DB.prepare(`SELECT stay_id, guest_name, status, checkin_date, checkout_date FROM stayvibe_stays WHERE airbnb_conf = ? AND villa_id = ? LIMIT 1`).bind(bookingId, villaId).first()
+  const range = parsed.checkIn && parsed.checkOut ? `${dayMonth(parsed.checkIn)} to ${dayMonth(parsed.checkOut)}` : ''
+
+  // ── A NEW BOOKING ──
+  if (kind === 'confirmed') {
+    if (found) { await recordPlatformEmail(DB, messageId, found.stay_id, `${partner.id} confirmed ${bookingId}: already a stay`); return { action: 'duplicate', reason: 'booking', stayId: found.stay_id } }
+    const host = getHostConfig(villaId)
+    const money = platformEmailMoney(parsed, partner, host)
+    const guestName = parsed.guestName || `${label} guest ${bookingId}`
+    const made = await createBookingRecord(DB, env, {
+      villaId, source: partner.id, guestName, checkInDate: parsed.checkIn, checkOutDate: parsed.checkOut, nights: parsed.nights,
+      adults: parsed.adults || 1, children: parsed.children || 0, gross: money.gross, commissionAmt: money.commissionAmt, net: money.net,
+      airbnbConf: bookingId, country: parsed.country || '',
+    }, 'auto', env.DEFAULT_VILLA_ID || 'dwarka')
+    if (made.invalid) {
+      await recordPlatformEmail(DB, messageId, null, `${partner.id} confirmed ${bookingId}: ${made.invalid}`)
+      return { action: 'unparsed', kind, missing: [], problem: made.invalid }
+    }
+    if (made.conflict) {
+      // createBookingRecord has already sent the urgent double-booking email; this one carries the booking itself, so it can be added once the clash is sorted out.
+      await alertPlatformEmail(env, DB, villaId, { kind: 'alert', emoji: '⚠️', text: `${label} booking NOT added, another guest holds those nights: ${guestName}, ${range}` }, [
+        `Source: ${label} booking email > StayVibe`,
+        `Action: ${label} says these nights are booked, and StayVibe already has another guest on them. The ${label} booking was NOT added.`,
+        '', `${label} booking: ${bookingId}`, `Guest:    ${guestName}${parsed.country ? ' (' + parsed.country + ')' : ''}`, `Dates:    ${range} (${parsed.nights} night${parsed.nights === 1 ? '' : 's'})`,
+        `Guests:   ${parsed.adults || '?'} adult${parsed.adults === 1 ? '' : 's'}${parsed.children ? ', ' + parsed.children + ' child' + (parsed.children === 1 ? '' : 'ren') : ''}`,
+        `Price:    ${parsed.total ? (parsed.currency ? parsed.currency + ' ' : '') + parsed.total : '(none)'}`, '',
+        `Already here: ${made.conflict.stay_id} (${made.conflict.guest_name}, ${made.conflict.source || 'direct'}), ${dayMonth(made.conflict.checkin_date)} to ${dayMonth(made.conflict.checkout_date)}`,
+        `What to do today: decide which booking stands and move or cancel the other, then add the ${label} booking by hand (New booking, source ${label}) if it stays.`,
+        stamp,
+      ])
+      await recordPlatformEmail(DB, messageId, made.conflict.stay_id, `${partner.id} confirmed ${bookingId}: clash with ${made.conflict.stay_id}`)
+      return { action: 'conflict', bookingId, conflictStayId: made.conflict.stay_id }
+    }
+    const stayId = made.stayId
+    const rateNote = partner.commission && !Array.isArray(partner.commission) && partner.commission.note ? String(partner.commission.note) : ''
+    const noteLine = `${label} booking ${bookingId}, added from its confirmation email. `
+      + (money.usable ? `Price ${inr(parsed.total)} as the email says (${money.totalIs === 'net' ? 'what ' + label + ' pays out' : 'the guest\'s price, less ' + label + '\'s ' + money.rate + '%'}).`
+        : `The email's price (${parsed.total ? (parsed.currency ? parsed.currency + ' ' : '') + parsed.total : 'none'}) was not stored: enter the money in Complete booking.`)
+      + (spec.noContact ? ' No phone or email came with it: copy them from the platform.' : '')
+    await DB.prepare(`UPDATE stayvibe_stays SET notes = CASE WHEN COALESCE(notes,'') = '' THEN ? ELSE notes || ' | ' || ? END, updated_at = datetime('now') WHERE stay_id = ?`).bind(noteLine, noteLine, stayId).run()
+    await recordPlatformEmail(DB, messageId, stayId, `${partner.id} confirmed ${bookingId}: ${made.merged ? 'merged into' : 'created'} ${stayId}`)
+    await alertPlatformEmail(env, DB, villaId, { kind: 'log', emoji: '🏨', text: `New ${label} booking: ${guestName}, ${range}` }, [
+      `Source: ${label} booking email > StayVibe`,
+      made.merged ? `Action: this ${label} booking was added to a stay the same guest already had (${stayId}).` : `Action: a new ${label} booking was added as a stay. Nothing to do unless a line below says so.`,
+      '', `Guest:         ${guestName}${parsed.country ? ' (' + parsed.country + ')' : ''}`, `${label} booking: ${bookingId}`,
+      `Dates:         ${range} (${parsed.nights} night${parsed.nights === 1 ? '' : 's'}; the guest arrives on the first date and leaves on the last)`,
+      `Guests:        ${parsed.adults || '?'} adult${parsed.adults === 1 ? '' : 's'}${parsed.children ? ', ' + parsed.children + ' child' + (parsed.children === 1 ? '' : 'ren') : ''}`,
+      ...(parsed.rooms ? [`Room:          ${parsed.rooms}`] : []),
+      `Price:         ${parsed.total ? (parsed.currency ? parsed.currency + ' ' : '') + parsed.total : '(none in the email)'}`,
+      ...(money.usable ? [`You receive:   about ${inr(money.net)} (after ${label}'s ${money.rate}%${rateNote ? '; ' + rateNote : ''})`] : [`Money:         not stored: enter it in Complete booking`]),
+      `Stay:          ${stayId}`, '',
+      ...(spec.noContact ? [`Still to do: ${label} sends no phone number or email. Copy the guest's from ${label} ("View booking details" in its email) into Complete booking > Guest info, so the check-in link can be sent.`, ''] : []),
+      `The nights close on your other platforms' calendars when each next reads your StayVibe link (usually within a couple of hours).`,
+      stamp,
+    ])
+    return { action: made.merged ? 'merged' : 'created', stayId, guestName, checkIn: parsed.checkIn, checkOut: parsed.checkOut, nights: parsed.nights }
+  }
+
+  // ── A CANCELLATION ──
+  if (kind === 'cancelled') {
+    if (!found) { await recordPlatformEmail(DB, messageId, null, `${partner.id} cancelled ${bookingId}: no stay`); return { action: 'cancel_unmatched', bookingId } }
+    if (found.status === 'cancelled' || found.status === 'void') { await recordPlatformEmail(DB, messageId, found.stay_id, `${partner.id} cancelled ${bookingId}: already ${found.status}`); return { action: 'already_cancelled', stayId: found.stay_id } }
+    const stayRange = `${dayMonth(found.checkin_date)} to ${dayMonth(found.checkout_date)}`
+    if (PLATFORM_STAY_ARRIVED.includes(found.status)) {
+      await alertPlatformEmail(env, DB, villaId, { kind: 'alert', emoji: '⚠️', text: `${label} says booking ${bookingId} was cancelled, but the guest has arrived: ${found.guest_name || ''}` }, [
+        `Source: ${label} cancellation email > StayVibe`,
+        `Action: ${label} cancelled a booking whose stay is already ${found.status.replace(/_/g, ' ')}. Nothing was changed.`,
+        '', `Guest: ${found.guest_name || '?'} (${found.stay_id}), ${stayRange}`, '',
+        `What to do: check the booking in ${label}. If the guest really did not stay, cancel or void the stay in Complete booking.`, stamp,
+      ])
+      await recordPlatformEmail(DB, messageId, found.stay_id, `${partner.id} cancelled ${bookingId}: refused, stay is ${found.status}`)
+      return { action: 'cancel_refused', reason: 'guest_already_arrived', stayId: found.stay_id }
+    }
+    await DB.batch([
+      DB.prepare(`UPDATE stayvibe_stays SET status = 'cancelled', updated_by = 'auto', updated_at = datetime('now') WHERE stay_id = ?`).bind(found.stay_id),
+      DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'cancellation', ?, ?, datetime('now'))`)
+        .bind(genId('LOG'), found.stay_id, `${label} cancellation (${bookingId}) — ${found.guest_name} ${found.checkin_date} → ${found.checkout_date}. Status set to cancelled.`),
+    ])
+    await syncEnquiryOnStayCancel(DB, found.stay_id, 'auto', `${label} cancellation (${bookingId})`)
+    await recordPlatformEmail(DB, messageId, found.stay_id, `${partner.id} cancelled ${bookingId}: stay cancelled`)
+    await alertPlatformEmail(env, DB, villaId, { kind: 'log', emoji: '❌', text: `${label} cancellation: ${found.guest_name || bookingId}, ${stayRange}` }, [
+      `Source: ${label} cancellation email > StayVibe`,
+      `Action: ${label} booking ${bookingId} was cancelled, and the stay was set to cancelled: it no longer holds the nights or counts in your revenue.`,
+      '', `Guest: ${found.guest_name || '?'} (${found.stay_id}), ${stayRange}`,
+      `The nights open again on your other platforms' calendars when each next reads your StayVibe link (usually within a couple of hours).`, stamp,
+    ])
+    return { action: 'cancelled', stayId: found.stay_id, guestName: found.guest_name }
+  }
+
+  // ── A CHANGE ──: only the owner is told. What the platform changed can be dates, guests or money, and applying it is a decision.
+  const was = found ? `${found.guest_name || '?'} (${found.stay_id}), ${dayMonth(found.checkin_date)} to ${dayMonth(found.checkout_date)}` : 'no stay in StayVibe has this booking number'
+  await alertPlatformEmail(env, DB, villaId, { kind: 'alert', emoji: '✏️', text: `${label} changed booking ${bookingId}${found && found.guest_name ? ': ' + found.guest_name : ''}` }, [
+    `Source: ${label} change email > StayVibe`,
+    `Action: ${label} says booking ${bookingId} was changed. Nothing was changed in StayVibe.`,
+    '', `Subject:   ${subject}`, `StayVibe:  ${was}`,
+    ...(range ? [`The email:  ${range}${parsed.adults ? ', ' + parsed.adults + ' adult' + (parsed.adults === 1 ? '' : 's') : ''}${parsed.children ? ', ' + parsed.children + ' child' + (parsed.children === 1 ? '' : 'ren') : ''}`] : []),
+    '', `What to do: open the booking in ${label}. If the dates, guests or money changed, update the stay (Complete booking > Guest info, and Channel & tariff).`, stamp,
+  ])
+  await recordPlatformEmail(DB, messageId, found ? found.stay_id : null, `${partner.id} modified ${bookingId}: owner told`)
+  return { action: 'modified_alert', stayId: found ? found.stay_id : null }
+}
+
+// Does a stay of this platform already hold the nights of a block in its calendar? (A stay made from its booking email does: the calendar showing them is
+// nothing new, and not a double booking.)
+async function platformStayHolds(DB, villaId, partner, block) {
+  const { results } = await DB.prepare(
+    `SELECT source FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled', 'void') AND checkin_date IS NOT NULL AND checkout_date IS NOT NULL AND checkin_date < ? AND checkout_date > ?`
+  ).bind(villaId, block.checkout, block.checkin).all()
+  return (results || []).some(r => channelsMatch(r.source, partner.id))
 }
 
 // 256 random bits, URL-safe: the whole secret in a platform's calendar link.
@@ -9600,78 +9922,27 @@ export async function onRequest(ctx) {
 
       if (action === 'createBooking') {
         assertPropertyAccess(payload, body.villaId)   // stands alone if the body was too large to peek
-        const stayId = genStayId(body.villaId)
-        const nights = parseInt(body.nights) || 1
-        // The rate stored with the stay. The AMOUNT is the fact and the percentage only describes it: when the caller gives both a
-        // gross and a commission amount, the rate is worked out from them, so the two can never disagree (the email poller sent a
-        // constant 3 for years, which went wrong overnight on 2026-10-10 when Airbnb moved to host-only fees at 15.5%). With no amount
-        // yet it is the host's rule for the platform as of the booking's date (the partner's file plus the host's own config); a
-        // source nobody has described keeps what the caller sent.
-        const ruleHost = getHostConfig(body.villaId || DEFAULT_VILLA_ID)
-        const bkGross = Number(body.gross) || 0
-        const bkCommAmt = Number(body.commissionAmt) || 0
-        const bkCommPct = (bkGross > 0 && bkCommAmt > 0)
-          ? Math.round((bkCommAmt / bkGross) * 1000) / 10
-          : (partnerFor(ruleHost, body.source) ? commissionPct(ruleHost, body.source, body.checkInDate) : (Number(body.commissionPct) || 0))
+        // The work is createBookingRecord (module level, so the platform-email reader makes a stay the same way); this only answers as it always did.
+        const made = await createBookingRecord(DB, env, body, actor, DEFAULT_VILLA_ID)
+        if (made.invalid) return err(made.invalid)
+        if (made.conflict) return json({ success: false, error: made.error, conflict: made.conflict }, 409)
+        return json({ success: true, data: made.merged ? { stayId: made.stayId, merged: true, wasStatus: made.wasStatus } : { stayId: made.stayId } })
+      }
 
-        // Guard against a checkout <= checkin pair reaching the DB at all —
-        // this exact shape (auto-imported Airbnb booking, correct nights,
-        // checkout_date silently equal to checkin_date) happened once via
-        // the email-parsing Apps Script mis-reading a reservation's dates.
-        // Reject loudly here instead of silently storing a degenerate
-        // 0-night stay that only shows up later as a calendar artifact.
-        if (body.checkInDate && body.checkOutDate && body.checkOutDate <= body.checkInDate) {
-          return err(`checkOutDate (${body.checkOutDate}) must be after checkInDate (${body.checkInDate})`)
-        }
+      // ── BOOKING PLATFORM EMAILS (2026-11-27): called by the inbox reader (apps-script/poll-reservations v1.5) with the system token. The work is above. ──
+      if (action === 'getPlatformEmailSources') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)   // the system token carries the owner role
+        const villaId = String(body.villaId || '').trim() || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        return json({ success: true, data: { sources: platformEmailSources(villaId) } })
+      }
 
-        // Identity + overlap classification (Phase 2b) — replaces the fragile
-        // exact-checkin_date "provisional" match. A same-guest overlap is this
-        // guest's existing hold/enquiry stay → enrich it with the Airbnb data
-        // (no duplicate even if the dates shifted). A different-guest overlap
-        // is a real double booking → alert + log + block.
-        const cls = await classifyStayConflicts(DB, {
-          villaId: body.villaId || DEFAULT_VILLA_ID,
-          checkinDate: body.checkInDate, checkoutDate: body.checkOutDate,
-          phone: body.guestPhone, email: body.guestEmail,
-          guestName: body.guestName || body.bookerName,
-        })
-
-        if (cls.ownOverlap) {
-          const provisional = cls.ownOverlap
-          await DB.prepare(`UPDATE stayvibe_stays SET source = COALESCE(NULLIF(?, ''), source), airbnb_conf = ?, gross = ?, commission_pct = ?, commission_amt = ?, net = ?, night_fee = ?, cleaning_fee = ?, host_service_fee = ?, you_earn = ?, guest_service_fee = ?, guest_paid_total = ?, checkout_date = COALESCE(NULLIF(checkout_date,''), ?), nights = COALESCE(NULLIF(nights,0), ?), adults = COALESCE(NULLIF(adults,0), ?), updated_by = ?, updated_at = datetime('now') WHERE stay_id = ?`).bind(body.source || '', body.airbnbConf || null, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.checkOutDate || null, parseInt(body.nights) || 1, body.adults || 1, actor, provisional.stay_id).run()
-          await syncStayLedger(DB, provisional.stay_id)
-          return json({ success: true, data: { stayId: provisional.stay_id, merged: true, wasStatus: provisional.status } })
-        }
-
-        if (cls.otherOverlap) {
-          const conflict = cls.otherOverlap
-          const alertSubject = { domain: 'villa', kind: 'alert', emoji: '🚨', text: 'URGENT — Double booking detected! ' + (body.checkInDate || '') }
-          const alertVillaId = body.villaId || DEFAULT_VILLA_ID
-          const alertLines = [
-            'Source: New Booking screen (createBooking)',
-            'Action: New booking BLOCKED — overlapping dates detected',
-            '',
-            'IMMEDIATE ACTION REQUIRED — the villa is already booked for these dates.',
-            '',
-            `EXISTING: ${conflict.stay_id} | ${conflict.guest_name} | ${conflict.checkin_date} -> ${conflict.checkout_date}`,
-            `NEW ATTEMPT: ${body.guestName} | ${body.checkInDate} -> ${body.checkOutDate}`,
-            '',
-            `Attempted by: ${actor}`,
-            `Time:         ${now()}`,
-          ]
-          await sendAlert(env, alertSubject, alertLines, await getOwnerAlertEmail(DB, env, alertVillaId), DB, alertVillaId)
-
-          try {
-            const overlapNights = body.checkInDate && body.checkOutDate ? Math.max(0, Math.round((Math.min(new Date(conflict.checkout_date), new Date(body.checkOutDate)) - Math.max(new Date(conflict.checkin_date), new Date(body.checkInDate))) / 86400000)) : 0
-            await DB.prepare(`INSERT INTO stayvibe_duplicate_bookings (dup_id, villa_id, detected_at, existing_stay_id, existing_guest, existing_checkin, existing_checkout, existing_source, existing_booked_at, new_guest, new_checkin, new_checkout, new_source, new_airbnb_conf, overlap_nights) VALUES (?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?,?)`).bind(`DUP-${Date.now()}`, body.villaId || DEFAULT_VILLA_ID, conflict.stay_id, conflict.guest_name, conflict.checkin_date, conflict.checkout_date, conflict.source || 'unknown', conflict.created_at || null, body.guestName || 'unknown', body.checkInDate, body.checkOutDate, body.source || 'unknown', body.airbnbConf || null, overlapNights).run()
-          } catch(logErr) {}
-
-          return json({ success: false, error: `Double booking detected: ${conflict.guest_name} is already booked`, conflict }, 409)
-        }
-
-        await DB.prepare(`INSERT INTO stayvibe_stays (stay_id, villa_id, source, guest_name, guest_phone, guest_email, checkin_date, checkout_date, nights, adults, children, tariff_per_night, extra_charges, gross, commission_pct, commission_amt, net, status, home_address, city, state, country, from_city, night_fee, cleaning_fee, host_service_fee, you_earn, guest_service_fee, guest_paid_total, airbnb_conf, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(stayId, body.villaId || DEFAULT_VILLA_ID, body.source || 'direct', body.guestName || body.bookerName, normalizeStoredPhone(body.guestPhone), body.guestEmail || null, body.checkInDate, body.checkOutDate, nights, body.adults || 1, body.children || 0, (body.tariffPerNight || (body.nightFee && body.nights ? Math.round((body.nightFee / body.nights) * 100) / 100 : 0)), body.extraCharges || 0, body.gross || 0, bkCommPct, body.commissionAmt || 0, body.net || 0, 'confirmed', body.homeAddress || null, body.city || null, body.state || null, body.country || 'India', body.fromCity || body.city || null, body.nightFee || 0, body.cleaningFee || 0, body.hostServiceFee || 0, body.youEarn || body.net || 0, body.guestServiceFee || 0, body.guestPaid || 0, body.airbnbConf || null, actor, actor).run()
-        await syncStayLedger(DB, stayId)
-        return json({ success: true, data: { stayId } })
+      if (action === 'ingestPlatformEmail') {
+        if (payload.role !== 'owner' && payload.role !== 'master_owner') return err('Owner access only', 403)   // the system token carries the owner role
+        const villaId = String(body.villaId || '').trim() || DEFAULT_VILLA_ID
+        assertPropertyAccess(payload, villaId)
+        const result = await ingestPlatformEmail(env, DB, { ...body, villaId })
+        return result.error ? err(result.error) : json({ success: true, data: result })
       }
 
       // ── LICENSE-PLATE OCR (Raman check-in pre-fill) ──────────────────

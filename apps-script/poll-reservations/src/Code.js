@@ -41,8 +41,11 @@
 //     blocked date on its calendar, hours late, with no guest, no price and no check-in link (5-6 Dec 2026, Suresh Kumar, never became a stay).
 //   • Dedupe is the Gmail label portal-platform-mail-done (read state is no marker, see REVIEW_DONE_LABEL), the last 14 days are looked at for threads not yet
 //     marked, and every thread with activity in the last 3 days is looked at again even when marked: a cancellation arriving in the booking's own thread must
-//     not be missed. The Worker remembers each email by its Gmail id, so looking twice never does anything twice. Oldest email first, so a cancellation is
-//     applied after the booking it cancels. The mail system's own sender verdict (Authentication-Results) goes with each email, so a made-up "Agoda" email is refused.
+//     not be missed. The Worker remembers each email by its Gmail id, so looking twice never does anything twice. Cancellations are sent FIRST and everything else
+//     oldest first: a reader that was off for a while (or has just been installed) meets a booking's cancellation and its older confirmation together, and the
+//     Worker, which compares the times the two were RECEIVED, then makes no stay for the cancelled booking (no false "double booking" against a guest who has
+//     rebooked the nights since). With every email read as it arrives it makes no difference. The mail system's own sender verdict (Authentication-Results)
+//     goes with each email, so a made-up "Agoda" email is refused.
 //   • The step is timed like the others ("platform emails 120ms" in the last-ran report); the report's label is now "Booking email reader".
 //   Nothing about reading or parsing Airbnb's emails changed.
 // v1.4  2026-11-03
@@ -310,7 +313,7 @@ function pollAirbnbCancellations() {
 // makes or cancels the stay and emails the owner. What this does: ask the Worker which senders to look for, find their emails, send the oldest first, and mark
 // a thread done only when every email in it was dealt with (a failed call leaves it for the next run, and tells the owner once).
 var PLATFORM_MAIL_DONE_LABEL   = 'portal-platform-mail-done';   // do not rename: the label IS the record of what has been handled (see REVIEW_DONE_LABEL)
-var PLATFORM_MAIL_SOURCES_KEY  = 'platformMailSources-v1';
+var PLATFORM_MAIL_SOURCES_KEY  = 'platformMailSources-v2';   // v2: each source also carries its `kinds` (how a subject tells a cancellation), used to send cancellations first
 var PLATFORM_MAIL_NEW_DAYS     = 14;   // threads not yet marked done: this many days back (also what a fresh install picks up from before it)
 var PLATFORM_MAIL_RECHECK_DAYS = 3;    // threads with activity this recently are looked at again even when marked done
 var PLATFORM_MAIL_MAX_THREADS  = 20;   // per search
@@ -339,6 +342,21 @@ function platformMailQuery_(source, extra) {
   var q = 'from:(' + (source.from || []).join(' OR ') + ')';
   if (source.searchWords && source.searchWords.length) q += ' subject:(' + source.searchWords.join(' OR ') + ')';
   return q + ' ' + extra;
+}
+
+// What a subject means, by the same rule the Worker uses (src/utils/platformEmail.js emailKind): `kinds` is the platform's { cancelled: [...], modified: [...], confirmed: [...] }
+// of lower-case fragments and the first kind listed with a fragment in the subject wins. 'other' when none does, or when the Worker did not say (then nothing is reordered).
+function platformMailKind_(subject, kinds) {
+  var s = String(subject || '').toLowerCase().replace(/[‘’`´]/g, "'").replace(/[‐-―−]/g, '-').replace(/\s+/g, ' ');
+  var names = Object.keys(kinds || {});
+  for (var i = 0; i < names.length; i++) {
+    var fragments = kinds[names[i]];
+    if (!fragments || !fragments.length) continue;
+    for (var j = 0; j < fragments.length; j++) {
+      if (fragments[j] && s.indexOf(String(fragments[j]).toLowerCase()) !== -1) return names[i];
+    }
+  }
+  return 'other';
 }
 
 // Is this message from one of the platform's senders? (A thread can also hold the villa's own replies.)
@@ -426,12 +444,17 @@ function pollPlatformEmails() {
     Logger.log(source.label + ' email threads to look at: ' + threads.length);
     if (!threads.length) return;
 
-    // Every email of those threads, the oldest first: a cancellation must be applied after the booking it cancels.
+    // Every email of those threads: the cancellations first, then the rest, each group oldest first. A cancellation finds the stay its booking made on an earlier run;
+    // and when the reader has not seen the booking yet (it was off, or has just been installed) the Worker remembers the cancellation with the time it was received,
+    // so that the OLDER confirmation, which comes up next, is known to be void and makes no stay.
     var items = [];
     threads.forEach(function(t) {
-      t.getMessages().forEach(function(m) { items.push({ thread: t, msg: m, at: m.getDate().getTime() }); });
+      t.getMessages().forEach(function(m) {
+        var cancellation = platformMailKind_(m.getSubject(), source.kinds) === 'cancelled';
+        items.push({ thread: t, msg: m, at: m.getDate().getTime(), first: cancellation ? 0 : 1 });
+      });
     });
-    items.sort(function(a, b) { return a.at - b.at; });
+    items.sort(function(a, b) { return (a.first - b.first) || (a.at - b.at); });
 
     var notDone = {};
     items.forEach(function(it) {

@@ -3,6 +3,11 @@
 //   v2.0 — JWT authentication (PINs server-side only)
 //
 //   WHAT CHANGED (newest first; the full history is in git: git log -- "functions/api/[[route]].js")
+//     2026-11-28  Platform booking emails, two gaps found before the Google half went live: (1) a confirmation that is read AFTER its own cancellation (the reader
+//                 was off, or not installed yet, and meets the backlog; it now sends cancellations first) makes no stay, by comparing the times the two emails
+//                 were RECEIVED, so an old Agoda booking that was cancelled can no longer raise a false "double booking" against the guest who rebooked the nights;
+//                 (2) an email from the platform whose subject is none of new / cancelled / changed but that names a booking we hold is told to the owner instead of
+//                 being dropped without a word (a cancellation in wording we have not seen would otherwise leave a stay holding the nights shut everywhere).
 //     2026-11-27  Booking emails from platforms other than Airbnb (Agoda first): ingestPlatformEmail and getPlatformEmailSources read what the inbox reader
 //                 (apps-script/poll-reservations v1.5) hands over; the body of the createBooking action moved, line for line, into createBookingRecord() so a
 //                 booking that arrives by email is made the same way as one typed in; and the calendar-block alert (notifyNewPlatformBookings) for a platform
@@ -2038,13 +2043,16 @@ async function createBookingRecord(DB, env, body, actor, defaultVilla) {
 //   cancelled -> that stay is set to cancelled (never one whose guest has already arrived), and the owner is told
 //   modified  -> only the owner is told: a change is for a person to apply, and the wording of one is not known yet
 //   unreadable, or a failed sender check -> the owner is emailed, nothing is guessed and nothing is changed
+//   a confirmation whose booking was cancelled AFTER it was sent, and the cancellation was read first -> no stay is made (the owner is told it was cancelled before it was added)
+//   an email in none of those kinds that names a booking we hold -> the owner is told, nothing is changed (it may be a cancellation in words not known yet)
 // Every email is remembered by its Gmail id (infra_processing_log, event 'platform_email'), so a retry, or a thread read twice, never repeats anything.
+// What an email SAYS happened to a booking is dated by when it was RECEIVED, not when it was read (infra_processing_log, event 'platform_booking_event').
 
 // What the inbox reader must search for: one entry per platform that sends booking emails.
 function platformEmailSources(villaId) {
   return hostPartners(getHostConfig(villaId))
     .filter(p => p.email && Array.isArray(p.email.from) && p.email.from.length)
-    .map(p => ({ platform: p.id, label: p.label, from: p.email.from, searchWords: Array.isArray(p.email.searchWords) ? p.email.searchWords : [] }))
+    .map(p => ({ platform: p.id, label: p.label, from: p.email.from, searchWords: Array.isArray(p.email.searchWords) ? p.email.searchWords : [], kinds: p.email.kinds || {} }))
 }
 
 // The partner whose emails these are: the first that lists the sender.
@@ -2060,6 +2068,36 @@ async function recordPlatformEmail(DB, messageId, stayId, what) {
 async function platformEmailSeen(DB, messageId) {
   const row = await DB.prepare(`SELECT 1 AS seen FROM infra_processing_log WHERE event_type = 'platform_email' AND note LIKE ? LIMIT 1`).bind(`msg:${messageId} %`).first()
   return !!row
+}
+
+// When the email reached the inbox, as the reader says it (an ISO time): '' when it did not say, or said something that is not a time of the last years.
+function platformEmailReceivedAt(value) {
+  const ms = Date.parse(String(value || ''))
+  return Number.isFinite(ms) && ms > Date.parse('2020-01-01T00:00:00Z') && ms < Date.now() + 36e5 ? new Date(ms).toISOString() : ''
+}
+
+// What an email said happened to a booking, with the time it was RECEIVED (not the time it was read): "<platform>|<booking number>|<cancelled>|<ISO time>".
+// The order a reader meets emails in is not the order they were sent in (a reader that was off reads a backlog), so the story of a booking is told by these times.
+async function noteBookingEvent(DB, platformId, bookingId, kind, atIso) {
+  await DB.prepare(`INSERT INTO infra_processing_log (log_id, event_type, stay_id, note, created_at) VALUES (?, 'platform_booking_event', NULL, ?, datetime('now'))`)
+    .bind(genId('LOG'), `${platformId}|${bookingId}|${kind}|${atIso}`).run()
+}
+// The latest time (ISO) an email of this kind about this booking was received: '' when none has been read.
+async function latestBookingEventAt(DB, platformId, bookingId, kind) {
+  const prefix = `${platformId}|${bookingId}|${kind}|`
+  const { results } = await DB.prepare(`SELECT note FROM infra_processing_log WHERE event_type = 'platform_booking_event' AND substr(note, 1, ?) = ?`).bind(prefix.length, prefix).all()
+  let latest = ''
+  for (const r of results || []) { const at = String(r.note || '').slice(prefix.length); if (at > latest) latest = at }
+  return latest
+}
+
+// The stays of this platform that are still live (not cancelled, not over more than a few days) whose booking number appears in `haystack` (an email's subject and text).
+async function heldPlatformBookingsMentioned(DB, villaId, partner, haystack) {
+  const since = addDays(todayInZone(await zoneFor(DB, villaId)), -3)   // the property's own day, not the database's UTC date
+  const { results } = await DB.prepare(
+    `SELECT stay_id, guest_name, source, airbnb_conf, checkin_date, checkout_date FROM stayvibe_stays WHERE villa_id = ? AND status NOT IN ('cancelled', 'void') AND COALESCE(airbnb_conf, '') != '' AND checkout_date >= ?`
+  ).bind(villaId, since).all()
+  return (results || []).filter(r => channelsMatch(r.source, partner.id) && String(r.airbnb_conf).length >= 6 && haystack.includes(String(r.airbnb_conf)))
 }
 
 // What the booking is worth, from the email's "total price". The platform's own rate (its partner file, as of the check-in date) turns the price the guest pays
@@ -2105,13 +2143,30 @@ async function ingestPlatformEmail(env, DB, body) {
   const label = partner.label
   if (await platformEmailSeen(DB, messageId)) return { action: 'duplicate', reason: 'message' }
 
-  // What the email is about, from its subject. Anything else the platform sends (a payment note, a promotion) is none of our business.
-  const kind = emailKind(subject, spec.kinds)
-  if (kind === 'other') { await recordPlatformEmail(DB, messageId, null, `${partner.id} ignored: subject`); return { action: 'ignored', reason: 'subject' } }
-
   const text = String(body.text || '').slice(0, 200000), html = String(body.html || '').slice(0, 300000)
   const stamp = `Time: ${new Date().toISOString()}`
   const inr = n => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
+  const receivedAt = platformEmailReceivedAt(body.receivedAt)   // when the email reached the inbox (the reader sends it); '' when not known
+
+  // What the email is about, from its subject. Anything else the platform sends (a payment note, a promotion) is none of our business, with ONE exception: an email
+  // that names a booking StayVibe holds and that we cannot sort may be a cancellation or a change in words not known yet, and a stay that goes on for a cancelled
+  // booking keeps the nights shut on every other platform. That is told to the owner (nothing is changed); a made-up email is not even that.
+  const kind = emailKind(subject, spec.kinds)
+  if (kind === 'other') {
+    const lines = bodyLines({ text, html })
+    const held = senderAuthFailed(body.authResults) ? [] : await heldPlatformBookingsMentioned(DB, villaId, partner, `${subject} ${lines.join(' ')}`)
+    if (!held.length) { await recordPlatformEmail(DB, messageId, null, `${partner.id} ignored: subject`); return { action: 'ignored', reason: 'subject' } }
+    const excerpt = lines.slice(0, 40).join('\n').slice(0, 1800)
+    await alertPlatformEmail(env, DB, villaId, { kind: 'alert', emoji: '⚠️', text: `${label} sent an email about ${held.length === 1 ? 'a booking' : 'bookings'} you hold, in words StayVibe does not know: ${subject.slice(0, 60)}` }, [
+      `Source: ${label} email > StayVibe`,
+      `Action: an email from ${label} names ${held.length === 1 ? 'a booking' : 'bookings'} StayVibe holds, but its subject is not a new booking, a cancellation or a change as StayVibe knows them. Nothing was changed.`,
+      '', `Subject:  ${subject}`, ...held.map(h => `StayVibe: ${h.guest_name || '?'} (${h.stay_id}), ${dayMonth(h.checkin_date)} to ${dayMonth(h.checkout_date)}, ${label} booking ${h.airbnb_conf}`), '',
+      `What to do: open the email. If it says the booking was cancelled or changed, cancel or update the stay yourself (Complete booking). If it is only a notice, ignore this. Then send the email to your developer, so the reader can learn its wording: the start of the text, as StayVibe read it, is below.`,
+      '', ...excerpt.split('\n').map(l => '  | ' + l), '', stamp,
+    ])
+    await recordPlatformEmail(DB, messageId, held[0].stay_id, `${partner.id} unrecognised, names ${held.map(h => h.airbnb_conf).join(',')}: owner told`)
+    return { action: 'unrecognised_alert', stayIds: held.map(h => h.stay_id) }
+  }
 
   // A made-up email can say it is from a platform. The mail system's own verdict on the sender is the one thing that says whether it was.
   if (senderAuthFailed(body.authResults)) {
@@ -2146,9 +2201,25 @@ async function ingestPlatformEmail(env, DB, body) {
   const found = await DB.prepare(`SELECT stay_id, guest_name, status, checkin_date, checkout_date FROM stayvibe_stays WHERE airbnb_conf = ? AND villa_id = ? LIMIT 1`).bind(bookingId, villaId).first()
   const range = parsed.checkIn && parsed.checkOut ? `${dayMonth(parsed.checkIn)} to ${dayMonth(parsed.checkOut)}` : ''
 
+  // A cancellation is remembered with the time it was received, whether or not there is a stay to cancel yet: a confirmation older than it, read later, is then known to be void.
+  if (kind === 'cancelled' && receivedAt) await noteBookingEvent(DB, partner.id, bookingId, 'cancelled', receivedAt)
+
   // ── A NEW BOOKING ──
   if (kind === 'confirmed') {
     if (found) { await recordPlatformEmail(DB, messageId, found.stay_id, `${partner.id} confirmed ${bookingId}: already a stay`); return { action: 'duplicate', reason: 'booking', stayId: found.stay_id } }
+    // A cancellation of this very booking that was received AFTER this confirmation, and was read first (the inbox reader sends cancellations first): the booking never
+    // stood. No stay is made, so no clash can be raised for nights that somebody else may have rebooked since (the owner is told once, in one email).
+    const cancelledAt = receivedAt ? await latestBookingEventAt(DB, partner.id, bookingId, 'cancelled') : ''
+    if (cancelledAt && cancelledAt > receivedAt) {
+      const wasGuest = parsed.guestName || `${label} guest ${bookingId}`
+      await recordPlatformEmail(DB, messageId, null, `${partner.id} confirmed ${bookingId}: cancelled before it was read (${cancelledAt}), no stay made`)
+      await alertPlatformEmail(env, DB, villaId, { kind: 'log', emoji: '❌', text: `${label} cancellation: ${wasGuest}, ${range} (cancelled before it was added)` }, [
+        `Source: ${label} booking email > StayVibe`,
+        `Action: ${label} booking ${bookingId} was cancelled before StayVibe read its confirmation, so no stay was made and no nights are held. Nothing to do.`,
+        '', `Guest: ${wasGuest}${parsed.country ? ' (' + parsed.country + ')' : ''}`, `Dates: ${range} (${parsed.nights} night${parsed.nights === 1 ? '' : 's'})`, stamp,
+      ])
+      return { action: 'cancelled_before_added', bookingId, cancelledAt }
+    }
     const host = getHostConfig(villaId)
     const money = platformEmailMoney(parsed, partner, host)
     const guestName = parsed.guestName || `${label} guest ${bookingId}`

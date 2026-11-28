@@ -104,6 +104,10 @@ script knows no platform and no wording, so a new platform's emails never need a
   handled. Threads not yet marked are looked at for 14 days back (the first run after an install therefore also picks up what arrived before it), and
   every thread with activity in the last 3 days is looked at again even when marked, so a cancellation arriving in the booking's own thread is not
   missed. The Worker remembers each email by its Gmail id (`infra_processing_log`, event `platform_email`): looking twice never does anything twice.
+- **Order**: cancellations first, then everything else, each oldest first (which emails are cancellations comes from each platform's `kinds` in the source list, the cache
+  key is `platformMailSources-v2`). A reader that was off, or has just been installed, then meets a booking's cancellation before its older confirmation, and the
+  Worker (which compares the times the two emails were *received*, `infra_processing_log` event `platform_booking_event`) makes no stay for it: no false "double booking"
+  against a guest who has rebooked the nights since. In the steady state, with every email read as it arrives, the order makes no difference.
 - **Needs nothing new**: no property, no trigger, no table (it uses the `infra_processing_log` that exists). The Worker must be live first (a script
   that asks for a source list the Worker does not know yet logs it and reads nothing).
 - A failed call leaves the thread unmarked (tried again in 5 minutes) and tells the owner once per email.
